@@ -358,3 +358,14 @@ proved creation, key handoff, ingest, connected state, and normalized endpoint
 inventory. Owner-authored application logs with optional Slack alerts shipped
 alongside. Stored trace exploration and broader incident workflows remain
 explicitly out of scope.
+
+<!-- portfolio-retained-work:2026-09-07 -->
+## Retained work from the portfolio review
+
+These are unresolved requirements retained at the owner’s request. They are not completed features. Work should follow a concrete need and fresh evidence.
+
+### Integrate across fleet
+
+Qualify actual SDK ingest and aggregate visibility in each adopted service; source imports or fixture dashboards do not prove production integration.
+
+Original requirements and discussion: [#55](https://github.com/sass-maker/app-health/issues/55).
