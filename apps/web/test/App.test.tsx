@@ -7,6 +7,7 @@ import {
   renderPublicEntrypoint,
 } from '../scripts/generate-public-entrypoints.mjs';
 import { App, OwnerUnlock, sortEndpoints } from '../src/App.js';
+import { SEED_APP_ID } from '@app-health/contracts';
 import type {
   AppEnvironmentV1,
   EndpointAggregateV1,
@@ -417,6 +418,15 @@ describe('App Health V0 UI', () => {
     render(<App />);
     expect(await screen.findByText('Cloudflare Worker connected')).toBeTruthy();
     expect(screen.getByText(/Cloudflare Worker is sending endpoint summaries/)).toBeTruthy();
+  });
+
+  it('labels seeded fixtures without claiming an SDK connection', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...savedProject, appId: SEED_APP_ID }));
+    installFetch();
+    render(<App />);
+    expect(await screen.findByText('Sample data')).toBeTruthy();
+    expect(screen.getByText(/seeded fixtures, not traffic received from an SDK/)).toBeTruthy();
+    expect(screen.queryByText('SDK connected')).toBeNull();
   });
 
   it('renders populated endpoint metrics and changes windows', async () => {

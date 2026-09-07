@@ -234,7 +234,25 @@ deployment. Set `VITE_APP_HEALTH_API` only when pointing the UI at another V1
 API implementation.
 
 For a populated local view, open `/?demo=populated`. This development-only
-route uses the seeded project and never exposes its key.
+route uses explicitly labelled seeded fixtures and never exposes its key. These
+metrics do not demonstrate an SDK connection.
+
+To verify actual synthetic traffic through the local SDK and Worker, run:
+
+```bash
+pnpm run verify:local-sdk
+```
+
+This builds the Node SDK, starts temporary loopback-only Vite and Express servers,
+creates a fresh in-memory project, and sends successful and failing parameterized
+requests through the Express middleware. It checks the same installation and
+endpoint aggregate APIs used by the dashboard: waiting before traffic, connected
+after ingest, normalized route, exact counts and error rate, and latency values.
+Both servers stop afterward. No credentials or production services are used.
+
+This local receipt does not qualify Cloudflare persistence, a deployed dashboard,
+or an external user's onboarding. Fresh owned-service production traffic and
+aggregate visibility remain required under [#55](https://github.com/sass-maker/app-health/issues/55).
 
 ## UI evidence
 

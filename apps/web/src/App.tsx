@@ -540,8 +540,19 @@ function statusBannerCopy(status: InstallationStatusV1): [string, string] {
   ];
 }
 
-function StatusBanner({ status }: { status: InstallationStatusV1 }): JSX.Element {
-  const [title, message] = statusBannerCopy(status);
+function StatusBanner({
+  status,
+  fixture,
+}: {
+  status: InstallationStatusV1;
+  fixture: boolean;
+}): JSX.Element {
+  const [title, message] = fixture
+    ? [
+        'Sample data',
+        'These metrics are seeded fixtures, not traffic received from an SDK. Create a project to verify your own service.',
+      ]
+    : statusBannerCopy(status);
   const bannerClass = 'status-banner status-' + status.state;
   return (
     <section aria-live="polite" className={bannerClass}>
@@ -1629,7 +1640,12 @@ function Dashboard({
                 </button>
               </section>
             ) : null}
-            {status ? <StatusBanner status={status} /> : null}
+            {status ? (
+              <StatusBanner
+                status={status}
+                fixture={import.meta.env.DEV && project.appId === SEED_APP_ID}
+              />
+            ) : null}
             <section className="endpoint-surface" aria-busy={loading}>
               <div className="surface-heading">
                 <div>

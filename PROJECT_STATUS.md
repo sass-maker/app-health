@@ -112,3 +112,18 @@ asynchronous endpoint summaries, aggregate-only storage, and a
 Open work is tracked only in [GitHub Issues](https://github.com/sarthakagrawal927/app-health/issues).
 An open issue is a to-do, a linked pull request is in progress, and merge plus
 issue closure makes the work done.
+
+## Local SDK qualification — 2026-09-07
+
+The seeded dashboard is explicitly labelled as sample fixtures and no longer
+claims an SDK connection. `pnpm run verify:local-sdk` builds the Node SDK and
+checks actual loopback Express requests through the local Vite Worker ingest
+route into the dashboard's installation and aggregate APIs. A fresh project
+starts waiting with no endpoints, then reports Node connected and exactly three
+requests on `/synthetic/:id`, one server error, a 1/3 error rate, and valid latency
+percentiles. Concrete route values and query values are absent from the result.
+The check closes both temporary servers and requires no credentials.
+
+This proves the local in-memory path. Fresh owned-service production telemetry,
+deployed D1/Analytics Engine aggregate visibility, and external onboarding remain
+unqualified by this check; retain [#55](https://github.com/sass-maker/app-health/issues/55).
