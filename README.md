@@ -360,6 +360,7 @@ alongside. Stored trace exploration and broader incident workflows remain
 explicitly out of scope.
 
 <!-- portfolio-retained-work:2026-09-07 -->
+
 ## Retained work from the portfolio review
 
 These are unresolved requirements retained at the owner’s request. They are not completed features. Work should follow a concrete need and fresh evidence.
