@@ -10,8 +10,11 @@ omitted.
 
 ## Express
 
+The SDK is distributed through the public GitHub release below. The npm
+registry package is not currently available.
+
 ```bash
-npm install @saas-maker/app-health
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.2.1/saas-maker-app-health-0.2.1.tgz
 ```
 
 ```ts

@@ -82,10 +82,18 @@ go vet ./...
 
 ## Install the SDKs
 
+Public package verification and remaining release work are tracked in
+[SDK installation and release parity #57](https://github.com/sass-maker/app-health/issues/57).
+The current GitHub release supports core, Express, Hono and Pages; the newer
+browser logger in this checkout is not included in that artifact.
+
 ### Express on Node.js 20+
 
+The SDK is distributed through the public GitHub release below. The npm
+registry package is not currently available.
+
 ```bash
-npm install @saas-maker/app-health
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.2.1/saas-maker-app-health-0.2.1.tgz
 ```
 
 ```ts

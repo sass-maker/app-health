@@ -272,7 +272,11 @@ describe('App Health V0 UI', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /create project/i }));
 
-    expect(await screen.findByText(/npm install @saas-maker\/app-health/)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        /npm install https:\/\/github\.com\/sass-maker\/app-health\/releases\/download\/node-v0\.2\.1\/saas-maker-app-health-0\.2\.1\.tgz/,
+      ),
+    ).toBeTruthy();
     expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();
     fireEvent.click(screen.getByRole('tab', { name: 'Hono Worker' }));
     expect(screen.getByText(/@saas-maker\/app-health\/hono/)).toBeTruthy();
