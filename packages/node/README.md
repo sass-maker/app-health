@@ -14,7 +14,7 @@ The SDK is distributed through the public GitHub release below. The npm
 registry package is not currently available.
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.2.1/saas-maker-app-health-0.2.1.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
 ```
 
 ```ts
@@ -88,7 +88,7 @@ Until npm publisher authentication is restored, install the same verified
 package from its immutable public release:
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.2.1/saas-maker-app-health-0.2.1.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
 ```
 
 ```ts

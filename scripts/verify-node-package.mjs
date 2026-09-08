@@ -37,6 +37,9 @@ try {
     'dist/pages.js',
     'dist/pages.cjs',
     'dist/pages.d.ts',
+    'dist/web.js',
+    'dist/web.cjs',
+    'dist/web.d.ts',
   ];
   for (const path of required) {
     if (!paths.includes(path)) throw new Error(`packed package is missing ${path}`);
@@ -79,7 +82,8 @@ import { createAppHealthClient } from '@saas-maker/app-health';
 import { expressMiddleware } from '@saas-maker/app-health/express';
 import { honoMiddleware } from '@saas-maker/app-health/hono';
 import { withPagesFunctionHealth } from '@saas-maker/app-health/pages';
-if ([createAppHealthClient, expressMiddleware, honoMiddleware, withPagesFunctionHealth].some((value) => typeof value !== 'function')) process.exit(1);
+import { createWebLogger } from '@saas-maker/app-health/web';
+if ([createAppHealthClient, expressMiddleware, honoMiddleware, withPagesFunctionHealth, createWebLogger].some((value) => typeof value !== 'function')) process.exit(1);
 const events = [];
 const waits = [];
 const client = { record: (event) => events.push(event), flush: async () => {}, close: async () => {}, diagnostics: () => ({}) };
@@ -91,6 +95,18 @@ if (response.status !== 200 || events[0]?.route !== '/users/:id' || waits.length
 const pages = withPagesFunctionHealth({ client, route: '/pages/:id' }, async () => new Response('ok', { status: 201 }));
 const pageResponse = await pages({ request: new Request('https://example.test/pages/private'), env: {}, params: {}, data: {}, next: async () => new Response(), waitUntil: (promise) => waits.push(promise) });
 if (pageResponse.status !== 201 || events[1]?.route !== '/pages/:id') process.exit(1);
+const logBatches = [];
+const logger = createWebLogger({
+  publicKey: 'ahk_pub_package_qualification',
+  endpoint: 'https://example.test/v1/logs',
+  lifecycle: false,
+  disableTimer: true,
+  fetch: async (_url, init) => { logBatches.push(JSON.parse(init.body)); return { ok: true }; },
+});
+logger.log('package.verified', { props: { synthetic: true } });
+await logger.flush();
+if (logBatches.length !== 1 || logBatches[0].logs[0]?.event !== 'package.verified' || logger.diagnostics().sent !== 1) process.exit(1);
+
 `,
   );
   execFileSync(globalThis.process.execPath, ['smoke.mjs'], {
@@ -101,7 +117,7 @@ if (pageResponse.status !== 201 || events[1]?.route !== '/pages/:id') process.ex
     globalThis.process.execPath,
     [
       '-e',
-      "const core = require('@saas-maker/app-health'); const express = require('@saas-maker/app-health/express'); const hono = require('@saas-maker/app-health/hono'); const pages = require('@saas-maker/app-health/pages'); if ([core.createAppHealthClient, express.expressMiddleware, hono.honoMiddleware, pages.withPagesFunctionHealth].some((value) => typeof value !== 'function')) process.exit(1)",
+      "const core = require('@saas-maker/app-health'); const express = require('@saas-maker/app-health/express'); const hono = require('@saas-maker/app-health/hono'); const pages = require('@saas-maker/app-health/pages'); const web = require('@saas-maker/app-health/web'); if ([core.createAppHealthClient, express.expressMiddleware, hono.honoMiddleware, pages.withPagesFunctionHealth, web.createWebLogger].some((value) => typeof value !== 'function')) process.exit(1)",
     ],
     { cwd: consumerDir, stdio: 'inherit' },
   );

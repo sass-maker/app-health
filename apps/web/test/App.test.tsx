@@ -274,7 +274,7 @@ describe('App Health V0 UI', () => {
 
     expect(
       await screen.findByText(
-        /npm install https:\/\/github\.com\/sass-maker\/app-health\/releases\/download\/node-v0\.2\.1\/saas-maker-app-health-0\.2\.1\.tgz/,
+        /npm install https:\/\/github\.com\/sass-maker\/app-health\/releases\/download\/node-v0\.3\.0\/saas-maker-app-health-0\.3\.0\.tgz/,
       ),
     ).toBeTruthy();
     expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();
