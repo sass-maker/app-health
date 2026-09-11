@@ -1,6 +1,6 @@
 # app-health — PROJECT STATUS
 
-Last updated: 2026-08-11
+Last updated: 2026-09-11
 
 ## Why / What
 
@@ -78,6 +78,13 @@ asynchronous endpoint summaries, aggregate-only storage, and a
   and Echo v5 adapter `v5.1.1`, and merged Polaris PR #282; real Local and
   Staging `/health` traffic reached the shared product key before the legacy
   staging key was revoked
+- 2026-09-11 — recovered the owner credential through the approved Infisical
+  Fleet production source, deployed a versioned Worker release at 100% from
+  SHA `189ed565967cfe04d73e8af97139f07624d12994`, and passed an isolated
+  production Node SDK canary with connected state, three requests, one error,
+  and finite latency percentiles; three disposable canary ingest keys were
+  revoked while their aggregate records remain available because the V0 API
+  exposes no app archive or delete route
 
 ## Products
 
@@ -124,6 +131,19 @@ requests on `/synthetic/:id`, one server error, a 1/3 error rate, and valid late
 percentiles. Concrete route values and query values are absent from the result.
 The check closes both temporary servers and requires no credentials.
 
-This proves the local in-memory path. Fresh owned-service production telemetry,
-deployed D1/Analytics Engine aggregate visibility, and external onboarding remain
-unqualified by this check; retain [#55](https://github.com/sass-maker/app-health/issues/55).
+This proves the local in-memory path. The isolated production Node SDK canary
+also proved deployed D1/Analytics Engine aggregate visibility; real adopted
+service traffic and external onboarding remain unqualified by this check;
+retain [#55](https://github.com/sass-maker/app-health/issues/55).
+
+## Production qualification receipt — 2026-09-11
+
+The versioned Worker receipt and sanitized canary details live in Fleet-local
+evidence at `saas-maker/.fleet-local/app-health-agent-2026-09-11/`. The owner
+credential source is Infisical project `Fleet`, environment `prod`, path `/`,
+key `APP_HEALTH_OWNER_TOKEN`, tagged `app-health`; the Worker secret is
+`OWNER_AUTH_TOKEN`. The query-token secret and production resources were left
+unchanged. Keep the owner token out of repositories, command arguments, and
+credential files; feed it through process stdin or an in-memory environment and
+wait for an authenticated `/v1/apps` response after version promotion before
+starting a canary.
