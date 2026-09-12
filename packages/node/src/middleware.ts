@@ -13,6 +13,7 @@
 // The application response never awaits ingest. `record()` is non-blocking.
 
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
+import { observe } from './observe.js';
 import type { AppHealthClient } from './client.js';
 import {
   normalizeMethod,
@@ -48,21 +49,23 @@ export function expressMiddleware(options: ExpressMiddlewareOptions): RequestHan
   return (req: Request, res: Response, next: NextFunction): void => {
     const start = nowMs();
     // `finish` fires after the response has been sent to the OS socket.
-    res.on('finish', () => {
-      const durationMs = Math.max(0, Math.round(nowMs() - start));
-      const route = resolveExpressRoute(req);
-      const method = normalizeMethod(req.method);
-      const status = normalizeStatus(res.statusCode);
-      if (method === null || route === null || status === null) return;
-      onRecord?.({ method, route, status_code: status, duration_ms: durationMs });
-      client.record({
-        method,
-        route,
-        status_code: status,
-        duration_ms: durationMs,
-        ...(release !== undefined ? { release } : {}),
-      });
-    });
+    res.on('finish', () =>
+      observe(() => {
+        const durationMs = Math.max(0, Math.round(nowMs() - start));
+        const route = resolveExpressRoute(req);
+        const method = normalizeMethod(req.method);
+        const status = normalizeStatus(res.statusCode);
+        if (method === null || route === null || status === null) return;
+        onRecord?.({ method, route, status_code: status, duration_ms: durationMs });
+        client.record({
+          method,
+          route,
+          status_code: status,
+          duration_ms: durationMs,
+          ...(release !== undefined ? { release } : {}),
+        });
+      }),
+    );
     next();
   };
 }

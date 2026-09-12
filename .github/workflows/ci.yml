@@ -16,13 +16,14 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
       - uses: actions/setup-node@v4
         with:
-          node-version: '20.19'
+          node-version: '24'
           cache: pnpm
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
           cache: false
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @app-health/web exec playwright install --with-deps chromium
       - run: pnpm run check
 
   go:

@@ -1,13 +1,5 @@
 // @saas-maker/app-health/web — browser log client.
-//
-// Sends owner-authored application logs from a web page with a *public* log
-// key. The key is not a secret: the server pins it to one environment and an
-// origin allowlist and rate limits it. Browser logs are stored as
-// `source: browser` so the dashboard can tell claims from server facts.
-//
-// Transport: one POST per batch to /v1/logs as `text/plain` (no CORS
-// preflight) with `keepalive`, and `navigator.sendBeacon` when the page is
-// hidden or unloading. Nothing here throws into the page.
+// This entrypoint only imports browser-safe contracts and log normalisation.
 
 import {
   PUBLIC_LOG_KEY_PREFIX,
@@ -20,27 +12,22 @@ import { buildLogEventV1, type LogInput } from './log.js';
 export type { LogInput } from './log.js';
 
 export interface WebLifecycle {
-  /** Subscribe to `pagehide` and `visibilitychange`. */
   addEventListener(type: string, listener: () => void): void;
-  /** Current visibility; only `hidden` triggers a beacon flush. */
+  removeEventListener?(type: string, listener: () => void): void;
   visibilityState(): string;
 }
 
 export interface WebLoggerOptions {
-  /** Public log key (`ahk_pub_…`) created in the dashboard. */
   publicKey: string;
-  /** Logs endpoint. Default https://ingest.sassmaker.com/v1/logs. */
   endpoint?: string;
-  /** Must match the environment the key was created for; omit to let the key decide. */
   environment?: string;
-  /** Auto-flush delay after the first queued log. Default 2000. */
   flushIntervalMs?: number;
-  /** Logs kept in memory before dropping. Default 200. */
   maxQueueSize?: number;
-  /** Logs per request. Default 50, max 100. */
   maxBatchSize?: number;
-  /** Injection points for tests and non-browser hosts. */
-  fetch?: (url: string, init: RequestInit) => Promise<{ ok: boolean }>;
+  fetch?: (
+    url: string,
+    init: RequestInit,
+  ) => Promise<{ ok: boolean; status?: number; body?: { cancel(): Promise<unknown> } | null }>;
   sendBeacon?: (url: string, body: string) => boolean;
   lifecycle?: WebLifecycle | false;
   now?: () => number;
@@ -52,33 +39,49 @@ export interface WebLoggerDiagnostics {
   queued: number;
   sent: number;
   dropped: number;
+  retried: number;
+  beaconQueued: number;
 }
 
 export interface WebLogger {
-  /** Queue one log. Never throws; invalid input is dropped and counted. */
   log(event: string, input?: LogInput): void;
-  /** Send everything queued with fetch. Resolves when the request settles. */
   flush(): Promise<void>;
-  /** Send everything queued with sendBeacon (synchronous). Returns true when the browser accepted it. */
   flushBeacon(): boolean;
   diagnostics(): WebLoggerDiagnostics;
+  close(): Promise<void>;
 }
 
 const DEFAULT_ENDPOINT = 'https://ingest.sassmaker.com/v1/logs';
+const MAX_BATCH_BYTES = 60 * 1024;
+const MAX_ATTEMPTS = 3;
+const REQUEST_TIMEOUT_MS = 2000;
 
-// The package compiles without the DOM lib, so browser globals are typed here.
 interface BrowserGlobals {
-  document?: { visibilityState: string };
-  window?: { addEventListener(type: string, listener: () => void): void };
+  document?: {
+    visibilityState: string;
+    addEventListener?: (type: string, listener: () => void) => void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  };
+  window?: {
+    addEventListener(type: string, listener: () => void): void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  };
   navigator?: { sendBeacon?: (url: string, data: Blob) => boolean };
 }
 const browser = globalThis as unknown as BrowserGlobals;
 
 function browserLifecycle(): WebLifecycle | false {
   const { document, window } = browser;
-  if (!document || !window) return false;
+  if (!document || !window || typeof document.addEventListener !== 'function') return false;
   return {
-    addEventListener: (type, listener) => window.addEventListener(type, listener),
+    addEventListener: (type, listener) => {
+      if (type === 'visibilitychange') document.addEventListener?.(type, listener);
+      else window.addEventListener(type, listener);
+    },
+    removeEventListener: (type, listener) => {
+      if (type === 'visibilitychange') document.removeEventListener?.(type, listener);
+      else window.removeEventListener?.(type, listener);
+    },
     visibilityState: () => document.visibilityState,
   };
 }
@@ -116,13 +119,93 @@ const WEB_DEFAULTS = {
   disableTimer: false,
   now: () => Date.now(),
   randomUUID: uuidV4,
-  fetch: (url: string, init: RequestInit) => fetch(url, init),
+  fetch: async (url: string, init: RequestInit) => {
+    return fetch(url, init);
+  },
   sendBeacon: defaultBeacon,
 };
+type MergedWebOptions = WebLoggerOptions & {
+  endpoint: string;
+  maxQueueSize: number;
+  maxBatchSize: number;
+  flushIntervalMs: number;
+  disableTimer: boolean;
+  now: () => number;
+  randomUUID: () => string;
+  fetch: NonNullable<WebLoggerOptions['fetch']>;
+  sendBeacon: NonNullable<WebLoggerOptions['sendBeacon']>;
+};
+
+function boundedNumber(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
+function serializedBytes(body: string): number {
+  return new TextEncoder().encode(body).byteLength;
+}
+
+function safeEndpoint(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateLimits(merged: MergedWebOptions): void {
+  if (!boundedNumber(merged.maxQueueSize, 1, 10_000))
+    throw new Error('maxQueueSize must be an integer from 1 to 10000');
+  if (!boundedNumber(merged.maxBatchSize, 1, 100))
+    throw new Error('maxBatchSize must be an integer from 1 to 100');
+  if (!boundedNumber(merged.flushIntervalMs, 0, 86_400_000))
+    throw new Error('flushIntervalMs must be an integer from 0 to 86400000');
+}
+
+function validateTypes(merged: MergedWebOptions): void {
+  if (
+    typeof merged.disableTimer !== 'boolean' ||
+    typeof merged.fetch !== 'function' ||
+    typeof merged.sendBeacon !== 'function'
+  ) {
+    throw new Error('@saas-maker/app-health/web: invalid option type');
+  }
+  if (typeof merged.now !== 'function' || typeof merged.randomUUID !== 'function')
+    throw new Error('clock and randomUUID must be functions');
+}
+
+function validateLifecycle(lifecycle: WebLifecycle | false | undefined): void {
+  if (
+    lifecycle !== undefined &&
+    lifecycle !== false &&
+    (typeof lifecycle.addEventListener !== 'function' ||
+      typeof lifecycle.visibilityState !== 'function')
+  ) {
+    throw new Error('lifecycle must provide addEventListener and visibilityState');
+  }
+}
+
+function validateWebOptions(merged: MergedWebOptions): void {
+  if (!safeEndpoint(merged.endpoint)) throw new Error('endpoint must be a safe HTTP(S) URL');
+  validateLimits(merged);
+  validateTypes(merged);
+  if (
+    merged.environment !== undefined &&
+    (typeof merged.environment !== 'string' || !/^[a-z][a-z0-9-]{0,63}$/.test(merged.environment))
+  ) {
+    throw new Error('environment must be a string of at most 64 characters');
+  }
+  validateLifecycle(merged.lifecycle);
+}
 
 function resolveWebOptions(options: WebLoggerOptions): ResolvedWebOptions {
   if (
-    typeof options?.publicKey !== 'string' ||
+    !options ||
+    typeof options.publicKey !== 'string' ||
+    options.publicKey.length > 256 ||
     !options.publicKey.startsWith(PUBLIC_LOG_KEY_PREFIX)
   ) {
     throw new Error(
@@ -132,13 +215,14 @@ function resolveWebOptions(options: WebLoggerOptions): ResolvedWebOptions {
   const provided = Object.fromEntries(
     Object.entries(options).filter(([, value]) => value !== undefined),
   );
-  const merged = { ...WEB_DEFAULTS, ...provided } as typeof WEB_DEFAULTS & WebLoggerOptions;
+  const merged = { ...WEB_DEFAULTS, ...provided, publicKey: options.publicKey } as MergedWebOptions;
+  validateWebOptions(merged);
   return {
     publicKey: merged.publicKey,
     endpoint: merged.endpoint,
     environment: merged.environment,
     maxQueueSize: merged.maxQueueSize,
-    maxBatchSize: Math.min(merged.maxBatchSize, 100),
+    maxBatchSize: merged.maxBatchSize,
     flushIntervalMs: merged.flushIntervalMs,
     disableTimer: merged.disableTimer,
     now: merged.now,
@@ -149,79 +233,203 @@ function resolveWebOptions(options: WebLoggerOptions): ResolvedWebOptions {
   };
 }
 
-/** Flush with sendBeacon when the page hides or unloads. */
-function attachLifecycle(lifecycle: WebLifecycle | false, flushBeacon: () => boolean): void {
-  if (!lifecycle) return;
-  lifecycle.addEventListener('pagehide', () => void flushBeacon());
-  lifecycle.addEventListener('visibilitychange', () => {
-    if (lifecycle.visibilityState() === 'hidden') flushBeacon();
-  });
+interface Batch {
+  logs: LogEventV1[];
+  body: string;
 }
 
-export function createWebLogger(options: WebLoggerOptions): WebLogger {
-  const cfg = resolveWebOptions(options);
-  const queue: LogEventV1[] = [];
-  const diag: WebLoggerDiagnostics = { queued: 0, sent: 0, dropped: 0 };
-  let timer: ReturnType<typeof setTimeout> | null = null;
+function attachLifecycle(lifecycle: WebLifecycle | false, flushBeacon: () => boolean): () => void {
+  if (!lifecycle) return () => undefined;
+  const onPageHide = () => void flushBeacon();
+  const onVisibility = () => {
+    if (lifecycle.visibilityState() === 'hidden') flushBeacon();
+  };
+  lifecycle.addEventListener('pagehide', onPageHide);
+  lifecycle.addEventListener('visibilitychange', onVisibility);
+  return () => {
+    lifecycle.removeEventListener?.('pagehide', onPageHide);
+    lifecycle.removeEventListener?.('visibilitychange', onVisibility);
+  };
+}
 
-  function takeBatch(): { logs: LogEventV1[]; body: string } {
-    const logs = queue.splice(0, cfg.maxBatchSize);
-    diag.queued = queue.length;
+class BrowserLogger implements WebLogger {
+  private readonly queue: LogEventV1[] = [];
+  private readonly beaconBatches: Batch[] = [];
+  private readonly diag: WebLoggerDiagnostics = {
+    queued: 0,
+    sent: 0,
+    dropped: 0,
+    retried: 0,
+    beaconQueued: 0,
+  };
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private inflight: Promise<void> | null = null;
+  private closed = false;
+  private inflightCount = 0;
+  private closing: Promise<void> | null = null;
+  private readonly detach: () => void;
+
+  constructor(private readonly cfg: ResolvedWebOptions) {
+    this.detach = attachLifecycle(cfg.lifecycle, () => this.flushBeacon());
+  }
+
+  private makeBatch(logs: LogEventV1[], id = this.cfg.uuid()): Batch {
     const batch: BrowserLogBatchV1 = {
-      public_key: cfg.publicKey,
-      batch_id: cfg.uuid(),
+      public_key: this.cfg.publicKey,
+      batch_id: id,
       schema_version: SCHEMA_VERSION,
-      ...(cfg.environment !== undefined ? { environment: cfg.environment } : {}),
+      ...(this.cfg.environment !== undefined ? { environment: this.cfg.environment } : {}),
       logs,
     };
     return { logs, body: JSON.stringify(batch) };
   }
 
-  function settle(logs: LogEventV1[], accepted: boolean): void {
-    if (accepted) diag.sent += logs.length;
-    else diag.dropped += logs.length;
+  private takeBatch(): Batch | null {
+    const logs: LogEventV1[] = [];
+    const id = this.cfg.uuid();
+    let bytes = serializedBytes(this.makeBatch([], id).body);
+    while (logs.length < this.cfg.maxBatchSize && this.queue.length > 0) {
+      const size = serializedBytes(JSON.stringify(this.queue[0])) + (logs.length ? 1 : 0);
+      if (bytes + size > MAX_BATCH_BYTES) {
+        if (logs.length) break;
+        this.queue.shift();
+        this.diag.dropped++;
+        continue;
+      }
+      bytes += size;
+      logs.push(this.queue.shift() as LogEventV1);
+    }
+    return logs.length ? this.makeBatch(logs, id) : null;
   }
 
-  async function flush(): Promise<void> {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    while (queue.length > 0) {
-      const { logs, body } = takeBatch();
-      const accepted = await cfg
-        .fetchFn(cfg.endpoint, {
+  private settle(batch: Batch, accepted: boolean): void {
+    if (accepted) this.diag.sent += batch.logs.length;
+    else this.diag.dropped += batch.logs.length;
+  }
+
+  private async request(batch: Batch): Promise<boolean> {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+      const controller = new AbortController();
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const fetchPromise = this.cfg.fetchFn(this.cfg.endpoint, {
           method: 'POST',
           headers: { 'content-type': 'text/plain' },
-          body,
+          body: batch.body,
           keepalive: true,
-        })
-        .then((response) => response.ok)
-        .catch(() => false);
-      settle(logs, accepted);
+          credentials: 'omit',
+          signal: controller.signal,
+        });
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort();
+            reject(new Error('request timeout'));
+          }, REQUEST_TIMEOUT_MS);
+        });
+        const response = await Promise.race([fetchPromise, timeoutPromise]);
+        void response.body?.cancel().catch(() => {});
+        if (response.ok) return true;
+        if (!(response.status === 429 || (response.status !== undefined && response.status >= 500)))
+          return false;
+      } catch {
+        // Network and timeout errors are retryable.
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+      if (attempt < MAX_ATTEMPTS) {
+        this.diag.retried += 1;
+        await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** (attempt - 1)));
+      }
+    }
+    return false;
+  }
+
+  private async runFlush(): Promise<void> {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    const work = this.beaconBatches.splice(0);
+    this.diag.beaconQueued = 0;
+    while (this.queue.length) {
+      const batch = this.takeBatch();
+      if (batch) work.push(batch);
+    }
+    this.inflightCount = work.reduce((total, batch) => total + batch.logs.length, 0);
+    for (const batch of work) {
+      this.settle(batch, await this.request(batch));
+      this.inflightCount -= batch.logs.length;
     }
   }
 
-  function flushBeacon(): boolean {
-    if (queue.length === 0) return true;
-    const { logs, body } = takeBatch();
-    const accepted = cfg.beacon(cfg.endpoint, body);
-    settle(logs, accepted);
+  flush(): Promise<void> {
+    if (this.inflight) return this.inflight;
+    this.inflight = this.runFlush().finally(() => {
+      this.inflight = null;
+      this.diag.queued = this.queue.length;
+      if (this.queue.length > 0 && !this.closed && !this.cfg.disableTimer && this.timer === null) {
+        this.timer = setTimeout(() => void this.flush(), this.cfg.flushIntervalMs);
+      }
+    });
+    return this.inflight;
+  }
+
+  flushBeacon(): boolean {
+    if (this.closed || this.queue.length === 0) return this.queue.length === 0;
+    const batch = this.takeBatch();
+    if (!batch) return false;
+    let accepted = false;
+    try {
+      accepted = this.cfg.beacon(this.cfg.endpoint, batch.body);
+    } catch {
+      accepted = false;
+    }
+    if (accepted) {
+      this.beaconBatches.push(batch);
+      this.diag.beaconQueued += batch.logs.length;
+    } else this.settle(batch, false);
     return accepted;
   }
 
-  function log(event: string, input: LogInput = {}): void {
-    const entry = buildLogEventV1(event, input, { now: cfg.now, uuid: cfg.uuid });
-    if (entry === null || queue.length >= cfg.maxQueueSize) {
-      diag.dropped += 1;
-      return;
-    }
-    queue.push(entry);
-    diag.queued = queue.length;
-    if (queue.length >= cfg.maxBatchSize) return void flush();
-    if (!cfg.disableTimer && timer === null) {
-      timer = setTimeout(() => void flush(), cfg.flushIntervalMs);
+  log(event: string, input: LogInput = {}): void {
+    if (this.closed) return;
+    try {
+      const entry = buildLogEventV1(event, input, { now: this.cfg.now, uuid: this.cfg.uuid });
+      if (
+        entry === null ||
+        this.queue.length + this.diag.beaconQueued + this.inflightCount >= this.cfg.maxQueueSize
+      ) {
+        this.diag.dropped += 1;
+        return;
+      }
+      this.queue.push(entry);
+      this.diag.queued = this.queue.length;
+      if (this.queue.length >= this.cfg.maxBatchSize) void this.flush();
+      else if (!this.cfg.disableTimer && this.timer === null)
+        this.timer = setTimeout(() => void this.flush(), this.cfg.flushIntervalMs);
+    } catch {
+      this.diag.dropped += 1;
     }
   }
 
-  attachLifecycle(cfg.lifecycle, flushBeacon);
-  return { log, flush, flushBeacon, diagnostics: () => ({ ...diag }) };
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
+    this.closed = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.detach();
+    this.closing = this.flush().then(async () => {
+      if (this.queue.length || this.beaconBatches.length) await this.flush();
+    });
+    return this.closing;
+  }
+
+  diagnostics(): WebLoggerDiagnostics {
+    return {
+      ...this.diag,
+      queued: this.queue.length + this.diag.beaconQueued + this.inflightCount,
+    };
+  }
+}
+
+export function createWebLogger(options: WebLoggerOptions): WebLogger {
+  return new BrowserLogger(resolveWebOptions(options));
 }

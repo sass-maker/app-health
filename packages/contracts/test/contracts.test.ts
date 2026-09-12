@@ -16,11 +16,27 @@ import {
   approximatePercentiles,
   MAX_BATCH_EVENTS,
   MAX_ROUTE_LENGTH,
+  MAX_DURATION_MS,
   SCHEMA_VERSION,
   FailureEventV1,
   FailureQueryRequestV1,
   FailureQueryResponseV1,
 } from '../src/index.js';
+
+it('preserves literal route separators and storage sampling when merging measurements', () => {
+  const bucket = { ...SEED_BUCKETS[0], route: '/a|b', sampled: true };
+  const result = mergeBuckets([bucket], '24h', bucket.bucket_start + 1000);
+  expect(result[0].route).toBe('/a|b');
+  expect(result[0].sampled).toBe(true);
+});
+
+it('uses the accepted duration ceiling for an overflow percentile bound', () => {
+  const histogram = Array.from({ length: 16 }, (_, index) => (index === 15 ? 20 : 0));
+  expect(approximatePercentiles(histogram)).toEqual({
+    p50_ms: MAX_DURATION_MS,
+    p95_ms: MAX_DURATION_MS,
+  });
+});
 
 describe('event batch validation', () => {
   it('accepts the canonical Node fixture', () => {

@@ -61,6 +61,7 @@ export type LogIngestResult =
       environment_id: string;
       source: LogSource;
       sinks: Partial<Record<LogSink, StoredLogV1[]>>;
+      duplicates: number;
     }
   | { ok: false; status: number; error: string; details?: string[] };
 
@@ -88,6 +89,7 @@ export class AppHealthService {
         request.name,
         request.environment,
         now,
+        request.key_scope,
       );
       return {
         app: created.app,
@@ -102,7 +104,10 @@ export class AppHealthService {
     }
     const app = await this.repos.apps.createApp(request.name, now);
     const env = await this.repos.environments.createEnvironment(app.id, request.environment, now);
-    const { record, rawKey } = await this.repos.keys.createProductKey(app.id, now);
+    const { record, rawKey } =
+      request.key_scope === 'environment'
+        ? await this.repos.keys.createKey(app.id, env.id, now)
+        : await this.repos.keys.createProductKey(app.id, now);
     return {
       app,
       environment: env,
@@ -156,6 +161,7 @@ export class AppHealthService {
       return { ok: false, status: 400, error: 'invalid v1 batch' };
     }
     const batch: EventBatchV1 = validation.batch;
+    this.repos.buckets.validateEvents?.(batch.events, batch.release);
     for (const event of batch.events) {
       if (Math.abs(event.timestamp - now) > MAX_CLOCK_SKEW_MS) {
         return { ok: false, status: 400, error: 'event timestamp outside clock-skew window' };
@@ -189,6 +195,7 @@ export class AppHealthService {
     events: readonly OtlpEndpointEvent[],
     now: number,
   ): Promise<IngestResult> {
+    this.repos.buckets.validateEvents?.(events, release);
     for (const event of events) {
       if (Math.abs(event.timestamp - now) > MAX_CLOCK_SKEW_MS) {
         return { ok: false, status: 400, error: 'event timestamp outside clock-skew window' };
@@ -313,6 +320,12 @@ export class AppHealthService {
     }
     if (acceptedEvents.length > 0) {
       await this.repos.installation.recordIngest(scope.app_id, scope.environment_id, runtime, now);
+      await this.repos.capabilities?.recordCapability(
+        scope.app_id,
+        scope.environment_id,
+        'endpoints',
+        now,
+      );
     }
     return { ok: true, accepted: acceptedEvents.length, duplicates };
   }
@@ -402,9 +415,18 @@ export class AppHealthService {
     if (!validation.ok) {
       return { ok: false, status: 400, error: 'invalid log batch', details: validation.errors };
     }
+    const timestampError = validateLogTimestamps(validation.batch.logs, now);
+    if (timestampError) return timestampError;
     const resolution = await this.resolveScope(keyRecord, validation.batch.environment, now);
     if (!resolution.ok) return resolution;
-    return this.commitLogs(resolution.scope, validation.batch.logs, 'server', routes);
+    return this.commitLogs(
+      resolution.scope,
+      validation.batch.logs,
+      'server',
+      routes,
+      now,
+      await logBatchId('server', validation.batch.batch_id, validation.batch.logs),
+    );
   }
 
   /**
@@ -426,6 +448,8 @@ export class AppHealthService {
         details: validation.errors,
       };
     }
+    const timestampError = validateLogTimestamps(validation.batch.logs, now);
+    if (timestampError) return timestampError;
     const key = await this.repos.publicKeys?.verifyPublicKey(validation.batch.public_key);
     if (!key) return { ok: false, status: 401, error: 'invalid or revoked public key' };
     if (!origin || !key.allowed_origins.includes(origin)) {
@@ -446,7 +470,14 @@ export class AppHealthService {
       return { ok: false, status: 429, error: 'browser log rate limit exceeded' };
     }
     const scope = { app_id: key.app_id, environment_id: environment.id };
-    return this.commitLogs(scope, validation.batch.logs, 'browser', routes);
+    return this.commitLogs(
+      scope,
+      validation.batch.logs,
+      'browser',
+      routes,
+      now,
+      await logBatchId('browser', validation.batch.batch_id, validation.batch.logs),
+    );
   }
 
   private async commitLogs(
@@ -454,13 +485,35 @@ export class AppHealthService {
     logs: readonly LogEventV1[],
     source: LogSource,
     routes: LogRoutesV1,
+    now: number,
+    batchId: string,
   ): Promise<LogIngestResult> {
     const stored = logs.map((log) => ({ ...log, source }));
+    const claimId = `logs:${source}:${batchId}`;
+    const claimed = await this.repos.dedupe.markSeen(
+      scope.app_id,
+      scope.environment_id,
+      claimId,
+      now,
+    );
+    if (!claimed)
+      return { ok: true, accepted: 0, duplicates: logs.length, ...scope, source, sinks: {} };
     const sinks = routeLogs(stored, routes);
-    if (sinks.store) {
-      await this.repos.logs?.recordLogs(scope.app_id, scope.environment_id, sinks.store, source);
+    try {
+      if (sinks.store)
+        await this.repos.logs?.recordLogs(scope.app_id, scope.environment_id, sinks.store, source);
+      if (logs.length)
+        await this.repos.capabilities?.recordCapability(
+          scope.app_id,
+          scope.environment_id,
+          'logs',
+          now,
+        );
+      return { ok: true, accepted: logs.length, duplicates: 0, ...scope, source, sinks };
+    } catch (error) {
+      await this.repos.dedupe.forget(scope.app_id, scope.environment_id, claimId);
+      throw error;
     }
-    return { ok: true, accepted: logs.length, ...scope, source, sinks };
   }
 
   async createPublicKey(
@@ -495,8 +548,13 @@ export class AppHealthService {
   ): Promise<LogQueryResponseV1> {
     const { level, source, event, limit } = filters;
     const logs =
-      (await this.repos.logs?.listLogs(appId, envId, { minLevel: level, source, event, limit })) ??
-      [];
+      (await this.repos.logs?.listLogs(appId, envId, {
+        minLevel: level,
+        source,
+        event,
+        limit,
+        now,
+      })) ?? [];
     return LogQueryResponseV1.parse({
       refreshed_at: now,
       level,
@@ -532,4 +590,29 @@ async function legacyBatchID(batch: EventBatchV1): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
   return `legacy-${hex}`;
+}
+
+function validateLogTimestamps(
+  logs: readonly LogEventV1[],
+  now: number,
+): Extract<LogIngestResult, { ok: false }> | null {
+  const oldest = now - LOG_RETENTION_DAYS * 86_400_000;
+  if (logs.some((log) => log.timestamp > now + MAX_CLOCK_SKEW_MS))
+    return { ok: false, status: 400, error: 'log timestamp too far in the future' };
+  if (logs.some((log) => log.timestamp < oldest))
+    return { ok: false, status: 400, error: 'log timestamp outside retention window' };
+  return null;
+}
+
+async function logBatchId(
+  source: LogSource,
+  batchId: string | undefined,
+  logs: readonly LogEventV1[],
+): Promise<string> {
+  if (batchId) return batchId;
+  const input = `${source}\u0000${logs.map((log) => log.log_id).join('\u0000')}`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return `legacy-${[...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')}`;
 }

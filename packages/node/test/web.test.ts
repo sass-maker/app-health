@@ -39,6 +39,16 @@ describe('createWebLogger', () => {
     );
   });
 
+  it('rejects unsafe endpoints and unbounded options during initialization', () => {
+    expect(() =>
+      createWebLogger({ publicKey: KEY, endpoint: 'https://user:pass@example.test' }),
+    ).toThrow(/endpoint/);
+    expect(() => createWebLogger({ publicKey: KEY, maxBatchSize: 0 })).toThrow(/maxBatchSize/);
+    expect(() => createWebLogger({ publicKey: KEY, maxBatchSize: Number.NaN })).toThrow(
+      /maxBatchSize/,
+    );
+  });
+
   it('posts a text/plain browser batch with the key in the body and keepalive', async () => {
     const { fetchImpl, calls } = fakeFetch();
     const logger = createWebLogger({
@@ -67,7 +77,7 @@ describe('createWebLogger', () => {
     ]);
     expect(validateBrowserLogBatch(batch).ok).toBe(true);
     const diagnostics: WebLoggerDiagnostics = logger.diagnostics();
-    expect(diagnostics).toEqual({ queued: 0, sent: 2, dropped: 0 });
+    expect(diagnostics).toEqual({ queued: 0, sent: 2, dropped: 0, retried: 0, beaconQueued: 0 });
   });
 
   it('drops invalid logs and overflow, counts rejected and failed requests', async () => {
@@ -85,9 +95,21 @@ describe('createWebLogger', () => {
     logger.log('one');
     logger.log('two');
     logger.log('three');
-    expect(logger.diagnostics()).toEqual({ queued: 2, sent: 0, dropped: 2 });
+    expect(logger.diagnostics()).toEqual({
+      queued: 2,
+      sent: 0,
+      dropped: 2,
+      retried: 0,
+      beaconQueued: 0,
+    });
     await logger.flush();
-    expect(logger.diagnostics()).toEqual({ queued: 0, sent: 0, dropped: 4 });
+    expect(logger.diagnostics()).toEqual({
+      queued: 0,
+      sent: 0,
+      dropped: 4,
+      retried: 0,
+      beaconQueued: 0,
+    });
     const throwing = createWebLogger({
       publicKey: KEY,
       fetch: async () => {
@@ -126,6 +148,31 @@ describe('createWebLogger', () => {
     }
   });
 
+  it('coalesces concurrent flushes and retries transient responses with one batch id', async () => {
+    const calls: RequestInit[] = [];
+    let attempts = 0;
+    const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      attempts += 1;
+      return attempts === 1 ? { ok: false, status: 503 } : { ok: true, status: 200 };
+    });
+    const logger = createWebLogger({
+      publicKey: KEY,
+      fetch: fetchImpl,
+      lifecycle: false,
+      disableTimer: true,
+      randomUUID: () => '11111111-2222-4333-a444-555555555555',
+    });
+    logger.log('retryable');
+    await Promise.all([logger.flush(), logger.flush()]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(calls[0].credentials).toBe('omit');
+    expect(JSON.parse(String(calls[0].body)).batch_id).toBe(
+      JSON.parse(String(calls[1].body)).batch_id,
+    );
+    expect(logger.diagnostics()).toMatchObject({ sent: 1, retried: 1 });
+  });
+
   it('uses sendBeacon on pagehide and when the page becomes hidden', () => {
     const beacon = vi.fn((_url: string, _body: string) => true);
     const { lifecycle, fire, setState } = fakeLifecycle();
@@ -147,7 +194,7 @@ describe('createWebLogger', () => {
     logger.log('gone');
     fire('pagehide');
     expect(beacon).toHaveBeenCalledTimes(2);
-    expect(logger.diagnostics().sent).toBe(2);
+    expect(logger.diagnostics()).toMatchObject({ sent: 0, beaconQueued: 2 });
     const rejected = createWebLogger({ publicKey: KEY, sendBeacon: () => false, lifecycle: false });
     rejected.log('x');
     expect(rejected.flushBeacon()).toBe(false);
@@ -172,7 +219,10 @@ describe('createWebLogger', () => {
     vi.stubGlobal('window', {
       addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
     });
-    const doc = { visibilityState: 'visible' };
+    const doc = {
+      visibilityState: 'visible',
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+    };
     vi.stubGlobal('document', doc);
     try {
       const logger = createWebLogger({ publicKey: KEY, sendBeacon: beacon, disableTimer: true });

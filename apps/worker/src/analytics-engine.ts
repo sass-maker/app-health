@@ -1,11 +1,15 @@
+import { browserQuery } from './browser-query.js';
 import {
   LATENCY_HISTOGRAM_BUCKETS,
+  MAX_METHOD_LENGTH,
+  MAX_ROUTE_LENGTH,
   WINDOW_MS,
   type BucketV1,
   type Runtime,
   type Window,
 } from '@app-health/contracts';
 import { histogramIndex } from './in-memory-adapter.js';
+import { EndpointCapacityError, validateEndpointCapacity } from './endpoint-capacity.js';
 import type { BucketRepository } from './repository.js';
 
 export interface AnalyticsEngineDatasetLike {
@@ -21,16 +25,12 @@ interface QueryRow {
   duration_sum_ms: string | number;
   last_seen: string | number | null;
   upstream_sampled?: string | number | null;
+  sample_interval?: string | number;
 }
 
 const DATASET = 'app_health_endpoint_v1';
 const MAX_POINTS = 250;
-const INTERVALS: Record<Window, string> = {
-  '15m': "INTERVAL '15' MINUTE",
-  '1h': "INTERVAL '1' HOUR",
-  '24h': "INTERVAL '1' DAY",
-};
-
+const MAX_QUERY_ROWS = 10_000;
 export async function telemetryScope(appId: string, envId: string): Promise<string> {
   const digest = await crypto.subtle.digest(
     'SHA-256',
@@ -44,6 +44,19 @@ export class AnalyticsEngineBuckets implements BucketRepository {
     private readonly dataset: AnalyticsEngineDatasetLike,
     private readonly query: (sql: string) => Promise<QueryRow[]>,
   ) {}
+
+  validateEvents(
+    events: readonly {
+      method: string;
+      route: string;
+      duration_ms: number;
+      release?: string;
+      environment?: string;
+    }[],
+    release?: string,
+  ): void {
+    validateEndpointCapacity(events, release);
+  }
 
   async upsertBucket(): Promise<void> {
     throw new Error('production telemetry requires batched Analytics Engine writes');
@@ -101,8 +114,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       point.upstreamSampled ||= event.upstream_sampled === true;
       points.set(key, point);
     }
-    if (points.size > MAX_POINTS)
-      throw new Error(`ingest expands to more than ${MAX_POINTS} telemetry points`);
+    if (points.size > MAX_POINTS) throw new EndpointCapacityError();
     for (const point of points.values()) {
       this.dataset.writeDataPoint({
         indexes: [scope],
@@ -120,15 +132,18 @@ export class AnalyticsEngineBuckets implements BucketRepository {
   }
 
   async queryBuckets(appId: string, envId: string, from: number, to: number): Promise<BucketV1[]> {
-    const window = windowFor(to - from);
+    windowFor(to - from);
     const scope = await telemetryScope(appId, envId);
     // Analytics Engine is append-only. This exact release was a manually
     // injected connectivity check, not application traffic, so query-tombstone
     // it after its durable D1 inventory and installation state are removed.
-    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' AND timestamp >= NOW() - ${INTERVALS[window]} GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
+    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
     const rows = await this.query(sql);
+    if (rows.length > MAX_QUERY_ROWS)
+      throw new Error('Analytics Engine query returned too many rows');
     const grouped = new Map<string, BucketV1>();
     for (const row of rows) {
+      validateQueryRow(row);
       const key = `${row.method}\u0000${row.route}`;
       const bucket = grouped.get(key) ?? {
         app_id: appId,
@@ -158,6 +173,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       const lastSeen = row.last_seen === null ? null : Number(row.last_seen);
       if (Number.isFinite(lastSeen)) bucket.last_seen = Math.max(bucket.last_seen ?? 0, lastSeen!);
       if (Number(row.upstream_sampled) > 0) bucket.upstream_sampled = true;
+      if (Number(row.sample_interval) > 1) bucket.sampled = true;
       grouped.set(key, bucket);
     }
     return [...grouped.values()];
@@ -179,18 +195,66 @@ export function createAnalyticsQuery(options: {
 }) {
   if (!/^[a-f0-9]{32}$/i.test(options.accountId)) throw new Error('invalid Cloudflare account id');
   if (!options.token) throw new Error('missing Analytics Engine query token');
-  const fetchImpl = options.fetchImpl ?? fetch;
   return async (sql: string): Promise<QueryRow[]> => {
-    const response = await fetchImpl(
-      `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/analytics_engine/sql`,
-      {
-        method: 'POST',
-        headers: { authorization: `Bearer ${options.token}`, 'content-type': 'text/plain' },
-        body: sql,
-      },
-    );
+    const response = await browserQuery(sql, options);
     if (!response.ok) throw new Error(`Analytics Engine query failed: ${response.status}`);
-    const payload = (await response.json()) as { data?: QueryRow[] };
-    return payload.data ?? [];
+    const payload: unknown = await response.json();
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      !Array.isArray((payload as { data?: unknown }).data)
+    ) {
+      throw new Error('Analytics Engine query returned invalid data');
+    }
+    return (payload as { data: QueryRow[] }).data;
   };
+}
+
+function validateQueryRow(row: QueryRow): void {
+  if (!isQueryRowShape(row)) throw new Error('Analytics Engine query returned invalid row');
+  const bucket = Number(row.latency_bucket);
+  const count = Number(row.request_count);
+  const errors = Number(row.error_count);
+  const duration = Number(row.duration_sum_ms);
+  const lastSeen = row.last_seen === null ? null : Number(row.last_seen);
+  if (
+    !Number.isInteger(bucket) ||
+    bucket < 0 ||
+    bucket >= LATENCY_HISTOGRAM_BUCKETS ||
+    !validMetric(count) ||
+    !validMetric(errors) ||
+    errors > count ||
+    !validMetric(duration) ||
+    (lastSeen !== null && (!Number.isFinite(lastSeen) || lastSeen < 0))
+  ) {
+    throw new Error('Analytics Engine query returned invalid row');
+  }
+  if (row.method.includes('\u0000') || row.route.includes('\u0000'))
+    throw new Error('Analytics Engine query returned invalid row');
+}
+
+function isQueryRowShape(row: QueryRow | null | undefined): row is QueryRow {
+  if (!row || typeof row.method !== 'string' || typeof row.route !== 'string') return false;
+  if (!row.method || row.method.length > MAX_METHOD_LENGTH) return false;
+  if (!row.route || row.route.length > MAX_ROUTE_LENGTH) return false;
+  if (row.last_seen !== null && !isNumericField(row.last_seen)) return false;
+  if (
+    row.sample_interval !== undefined &&
+    (!isNumericField(row.sample_interval) || Number(row.sample_interval) < 1)
+  )
+    return false;
+  return [row.latency_bucket, row.request_count, row.error_count, row.duration_sum_ms].every(
+    isNumericField,
+  );
+}
+
+function isNumericField(value: unknown): value is number | string {
+  return (
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    (typeof value === 'string' && value.trim().length > 0)
+  );
+}
+
+function validMetric(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
 }

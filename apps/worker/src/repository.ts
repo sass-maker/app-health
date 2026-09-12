@@ -7,6 +7,8 @@
 // never persisted: ingest updates one-minute aggregate buckets only.
 
 import type {
+  CapabilityId,
+  CapabilityState,
   AppV1,
   BucketV1,
   EnvironmentV1,
@@ -31,6 +33,11 @@ export interface AppRepository {
 
 /** Persisted environment records, scoped to an app. */
 export interface EnvironmentRepository {
+  createEnvironmentKey(
+    appId: string,
+    name: string,
+    now: number,
+  ): Promise<{ environment: EnvironmentV1; record: KeyRecordV1; rawKey: string } | null>;
   createEnvironment(appId: string, name: string, now: number): Promise<EnvironmentV1>;
   resolveEnvironment(appId: string, name: string, now: number): Promise<EnvironmentV1 | null>;
   getEnvironment(envId: string): Promise<EnvironmentV1 | null>;
@@ -42,6 +49,11 @@ export interface EnvironmentRepository {
  * key is returned to the caller exactly once at creation time.
  */
 export interface KeyRepository {
+  rotateEnvironmentKey(
+    appId: string,
+    envId: string,
+    now: number,
+  ): Promise<{ record: KeyRecordV1; rawKey: string }>;
   /** Create a product-scoped key that can route to explicit environments. */
   createProductKey(
     appId: string,
@@ -103,6 +115,7 @@ export interface LogListQuery {
   source?: LogSource;
   event?: string;
   limit: number;
+  now?: number;
 }
 
 /**
@@ -132,6 +145,7 @@ export interface PublicLogKeyRepository {
     now: number,
   ): Promise<{ record: PublicLogKeyV1; rawKey: string }>;
   verifyPublicKey(rawKey: string): Promise<PublicLogKeyV1 | null>;
+  getPublicKey(keyId: string): Promise<PublicLogKeyV1 | null>;
   listPublicKeys(appId: string): Promise<PublicLogKeyV1[]>;
   /** Returns false when no active key matched. */
   revokePublicKey(keyId: string, now: number): Promise<boolean>;
@@ -161,6 +175,8 @@ export interface EndpointInventoryRepository {
  * range and merges buckets in memory.
  */
 export interface BucketRepository {
+  /** Validate provider expansion limits before any inventory, failure or dedupe writes. */
+  validateEvents?(events: readonly (EventV1 & { environment?: string })[], release?: string): void;
   /** Atomically add one event's contribution to its one-minute bucket. */
   upsertBucket(
     bucket: Omit<
@@ -197,11 +213,23 @@ export interface BucketRepository {
   ): Promise<void>;
 }
 
+export interface CapabilityRepository {
+  getCapabilities(appId: string, envId: string): Promise<CapabilityState[]>;
+  setCapabilities(appId: string, envId: string, enabled: readonly CapabilityId[]): Promise<void>;
+  recordCapability(
+    appId: string,
+    envId: string,
+    capability: CapabilityId,
+    now: number,
+  ): Promise<void>;
+}
+
 export interface SetupRepository {
   createAppEnvironmentKey(
     name: string,
     environment: string,
     now: number,
+    keyScope?: 'product' | 'environment',
   ): Promise<{ app: AppV1; environment: EnvironmentV1; record: KeyRecordV1; rawKey: string }>;
 }
 
@@ -209,6 +237,7 @@ export const MAX_ENVIRONMENTS_PER_APP = 20;
 
 /** Aggregate of all V0 repositories. The in-memory adapter implements this. */
 export interface AppHealthRepositories {
+  capabilities?: CapabilityRepository;
   apps: AppRepository;
   environments: EnvironmentRepository;
   keys: KeyRepository;

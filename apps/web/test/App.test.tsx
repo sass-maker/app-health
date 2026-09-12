@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -15,6 +15,8 @@ import type {
   InstallationStatusV1,
   PublicLogKeyV1,
   StoredLogV1,
+  CapabilityState,
+  EnvironmentCapabilities,
 } from '@app-health/contracts';
 
 const STORAGE_KEY = 'app-health-v0-project';
@@ -80,13 +82,112 @@ function installFetch(options?: {
   publicKeys?: PublicLogKeyV1[];
   publicKeyFail?: boolean;
   fail?: boolean;
+  google?: boolean;
+  appsFail?: boolean;
+  signOutFail?: boolean;
+  capabilityRows?: CapabilityState[];
+  capabilityFail?: boolean;
+  capabilitySaveFail?: boolean;
+  privateKey?: EnvironmentCapabilities['private_key'];
+  environmentCreateFail?: boolean;
+  environmentCreateInvalid?: boolean;
+  keyIssueFail?: boolean;
+  keyIssueInvalid?: boolean;
+  endpointInvalid?: boolean;
+  endpointPending?: boolean;
+  statusInvalid?: boolean;
 }) {
   const publicKeys = [...(options?.publicKeys ?? [])];
+  let capabilityRows =
+    options?.capabilityRows ??
+    (['analytics', 'endpoints', 'logs'] as const).map((id) => ({
+      id,
+      enabled: true,
+      first_received_at: Date.now() - 60_000,
+      last_received_at: Date.now() - 5_000,
+    }));
   const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
-    if (options?.fail) throw new Error('connection refused');
     const url =
-      input instanceof URL ? input : new URL(typeof input === 'string' ? input : input.url);
+      input instanceof URL
+        ? input
+        : new URL(typeof input === 'string' ? input : input.url, window.location.origin);
+    if (url.pathname === '/v1/account/config')
+      return Response.json({ google: options?.google ?? false });
+    if (url.pathname === '/v1/capabilities') {
+      if (options?.capabilityFail) return new Response(null, { status: 503 });
+      if (init?.method === 'PUT') {
+        if (options?.capabilitySaveFail) return new Response(null, { status: 503 });
+        const enabled = (JSON.parse(String(init.body)) as { enabled: string[] }).enabled;
+        capabilityRows = capabilityRows.map((row) => ({
+          ...row,
+          enabled: enabled.includes(row.id),
+        }));
+      }
+      return Response.json({
+        app_id: url.searchParams.get('app_id'),
+        environment_id: url.searchParams.get('environment_id'),
+        capabilities: capabilityRows,
+        private_key:
+          options && 'privateKey' in options
+            ? options.privateKey
+            : {
+                id: 'key-current',
+                environment_id: url.searchParams.get('environment_id'),
+                created_at: Date.now() - 100_000,
+                revoked_at: null,
+              },
+      });
+    }
+    const createEnvironment = url.pathname.match(/^\/v1\/apps\/([^/]+)\/environments$/);
+    if (createEnvironment && init?.method === 'POST') {
+      if (options?.environmentCreateFail) return new Response(null, { status: 503 });
+      if (options?.environmentCreateInvalid) return Response.json({ environment: {} });
+      const body = JSON.parse(String(init.body)) as { name: string };
+      return new Response(
+        JSON.stringify({
+          environment: {
+            id: `env-${body.name}`,
+            app_id: createEnvironment[1],
+            name: body.name,
+            created_at: Date.now(),
+          },
+          key: {
+            key: `ahk_${body.name}_one_time`,
+            app_id: createEnvironment[1],
+            environment_id: `env-${body.name}`,
+            created_at: Date.now(),
+          },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    const issueKey = url.pathname.match(/^\/v1\/apps\/([^/]+)\/environments\/([^/]+)\/keys$/);
+    if (issueKey && init?.method === 'POST') {
+      if (options?.keyIssueFail) return new Response(null, { status: 503 });
+      if (options?.keyIssueInvalid) return Response.json({ key: {} });
+      return new Response(
+        JSON.stringify({
+          environment: {
+            id: issueKey[2],
+            app_id: issueKey[1],
+            name: savedProject.environment,
+            created_at: Date.now(),
+          },
+          key: {
+            key: 'ahk_environment_one_time',
+            app_id: issueKey[1],
+            environment_id: issueKey[2],
+            created_at: Date.now(),
+          },
+        }),
+        { status: 201, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    if (options?.fail) throw new Error('connection refused');
+    if (url.pathname === '/v1/auth/sign-out')
+      return new Response('{}', { status: options?.signOutFail ? 503 : 200 });
     if (url.pathname === '/v1/apps') {
+      if (options?.appsFail) return new Response(null, { status: 403 });
       if (init?.method !== 'POST') return Response.json({ apps: options?.apps ?? [] });
       return new Response(
         JSON.stringify({
@@ -108,9 +209,17 @@ function installFetch(options?: {
       );
     }
     if (url.pathname === '/v1/installation/status') {
+      if (options?.statusInvalid) return Response.json({ state: 'connected' });
       return Response.json(options?.status ?? connected);
     }
     if (url.pathname === '/v1/endpoints') {
+      if (options?.endpointInvalid) return Response.json({ endpoints: [] });
+      if (options?.endpointPending)
+        return new Promise<Response>((_, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('Aborted', 'AbortError')),
+          );
+        });
       return Response.json({
         refreshed_at: Date.now(),
         window: url.searchParams.get('window') ?? '15m',
@@ -182,29 +291,165 @@ function installFetch(options?: {
   return fetchMock;
 }
 
+async function openKeySetup(): Promise<void> {
+  installFetch();
+  render(<App />);
+  fireEvent.change(screen.getByLabelText('Application name'), {
+    target: { value: 'orders-api' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /create project/i }));
+  await screen.findByText('ahk_one_time_secret');
+}
+
 describe('App Health V0 UI', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', storage);
     localStorage.clear();
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState({}, '', '/app#endpoints');
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it('renders the public unlock hero in the initial HTML response', () => {
+  it('resolves a valid explicit analytics link without local storage', async () => {
+    const apps = [
+      {
+        app: { id: 'app-alpha', name: 'alpha', created_at: Date.now() },
+        environments: [
+          { id: 'env-alpha', app_id: 'app-alpha', name: 'production', created_at: Date.now() },
+        ],
+      },
+    ];
+    window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
+    installFetch({ apps });
+    render(<App />);
+    expect(await screen.findByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha');
+    expect(localStorage.getItem(STORAGE_KEY)).toContain('app-alpha');
+  });
+
+  it('does not replace an explicit target after selecting another project', async () => {
+    const apps = ['alpha', 'beta'].map((name) => ({
+      app: { id: `app-${name}`, name, created_at: Date.now() },
+      environments: [
+        { id: `env-${name}`, app_id: `app-${name}`, name: 'production', created_at: Date.now() },
+      ],
+    }));
+    window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
+    installFetch({ apps });
+    render(<App />);
+    const picker = await screen.findByRole('combobox', { name: 'Project' });
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'beta' }));
+    expect(new URL(window.location.href).searchParams.get('project')).toBe('app-beta');
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20));
+    });
+    expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('beta');
+  });
+
+  it('shows a retryable error when an explicit target inventory request is forbidden', async () => {
+    window.history.replaceState({}, '', '/app?project=foreign&environment=prod#analytics');
+    installFetch({ appsFail: true });
+    render(<App />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('project list could not load');
+    expect(screen.queryByRole('button', { name: 'Create project' })).toBeNull();
+  });
+
+  it('restores the selected project when browser history changes the URL target', async () => {
+    const apps = ['alpha', 'beta'].map((name) => ({
+      app: { id: `app-${name}`, name, created_at: Date.now() },
+      environments: [
+        { id: `env-${name}`, app_id: `app-${name}`, name: 'production', created_at: Date.now() },
+      ],
+    }));
+    window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
+    installFetch({ apps });
+    render(<App />);
+    expect(await screen.findByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha');
+    await act(async () => {
+      window.history.pushState({}, '', '/app?project=app-beta&environment=env-beta#analytics');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('beta'),
+    );
+    await act(async () => {
+      window.history.pushState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha'),
+    );
+  });
+
+  it('resumes a Google workspace, switches projects, and signs out without persisting credentials', async () => {
+    const apps = ['alpha', 'beta'].map((name) => ({
+      app: { id: `app-${name}`, name, created_at: Date.now() },
+      environments: [
+        { id: `env-${name}`, app_id: `app-${name}`, name: 'production', created_at: Date.now() },
+      ],
+    }));
+    const mock = installFetch({ google: true, apps });
+    render(<App />);
+    const picker = await screen.findByRole('combobox', { name: 'Project' });
+    expect(picker).toHaveTextContent('alpha');
+    fireEvent.keyDown(picker, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'beta' }));
+    await waitFor(() => expect(localStorage.getItem(STORAGE_KEY)).toContain('app-beta'));
+    fireEvent.click(screen.getByRole('button', { name: 'Add another project' }));
+    expect(await screen.findByRole('button', { name: 'Back to projects' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('button', { name: 'Continue with Google' })).toBeTruthy();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(
+      mock.mock.calls.filter(([input]) => String(input).includes('/v1/auth/sign-out')),
+    ).toHaveLength(1);
+    expect(
+      mock.mock.calls.every(([, init]) => !new Headers(init?.headers).has('authorization')),
+    ).toBe(true);
+  });
+
+  it('keeps a failed sign-out recoverable, including an empty workspace', async () => {
+    installFetch({ google: true, signOutFail: true });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out');
+    expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
+  });
+
+  it('offers Google sign-in and reports provider failures without losing the deployment-key option', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 503 })));
+    render(<OwnerUnlock onUnlock={vi.fn()} googleEnabled />);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Google sign-in could not start');
+    expect(screen.getByRole('button', { name: 'Unlock' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeEnabled();
+  });
+
+  it('rejects unexpected OAuth destinations and explains callback failure', async () => {
+    window.history.replaceState({}, '', '/?signin=failed');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(Response.json({ url: 'https://evil.example.com' })),
+    );
+    render(<OwnerUnlock onUnlock={vi.fn()} googleEnabled />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in did not complete');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    expect(await screen.findByText('Unexpected sign-in destination.')).toBeTruthy();
+  });
+
+  it('renders the product-led landing hero in the initial HTML response', () => {
     const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
-    expect(html).toContain('data-initial-unlock-shell');
-    expect(html).toContain(
-      '<h1 id="unlock-title">Private endpoint health from observed traffic.</h1>',
-    );
-    expect(html).toContain('No request bodies, parameters, or identities');
-    expect(html).toContain('Current production V0');
-    expect(html).toContain('The production dashboard and ingest service are live.');
-    expect(html).toContain('Read install guide');
-    expect(html).toMatch(/The hosted dashboard has no public\s+signup\./);
+    expect(html).toContain('data-initial-landing-shell');
+    expect(html).toContain('<h1 id="unlock-title">See what people do. Know what to improve.</h1>');
+    expect(html).toContain('Named product events and trends');
+    expect(html).toContain('One browser script');
+    expect(html).toContain('Local preview available');
+    expect(html).toContain('Open local preview');
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 
@@ -237,40 +482,29 @@ describe('App Health V0 UI', () => {
   it('starts with the focused project setup flow', () => {
     installFetch();
     render(<App />);
-    expect(screen.getByRole('heading', { name: /know which routes are healthy/i })).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: /start with a product you want to understand/i }),
+    ).toBeTruthy();
     expect(screen.getByLabelText('Application name')).toBeTruthy();
-    expect(screen.getByText(/no payload storage/i)).toBeTruthy();
+    expect(screen.getByText(/named product events/i)).toBeTruthy();
   });
 
   it('shows a newly-created key once and never persists the raw key', async () => {
-    installFetch({
-      status: {
-        state: 'waiting',
-        first_seen: null,
-        last_seen: null,
-        next_action: 'Start your service.',
-      },
-      endpointRows: [],
-    });
-    render(<App />);
-    fireEvent.change(screen.getByLabelText('Application name'), {
-      target: { value: 'orders-api' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /create project/i }));
-    expect(await screen.findByText('ahk_one_time_secret')).toBeTruthy();
+    await openKeySetup();
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain('ahk_one_time_secret');
-    fireEvent.click(screen.getByRole('button', { name: /i saved the key/i }));
-    expect(await screen.findByText('Waiting for traffic')).toBeTruthy();
+    const createCall = vi
+      .mocked(fetch)
+      .mock.calls.find(
+        ([input, init]) => String(input).endsWith('/v1/apps') && init?.method === 'POST',
+      );
+    expect(JSON.parse(String(createCall?.[1]?.body)).key_scope).toBe('environment');
+    fireEvent.click(screen.getByRole('button', { name: /save key and choose capabilities/i }));
+    expect(await screen.findByRole('heading', { name: 'Project settings' })).toBeTruthy();
     expect(screen.queryByText('ahk_one_time_secret')).toBeNull();
   });
 
   it('shows copy-ready SDK and OpenTelemetry setup without persisting the key', async () => {
-    installFetch();
-    render(<App />);
-    fireEvent.change(screen.getByLabelText('Application name'), {
-      target: { value: 'orders-api' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /create project/i }));
+    await openKeySetup();
 
     expect(
       await screen.findByText(
@@ -305,6 +539,36 @@ describe('App Health V0 UI', () => {
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain('ahk_one_time_secret');
   });
 
+  it('keeps the key selectable and reports when the Clipboard API is unavailable', async () => {
+    vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: undefined }));
+    await openKeySetup();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy key' }));
+
+    expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+    expect(screen.getByText(/select the key above and copy it manually/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy key' })).toBeTruthy();
+    expect(screen.getByText('ahk_one_time_secret')).toBeTruthy();
+  });
+
+  it('keeps the snippet visible and reports a rejected clipboard write', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('permission denied'));
+    vi.stubGlobal(
+      'navigator',
+      Object.assign(Object.create(navigator), { clipboard: { writeText } }),
+    );
+    await openKeySetup();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy snippet' }));
+
+    expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+    expect(screen.getByText(/select the snippet above and copy it manually/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Copy snippet' })).toBeTruthy();
+    expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(writeText.mock.calls[0][0]).toContain('@saas-maker/app-health/express');
+  });
+
   it('identifies OpenTelemetry traffic and discloses sampled endpoint estimates', async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({
@@ -315,6 +579,14 @@ describe('App Health V0 UI', () => {
     expect(await screen.findByText('OpenTelemetry connected')).toBeTruthy();
     expect(screen.getByText(/OpenTelemetry pipeline/)).toBeTruthy();
     expect(screen.getAllByText('OTel sampled estimate')).toHaveLength(2);
+  });
+
+  it('labels storage-sampled measurements without attributing them to OpenTelemetry', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch({ status: connected, endpointRows: [{ ...endpoints[0], sampled: true }] });
+    render(<App />);
+    expect(await screen.findAllByText('Sampled estimate')).toHaveLength(2);
+    expect(screen.queryByText('OTel sampled estimate')).toBeNull();
   });
 
   it('switches every dashboard query between environments under one product', async () => {
@@ -349,8 +621,9 @@ describe('App Health V0 UI', () => {
 
     render(<App />);
     const environment = await screen.findByRole('combobox', { name: 'Environment' });
-    expect(environment).toHaveValue('env-polaris-local');
-    fireEvent.change(environment, { target: { value: 'env-polaris-staging' } });
+    expect(environment).toHaveTextContent('local');
+    fireEvent.keyDown(environment, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'staging' }));
 
     await waitFor(() => {
       const scopedCalls = fetchMock.mock.calls
@@ -410,7 +683,7 @@ describe('App Health V0 UI', () => {
     render(<App />);
 
     expect(await screen.findByText('Polaris')).toBeTruthy();
-    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveValue('env-polaris-local');
+    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('local');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('app-polaris');
   });
 
@@ -446,6 +719,42 @@ describe('App Health V0 UI', () => {
         .filter((url): url is URL => url?.pathname === '/v1/endpoints');
       expect(endpointCalls.at(-1)?.searchParams.get('window')).toBe('1h');
     });
+  });
+
+  it('rejects an invalid dashboard endpoint contract', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch({ endpointInvalid: true });
+    render(<App />);
+    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid endpoint data response');
+  });
+
+  it('rejects an invalid installation status contract', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch({ statusInvalid: true });
+    render(<App />);
+    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid installation status response');
+  });
+
+  it('clears endpoint data and aborts the prior window request', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    const fetchMock = installFetch({ endpointPending: true });
+    render(<App />);
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(2));
+    fireEvent.click(screen.getByRole('button', { name: '1h' }));
+    await waitFor(() => {
+      const endpointCalls = fetchMock.mock.calls.filter(
+        ([input]) => input instanceof URL && input.pathname === '/v1/endpoints',
+      );
+      expect(endpointCalls.at(-1)?.[0]).toHaveProperty('searchParams');
+      expect((endpointCalls.at(-1)?.[0] as URL).searchParams.get('window')).toBe('1h');
+    });
+    const firstEndpointCall = fetchMock.mock.calls.find(
+      ([input]) => input instanceof URL && input.pathname === '/v1/endpoints',
+    );
+    expect(firstEndpointCall?.[1]?.signal).toHaveProperty('aborted', true);
+    expect(screen.queryByText('/orders')).toBeNull();
   });
 
   it('loads retained failures only after the owner opens Data received', async () => {
@@ -528,7 +837,7 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
     expect(await screen.findAllByText('/rare')).toHaveLength(2);
-    expect(screen.getAllByText('metrics sampled')).toHaveLength(2);
+    expect(screen.getAllByText('metrics unavailable')).toHaveLength(2);
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(4);
     expect(screen.queryByText('0.0%')).toBeNull();
   });
@@ -612,6 +921,178 @@ describe('App Health V0 UI', () => {
     expect(screen.getByText(/application is unaffected/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
   });
+
+  it('shows a recoverable capability error instead of setup when status is unavailable', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    const fetchMock = installFetch({ capabilityFail: true });
+    render(<App />);
+
+    expect(await screen.findByText('Capability status is unavailable')).toBeTruthy();
+    expect(screen.queryByText(/Waiting for the first valid/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.filter(
+          ([input]) => input instanceof URL && input.pathname === '/v1/capabilities',
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+  });
+
+  it('enables a hidden capability before opening its setup', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    const fetchMock = installFetch({
+      capabilityRows: (['analytics', 'endpoints', 'logs'] as const).map((id) => ({
+        id,
+        enabled: false,
+        first_received_at: null,
+        last_received_at: null,
+      })),
+    });
+    render(<App />);
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open setup' }))[0]);
+    expect(await screen.findByText('Install web analytics')).toBeTruthy();
+    const saveCall = fetchMock.mock.calls.find(
+      ([input, init]) =>
+        input instanceof URL && input.pathname === '/v1/capabilities' && init?.method === 'PUT',
+    );
+    expect(JSON.parse(String(saveCall?.[1]?.body)).enabled).toEqual(['analytics']);
+    expect(location.hash).toBe('#analytics');
+  });
+
+  it('keeps capability settings open and explains a failed enable request', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch({
+      capabilitySaveFail: true,
+      capabilityRows: (['analytics', 'endpoints', 'logs'] as const).map((id) => ({
+        id,
+        enabled: false,
+        first_received_at: null,
+        last_received_at: null,
+      })),
+    });
+    render(<App />);
+
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Open setup' }))[0]);
+    expect(await screen.findByText('API returned 503')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Project settings' })).toBeTruthy();
+    expect(location.hash).toBe('#settings');
+  });
+
+  it('keeps a newly-created environment key visible without switching environments', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch();
+    render(<App />);
+
+    fireEvent.change(await screen.findByLabelText('New environment name'), {
+      target: { value: 'staging' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add environment' }));
+    expect(await screen.findByText('Save the private key for staging')).toBeTruthy();
+    expect(screen.getByText('ahk_staging_one_time')).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('production');
+    expect(localStorage.getItem(STORAGE_KEY)).toContain('env-test');
+    expect(localStorage.getItem(STORAGE_KEY)).not.toContain('ahk_staging_one_time');
+  });
+
+  it.each([
+    [{ environmentCreateFail: true }, 'API returned 503'],
+    [{ environmentCreateInvalid: true }, 'The environment response was invalid'],
+  ] as const)('retains environment input after rejected creation %j', async (options, message) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch(options);
+    render(<App />);
+    const input = await screen.findByLabelText('New environment name');
+    fireEvent.change(input, { target: { value: 'staging' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add environment' }));
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(input).toHaveValue('staging');
+    expect(screen.queryByText('Save the private key for staging')).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('production');
+  });
+
+  it.each([null, { id: 'legacy-key', environment_id: null, created_at: 1, revoked_at: null }])(
+    'creates a scoped key without treating missing or legacy keys as scoped rotation',
+    async (privateKey) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+      window.history.replaceState({}, '', '/app#settings');
+      installFetch({ privateKey });
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Create environment key' }));
+      expect(await screen.findByText('ahk_environment_one_time')).toBeTruthy();
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      fireEvent.click(screen.getByRole('button', { name: 'Copy private key' }));
+      expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy();
+      expect(writeText).toHaveBeenCalledWith('ahk_environment_one_time');
+      writeText.mockRejectedValue(new Error('Copy denied'));
+      fireEvent.click(screen.getByRole('button', { name: 'Copied' }));
+      expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+      expect(screen.getByText('ahk_environment_one_time')).toBeTruthy();
+    },
+  );
+
+  it('rejects a malformed private-key response without revealing a key', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch({ privateKey: null, keyIssueInvalid: true });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Create environment key' }));
+    expect(await screen.findByText('The key response was invalid')).toBeTruthy();
+    expect(screen.queryByText('ahk_environment_one_time')).toBeNull();
+  });
+
+  it('rotates an environment private key only after confirmation', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch();
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace environment key' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
+      'Replace the key for checkout-api / production?',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Replace key' }));
+    expect(await screen.findByText('ahk_environment_one_time')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Replace environment key' })).toHaveFocus(),
+    );
+  });
+
+  it('keeps a failed key rotation error and retry action inside the dialog', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#settings');
+    installFetch({ keyIssueFail: true });
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Replace environment key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Replace key' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(await screen.findByRole('alert')).toHaveTextContent('API returned 503');
+    expect(dialog).toContainElement(screen.getByRole('alert'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Replace key' })).toHaveFocus());
+  });
+
+  it('synchronizes the dashboard when the URL hash changes', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch();
+    render(<App />);
+    await screen.findAllByText('/orders');
+
+    act(() => {
+      window.history.replaceState({}, '', '/app#logs');
+      window.dispatchEvent(new HashChangeEvent('hashchange'));
+    });
+    expect(await screen.findByText('Application logs')).toBeTruthy();
+    expect(document.title).toBe('Logs — App Health');
+  });
 });
 
 describe('Logs view', () => {
@@ -641,6 +1122,7 @@ describe('Logs view', () => {
     vi.stubGlobal('localStorage', storage);
     localStorage.clear();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#endpoints');
   });
 
   afterEach(() => {
@@ -668,15 +1150,17 @@ describe('Logs view', () => {
     expect(firstCall.searchParams.get('app_id')).toBe('app-test');
     expect(firstCall.searchParams.get('level')).toBe('debug');
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Minimum level' }), {
-      target: { value: 'warn' },
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Minimum level' }), {
+      key: 'ArrowDown',
     });
+    fireEvent.click(await screen.findByRole('option', { name: 'Warn and above' }));
     await waitFor(() => expect(screen.queryByText('ada@example.com')).toBeNull());
     expect(screen.getByText('payment.failed')).toBeTruthy();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Minimum level' }), {
-      target: { value: 'debug' },
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Minimum level' }), {
+      key: 'ArrowDown',
     });
+    fireEvent.click(await screen.findByRole('option', { name: 'All levels' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Event name' }), {
       target: { value: 'signup' },
     });
@@ -715,11 +1199,12 @@ describe('Logs view', () => {
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
     expect(await screen.findByText('payment.failed')).toBeTruthy();
-    expect(document.querySelector('.log-source')?.textContent).toBe('browser');
+    expect(screen.getByText('browser')).toBeTruthy();
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Source' }), {
-      target: { value: 'server' },
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Source' }), {
+      key: 'ArrowDown',
     });
+    fireEvent.click(await screen.findByRole('option', { name: 'Server only' }));
     await waitFor(() => expect(screen.queryByText('payment.failed')).toBeNull());
     expect(screen.getByText('ada@example.com')).toBeTruthy();
     const sourceCall = fetchMock.mock.calls
@@ -747,7 +1232,22 @@ describe('Logs view', () => {
     ]);
     expect(await screen.findByText('https://new.app, http://localhost:5173')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke browser key pubkey-existing' }));
+    const revokeTrigger = screen.getByRole('button', {
+      name: 'Revoke browser key pubkey-existing',
+    });
+    fireEvent.click(revokeTrigger);
+    expect(screen.getByText('Revoke this browser key?')).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('Revoke this browser key?')).toBeNull());
+    expect(revokeTrigger).toHaveFocus();
+
+    fireEvent.click(revokeTrigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByText('Revoke this browser key?')).toBeNull());
+    expect(revokeTrigger).toHaveFocus();
+
+    fireEvent.click(revokeTrigger);
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke key' }));
     expect(await screen.findByText(/revoked/)).toBeTruthy();
   });
 
@@ -773,7 +1273,48 @@ describe('Logs view', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
     expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Endpoints' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'App health' })).toBeTruthy();
+  });
+
+  it('rejects malformed log responses instead of showing an empty feed', async () => {
+    installFetch();
+    const delegate = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes('/v1/logs?'))
+          return Promise.resolve(Response.json({ logs: 'invalid' }));
+        return delegate(input, init);
+      }),
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
+    expect(screen.queryByText('No logs match')).toBeNull();
+  });
+
+  it('shows capability-specific browser and Cloudflare Worker log setup', async () => {
+    window.history.replaceState({}, '', '/app#logs');
+    installFetch({
+      capabilityRows: [
+        { id: 'analytics', enabled: false, first_received_at: null, last_received_at: null },
+        { id: 'endpoints', enabled: false, first_received_at: null, last_received_at: null },
+        { id: 'logs', enabled: true, first_received_at: null, last_received_at: null },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText('Send browser logs')).toBeTruthy();
+    expect(screen.getByText(/Cloudflare Worker · Hono/i)).toBeTruthy();
+    expect(screen.getByText(/appHealth\.log\('signup\.completed'/)).toBeTruthy();
+    expect(screen.getByText(/ctx\.waitUntil\(appHealth\.flush\(\)\)/)).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Allowed origins' }), {
+      target: { value: 'https://product.example' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create browser key' }));
+    expect(await screen.findByText(/createWebLogger/)).toBeTruthy();
+    expect(screen.getByText(new RegExp(`${window.location.origin}/v1/logs`))).toBeTruthy();
+    expect(screen.queryByText(/window\.appHealth\.track/)).toBeNull();
   });
 });
 

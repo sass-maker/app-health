@@ -8,7 +8,13 @@
 
 import type { EventBatchV1, LogBatchV1 } from './contracts.js';
 
-export type FetchLike = (input: string, init: RequestInit) => Promise<{ status: number }>;
+export type FetchLike = (
+  input: string,
+  init: RequestInit,
+) => Promise<{
+  status: number;
+  body?: { cancel(): Promise<unknown> } | null;
+}>;
 
 export interface TransportOptions {
   endpoint: string;
@@ -41,7 +47,7 @@ export async function sendBatch(
   for (let attempt = 0; attempt <= options.maxRetries; attempt += 1) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.requestTimeoutMs);
-    let response: { status: number };
+    let response: Awaited<ReturnType<FetchLike>>;
     try {
       response = await fetchFn(options.endpoint, {
         method: 'POST',
@@ -63,6 +69,7 @@ export async function sendBatch(
       return { ok: false, retried: attempt, error: lastError };
     }
     clearTimeout(timer);
+    void response.body?.cancel().catch(() => {});
     lastStatus = response.status;
     if (response.status >= 200 && response.status < 300) {
       return { ok: true, status: response.status, retried: attempt };

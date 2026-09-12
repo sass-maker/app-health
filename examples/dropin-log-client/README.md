@@ -1,5 +1,10 @@
 # Drop-in log client
 
+These are legacy examples, retained for existing integrations. They send one
+request per log and do not provide the maintained SDK's bounded batching, retry
+and shutdown guarantees. Use `appHealth.log()` or `createWebLogger` for new
+integrations; this readiness pass does not modify consumer projects.
+
 `ping.ts` is a zero-dependency sender for App Health application logs. Copy it
 into an app, set `APP_HEALTH_INGEST_KEY` (and `APP_HEALTH_ENVIRONMENT`), and
 call `ping('signup', { title, props })`. One POST per call to `/v1/logs`; no

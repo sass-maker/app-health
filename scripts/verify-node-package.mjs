@@ -40,6 +40,9 @@ try {
     'dist/web.js',
     'dist/web.cjs',
     'dist/web.d.ts',
+    'dist/viewer.js',
+    'dist/viewer.cjs',
+    'dist/viewer.d.ts',
   ];
   for (const path of required) {
     if (!paths.includes(path)) throw new Error(`packed package is missing ${path}`);
@@ -83,7 +86,8 @@ import { expressMiddleware } from '@saas-maker/app-health/express';
 import { honoMiddleware } from '@saas-maker/app-health/hono';
 import { withPagesFunctionHealth } from '@saas-maker/app-health/pages';
 import { createWebLogger } from '@saas-maker/app-health/web';
-if ([createAppHealthClient, expressMiddleware, honoMiddleware, withPagesFunctionHealth, createWebLogger].some((value) => typeof value !== 'function')) process.exit(1);
+import { createAnalyticsViewer } from '@saas-maker/app-health/viewer';
+if ([createAppHealthClient, expressMiddleware, honoMiddleware, withPagesFunctionHealth, createWebLogger, createAnalyticsViewer].some((value) => typeof value !== 'function')) process.exit(1);
 const events = [];
 const waits = [];
 const client = { record: (event) => events.push(event), flush: async () => {}, close: async () => {}, diagnostics: () => ({}) };
@@ -117,7 +121,7 @@ if (logBatches.length !== 1 || logBatches[0].logs[0]?.event !== 'package.verifie
     globalThis.process.execPath,
     [
       '-e',
-      "const core = require('@saas-maker/app-health'); const express = require('@saas-maker/app-health/express'); const hono = require('@saas-maker/app-health/hono'); const pages = require('@saas-maker/app-health/pages'); const web = require('@saas-maker/app-health/web'); if ([core.createAppHealthClient, express.expressMiddleware, hono.honoMiddleware, pages.withPagesFunctionHealth, web.createWebLogger].some((value) => typeof value !== 'function')) process.exit(1)",
+      "const core = require('@saas-maker/app-health'); const express = require('@saas-maker/app-health/express'); const hono = require('@saas-maker/app-health/hono'); const pages = require('@saas-maker/app-health/pages'); const web = require('@saas-maker/app-health/web'); const viewer = require('@saas-maker/app-health/viewer'); if ([core.createAppHealthClient, express.expressMiddleware, hono.honoMiddleware, pages.withPagesFunctionHealth, web.createWebLogger, viewer.createAnalyticsViewer].some((value) => typeof value !== 'function')) process.exit(1)",
     ],
     { cwd: consumerDir, stdio: 'inherit' },
   );

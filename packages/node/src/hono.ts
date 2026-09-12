@@ -6,6 +6,7 @@
 
 import type { Context, Env, MiddlewareHandler } from 'hono';
 import { routePath } from 'hono/route';
+import { observe } from './observe.js';
 import type { AppHealthClient } from './client.js';
 import {
   normalizeMethod,
@@ -41,10 +42,10 @@ export function honoMiddleware<E extends Env = Env>(
     try {
       await next();
     } catch (error) {
-      recordHono(context, options, release, 500, start);
+      observe(() => recordHono(context, options, release, 500, start));
       throw error;
     }
-    recordHono(context, options, release, context.res.status, start);
+    observe(() => recordHono(context, options, release, context.res.status, start));
   };
 }
 

@@ -27,6 +27,8 @@ export const BucketV1 = z.object({
   last_seen: z.number().int().min(0).nullable(),
   /** True when any contribution came from a potentially sampled upstream trace stream. */
   upstream_sampled: z.boolean().optional(),
+  /** True when the analytics storage sampled contributing measurements. */
+  sampled: z.boolean().optional(),
   /** Fixed latency histogram counts aligned with LATENCY_BUCKET_BOUNDS_MS. */
   histogram: z.array(z.number().int().min(0)).length(LATENCY_HISTOGRAM_BUCKETS),
 });
@@ -48,6 +50,8 @@ export const EndpointAggregateV1 = z.object({
   metrics_available: z.boolean().optional(),
   /** True when counts and percentiles include trace-derived sampled estimates. */
   upstream_sampled: z.boolean().optional(),
+  /** True when the analytics storage sampled contributing measurements. */
+  sampled: z.boolean().optional(),
 });
 
 export type EndpointAggregateV1 = z.infer<typeof EndpointAggregateV1>;

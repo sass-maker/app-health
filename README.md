@@ -1,11 +1,23 @@
 # app-health
 
-App Health V0 gives a service an ingest key and shows how every observed
-endpoint is performing. It accepts an existing OpenTelemetry trace pipeline or
-the Express, Echo, and `net/http` SDKs, then provides aggregate-only ingest and
-a responsive operator dashboard. Local development is credential-free; the
-production path targets Cloudflare D1 and Workers Analytics Engine with a
-dedicated single-owner Worker secret.
+App Health brings endpoint health, intentional logs, and product analytics into
+one workspace. Sign in with Google, create a project and its environments, and
+connect only the capabilities you need. Each capability shows setup until traffic
+arrives. Fleet's internal Site Health dashboard is a separate product.
+
+- **API health:** batched route measurements from Cloudflare Workers, Hono, Pages,
+  Node, Go, or OTLP.
+- **Logs:** explicit level-based events with bounded ingestion and 30-day retention.
+- **Analytics:** a small browser tracker, optional JavaScript modules, a Foundation
+  Swift SDK, recent active sessions, and revocable aggregate-only public links.
+
+The dashboard uses shadcn components with light and dark themes. Cloudflare D1,
+Analytics Engine, Queues, Durable Objects, and compressed R2 archives provide the
+production backend. SDKs keep independent entry points to avoid loading unused
+capabilities. See [integration readiness](docs/integration-readiness.md),
+[Google accounts](docs/accounts.md), and [efficiency](docs/efficiency.md) for exact
+verification status and limits. Source support does not imply every SDK module is
+already published to a package registry.
 
 ## Repository layout
 
@@ -18,6 +30,7 @@ packages/
               contracts with zod runtime validation and canonical fixtures
   node/       @saas-maker/app-health client plus Express, Hono, and Pages adapters
   go/         Go 1.22 client with net/http and Echo adapters
+  swift/      Foundation client for explicit native events and logs
 openspec/specs/   Canonical behavior specifications
 openspec/changes/archive/   Completed and superseded change history
 ```

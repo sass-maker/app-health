@@ -27,6 +27,23 @@ function clientSpy() {
 }
 
 describe('Hono middleware', () => {
+  it('preserves a successful response when an optional observation hook throws', async () => {
+    const { client } = clientSpy();
+    const app = new Hono();
+    app.use(
+      '*',
+      honoMiddleware({
+        client,
+        onRecord: () => {
+          throw new Error('hook failed');
+        },
+      }),
+    );
+    app.get('/health', (context) => context.text('healthy', 201));
+    const response = await app.request('/health');
+    expect(response.status).toBe(201);
+    expect(await response.text()).toBe('healthy');
+  });
   it('records only the matched route template and uses waitUntil', async () => {
     const { client, events, flush } = clientSpy();
     const waits: Promise<unknown>[] = [];

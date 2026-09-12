@@ -36,6 +36,11 @@
       "types": "./dist/web.d.ts",
       "import": "./dist/web.js",
       "require": "./dist/web.cjs"
+    },
+    "./viewer": {
+      "types": "./dist/viewer.d.ts",
+      "import": "./dist/viewer.js",
+      "require": "./dist/viewer.cjs"
     }
   },
   "repository": {
@@ -54,7 +59,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:bench": "vitest run --testNamePattern benchmark",
-    "build": "tsup src/index.ts src/express.ts src/hono.ts src/pages.ts src/web.ts --format esm,cjs --dts --clean --external express --external hono --external hono/route",
+    "build": "tsup src/index.ts src/express.ts src/hono.ts src/pages.ts src/web.ts src/viewer.ts --format esm,cjs --dts --clean --external express --external hono --external hono/route",
     "pack:verify": "pnpm run build && node ../../scripts/verify-node-package.mjs",
     "clean": "rimraf dist *.tsbuildinfo"
   },

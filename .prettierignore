@@ -11,3 +11,5 @@ openspec
 .github
 AGENTS.md
 PROJECT_STATUS.md
+packages/swift/.build
+packages/swift/.swiftpm

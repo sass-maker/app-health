@@ -39,6 +39,26 @@ function clientSpy() {
 }
 
 describe('Pages Function wrapper', () => {
+  it('preserves response identity and the original handler error when instrumentation throws', async () => {
+    const { client } = clientSpy();
+    const options = {
+      client,
+      route: '/health',
+      onRecord: () => {
+        throw new Error('hook');
+      },
+    };
+    const response = new Response('ok', { status: 201 });
+    expect(await withPagesFunctionHealth(options, async () => response)(fixtureContext())).toBe(
+      response,
+    );
+    const failure = new Error('original handler error');
+    await expect(
+      withPagesFunctionHealth(options, async () => {
+        throw failure;
+      })(fixtureContext()),
+    ).rejects.toBe(failure);
+  });
   it('records the explicit template, preserves the response, and uses waitUntil', async () => {
     const { client, events, flush } = clientSpy();
     const context = fixtureContext();

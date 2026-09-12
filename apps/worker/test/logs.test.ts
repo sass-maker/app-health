@@ -23,7 +23,7 @@ import {
 } from '@app-health/contracts';
 
 const LOCAL_ENV: Env = { APP_HEALTH_MODE: 'local' };
-const NOW = 1_725_000_000_000;
+const NOW = Date.now();
 
 function logId(n: number): string {
   return `00000000-0000-4000-a000-${String(n).padStart(12, '0')}`;
@@ -73,7 +73,7 @@ describe('log ingest and query routes', () => {
       bearer(SEED_KEY),
     );
     expect(posted.status).toBe(202);
-    await expect(posted.json()).resolves.toEqual({ accepted: 2, source: 'server' });
+    await expect(posted.json()).resolves.toEqual({ accepted: 2, duplicates: 0, source: 'server' });
 
     const listed = await call(
       'GET',
@@ -171,7 +171,10 @@ describe('log alerts', () => {
       'POST',
       '/v1/logs',
       env,
-      batch([log(1), log(2, { event: 'boom', level: 'error', title: 'x <y>' })]),
+      {
+        ...batch([log(1), log(2, { event: 'boom', level: 'error', title: 'x <y>' })]),
+        batch_id: '11111111-2222-4333-a444-000000000099',
+      },
       bearer(SEED_KEY),
       { waitUntil: (promise) => pending.push(promise) },
     );
@@ -246,6 +249,17 @@ describe('log alerts', () => {
 });
 
 describe('log service and in-memory repository', () => {
+  it('does not expose expired logs while physical cleanup is pending', async () => {
+    const adapter = await InMemoryAdapter.create();
+    await adapter.recordLogs(
+      SEED_APP_ID,
+      SEED_ENV_ID,
+      [log(1, { timestamp: NOW - 31 * 86_400_000 }), log(2)],
+      'server',
+    );
+    const rows = await adapter.listLogs(SEED_APP_ID, SEED_ENV_ID, { minLevel: 'debug', limit: 10 });
+    expect(rows.map((row) => row.log_id)).toEqual([logId(2)]);
+  });
   it('dedupes repeated log ids and routes product keys by environment', async () => {
     const adapter = await InMemoryAdapter.create();
     const service = new AppHealthService(adapter.asRepositories());
@@ -395,6 +409,8 @@ describe('D1 log storage', () => {
     expect(db.statements[0].values).toEqual([
       'app',
       'env',
+      expect.any(Number),
+      expect.any(Number),
       'warn',
       'error',
       'browser',
@@ -403,7 +419,19 @@ describe('D1 log storage', () => {
     ]);
 
     await control.listLogs('app', 'env', { minLevel: 'debug', limit: 1 });
-    expect(db.statements[1].values).toEqual(['app', 'env', 'debug', 'info', 'warn', 'error', 1]);
+    expect(db.statements[1].values).toEqual([
+      'app',
+      'env',
+      expect.any(Number),
+      expect.any(Number),
+      'debug',
+      'info',
+      'warn',
+      'error',
+      1,
+    ]);
+    expect(db.statements[1].sql).toContain('timestamp >= ?');
+    expect(Number(db.statements[1].values[2])).toBeGreaterThanOrEqual(NOW - 30 * 86_400_000);
     expect(db.statements[1].sql).not.toContain('AND event');
     expect(db.statements[1].sql).not.toContain('AND source');
     expect(db.statements[1].sql).not.toContain('AND source');
@@ -504,7 +532,11 @@ describe('browser log ingest', () => {
       },
     );
     expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({ accepted: 1, source: 'browser' });
+    await expect(response.json()).resolves.toEqual({
+      accepted: 1,
+      duplicates: 0,
+      source: 'browser',
+    });
     expect(response.headers.get('access-control-allow-origin')).toBe(ORIGIN);
     const listed = (await (
       await call(

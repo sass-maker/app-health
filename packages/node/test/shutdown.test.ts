@@ -128,8 +128,16 @@ describe('client flush, close, and timer shutdown', () => {
     client.record({ method: 'GET', route: '/health', status_code: 200, duration_ms: 1 });
     const p1 = client.flush();
     const p2 = client.flush();
+    expect(p2).toBe(p1);
+    let closed = false;
+    const closing = client.close().then(() => {
+      closed = true;
+    });
+    await Promise.resolve();
+    expect(closed).toBe(false);
     resolveFirst!();
-    await Promise.all([p1, p2]);
+    await Promise.all([p1, p2, closing]);
+    expect(closed).toBe(true);
     expect(calls).toBe(1);
   });
 });

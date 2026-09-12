@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { WINDOW_MS } from '@app-health/contracts';
-import { AnalyticsEngineBuckets, telemetryScope } from '../src/analytics-engine.js';
+import {
+  AnalyticsEngineBuckets,
+  createAnalyticsQuery,
+  telemetryScope,
+} from '../src/analytics-engine.js';
 
 describe('Analytics Engine telemetry adapter', () => {
   it('aggregates equivalent events and writes only approved dimensions', async () => {
@@ -72,6 +76,7 @@ describe('Analytics Engine telemetry adapter', () => {
             error_count: 1,
             duration_sum_ms: 200,
             last_seen: 500,
+            sample_interval: 10,
           },
         ];
       },
@@ -79,11 +84,66 @@ describe('Analytics Engine telemetry adapter', () => {
     const rows = await adapter.queryBuckets('app-a', 'env-a', 1000 - WINDOW_MS['15m'], 1000);
     expect(rows[0].histogram[2]).toBe(20);
     expect(rows[0].request_count).toBe(20);
+    expect(rows[0].sampled).toBe(true);
     expect(sql).toContain('app_health_endpoint_v1');
     expect(sql).toContain('_sample_interval');
     expect(sql).toContain(await telemetryScope('app-a', 'env-a'));
     expect(sql).toContain("blob5 != 'polaris-staging-canary'");
     expect(sql).not.toContain('app-a');
+  });
+
+  it('uses explicit half-open query bounds and rejects malformed rows', async () => {
+    let sql = '';
+    const from = 1_700_000_000_123;
+    const to = from + WINDOW_MS['15m'];
+    const adapter = new AnalyticsEngineBuckets(
+      { writeDataPoint: () => undefined },
+      async (query) => {
+        sql = query;
+        return [
+          {
+            method: 'GET',
+            route: '/health',
+            latency_bucket: 2,
+            request_count: 1,
+            error_count: 0,
+            duration_sum_ms: 10,
+            last_seen: from,
+          },
+        ];
+      },
+    );
+    await adapter.queryBuckets('app-a', 'env-a', from, to);
+    expect(sql).toContain('timestamp >= toDateTime(1700000000)');
+    expect(sql).toContain('timestamp < toDateTime(1700000901)');
+
+    const malformed = new AnalyticsEngineBuckets({ writeDataPoint: () => undefined }, async () => [
+      {
+        method: 'GET',
+        route: '/health',
+        latency_bucket: 2,
+        request_count: Number.NaN,
+        error_count: 0,
+        duration_sum_ms: 10,
+        last_seen: from,
+      },
+    ]);
+    await expect(malformed.queryBuckets('app-a', 'env-a', from, to)).rejects.toThrow('invalid row');
+  });
+
+  it('fails closed on malformed query payloads and supplies a timeout signal', async () => {
+    let signal: AbortSignal | undefined;
+    const query = createAnalyticsQuery({
+      accountId: '0123456789abcdef0123456789abcdef',
+      token: 'query-token',
+      fetchImpl: async (_input, init) => {
+        signal = init?.signal ?? undefined;
+        return new Response(JSON.stringify({}), { status: 200 });
+      },
+    });
+    await expect(query('SELECT 1')).rejects.toThrow('invalid data');
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal?.aborted).toBe(false);
   });
 
   it('rejects more than 250 expanded points before writing', async () => {
