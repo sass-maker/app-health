@@ -260,7 +260,10 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   );
   const report = detail.report;
   const totals = report?.series.reduce(
-    (all, row) => ({ pageviews: all.pageviews + row.pageviews, events: all.events + row.events }),
+    (all, row) => ({
+      pageviews: all.pageviews + row.pageviews,
+      events: all.events + row.events,
+    }),
     { pageviews: 0, events: 0 },
   );
   const active = activeSessionCount(workspace, appId, environmentId);
@@ -272,7 +275,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     report?.source === 'local'
       ? 'Local development data'
       : report?.sampled
-        ? 'Sampled event estimates'
+        ? 'Sampled analytics estimates'
         : 'Event totals may arrive later';
   const selectEvent = (event: string) => {
     setSelected(event);

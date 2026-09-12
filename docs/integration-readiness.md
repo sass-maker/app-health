@@ -3,9 +3,11 @@
 This records the sequential core readiness pass in
 [issue #58](https://github.com/sass-maker/app-health/issues/58). App Health is the
 product; Site Health remains Fleet's private portfolio system. Production
-resources, account migrations, and provider preparation are complete, while the
-Worker code is awaiting deployment and the real Google callback is not yet
-verified.
+resources and account migrations are deployed. A real Google sign-in created
+the owner workspace, and production recorded one `signup.completed` and one
+`project.created` milestone. A real Node SDK canary produced two successful
+requests and one measured error. The analytics reporting correction and SDK
+0.4.0 release are undergoing final deployment verification.
 
 | Stage               | Verified behavior                                                                                                                                                                              | Integration guide                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -39,9 +41,9 @@ can only read a deliberately limited aggregate projection.
 
 ## Remaining activation and capability boundaries
 
-Worker deployment, real Google OAuth callback verification, published SDK
-versions, and integration into actual Fleet apps still need their own activation
-and live canaries. Self account milestones are server-side, scoped to the
+Final analytics deployment, SDK publication, and integration into other Fleet
+apps still need their own live receipts. Swift remains a local-package
+integration until a separately installable release is published. Self account milestones are server-side, scoped to the
 configured App Health app/environment, and carry no profile, project identifier,
 or credential data. All credentials in local canaries are synthetic.
 

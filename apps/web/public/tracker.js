@@ -61,7 +61,7 @@
   function referrer() {
     try {
       const host = document.referrer ? new URL(document.referrer).hostname : '';
-      return /^[a-z0-9.-]*$/i.test(host) ? host : '';
+      return host !== location.hostname && /^[a-z0-9.-]*$/i.test(host) ? host : '';
     } catch {
       return '';
     }
@@ -111,8 +111,7 @@
         keepalive: true,
         signal: controller.signal,
       });
-      if (!response.ok && (response.status === 429 || response.status >= 500))
-        throw new Error('retry');
+      if (!response.ok && (response.status === 429 || response.status >= 500)) throw new Error();
       if (response.ok) diagnostics.accepted += attempt.events.length;
       else diagnostics.dropped += attempt.events.length;
       pending = null;

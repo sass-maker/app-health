@@ -46,6 +46,13 @@ To publish aggregate live counts on a product website, use
   in sessionStorage, and rotate after 30 minutes without tracking activity or
   at a UTC date boundary. Visible heartbeats keep a session active. The same
   visitor can have multiple sessions across tabs, devices, and projects.
+- Historical session counts persist only a one-way SHA-256 hash scoped to the
+  app, environment, and session. Raw browser session IDs are used transiently
+  for the live heartbeat and never enter the queue or archive. Events collected
+  before session-hash support have no historical session count.
+- One-hour and 24-hour historical session counts are distinct browser-session
+  counts, never unique-person counts. Sampled Analytics Engine results report a
+  lower bound for sessions; they are not extrapolated to claim unique people.
 - Active means a heartbeat within 45 seconds. The Durable Object prunes on
   ten-second alarms; a connected dashboard can observe expiry up to ten seconds
   later. Disconnected production counters display a dash until reconnection.
@@ -101,9 +108,9 @@ connections lose access at their next lease renewal.
 
 The production dashboard refreshes its workspace summary and current report
 once per minute and uses that one stream for live presence. Reports are cached
-for 60 seconds. A report makes four
-bounded aggregate queries for trends, pages, sources, and named events; the
-summary makes one additional aggregate query. Changing a filter requests a new
+for 60 seconds. A report makes five bounded aggregate queries for trends, pages,
+sources, named events, and distinct sessions; the summary makes one additional
+aggregate query. Changing a filter requests a new
 report. Every query is scoped to the authenticated workspace, with 24 trend
 buckets, 20 pages/sources, and up to 100 event names. The existing project-inventory
 refresh continues separately. There is no per-project analytics polling fanout.

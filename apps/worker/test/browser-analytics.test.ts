@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   LocalBrowserAnalytics,
+  browserSessionScope,
   projectBrowserBatch,
   queryBrowserSummary,
   type CollectedBrowserBatch,
 } from '../src/browser-analytics.js';
-import { handleBrowserIngest, handleBrowserOwner } from '../src/browser-routes.js';
+import { localBrowserReport } from '../src/browser-reports.js';
+import { acceptBrowser, handleBrowserIngest, handleBrowserOwner } from '../src/browser-routes.js';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
+import type { AppHealthRepositories } from '../src/repository.js';
 import { SEED_APP_ID, SEED_ENV_ID, SEED_PUBLIC_KEY } from '@app-health/contracts';
 
 const batch = (): CollectedBrowserBatch => ({
@@ -24,12 +27,19 @@ const batch = (): CollectedBrowserBatch => ({
       referrer: '',
     },
   ],
+  session_hash: 'f'.repeat(64),
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
 describe('browser analytical data', () => {
+  it('scopes session identifiers without retaining the raw value', async () => {
+    const first = await browserSessionScope('app-one', 'env-one', 'session-secret');
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+    expect(first).not.toContain('session-secret');
+    expect(await browserSessionScope('app-one', 'env-two', 'session-secret')).not.toBe(first);
+  });
   it('counts a retried batch once, separates environments, and expires presence and history', () => {
     vi.useFakeTimers();
     const store = new LocalBrowserAnalytics();
@@ -46,8 +56,8 @@ describe('browser analytical data', () => {
     );
     vi.advanceTimersByTime(1);
     expect(store.summary().projects).toEqual([
-      { app_id: 'app-one', environment_id: 'env-one', pageviews: 1, events: 0 },
-      { app_id: 'app-one', environment_id: 'env-two', pageviews: 0, events: 1 },
+      { app_id: 'app-one', environment_id: 'env-one', pageviews: 1, events: 0, sessions: 1 },
+      { app_id: 'app-one', environment_id: 'env-two', pageviews: 0, events: 1, sessions: 1 },
     ]);
     expect(store.snapshot().total).toBe(2);
     vi.advanceTimersByTime(45000);
@@ -60,6 +70,68 @@ describe('browser analytical data', () => {
     );
     store.ingest(batch(), 'new');
     expect(store.summary().projects).toHaveLength(1);
+  });
+  it('deduplicates historical sessions across batches while isolating app and environment scopes', () => {
+    const now = Date.now();
+    const first = batch();
+    first.events = [{ ...first.events[0], timestamp: now - 1_000 }];
+    const second = { ...first, batch_id: crypto.randomUUID() };
+    const otherEnvironment = { ...first, batch_id: crypto.randomUUID(), environment_id: 'env-two' };
+    const otherApp = { ...first, batch_id: crypto.randomUUID(), app_id: 'app-two' };
+    expect(localBrowserReport([first, second], { range: '24h' }, now).sessions).toBe(1);
+    expect(
+      localBrowserReport([first, otherEnvironment, otherApp], { range: '24h' }, now).sessions,
+    ).toBe(1);
+  });
+  it('counts only sessions with activity inside the selected one-hour or day window', () => {
+    const now = Date.now();
+    const recent = batch();
+    recent.events = [{ ...recent.events[0], timestamp: now - 1_000 }];
+    const olderBase = batch();
+    const older = {
+      ...olderBase,
+      batch_id: crypto.randomUUID(),
+      session_hash: 'e'.repeat(64),
+      events: [{ ...olderBase.events[0], timestamp: now - 2 * 3_600_000 }],
+    };
+    expect(localBrowserReport([recent, older], { range: '1h' }, now).sessions).toBe(1);
+    expect(localBrowserReport([recent, older], { range: '24h' }, now).sessions).toBe(2);
+  });
+  it('queues only the scoped hash and never the raw session identifier', async () => {
+    const sent: CollectedBrowserBatch[] = [];
+    const response = await acceptBrowser(
+      batch(),
+      'raw-session-secret',
+      {
+        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        BROWSER_HISTORY: {
+          put: async () => ({}) as R2Object,
+          list: async () => ({ objects: [], delimitedPrefixes: [], truncated: false }),
+          delete: async () => {},
+        },
+        BROWSER_ARCHIVE: {
+          getByName: () => ({
+            stage: async () => ({
+              accepted: [{ app_id: 'app-one', environment_id: 'env-one', batch_id: 'batch-one' }],
+              duplicates: 0,
+            }),
+          }),
+        },
+        BROWSER_ANALYTICS: { writeDataPoint: () => {} },
+        WORKSPACE_PRESENCE: {
+          getByName: () => ({
+            heartbeat: async () => {},
+            snapshot: async () => ({ measured_at: 0, ttl_ms: 45000, total: 0, projects: [] }),
+            fetch: async () => new Response(null, { status: 404 }),
+          }),
+        },
+      },
+      {} as AppHealthRepositories,
+      false,
+    );
+    expect(response.status).toBe(202);
+    expect(sent[0].session_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(JSON.stringify(sent[0])).not.toContain('raw-session-secret');
   });
   it('keeps summary and reports in the same half-open event-time window', () => {
     vi.useFakeTimers();
@@ -82,7 +154,7 @@ describe('browser analytical data', () => {
     projectBrowserBatch(input, { BROWSER_ANALYTICS: { writeDataPoint } });
     expect(writeDataPoint).toHaveBeenCalledWith({
       indexes: ['workspace-one'],
-      blobs: ['app-one', 'env-one', 'pageview', '/pricing', '', ''],
+      blobs: ['app-one', 'env-one', 'pageview', '/pricing', '', '', 'f'.repeat(64)],
       doubles: [1, input.events[0].timestamp],
     });
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -106,6 +178,7 @@ describe('browser analytical data', () => {
             environment_id: 'env',
             pageviews: '24',
             events: 2,
+            sessions: 1,
             sample_interval: '10',
           },
         ],
@@ -114,12 +187,14 @@ describe('browser analytical data', () => {
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
     expect(await queryBrowserSummary('workspace-one', options)).toEqual({
       sampled: true,
-      projects: [{ app_id: 'app', environment_id: 'env', pageviews: 24, events: 2 }],
+      projects: [{ app_id: 'app', environment_id: 'env', pageviews: 24, events: 2, sessions: 1 }],
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl.mock.calls[0][1]?.body).toContain("WHERE index1 = 'workspace-one'");
-    expect(fetchImpl.mock.calls[0][1]?.body).toContain('_sample_interval');
-    expect(fetchImpl.mock.calls[0][1]?.body).toMatch(/AND double2 < \d+ GROUP BY/);
+    // Analytics Engine rejects IF branches with Double and Integer types (HTTP 422).
+    expect(fetchImpl.mock.calls[0][1]?.body).toContain('double1 * _sample_interval, 0.0)');
+    expect(fetchImpl.mock.calls[0][1]?.body).not.toContain('double1 * _sample_interval, 0)');
+    expect(fetchImpl.mock.calls[0][1]?.body).toMatch(/AND double2 < \d+ .*GROUP BY/);
     await expect(queryBrowserSummary("x' OR 1=1", options)).rejects.toThrow('scope');
     fetchImpl.mockResolvedValueOnce(new Response(null, { status: 503 }));
     await expect(queryBrowserSummary('workspace-one', options)).rejects.toThrow('unavailable');

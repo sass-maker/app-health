@@ -25,7 +25,10 @@ Tracked in https://github.com/sass-maker/app-health/issues/58. Production resour
 setup and additive migrations 0007–0011 are complete; Google credentials are held
 as Worker secrets. The App Health operational project is configured for its own
 browser analytics and server-generated `signup.completed` / `project.created`
-logs. New runtime deployment and real Google callback verification are pending.
+logs. The unified runtime is deployed and a real Google callback, workspace
+creation, project creation, both milestone logs, and a Node endpoint canary have
+been verified. Final analytics query corrections, historical session counts, and
+the updated JavaScript package are in final release verification.
 Local checks cover workerd/D1, browser setup flows, public-share revocation, SDK
 runtime compatibility, Swift delivery, retention, and milestone deduplication.
 

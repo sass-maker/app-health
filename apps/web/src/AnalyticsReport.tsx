@@ -204,7 +204,7 @@ export interface AnalyticsReportProps {
 function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
   const { selected, totals, active } = props;
   return (
-    <div className={`grid gap-3 md:grid-cols-2 ${selected ? '' : 'xl:grid-cols-3'}`}>
+    <div className={`grid gap-3 md:grid-cols-2 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
       {!selected ? (
         <MetricCard
           label="Page views"
@@ -218,6 +218,14 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
         value={formatCount(totals.events)}
         note="Named actions received"
         icon={MousePointer2}
+      />
+      <MetricCard
+        label="Sessions"
+        value={formatCount(props.report.sessions)}
+        note={
+          props.report.sampled ? 'Sampled lower bound for this period' : 'Sessions in this period'
+        }
+        icon={Clock3}
       />
       <MetricCard
         label="Active now"

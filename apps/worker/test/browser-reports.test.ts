@@ -25,6 +25,7 @@ const batch: CollectedBrowserBatch = {
     event('event', now - 4000, '/checkout', 'checkout.started'),
     event('pageview', now - 90000000),
   ],
+  session_hash: 'f'.repeat(64),
 };
 afterEach(() => vi.useRealTimers());
 describe('browser reports', () => {
@@ -39,6 +40,7 @@ describe('browser reports', () => {
     ]);
     expect(report.sources).toEqual([{ name: 'google.com', count: 2 }]);
     expect(report.events[0]).toEqual({ name: 'signup.completed', count: 2, last_seen: now - 4000 });
+    expect(report.sessions).toBe(1);
     expect(
       localBrowserReport([batch], { range: '1h' }, now).series.reduce((n, r) => n + r.pageviews, 0),
     ).toBe(1);
@@ -80,7 +82,8 @@ describe('browser reports', () => {
         Response.json({
           data: [{ name: 'signup.completed', count: 4, last_seen: now - 4000, sample_interval: 2 }],
         }),
-      );
+      )
+      .mockResolvedValueOnce(Response.json({ data: [{ sessions: 1, sample_interval: 2 }] }));
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
     const report = await queryBrowserReport(
       'w-one',
@@ -95,7 +98,8 @@ describe('browser reports', () => {
       expect(init?.body).toContain("blob1 = 'a-one'");
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(report.sessions).toBe(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();

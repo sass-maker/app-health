@@ -5,6 +5,7 @@ import type { OwnerIdentity } from './identity.js';
 import type { AppHealthRepositories } from './repository.js';
 import {
   LocalBrowserAnalytics,
+  browserSessionScope,
   queryBrowserSummary,
   type BrowserBindings,
   type CollectedBrowserBatch,
@@ -84,17 +85,23 @@ export async function acceptBrowser(
   repos: AppHealthRepositories,
   local: boolean,
 ) {
+  const durableBatch = session
+    ? {
+        ...batch,
+        session_hash: await browserSessionScope(batch.app_id, batch.environment_id, session),
+      }
+    : batch;
   let response: Response;
   if (local) {
-    localAnalytics.ingest(batch, session);
+    localAnalytics.ingest(durableBatch, session);
     response = json(202, { accepted: batch.events.length, presence: true });
-  } else response = await enqueueBrowser(batch, session, env);
-  if (response.status === 202 && batch.events.length) {
+  } else response = await enqueueBrowser(durableBatch, session, env);
+  if (response.status === 202 && durableBatch.events.length) {
     await repos.capabilities?.recordCapability(
-      batch.app_id,
-      batch.environment_id,
+      durableBatch.app_id,
+      durableBatch.environment_id,
       'analytics',
-      batch.received_at,
+      durableBatch.received_at,
     );
   }
   return response;

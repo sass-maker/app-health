@@ -449,7 +449,7 @@ describe('App Health V0 UI', () => {
     expect(html).toContain('Named product events and trends');
     expect(html).toContain('One browser script');
     expect(html).toContain('Local preview available');
-    expect(html).toContain('Open local preview');
+    expect(html).toContain('Open App Health');
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 
@@ -508,7 +508,7 @@ describe('App Health V0 UI', () => {
 
     expect(
       await screen.findByText(
-        /npm install https:\/\/github\.com\/sass-maker\/app-health\/releases\/download\/node-v0\.3\.0\/saas-maker-app-health-0\.3\.0\.tgz/,
+        /npm install https:\/\/github\.com\/sass-maker\/app-health\/releases\/download\/node-v0\.4\.0\/saas-maker-app-health-0\.4\.0\.tgz/,
       ),
     ).toBeTruthy();
     expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();

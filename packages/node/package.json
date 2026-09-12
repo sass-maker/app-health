@@ -1,6 +1,6 @@
 {
   "name": "@saas-maker/app-health",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Privacy-first endpoint health telemetry for Node.js, Hono, Express, and Cloudflare Pages Functions.",
   "private": false,
   "type": "module",

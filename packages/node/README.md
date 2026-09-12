@@ -1,8 +1,8 @@
 # App Health for Node.js
 
-The current readiness fixes are local and unreleased. The release URL below
-still refers to the existing v0.3.0 artifact. Verify a local build with
-`pnpm --filter @saas-maker/app-health pack:verify` before integration testing.
+Version 0.4.0 includes endpoint telemetry, explicit logs, and the public analytics
+viewer as separate imports. Verify the packaged SDK with
+`pnpm --filter @saas-maker/app-health pack:verify`.
 
 Privacy-first endpoint health telemetry for Node.js 20+, Express, Hono Workers,
 and Cloudflare Pages Functions. The SDK
@@ -18,7 +18,7 @@ The SDK is distributed through the public GitHub release below. The npm
 registry package is not currently available.
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.4.0/saas-maker-app-health-0.4.0.tgz
 ```
 
 ```ts
@@ -100,7 +100,7 @@ Until npm publisher authentication is restored, install the same verified
 package from its immutable public release:
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.4.0/saas-maker-app-health-0.4.0.tgz
 ```
 
 ```ts

@@ -9,7 +9,7 @@ const sections = [
   ],
   [
     'Project telemetry',
-    'Endpoint measurements contain HTTP method, normalized route, status, duration, timestamp, and optional release. They do not capture request headers, cookies, bodies, or query values. The browser tracker records page paths with query strings and fragments removed, normalizes likely identifiers, and records the referring hostname. A random session identifier in session storage supports recent-session counts; the tracker does not set analytics cookies. Explicit events and logs contain the fields your integration submits. Do not submit passwords, credentials, payment details, or other sensitive personal information.',
+    'Endpoint measurements contain HTTP method, normalized route, status, duration, timestamp, and optional release. They do not capture request headers, cookies, bodies, or query values. The browser tracker records page paths with query strings and fragments removed, normalizes likely identifiers, and records the referring hostname. A random session identifier in session storage supports recent-session counts. A one-way hash scoped to each project and environment is retained with analytics events to count historical sessions; raw session identifiers are not archived. Sessions are not unique people, and the tracker does not set analytics cookies. Explicit events and logs contain the fields your integration submits. Do not submit passwords, credentials, payment details, or other sensitive personal information.',
   ],
   [
     'How we use data',

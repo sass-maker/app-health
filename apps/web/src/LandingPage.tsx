@@ -299,11 +299,11 @@ function HonestStatus(): JSX.Element {
             Built in the open
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-            A useful first picture, with honest edges.
+            Your traffic, events, and service health.
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 opacity-75">
-            Web analytics and event exploration are available in the local product. Hosted Google
-            sign-in and production analytics activation remain separate verification steps.
+            Sign in with Google, add a project, and connect the capabilities you need. Start with
+            live sessions, page views, referral sources, named events, or endpoint health.
           </p>
         </div>
         <Button asChild size="lg" variant="secondary" className="h-12">

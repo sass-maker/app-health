@@ -97,7 +97,7 @@ go vet ./...
 
 Public package verification and remaining release work are tracked in
 [SDK installation and release parity #57](https://github.com/sass-maker/app-health/issues/57).
-SDK 0.3.0 includes core, Express, Hono, Pages and the browser logger.
+SDK 0.4.0 includes core, Express, Hono, Pages and the browser logger.
 Endpoint telemetry and explicitly authored browser logs retain separate privacy
 boundaries; browser logs require an origin-allowlisted public log key.
 
@@ -107,7 +107,7 @@ The SDK is distributed through the public GitHub release below. The npm
 registry package is not currently available.
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.4.0/saas-maker-app-health-0.4.0.tgz
 ```
 
 ```ts
@@ -128,11 +128,11 @@ await appHealth.close();
 
 ### Hono and Cloudflare Pages Functions
 
-The public `node-v0.3.0` GitHub Release is the install fallback while the npm
+The public `node-v0.4.0` GitHub Release is the install fallback while the npm
 publisher identity remains unavailable:
 
 ```bash
-npm install https://github.com/sass-maker/app-health/releases/download/node-v0.3.0/saas-maker-app-health-0.3.0.tgz
+npm install https://github.com/sass-maker/app-health/releases/download/node-v0.4.0/saas-maker-app-health-0.4.0.tgz
 ```
 
 For Hono Workers, configure the core client with `runtime: 'worker'` and
@@ -228,7 +228,7 @@ npm whoami
 npm publish packages/node --access public
 
 # If npm authentication is unavailable, publish the verified tarball as the
-# node-v0.3.0 GitHub Release asset instead.
+# node-v0.4.0 GitHub Release asset instead.
 
 GO_CORE_VERSION=0.1.5
 git tag "packages/go/v${GO_CORE_VERSION}"

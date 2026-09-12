@@ -67,6 +67,7 @@ export const BrowserSummary = z
             environment_id: z.string(),
             pageviews: z.number().finite().nonnegative(),
             events: z.number().finite().nonnegative(),
+            sessions: z.number().finite().nonnegative(),
           })
           .strict(),
       )
@@ -129,6 +130,7 @@ export const BrowserReport = z
           .strict(),
       )
       .max(100),
+    sessions: z.number().finite().nonnegative(),
   })
   .strict();
 export type BrowserReport = z.infer<typeof BrowserReport>;

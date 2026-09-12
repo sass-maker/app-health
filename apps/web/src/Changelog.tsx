@@ -5,6 +5,16 @@ import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.j
 
 const entries = [
   {
+    date: '2026-09-12',
+    title: 'Analytics, logs, and endpoint health share one workspace',
+    outcomes: [
+      'Sign in with Google, create projects and environments, and connect each capability when you need it.',
+      'Web analytics shows live sessions, historical sessions, page views, referral sources, and named events. Sessions are not unique people; sampled counts are labeled.',
+      'Share an aggregate live page with a revocable link. Private logs, event names, and credentials stay in your dashboard.',
+      'The JavaScript SDK ships endpoint adapters, explicit logs, and a public analytics viewer as separate imports.',
+    ],
+  },
+  {
     date: '2026-07-27',
     title: 'One product key can now cover multiple environments',
     outcomes: [

@@ -13,7 +13,7 @@ const summary = {
   source: 'local',
   sampled: false,
   stream: true,
-  projects: [{ app_id: 'app', environment_id: 'env', pageviews: 1, events: 1 }],
+  projects: [{ app_id: 'app', environment_id: 'env', pageviews: 1, events: 1, sessions: 1 }],
   live,
 };
 const report = {
@@ -25,6 +25,7 @@ const report = {
   pages: [],
   sources: [],
   events: [],
+  sessions: 1,
 };
 
 afterEach(() => {

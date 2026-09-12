@@ -30,14 +30,16 @@
     "quality:dependencies": "node scripts/check-code-health.mjs dependencies",
     "quality:suppressions": "node scripts/check-code-health.mjs suppressions",
     "quality:hygiene": "node scripts/check-code-health.mjs hygiene",
-    "quality": "pnpm --silent run format:check && pnpm --silent run quality:go-format && pnpm --silent run lint && pnpm --silent run typecheck && pnpm --silent run quality:go-vet && pnpm --silent run build && node scripts/verify-local-sdk.mjs && pnpm --silent run verify:cloudflare-sample && pnpm --filter @app-health/worker run verify:accounts-runtime && pnpm --silent run verify:public-viewer && pnpm --silent run quality:coverage && pnpm --silent run quality:unused && pnpm --silent run quality:complexity && pnpm --silent run quality:duplication && pnpm --silent run quality:cycles && pnpm --silent run quality:dependencies && pnpm --silent run quality:suppressions && pnpm --silent run quality:hygiene && pnpm --filter @app-health/web run test:browser",
-    "deploy:dry-run": "pnpm run build && pnpm --filter @app-health/worker exec wrangler deploy --env=\"\" --dry-run",
+    "quality": "pnpm --silent run format:check && pnpm --silent run quality:go-format && pnpm --silent run lint && pnpm --silent run typecheck && pnpm --silent run quality:go-vet && pnpm --silent run build && node scripts/verify-local-sdk.mjs && pnpm --silent run verify:cloudflare-sample && pnpm --silent run verify:asset-routing && pnpm --filter @app-health/worker run verify:accounts-runtime && pnpm --silent run verify:public-viewer && pnpm --silent run quality:coverage && pnpm --silent run quality:unused && pnpm --silent run quality:complexity && pnpm --silent run quality:duplication && pnpm --silent run quality:cycles && pnpm --silent run quality:dependencies && pnpm --silent run quality:suppressions && pnpm --silent run quality:hygiene && pnpm --filter @app-health/web run test:browser",
+    "deploy:dry-run": "pnpm run build:production && pnpm --filter @app-health/worker exec wrangler deploy --env=\"\" --dry-run",
     "d1:migrate:production": "pnpm --filter @app-health/worker exec wrangler d1 migrations apply DB --remote --env=\"\"",
-    "deploy": "pnpm run build && pnpm --filter @app-health/worker exec wrangler deploy --env=\"\" --tag \"$(git rev-parse HEAD)\"",
+    "deploy": "pnpm run build:production && pnpm --filter @app-health/worker exec wrangler deploy --env=\"\" --tag \"$(git rev-parse HEAD)\"",
     "clean": "pnpm --silent -r exec rimraf dist .turbo *.tsbuildinfo",
     "verify:cloudflare-sample": "node examples/cloudflare-sample/verify.mjs",
+    "verify:asset-routing": "node scripts/verify-asset-routing.mjs",
     "verify:public-viewer": "node scripts/verify-public-viewer.mjs",
-    "verify:swift-runtime": "node scripts/verify-swift-runtime.mjs"
+    "verify:swift-runtime": "node scripts/verify-swift-runtime.mjs",
+    "build:production": "VITE_APP_HEALTH_INGEST_ORIGIN=https://ingest.sassmaker.com pnpm run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

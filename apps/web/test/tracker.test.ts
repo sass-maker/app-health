@@ -151,3 +151,11 @@ it('aborts outstanding delivery on stop and drops unsupported referrer host synt
   await vi.advanceTimersByTimeAsync(60000);
   expect(fetch).toHaveBeenCalledOnce();
 });
+
+it('does not count internal navigation as an external traffic source', async () => {
+  vi.spyOn(document, 'referrer', 'get').mockReturnValue(`${location.origin}/pricing`);
+  api().page('/docs');
+  await api().flush();
+  const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(body.events[1].referrer).toBe('');
+});

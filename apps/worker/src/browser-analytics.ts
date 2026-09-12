@@ -9,6 +9,18 @@ import { localBrowserReport } from './browser-reports.js';
 import type { AnalyticsEngineDatasetLike } from './analytics-engine.js';
 import type { BrowserArchiveStageResult } from './browser-archive.js';
 
+export async function browserSessionScope(
+  appId: string,
+  environmentId: string,
+  session: string,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${appId}\u0000${environmentId}\u0000${session}`),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export interface CollectedBrowserBatch {
   workspace: string;
   app_id: string;
@@ -16,6 +28,8 @@ export interface CollectedBrowserBatch {
   batch_id: string;
   received_at: number;
   events: BrowserEventV1[];
+  /** Scoped one-way session identifier; raw browser session IDs never persist. */
+  session_hash?: string;
 }
 export interface BrowserBindings {
   BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
@@ -95,6 +109,7 @@ export class LocalBrowserAnalytics {
   summary(): BrowserSummary {
     const now = Date.now();
     const grouped = new Map<string, BrowserSummary['projects'][number]>();
+    const sessionGroups = new Map<string, Set<string>>();
     for (const batch of this.batches.values()) {
       const key = `${batch.app_id}/${batch.environment_id}`;
       const row = grouped.get(key) ?? {
@@ -102,12 +117,22 @@ export class LocalBrowserAnalytics {
         environment_id: batch.environment_id,
         pageviews: 0,
         events: 0,
+        sessions: 0,
       };
 
       for (const event of batch.events) {
         if (event.timestamp < now - 86_400_000 || event.timestamp >= now) continue;
         if (event.type === 'pageview') row.pageviews++;
         else row.events++;
+      }
+      if (
+        batch.session_hash &&
+        batch.events.some((event) => event.timestamp >= now - 86_400_000 && event.timestamp < now)
+      ) {
+        const sessions = sessionGroups.get(key) ?? new Set<string>();
+        sessions.add(batch.session_hash);
+        sessionGroups.set(key, sessions);
+        row.sessions = sessions.size;
       }
       grouped.set(key, row);
     }
@@ -136,6 +161,7 @@ export function projectBrowserBatch(batch: CollectedBrowserBatch, env: BrowserBi
           event.path,
           event.name ?? '',
           event.referrer,
+          batch.session_hash ?? '',
         ],
         doubles: [1, event.timestamp],
       });
@@ -167,7 +193,7 @@ export async function queryBrowserSummary(
     {
       method: 'POST',
       headers: { authorization: `Bearer ${options.token}`, 'content-type': 'text/plain' },
-      body: `SELECT blob1 AS app_id, blob2 AS environment_id, SUM(IF(blob3 = 'pageview', double1 * _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', double1 * _sample_interval, 0)) AS events, MAX(_sample_interval) AS sample_interval FROM app_health_browser_v1 WHERE index1 = '${workspace}' AND double2 >= ${now - 86_400_000} AND double2 < ${now} GROUP BY app_id, environment_id LIMIT 1001`,
+      body: `SELECT blob1 AS app_id, blob2 AS environment_id, SUM(IF(blob3 = 'pageview', double1 * _sample_interval, 0.0)) AS pageviews, SUM(IF(blob3 = 'event', double1 * _sample_interval, 0.0)) AS events, COUNT(DISTINCT blob7) - MAX(IF(blob7 = '', 1, 0)) AS sessions, MAX(_sample_interval) AS sample_interval FROM app_health_browser_v1 WHERE index1 = '${workspace}' AND double2 >= ${now - 86_400_000} AND double2 < ${now} GROUP BY app_id, environment_id LIMIT 1001`,
       signal: AbortSignal.timeout(10_000),
     },
   );
@@ -178,6 +204,7 @@ export async function queryBrowserSummary(
       environment_id: string;
       pageviews: string | number;
       events: string | number;
+      sessions: string | number;
       sample_interval: string | number;
     }[];
   };
@@ -188,7 +215,7 @@ export async function queryBrowserSummary(
       (row) =>
         typeof row.app_id !== 'string' ||
         typeof row.environment_id !== 'string' ||
-        [row.pageviews, row.events, row.sample_interval].some(
+        [row.pageviews, row.events, row.sessions, row.sample_interval].some(
           (value) => !Number.isFinite(Number(value)) || Number(value) < 0,
         ),
     )
@@ -201,6 +228,7 @@ export async function queryBrowserSummary(
       environment_id: row.environment_id,
       pageviews: Number(row.pageviews),
       events: Number(row.events),
+      sessions: Number(row.sessions),
     })),
   };
 }

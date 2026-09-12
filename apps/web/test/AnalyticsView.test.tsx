@@ -18,7 +18,7 @@ const summary = {
   source: 'local',
   sampled: false,
   stream: false,
-  projects: [{ app_id: 'one', environment_id: 'prod', pageviews: 12, events: 3 }],
+  projects: [{ app_id: 'one', environment_id: 'prod', pageviews: 12, events: 3, sessions: 2 }],
   live,
 };
 const report = {
@@ -30,6 +30,7 @@ const report = {
   pages: [{ name: '/pricing', count: 12 }],
   sources: [{ name: 'google.com', count: 12 }],
   events: [{ name: 'signup.completed', count: 3, last_seen: 500 }],
+  sessions: 2,
 };
 function install() {
   const mock = vi.fn(async (url: string) =>
@@ -58,6 +59,7 @@ it('shows traffic, top pages, sources, event names and a path to application hea
   expect(await screen.findByText('/pricing')).toBeTruthy();
   expect(screen.getByText('google.com')).toBeTruthy();
   expect(screen.getByText('signup.completed')).toBeTruthy();
+  expect(screen.getByText('Sessions')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /My project/ }));
   expect(select).toHaveBeenCalledWith(project);
   fireEvent.click(screen.getByRole('button', { name: /Install tracker/ }));

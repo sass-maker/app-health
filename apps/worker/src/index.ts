@@ -765,7 +765,7 @@ async function publicAnalyticsPage(
   assets: NonNullable<Env['ASSETS']>,
 ): Promise<Response> {
   const url = new URL(request.url);
-  url.pathname = '/live.html';
+  url.pathname = '/live';
   const asset = await assets.fetch(new Request(url, request));
   const response = new Response(asset.body, asset);
   response.headers.delete('x-frame-options');

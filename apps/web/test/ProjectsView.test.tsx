@@ -14,8 +14,8 @@ const summary = {
   sampled: false,
   stream: false,
   projects: [
-    { app_id: 'one', environment_id: 'prod', pageviews: 120, events: 14 },
-    { app_id: 'one', environment_id: 'staging', pageviews: 4, events: 1 },
+    { app_id: 'one', environment_id: 'prod', pageviews: 120, events: 14, sessions: 8 },
+    { app_id: 'one', environment_id: 'staging', pageviews: 4, events: 1, sessions: 2 },
   ],
   live: {
     measured_at: Date.now(),

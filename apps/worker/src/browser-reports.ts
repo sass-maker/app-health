@@ -26,6 +26,7 @@ export function localBrowserReport(
   const pages = new Map<string, number>();
   const sources = new Map<string, number>();
   const events = new Map<string, { name: string; count: number; last_seen: number }>();
+  const sessions = new Set<string>();
   for (const batch of batches) {
     if (
       (filter.app_id && batch.app_id !== filter.app_id) ||
@@ -55,6 +56,7 @@ export function localBrowserReport(
         row.last_seen = Math.max(row.last_seen, event.timestamp);
         events.set(event.name, row);
       }
+      if (batch.session_hash) sessions.add(batch.session_hash);
     }
   }
   return {
@@ -68,6 +70,7 @@ export function localBrowserReport(
     events: [...events.values()]
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
       .slice(0, 100),
+    sessions: sessions.size,
   };
 }
 
@@ -78,6 +81,7 @@ interface QueryRow {
   bucket?: number | string;
   pageviews?: number | string;
   events?: number | string;
+  sessions?: number | string;
   sample_interval: number | string;
 }
 const number = (value: unknown): number => {
@@ -113,7 +117,7 @@ export async function queryBrowserReport(
   if (filter.event) clauses.push(`blob5 = '${filter.event}'`);
   const source = `FROM app_health_browser_v1 WHERE ${clauses.join(' AND ')}`;
   const pageCondition = filter.event ? '' : " AND blob3 = 'pageview'";
-  const [trend, pages, sources, events] = await Promise.all([
+  const [trend, pages, sources, events, sessionRows] = await Promise.all([
     query(
       `SELECT FLOOR((double2 - ${from}) / ${step}) AS bucket, SUM(IF(blob3 = 'pageview', _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', _sample_interval, 0)) AS events, MAX(_sample_interval) AS sample_interval ${source} GROUP BY bucket ORDER BY bucket LIMIT 24`,
       options,
@@ -128,6 +132,10 @@ export async function queryBrowserReport(
     ),
     query(
       `SELECT blob5 AS name, SUM(_sample_interval) AS count, MAX(double2) AS last_seen, MAX(_sample_interval) AS sample_interval ${source} AND blob3 = 'event' GROUP BY name ORDER BY count DESC LIMIT 100`,
+      options,
+    ),
+    query(
+      `SELECT COUNT(DISTINCT blob7) AS sessions, MAX(_sample_interval) AS sample_interval ${source} AND blob7 != ''`,
       options,
     ),
   ]);
@@ -154,12 +162,13 @@ export async function queryBrowserReport(
     from,
     to,
     source: 'analytics-engine',
-    sampled: [...trend, ...pages, ...sources, ...events].some(
+    sampled: [...trend, ...pages, ...sources, ...events, ...sessionRows].some(
       (row) => number(row.sample_interval) > 1,
     ),
     series,
     pages: ranked(pages),
     sources: ranked(sources),
     events: ranked(events).map((row, i) => ({ ...row, last_seen: number(events[i].last_seen) })),
+    sessions: sessionRows.length === 1 ? number(sessionRows[0].sessions) : 0,
   };
 }
