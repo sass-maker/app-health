@@ -6,7 +6,7 @@ import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader } from './components/ui/card.js';
 import { LabeledSelect as ReportSelect } from './LabeledSelect.js';
-import { Skeleton } from './components/ui/skeleton.js';
+import { AnalyticsReportLoading } from './AnalyticsReportLoading.js';
 
 interface Project {
   appId: string;
@@ -16,19 +16,6 @@ interface Project {
 }
 
 const count = (value: number) => value.toLocaleString();
-
-function ReportLoading() {
-  return (
-    <div role="status" aria-label="Loading analytics" className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
-        {[1, 2, 3].map((key) => (
-          <Skeleton key={key} className="h-32" />
-        ))}
-      </div>
-      <Skeleton className="h-80" />
-    </div>
-  );
-}
 
 function ReportError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -164,6 +151,8 @@ function ReportFilters(props: ReportFiltersProps): JSX.Element {
           options={[
             { value: '24h', label: 'Last 24 hours' },
             { value: '1h', label: 'Last hour' },
+            { value: '7d', label: 'Last 7 days' },
+            { value: '30d', label: 'Last 30 days' },
           ]}
         />
       </div>
@@ -217,7 +206,7 @@ function AnalyticsResults(props: AnalyticsResultsProps): JSX.Element {
           }}
         />
       ) : null}
-      {detail.loading && !detail.report ? <ReportLoading /> : null}
+      {detail.loading && !detail.report ? <AnalyticsReportLoading /> : null}
       {detail.report ? <AnalyticsReport {...props} report={detail.report} /> : null}
     </>
   );
@@ -241,6 +230,11 @@ function AnalyticsFooter(props: {
   );
 }
 
+function reportSourceNote(report: ReturnType<typeof useBrowserReport>['report']): string {
+  if (report?.source === 'local') return 'Local development data';
+  return report?.sampled ? 'Sampled analytics estimates' : 'Event totals may arrive later';
+}
+
 export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   const { projects, project, ownerToken, onSelect, mode = 'web', onInstall } = props;
   const [range, setRange] = useState('24h');
@@ -250,6 +244,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   const [metric, setMetric] = useState<'pageviews' | 'events'>(
     mode === 'events' ? 'events' : 'pageviews',
   );
+  const [breakdown, setBreakdown] = useState<'audience' | 'acquisition' | 'technology'>('audience');
   const workspace = useWorkspaceAnalytics(ownerToken);
   const detail = useBrowserReport(
     ownerToken,
@@ -257,6 +252,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     appId === 'all' ? '' : appId,
     appId === 'all' ? '' : environmentId,
     selected,
+    breakdown,
   );
   const report = detail.report;
   const totals = report?.series.reduce(
@@ -271,19 +267,14 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     (project, index) => projects.findIndex((row) => row.appId === project.appId) === index,
   );
   const environments = projects.filter((candidate) => candidate.appId === appId);
-  const sourceNote =
-    report?.source === 'local'
-      ? 'Local development data'
-      : report?.sampled
-        ? 'Sampled analytics estimates'
-        : 'Event totals may arrive later';
+  const sourceNote = reportSourceNote(report);
   const selectEvent = (event: string) => {
     setSelected(event);
     setMetric('events');
   };
   const totalsValue = totals ?? { pageviews: 0, events: 0 };
   return (
-    <section aria-label="Workspace analytics" className="space-y-5">
+    <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
         apps={apps}
         environments={environments}
@@ -324,6 +315,8 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         totals={totalsValue}
         onMetric={setMetric}
         onEvent={selectEvent}
+        breakdown={breakdown}
+        onBreakdown={setBreakdown}
       />
       <ProjectRows projects={projects} summary={workspace.data} onSelect={onSelect} />
       <AnalyticsFooter sourceNote={sourceNote} workspace={workspace} />

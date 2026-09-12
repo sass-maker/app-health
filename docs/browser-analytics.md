@@ -17,6 +17,8 @@ reveal includes the script snippet:
   defer
   src="https://YOUR_APP_HEALTH_HOST/tracker.js"
   data-key="YOUR_PUBLIC_BROWSER_KEY"
+  data-project="YOUR_PROJECT_ID"
+  data-identity="persistent"
   data-endpoint="https://YOUR_INGEST_HOST/v1/browser"
 ></script>
 ```
@@ -33,7 +35,7 @@ contract deliberately accepts names only.
 **Web analytics** is the default dashboard, with active browser sessions, page
 views, trends, top pages, and referral sources. **Events** shows explicitly named
 events, occurrence counts, last received times, and per-event trends and page/source
-breakdowns. Reports support project/environment filters and the last hour or day.
+breakdowns. Reports support project/environment filters and 1-hour, 24-hour, 7-day and 30-day periods. Visitor recognition, campaign and technology reports are described in [analytics identity](analytics-identity.md); this extension is local and unreleased.
 Local development uses real collector requests and an in-memory
 store with a five-second workspace poll. Restarting local Vite clears that data.
 
@@ -42,24 +44,25 @@ To publish aggregate live counts on a product website, use
 
 ## Semantics and privacy
 
-- Counts represent browser sessions, not people. Session IDs are random, stored
-  in sessionStorage, and rotate after 30 minutes without tracking activity or
-  at a UTC date boundary. Visible heartbeats keep a session active. The same
-  visitor can have multiple sessions across tabs, devices, and projects.
-- Historical session counts persist only a one-way SHA-256 hash scoped to the
-  app, environment, and session. Raw browser session IDs are used transiently
-  for the live heartbeat and never enter the queue or archive. Events collected
-  before session-hash support have no historical session count.
-- One-hour and 24-hour historical session counts are distinct browser-session
-  counts, never unique-person counts. Sampled Analytics Engine results report a
-  lower bound for sessions; they are not extrapolated to claim unique people.
+- Persistent anonymous visitors are the default for new installations. IDs stay in
+  first-party local storage for up to 90 days, scoped by `data-project`; visits
+  expire after 30 minutes without meaningful activity. Same-origin tabs share
+  the visit. Heartbeats do not prolong inactivity or create historical events.
+- `data-identity="session"` omits persistent visitor IDs. Blocked storage falls
+  back to an in-memory session. Raw session and visitor IDs are hashed with the
+  app/environment scope before queueing or archival. Legacy identity remains
+  unknown, never counted as a new visitor.
+- Historical visitors describe recognized browsers, not unique people. Distinct
+  counts cover the whole selected period. Sampled results are lower bounds for
+  visitors and sessions, never extrapolated as unique people.
 - Active means a heartbeat within 45 seconds. The Durable Object prunes on
   ten-second alarms; a connected dashboard can observe expiry up to ten seconds
   later. Disconnected production counters display a dash until reconnection.
 - Automatic paths omit query strings and fragments and redact segments with
   digits, email delimiters, whitespace, or long values. Referrers contain only
-  the hostname. No cookies, request bodies, headers, or browser identity fields
-  are collected. Path redaction is heuristic: only install on suitable public
+  the hostname. Bounded campaign tags and coarse country/device/browser categories
+  support acquisition reports. No cookies, request bodies, raw IP addresses or
+  raw user-agent strings enter analytics storage. Path redaction is heuristic: only install on suitable public
   routes, and do not put private values in manual names or paths. This does not
   claim automatic removal of every possible identifier in a slug.
 - Public keys are bound to project, environment, and allowed Origin, and are
@@ -70,7 +73,7 @@ To publish aggregate live counts on a product website, use
 
 ## Delivery and efficiency boundaries
 
-The standalone script has no runtime dependencies and a tested **2 KB gzip**
+The standalone script has no runtime dependencies and a tested **3 KB gzip**
 budget. It queues at most 100 events, sends at most 25 per batch, flushes after
 1.5 seconds, and reuses its batch ID on retry. A request times out after ten
 seconds; retryable failures get at most three attempts with backoff. Permanent
@@ -90,9 +93,9 @@ time alarm, then retries an immutable R2 object. Batch identity is deduplicated
 for 31 days; pending batches, bytes, stage size, and ledger rows are bounded.
 Duplicate deliveries do not project the batch again. R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
-queried with `_sample_interval` weighting. A crash between SQLite stage and the
-Analytics Engine write, or a partial projection failure, can undercount the hot
-view. Replay/export and reconciliation tools are not implemented yet. This is
+queried with `_sample_interval` weighting. A durable bounded outbox retries failed
+projections independently of archival. A crash after append but before clearing
+the outbox can still duplicate an analytical projection. Replay/export and reconciliation tools are not implemented yet. This is
 not exactly-once end-to-end analytics.
 
 One SQLite-backed Durable Object coordinates each workspace. It stores only
@@ -108,8 +111,8 @@ connections lose access at their next lease renewal.
 
 The production dashboard refreshes its workspace summary and current report
 once per minute and uses that one stream for live presence. Reports are cached
-for 60 seconds. A report makes five bounded aggregate queries for trends, pages,
-sources, named events, and distinct sessions; the summary makes one additional
+for 60 seconds. A report queries core metrics and only the selected group of
+audience, acquisition, or technology dimensions; the summary makes one additional
 aggregate query. Changing a filter requests a new
 report. Every query is scoped to the authenticated workspace, with 24 trend
 buckets, 20 pages/sources, and up to 100 event names. The existing project-inventory
@@ -158,5 +161,5 @@ WebSocket upgrade, same-origin enforcement, and authenticated ownership.
 Browser evidence is in `.fleet/evidence/analytics/`; the populated screenshots
 use actual local collector events from two projects, not fixture metric counts.
 
-Remaining product work in #58 includes longer-range reports, richer filtering, funnels,
+Remaining product work in #58 includes richer filtering, a dedicated bot report, funnels,
 revenue/payment attribution, exports/replay, alerting, and full DataFast parity.

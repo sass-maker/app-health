@@ -39,3 +39,20 @@ it('validates and projects aggregate fields without leaking appended private dat
   ])
     expect(parseSharedAnalytics(value)).toBeNull();
 });
+
+it('accepts only the bounded opt-in breakdown projection', () => {
+  const breakdowns = {
+    sessions: 2,
+    events: 3,
+    pages: [{ name: '/home', count: 4 }],
+    sources: [{ name: 'Direct / unknown', count: 4 }],
+  };
+  expect(parseSharedAnalytics({ ...valid, breakdowns })).toMatchObject({ breakdowns });
+  expect(parseSharedAnalytics({ ...valid, breakdowns: { ...breakdowns, events: -1 } })).toBeNull();
+  const projected = parseSharedAnalytics({
+    ...valid,
+    breakdowns: { ...breakdowns, pages: [{ ...breakdowns.pages[0], secret: 'x' }] },
+  });
+  expect(projected?.breakdowns).toEqual(breakdowns);
+  expect(JSON.stringify(projected)).not.toContain('secret');
+});

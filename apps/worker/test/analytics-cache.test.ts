@@ -33,3 +33,21 @@ it('does not cache failures and tolerates unavailable cache storage', async () =
   expect(await cachedAnalytics('a', 'w', 'q', async () => 4, cache)).toBe(4);
   expect(await cachedAnalytics('a', 'w', 'q', async () => 5)).toBe(5);
 });
+
+it('coalesces concurrent misses per cache and releases rejected work', async () => {
+  const cache = { match: vi.fn(async () => undefined), put: vi.fn(async () => {}) };
+  let release!: (value: number) => void;
+  const load = vi.fn(() => new Promise<number>((resolve) => (release = resolve)));
+  const pending = Promise.all(
+    Array.from({ length: 10 }, () => cachedAnalytics('a', 'w', 'q', load, cache)),
+  );
+  await Promise.resolve();
+  expect(load).toHaveBeenCalledTimes(1);
+  release(7);
+  expect(await pending).toEqual(Array(10).fill(7));
+
+  const failed = vi.fn().mockRejectedValueOnce(new Error('failed')).mockResolvedValue(8);
+  await expect(cachedAnalytics('a', 'w', 'reject', failed, cache)).rejects.toThrow('failed');
+  await expect(cachedAnalytics('a', 'w', 'reject', failed, cache)).resolves.toBe(8);
+  expect(failed).toHaveBeenCalledTimes(2);
+});

@@ -1,3 +1,4 @@
+import { AnalyticsRanking } from './AnalyticsRanking.js';
 import type { BrowserReport } from '@app-health/contracts';
 import { ArrowRight, BarChart3, Clock3, MousePointer2, Radio } from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
@@ -13,7 +14,14 @@ import {
   TableRow,
 } from './components/ui/table.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.js';
+import { AnalyticsAudience } from './AnalyticsAudience.js';
 
+const periodLabels: Record<string, string> = {
+  '1h': 'Last hour',
+  '24h': 'Last 24 hours',
+  '7d': 'Last 7 days',
+  '30d': 'Last 30 days',
+};
 const formatCount = (value: number) => value.toLocaleString();
 const formatLastSeen = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -42,54 +50,6 @@ function MetricCard(props: {
         </div>
         <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">{value}</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{note}</p>
-      </CardContent>
-    </Card>
-  );
-}
-
-function RankingCard(props: {
-  title: string;
-  label: string;
-  rows: { name: string; count: number }[];
-}): JSX.Element {
-  const { title, label, rows } = props;
-  const max = Math.max(1, ...rows.map((row) => row.count));
-  return (
-    <Card className="shadow-none">
-      <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <span className="text-xs text-muted-foreground">{label}</span>
-      </CardHeader>
-      <CardContent className="p-0">
-        {rows.length ? (
-          <ol>
-            {rows.map((row) => (
-              <li
-                key={row.name}
-                className="relative flex items-center gap-4 border-b px-5 py-3.5 last:border-0"
-              >
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-y-1 left-0 bg-primary/7"
-                  style={{ width: `${(row.count / max) * 100}%` }}
-                />
-                <span
-                  className="relative min-w-0 flex-1 truncate font-mono text-xs"
-                  title={row.name}
-                >
-                  {row.name}
-                </span>
-                <strong className="relative text-xs font-medium tabular-nums">
-                  {formatCount(row.count)}
-                </strong>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="p-8 text-center text-sm text-muted-foreground">
-            No activity in this period.
-          </p>
-        )}
       </CardContent>
     </Card>
   );
@@ -199,12 +159,14 @@ export interface AnalyticsReportProps {
   totals: { pageviews: number; events: number };
   onMetric: (value: 'pageviews' | 'events') => void;
   onEvent: (event: string) => void;
+  breakdown: 'audience' | 'acquisition' | 'technology';
+  onBreakdown: (value: 'audience' | 'acquisition' | 'technology') => void;
 }
 
 function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
   const { selected, totals, active } = props;
   return (
-    <div className={`grid gap-3 md:grid-cols-2 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
+    <div className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
       {!selected ? (
         <MetricCard
           label="Page views"
@@ -249,8 +211,7 @@ function ReportChart(props: AnalyticsReportProps): JSX.Element {
               {selected || (metric === 'events' ? 'Event activity' : 'Traffic over time')}
             </h2>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock3 className="size-3" /> {range === '24h' ? 'Last 24 hours' : 'Last hour'} ·{' '}
-              {sourceNote}
+              <Clock3 className="size-3" /> {periodLabels[range]} · {sourceNote}
             </p>
           </div>
           <TabsList aria-label="Chart metric">
@@ -286,22 +247,24 @@ function ReportRankings(props: AnalyticsReportProps): JSX.Element {
   const { report, selected } = props;
   return (
     <div className="grid gap-5 lg:grid-cols-2">
-      <RankingCard
+      <AnalyticsRanking
         title={selected ? 'Where this event happens' : 'Top pages'}
         label={selected ? 'Events' : 'Views'}
         rows={report.pages}
+        total={selected ? props.totals.events : props.totals.pageviews}
       />
-      <RankingCard
+      <AnalyticsRanking
         title={selected ? 'Event referral sources' : 'Referral sources'}
         label={selected ? 'Events' : 'Views'}
         rows={report.sources}
+        total={selected ? props.totals.events : props.totals.pageviews}
       />
     </div>
   );
 }
 
 export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
-  const { report, mode, selected, onEvent } = props;
+  const { report, mode, selected, onEvent, breakdown, onBreakdown } = props;
   return (
     <>
       {mode === 'events' ? (
@@ -309,6 +272,20 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
       ) : null}
       <ReportMetrics {...props} />
       <ReportChart {...props} />
+      <Tabs value={breakdown} onValueChange={(value) => onBreakdown(value as typeof breakdown)}>
+        <TabsList aria-label="Analytics breakdown">
+          <TabsTrigger value="audience">Audience</TabsTrigger>
+          <TabsTrigger value="acquisition">Acquisition</TabsTrigger>
+          <TabsTrigger value="technology">Technology</TabsTrigger>
+        </TabsList>
+        <TabsContent value={breakdown}>
+          <AnalyticsAudience
+            report={report}
+            breakdown={breakdown}
+            metric={selected ? 'events' : 'pageviews'}
+          />
+        </TabsContent>
+      </Tabs>
       <ReportRankings {...props} />
       {mode === 'web' ? (
         <EventTable rows={report.events} selected={selected} onSelect={onEvent} />

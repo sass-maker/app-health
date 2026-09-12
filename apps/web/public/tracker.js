@@ -9,35 +9,112 @@
   let timer;
   let stopped = false;
   let lastPath = '';
-  let session;
+  const scope = script.dataset.project || script.dataset.key;
+  const sessionOnly = script.dataset.identity === 'session';
+  const visitorKey = `h:${scope}:v`;
+  const visitKey = `h:${scope}:w`;
+  let storage;
+  let visitor;
+  let visit;
+  try {
+    storage = sessionOnly ? globalThis.sessionStorage : globalThis.localStorage;
+  } catch {
+    /* Storage is optional. */
+  }
+  const uuid = (value) =>
+    typeof value === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   const diagnostics = { accepted: 0, dropped: 0, retries: 0 };
 
-  function sessionId() {
-    const now = Date.now();
+  function readStored(key) {
+    if (!storage) return null;
     try {
-      session ||= JSON.parse(sessionStorage.getItem('app-health-session-v1') || 'null');
+      return JSON.parse(storage.getItem(key) || 'null');
     } catch {
-      /* Optional. */
+      storage = undefined;
+      return null;
     }
+  }
+  function writeStored(key, value) {
+    if (!storage) return false;
+    try {
+      storage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch {
+      storage = undefined;
+      return false;
+    }
+  }
+  function attribution(path) {
+    const url = new URL(path || location.href, location.href);
+    const clean = (value) =>
+      String(value || '')
+        .replace(/[^a-zA-Z0-9 _.,:+/-]/g, '')
+        .slice(0, 100);
+    return {
+      source: clean(url.searchParams.get('utm_source') || referrer()),
+      medium: clean(url.searchParams.get('utm_medium')),
+      campaign: clean(url.searchParams.get('utm_campaign')),
+      content: clean(url.searchParams.get('utm_content')),
+      term: clean(url.searchParams.get('utm_term')),
+      entry_path: safePath(url.pathname),
+    };
+  }
+  function recognizedVisitor(now) {
+    if (sessionOnly || !storage) return undefined;
+    const saved = readStored(visitorKey);
+    if (!storage) return undefined;
+    if (saved && uuid(saved.id) && saved.expires > now) {
+      visitor = saved;
+      return false;
+    }
+    visitor = { id: crypto.randomUUID(), expires: now + 90 * 86400000 };
+    return writeStored(visitorKey, visitor) ? true : undefined;
+  }
+  function validVisit(value) {
+    return (
+      value &&
+      uuid(value.id) &&
+      Number.isFinite(value.last) &&
+      value.attribution &&
+      typeof value.attribution.entry_path === 'string'
+    );
+  }
+  function visitContext(meaningful = false, path = location.href) {
+    // Idle heartbeats reuse the last visit and never prolong its activity or identity.
+    if (!meaningful && visit) return contextOf(visit);
+    const now = Date.now();
+    const freshVisitor = recognizedVisitor(now);
+    const visitorId = freshVisitor === undefined ? undefined : visitor.id;
+    const saved = readStored(visitKey);
+    if (validVisit(saved)) visit = saved;
     if (
-      !session ||
-      !/^[a-f0-9-]{36}$/.test(session.id) ||
-      now - session.seen > 1800000 ||
-      session.day !== new Date(now).toISOString().slice(0, 10)
+      !validVisit(visit) ||
+      visit.visitor_id !== visitorId ||
+      now - visit.last >= 1800000 ||
+      now < visit.last
     ) {
-      session = {
+      visit = {
         id: crypto.randomUUID(),
-        day: new Date(now).toISOString().slice(0, 10),
-        seen: now,
+        last: now,
+        visitor_id: visitorId,
+        type: visitorId ? (freshVisitor ? 'new' : 'returning') : undefined,
+        attribution: attribution(path),
       };
     }
-    session.seen = now;
-    try {
-      sessionStorage.setItem('app-health-session-v1', JSON.stringify(session));
-    } catch {
-      /* Optional. */
+    if (meaningful) visit = { ...visit, last: now };
+    if (storage && !writeStored(visitKey, visit)) {
+      // A failed write must not claim durable recognition.
+      visit = { ...visit, visitor_id: undefined, type: undefined };
     }
-    return session.id;
+    return contextOf(visit);
+  }
+  function contextOf(value) {
+    return {
+      session_id: value.id,
+      ...(value.visitor_id ? { visitor_id: value.visitor_id, visit_type: value.type } : {}),
+      attribution: value.attribution,
+    };
   }
 
   function safePath(value) {
@@ -76,18 +153,20 @@
   }
 
   function payload() {
-    if (!pending)
-      pending = {
-        attempts: 0,
-        events: queue.splice(0, 25),
-        batch_id: crypto.randomUUID(),
-        session_id: sessionId(),
-      };
+    if (!pending) {
+      const context = queue[0]?.context || visitContext();
+      const events = [];
+      while (events.length < 25 && queue[0]?.context.session_id === context.session_id) {
+        const { context: _context, ...event } = queue.shift();
+        events.push(event);
+      }
+      pending = { attempts: 0, events, batch_id: crypto.randomUUID(), context };
+    }
     return JSON.stringify({
       schema_version: 1,
       public_key: script.dataset.key,
       batch_id: pending.batch_id,
-      session_id: pending.session_id,
+      ...pending.context,
       events: pending.events,
     });
   }
@@ -138,6 +217,7 @@
     queue.push({
       event_id: crypto.randomUUID(),
       timestamp: Date.now(),
+      context: visitContext(true, path),
       type,
       path: safePath(path),
       referrer: referrer(),
@@ -145,7 +225,7 @@
     });
     schedule();
   }
-  function page(path = location.pathname) {
+  function page(path = location.href) {
     lastPath = location.pathname;
     emit('pageview', undefined, path);
   }

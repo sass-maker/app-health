@@ -69,6 +69,7 @@ describe('browser analytical data', () => {
       true,
     );
     store.ingest(batch(), 'new');
+    vi.advanceTimersByTime(1);
     expect(store.summary().projects).toHaveLength(1);
   });
   it('deduplicates historical sessions across batches while isolating app and environment scopes', () => {
@@ -148,26 +149,34 @@ describe('browser analytical data', () => {
       1,
     );
   });
-  it('writes scoped analytical points and reports projection failures without replaying', () => {
+  it('writes scoped analytical points and surfaces projection failures', () => {
     const writeDataPoint = vi.fn();
     const input = batch();
     projectBrowserBatch(input, { BROWSER_ANALYTICS: { writeDataPoint } });
     expect(writeDataPoint).toHaveBeenCalledWith({
       indexes: ['workspace-one'],
-      blobs: ['app-one', 'env-one', 'pageview', '/pricing', '', '', 'f'.repeat(64)],
+      blobs: [
+        'app-one',
+        'env-one',
+        'pageview',
+        '/pricing',
+        '',
+        '',
+        'f'.repeat(64),
+        ...Array(12).fill(''),
+      ],
       doubles: [1, input.events[0].timestamp],
     });
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    projectBrowserBatch(input, {});
+    expect(() => projectBrowserBatch(input, {})).toThrow('projection missing');
     writeDataPoint.mockImplementation(() => {
       throw new Error('AE');
     });
-    projectBrowserBatch(
-      { ...input, events: [{ ...input.events[0], type: 'event', name: 'signup' }] },
-      { BROWSER_ANALYTICS: { writeDataPoint } },
-    );
-    expect(error).toHaveBeenCalledTimes(2);
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('browser_projection_failed'));
+    expect(() =>
+      projectBrowserBatch(
+        { ...input, events: [{ ...input.events[0], type: 'event', name: 'signup' }] },
+        { BROWSER_ANALYTICS: { writeDataPoint } },
+      ),
+    ).toThrow('AE');
   });
   it('uses one bounded, workspace-scoped weighted query and fails on provider errors', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
@@ -246,10 +255,67 @@ describe('browser collector boundary', () => {
     await repos.publicKeys!.revokePublicKey(key!.id, Date.now());
     expect((await handleBrowserIngest(request(body), {}, repos, true))?.status).toBe(403);
   });
+  it('accepts persistent visitors without exposing raw identities in reports', async () => {
+    const repos = await fixture();
+    const visitor = crypto.randomUUID();
+    const session = crypto.randomUUID();
+    const first = {
+      ...input(),
+      visitor_id: visitor,
+      visit_type: 'new',
+      session_id: session,
+      attribution: {
+        source: 'newsletter',
+        medium: 'email',
+        campaign: 'launch',
+        entry_path: '/pricing',
+      },
+      events: [{ ...batch().events[0], timestamp: Date.now() - 1000 }],
+    };
+    expect((await handleBrowserIngest(request(first), {}, repos, true))?.status).toBe(202);
+    expect(
+      (
+        await handleBrowserIngest(
+          request({
+            ...first,
+            batch_id: crypto.randomUUID(),
+            session_id: crypto.randomUUID(),
+            visit_type: 'returning',
+          }),
+          {},
+          repos,
+          true,
+        )
+      )?.status,
+    ).toBe(202);
+    const response = await handleBrowserOwner(
+      new Request(
+        `http://localhost/v1/analytics/report?app_id=${SEED_APP_ID}&range=24h&breakdown=acquisition`,
+      ),
+      {},
+      { id: 'owner', label: 'test' },
+      true,
+    );
+    const report = (await response!.json()) as {
+      audience: {
+        visitors: number;
+        new_sessions: number;
+        returning_sessions: number;
+        campaigns: unknown[];
+      };
+    };
+    expect(report.audience.visitors).toBe(1);
+    expect(report.audience.new_sessions).toBe(1);
+    expect(report.audience.returning_sessions).toBe(1);
+    expect(report.audience.campaigns).toContainEqual({ name: 'launch', count: 2 });
+    expect(JSON.stringify(report)).not.toContain(visitor);
+    expect(JSON.stringify(report)).not.toContain(session);
+  });
   it('rejects identity fields, encoded query data, stale timestamps, invalid JSON and oversized bodies', async () => {
     const repos = await fixture();
     for (const body of [
       { ...input(), user_id: 'private' },
+      { ...input(), attribution: { entry_path: '/user%40example.com' } },
       { ...input(), events: [{ ...batch().events[0], path: '/user%40example.com' }] },
       { ...input(), events: [{ ...batch().events[0], timestamp: 0 }] },
       { ...input(), events: Array(26).fill(batch().events[0]) },

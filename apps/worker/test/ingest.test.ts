@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppHealthService, InMemoryAdapter } from '../src/index.js';
 import { hashKey, generateRawKey, KEY_PREFIX } from '../src/crypto.js';
 import {
@@ -317,6 +317,37 @@ describe('ingest idempotent batch handling', () => {
     );
     const retry = await service.ingest(SEED_KEY, makeBatch([event]), NOW);
     expect(retry).toMatchObject({ ok: true, accepted: 1, duplicates: 0 });
+  });
+
+  it('completes control writes before aggregate projection', async () => {
+    const adapter = await InMemoryAdapter.create();
+    const repos = adapter.asRepositories();
+    const buckets = repos.buckets;
+    const capabilities = repos.capabilities;
+    let failOnce = true;
+    repos.capabilities = {
+      getCapabilities: (...args) => capabilities!.getCapabilities(...args),
+      setCapabilities: (...args) => capabilities!.setCapabilities(...args),
+      async recordCapability(...args) {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('simulated control failure');
+        }
+        await capabilities?.recordCapability(...args);
+      },
+    };
+    const upsertEvents = vi.spyOn(buckets, 'upsertEvents');
+    const service = new AppHealthService(repos);
+    const event = makeEvent({ event_id: uuid(24), timestamp: NOW, route: '/control-first' });
+    await expect(service.ingest(SEED_KEY, makeBatch([event]), NOW)).rejects.toThrow(
+      'simulated control failure',
+    );
+    expect(upsertEvents).not.toHaveBeenCalled();
+    await expect(service.ingest(SEED_KEY, makeBatch([event]), NOW)).resolves.toMatchObject({
+      accepted: 1,
+      duplicates: 0,
+    });
+    expect(upsertEvents).toHaveBeenCalledTimes(1);
   });
 });
 

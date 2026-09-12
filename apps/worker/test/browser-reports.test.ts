@@ -83,7 +83,30 @@ describe('browser reports', () => {
           data: [{ name: 'signup.completed', count: 4, last_seen: now - 4000, sample_interval: 2 }],
         }),
       )
-      .mockResolvedValueOnce(Response.json({ data: [{ sessions: 1, sample_interval: 2 }] }));
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            {
+              sessions: 1,
+              visitors: 1,
+              new_sessions: 1,
+              returning_sessions: 0,
+              unidentified_sessions: 0,
+              sample_interval: 2,
+            },
+          ],
+        }),
+      );
+    fetchImpl
+      .mockResolvedValueOnce(
+        Response.json({ data: [{ name: 'organic', count: 4, sample_interval: 2 }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: [{ name: '/', count: 4, sample_interval: 2 }] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [{ pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 }],
+        }),
+      );
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
     const report = await queryBrowserReport(
       'w-one',
@@ -99,11 +122,11 @@ describe('browser reports', () => {
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
     expect(report.sessions).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(5);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();
-    expect(BrowserReportFilter.safeParse({ range: '7d' }).success).toBe(false);
+    expect(BrowserReportFilter.safeParse({ range: 'invalid' }).success).toBe(false);
   });
   it('fails closed on malformed provider output and upstream outages', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 503 }));

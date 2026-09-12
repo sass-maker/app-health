@@ -307,6 +307,15 @@ export class AppHealthService {
   ): Promise<IngestResult> {
     await this.repos.inventory?.recordObserved(scope.app_id, scope.environment_id, acceptedEvents);
     await this.repos.failures?.recordFailures(scope.app_id, scope.environment_id, acceptedEvents);
+    if (acceptedEvents.length > 0) {
+      await this.repos.installation.recordIngest(scope.app_id, scope.environment_id, runtime, now);
+      await this.repos.capabilities?.recordCapability(
+        scope.app_id,
+        scope.environment_id,
+        'endpoints',
+        now,
+      );
+    }
     if (this.repos.buckets.upsertEvents) {
       await this.repos.buckets.upsertEvents(
         scope.app_id,
@@ -317,15 +326,6 @@ export class AppHealthService {
       );
     } else {
       for (const event of acceptedEvents) await this.applyEvent(scope, event);
-    }
-    if (acceptedEvents.length > 0) {
-      await this.repos.installation.recordIngest(scope.app_id, scope.environment_id, runtime, now);
-      await this.repos.capabilities?.recordCapability(
-        scope.app_id,
-        scope.environment_id,
-        'endpoints',
-        now,
-      );
     }
     return { ok: true, accepted: acceptedEvents.length, duplicates };
   }

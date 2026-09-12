@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
+import { BrowserBatchV1 } from '@app-health/contracts';
 import type { AppHealthTracker } from '../public/tracker.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const api = (): AppHealthTracker => window.appHealth!;
@@ -8,6 +9,8 @@ let originalPush: History['pushState'];
 beforeEach(async () => {
   vi.resetModules();
   vi.useFakeTimers();
+  globalThis.localStorage?.clear();
+  globalThis.sessionStorage?.clear();
   originalPush = history.pushState;
   const script = document.createElement('script');
   script.dataset.key = 'ahk_pub_test';
@@ -23,14 +26,16 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('ships under 2KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
-  expect(gzipSync(source).length).toBeLessThanOrEqual(2048);
+it('ships under 3KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
+  // Identity, attribution and storage-failure handling remain within a 3 KB compressed budget.
+  expect(gzipSync(source).length).toBeLessThanOrEqual(3000);
   api().page('/users/123?email=private@example.com#token');
   api().track('signup.completed');
   await api().flush();
   const call = vi.mocked(fetch).mock.calls[0][1]!;
   expect(call.credentials).toBe('omit');
   const body = JSON.parse(String(call.body));
+  expect(BrowserBatchV1.safeParse(body).success).toBe(true);
   expect(body.events).toHaveLength(3);
   expect(body.events[1].path).toBe('/users/:id');
   expect(body.events[2].name).toBe('signup.completed');
@@ -42,6 +47,8 @@ it('retries the same batch ID, bounds retry attempts and reports dropped events'
   await api().flush();
   await api().flush();
   await api().flush();
+  for (const [, init] of vi.mocked(fetch).mock.calls)
+    expect(BrowserBatchV1.safeParse(JSON.parse(String(init?.body))).success).toBe(true);
   const ids = vi
     .mocked(fetch)
     .mock.calls.map(([, init]) => JSON.parse(String(init?.body)).batch_id);
@@ -91,6 +98,9 @@ it('survives disabled storage and malformed or oversized paths, and stores only 
   api().page('/alice%40example.com');
   await api().flush();
   const events = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).events;
+  const blockedBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(BrowserBatchV1.safeParse(blockedBody).success).toBe(true);
+  expect(blockedBody.session_id).toMatch(/^[a-f0-9-]{36}$/);
   expect(events.slice(1).map((event: { path: string }) => event.path)).toEqual([
     '/',
     '/:path',
@@ -98,14 +108,103 @@ it('survives disabled storage and malformed or oversized paths, and stores only 
   ]);
   expect(events[1].referrer).toBe('search.example');
 });
-it('rotates a daily session and emits empty heartbeats without inventing events', async () => {
+
+it('supports strict session identity without persistent visitor fields', async () => {
+  api().stop();
+  vi.resetModules();
+  const script = document.createElement('script');
+  script.dataset.key = 'ahk_pub_test';
+  script.dataset.identity = 'session';
+  script.dataset.endpoint = '/v1/browser';
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(script);
+  await import('../public/tracker.js');
+  vi.mocked(fetch).mockClear();
+  await window.appHealth!.flush();
+  const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(BrowserBatchV1.safeParse(body).success).toBe(true);
+  expect(body).not.toHaveProperty('visitor_id');
+  expect(body).not.toHaveProperty('visit_type');
+});
+it('keeps a persistent visit across a day and emits empty heartbeats without inventing events', async () => {
   await api().flush();
   const first = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
   vi.setSystemTime(Date.now() + 86400000);
   await api().flush();
   const second = JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body));
-  expect(second.session_id).not.toBe(first.session_id);
+  expect(second.session_id).toBe(first.session_id);
+  expect(second.visitor_id).toBe(first.visitor_id);
   expect(second.events).toEqual([]);
+});
+
+it('shares an anonymous visitor across reloads, rotates visits after inactivity, and persists attribution', async () => {
+  api().stop();
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+  history.replaceState({}, '', '/landing?utm_source=launch&utm_medium=email&utm_campaign=summer');
+  vi.resetModules();
+  const script = document.createElement('script');
+  script.dataset.key = 'ahk_pub_test';
+  script.dataset.endpoint = '/v1/browser';
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(script);
+  await import('../public/tracker.js');
+  vi.mocked(fetch).mockClear();
+  await api().flush();
+  await api().flush();
+  const first = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(first.visit_type).toBe('new');
+  expect(first.attribution).toMatchObject({
+    source: 'launch',
+    medium: 'email',
+    campaign: 'summer',
+    entry_path: '/landing',
+  });
+  api().stop();
+  vi.resetModules();
+  const nextScript = document.createElement('script');
+  nextScript.dataset.key = 'ahk_pub_test';
+  nextScript.dataset.endpoint = '/v1/browser';
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(nextScript);
+  await import('../public/tracker.js');
+  vi.setSystemTime(Date.now() + 1_800_001);
+  api().page('/returning');
+  await api().flush();
+  await api().flush();
+  const second = JSON.parse(String(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.body));
+  expect(second.visitor_id).toBe(first.visitor_id);
+  expect(second.session_id).not.toBe(first.session_id);
+  expect(second.visit_type).toBe('returning');
+  expect(second.attribution).toMatchObject({
+    source: '',
+    medium: '',
+    campaign: '',
+    entry_path: '/returning',
+  });
+});
+
+it('sanitizes UTM values and omits persistent identity when storage is unavailable', async () => {
+  api().stop();
+  history.replaceState({}, '', '/landing?utm_source=alice%40example.com&utm_campaign=launch%21');
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    throw new Error('disabled');
+  });
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('disabled');
+  });
+  vi.resetModules();
+  const script = document.createElement('script');
+  script.dataset.key = 'ahk_pub_test';
+  script.dataset.endpoint = '/v1/browser';
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(script);
+  await import('../public/tracker.js');
+  vi.mocked(fetch).mockClear();
+  api().page('/landing?utm_source=alice%40example.com&utm_campaign=launch%21');
+  await api().flush();
+  const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(body).not.toHaveProperty('visitor_id');
+  expect(body.attribution).toMatchObject({ source: 'aliceexample.com', campaign: 'launch' });
 });
 it('uses at most two idle heartbeats per visible minute and cancels redundant scheduled flushes', async () => {
   await api().flush();

@@ -8,6 +8,12 @@ export interface SharedAnalytics {
     to: number;
     series: { timestamp: number; pageviews: number }[];
   } | null;
+  breakdowns?: {
+    sessions: number;
+    events: number;
+    pages: { name: string; count: number }[];
+    sources: { name: string; count: number }[];
+  };
   source: 'local' | 'analytics-engine';
   sampled: boolean;
   updated_at: number;
@@ -18,6 +24,7 @@ export interface AnalyticsShare {
   environment_id: string;
   created_at: number;
   revoked_at: number | null;
+  include_breakdowns: boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -26,6 +33,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isBreakdowns(value: unknown): value is SharedAnalytics['breakdowns'] {
+  if (!isRecord(value)) return false;
+  const rows = (row: unknown) =>
+    isRecord(row) && typeof row.name === 'string' && isNumber(row.count);
+  return (
+    isNumber(value.sessions) &&
+    isNumber(value.events) &&
+    Array.isArray(value.pages) &&
+    value.pages.length <= 20 &&
+    value.pages.every(rows) &&
+    Array.isArray(value.sources) &&
+    value.sources.length <= 20 &&
+    value.sources.every(rows)
+  );
+}
+
+function projectBreakdowns(value: NonNullable<SharedAnalytics['breakdowns']>) {
+  return {
+    sessions: value.sessions,
+    events: value.events,
+    pages: value.pages.map(({ name, count }) => ({ name, count })),
+    sources: value.sources.map(({ name, count }) => ({ name, count })),
+  };
 }
 
 function isProject(value: unknown): value is SharedAnalytics['project'] {
@@ -73,7 +105,8 @@ export function parseSharedAnalytics(value: unknown): SharedAnalytics | null {
     (traffic !== null && !isTraffic(traffic)) ||
     (value.source !== 'local' && value.source !== 'analytics-engine') ||
     typeof value.sampled !== 'boolean' ||
-    !isNumber(value.updated_at)
+    !isNumber(value.updated_at) ||
+    (value.breakdowns !== undefined && !isBreakdowns(value.breakdowns))
   ) {
     return null;
   }
@@ -95,5 +128,6 @@ export function parseSharedAnalytics(value: unknown): SharedAnalytics | null {
     source: value.source,
     sampled: value.sampled,
     updated_at: value.updated_at,
+    ...(value.breakdowns ? { breakdowns: projectBreakdowns(value.breakdowns) } : {}),
   };
 }

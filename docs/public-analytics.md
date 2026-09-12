@@ -9,8 +9,12 @@ authenticated dashboards.
 The public page shows the project and environment names, active browser and
 opt-in native foreground sessions seen within 45 seconds, and web pageview totals
 and hourly trends for the past 24 hours.
-It never returns paths, referrers, named events, session IDs, logs, ingestion keys,
-or another project's metrics. Sessions are not unique people. Unavailable data
+Existing links remain limited to those totals. Owners can enable **Share top
+routes and sources** for a new or existing link. This adds 24-hour browser
+sessions, product-event totals, and the top 20 routes and referrer hosts with
+counts and percentage of all page views. Disabling it removes those breakdowns
+on the next read without rotating the link. Event names, session IDs, logs,
+ingestion keys, and other projects' metrics are never included. Sessions are not unique people. Unavailable data
 shows an unavailable state rather than a manufactured zero; sampled traffic is
 labelled as estimated.
 
@@ -21,6 +25,9 @@ verifier is stored. The token is revealed once and placed in the URL fragment,
 which is not sent in the page request. The page sends it in an Authorization
 header to the same-origin public API. It grants no dashboard or ingestion access.
 Anyone who receives the link or reads a published iframe can view its aggregates.
+This is an intentionally shareable viewer credential, not a private project key.
+It is absent from the visible report, page-request URL and referrer. Embedding
+cannot make the token secret from someone inspecting the embed.
 
 Use **Revoke** beside a link to disable it. Every API read checks revocation and
 current project ownership before reading metrics. Revocation blocks subsequent
@@ -81,6 +88,21 @@ back off to at most once per minute after transient errors. Each request has a
 ten-second timeout. Production reads use two indexed D1 queries for the token
 and current project scope. Scope-specific internal caches reuse live counts for
 ten seconds and the single hourly traffic aggregate query for sixty seconds.
+Opted-in reports use four parallel aggregate queries (trend, routes, sources,
+sessions), cached for sixty seconds. They never query named-event rankings.
+Concurrent misses share one in-flight load per cache instance and project scope;
+the in-flight map is capped at 128 entries and releases failed loads. Presence
+and historical report reads run in parallel. Revocation is checked before using
+any cached metrics. This adds one sharing preference per link and no new raw-event
+storage, retention queue, or ingestion pipeline.
+
+The hosted page keeps historical data while refreshing or hidden. On return it
+immediately revalidates the link; stale live counts are hidden until fresh data
+arrives. Initial loading uses a report-shaped skeleton, with reduced-motion
+support. Temporary failures retain a clearly stale historical report; revocation
+or token changes clear it. The optional viewer SDK has its own explicit paused
+state described above.
+
 Public readers do not open presence WebSockets or allocate one Durable Object
 per viewer. Cache reuse is local to the serving Cloudflare cache, not global.
 
@@ -99,7 +121,9 @@ owner-only management, anonymous reads, revoked reads, and route-specific frame
 headers. Unit tests cover token hashing, active-link limits, scope isolation,
 ownership changes, provider validation, expiry, and polling cancellation.
 
-This implementation is local and not deployed. Production activation requires
-the existing accounts and browser analytics setup, additive migration
-`0009_analytics_shares.sql`, and a deployed `/live` deep-link and embedding canary.
+Public sharing is deployed; this richer-report follow-up is local and unreleased.
+Activation requires additive migration `0012_analytics_share_breakdowns.sql`, an
+App Health release, and a deployed `/live` deep-link and embedding canary. Existing
+links default to limited totals. Enable breakdowns on Highsignal's existing link
+after release; the iframe token does not need to change.
 Local shares are in-memory and disappear when the local server restarts.

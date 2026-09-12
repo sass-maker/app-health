@@ -38,7 +38,7 @@ describe('durable browser queue staging', () => {
     expect(stage).toHaveBeenCalledWith([first.body, duplicate.body]);
     expect(first.ack).toHaveBeenCalledTimes(1);
     expect(duplicate.ack).toHaveBeenCalledTimes(1);
-    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(writeDataPoint).not.toHaveBeenCalled();
     expect(first.retry).not.toHaveBeenCalled();
     expect(await browserArchiveShard({ ...first.body, received_at: 0 })).toBe(
       await browserArchiveShard(first.body),
@@ -51,7 +51,7 @@ describe('durable browser queue staging', () => {
       BROWSER_ARCHIVE: { getByName },
       BROWSER_ANALYTICS: { writeDataPoint },
     });
-    expect(writeDataPoint).toHaveBeenCalledTimes(1);
+    expect(writeDataPoint).not.toHaveBeenCalled();
   });
   it('retries failed groups while acknowledging unrelated work and bounds staging calls', async () => {
     const failed = message('failed');

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BrowserReport,
   BrowserSummary,
@@ -126,6 +126,7 @@ export function useWorkspaceAnalytics(ownerToken: string) {
     let hidden = document.hidden;
     let loading = false;
     let request: AbortController | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
     setData(null);
     setLive(null);
     setConnected(false);
@@ -165,23 +166,27 @@ export function useWorkspaceAnalytics(ownerToken: string) {
     }
     function onVisibilityChange() {
       hidden = document.hidden;
+      if (poll) clearInterval(poll);
       if (hidden) {
+        if (poll) clearInterval(poll);
+        poll = undefined;
         request?.abort();
         loading = false;
         sockets.close();
         setConnected(false);
       } else {
+        poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
         void load();
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     if (!hidden) void load();
-    const poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
+    if (!hidden) poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       request?.abort();
-      clearInterval(poll);
+      if (poll) clearInterval(poll);
       sockets.close();
     };
   }, [ownerToken, retry]);
@@ -194,22 +199,28 @@ export function useBrowserReport(
   appId: string,
   environmentId: string,
   event: string,
+  breakdown: 'audience' | 'acquisition' | 'technology' = 'audience',
 ) {
   const [report, setReport] = useState<BrowserReportData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
+  const scope = `${ownerToken}/${range}/${appId}/${environmentId}/${event}/${breakdown}`;
+  const reportDataScopeRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     let hidden = document.hidden;
     let loading = false;
     let request: AbortController | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const preserveReport = reportDataScopeRef.current === scope;
     const params = new URLSearchParams({ range });
     if (appId) params.set('app_id', appId);
     if (environmentId) params.set('environment_id', environmentId);
     if (event) params.set('event', event);
-    setReport(null);
-    setLoading(true);
+    if (breakdown !== 'audience') params.set('breakdown', breakdown);
+    if (!preserveReport) setReport(null);
+    setLoading(!preserveReport);
     setError('');
     async function load() {
       if (cancelled || hidden || loading) return;
@@ -221,10 +232,12 @@ export function useBrowserReport(
         const response = await fetch(`/v1/analytics/report?${params}`, {
           signal: controller.signal,
           headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
+          cache: 'no-store',
         });
         const parsed = await readReport(response);
         if (!cancelled && !controller.signal.aborted) {
           setReport(parsed);
+          reportDataScopeRef.current = scope;
           setError('');
         }
       } catch (cause) {
@@ -242,22 +255,31 @@ export function useBrowserReport(
     }
     function onVisibilityChange() {
       hidden = document.hidden;
+      if (timer) clearInterval(timer);
       if (hidden) {
+        if (timer) clearInterval(timer);
+        timer = undefined;
         request?.abort();
         loading = false;
       } else {
+        timer = setInterval(() => void load(), 60_000);
         void load();
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
     if (!hidden) void load();
-    const timer = setInterval(() => void load(), 60000);
+    if (!hidden) timer = setInterval(() => void load(), 60000);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       request?.abort();
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
-  }, [ownerToken, range, appId, environmentId, event, retry]);
-  return { report, error, loading, reload: () => setRetry((value) => value + 1) };
+  }, [ownerToken, range, appId, environmentId, event, breakdown, retry]);
+  return {
+    report: reportDataScopeRef.current === scope ? report : null,
+    error,
+    loading,
+    reload: () => setRetry((value) => value + 1),
+  };
 }

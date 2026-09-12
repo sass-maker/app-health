@@ -1,9 +1,11 @@
+import { LabeledSelect as IdentitySelect } from './LabeledSelect.js';
 import { AnalyticsSharing } from './AnalyticsSharing.js';
 import { NativeKeys } from './NativeKeys.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
 import { EnvironmentCreateForm } from './EnvironmentCreateForm.js';
 import { ProductBrand, ProductShell } from './ProductShell.js';
 import { AnalyticsView } from './AnalyticsView.js';
+import { AgentSetupPrompt } from './AgentSetupPrompt.js';
 import {
   Activity,
   AlertTriangle,
@@ -1954,6 +1956,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
       {state.created ? (
         <PublicKeyReveal
           created={state.created}
+          project={project}
           environment={project.environment}
           purpose={purpose}
         />
@@ -2023,15 +2026,18 @@ function PublicKeyForm({
 
 function PublicKeyReveal({
   created,
+  project,
   environment,
   purpose,
 }: {
   created: CreatePublicLogKeyResponseV1;
+  project: SavedProject;
   environment: string;
   purpose: BrowserKeyPurpose;
 }): JSX.Element {
+  const [identityMode, setIdentityMode] = useState('persistent');
   const logsSnippet = `import { createWebLogger } from '@saas-maker/app-health/web';\n\nconst logs = createWebLogger({\n  publicKey: '${created.key}',\n  environment: ${JSON.stringify(environment)},\n  endpoint: '${INGEST_ORIGIN}/v1/logs',\n});\n\nlogs.log('pricing.viewed', { props: { plan: 'pro' } });`;
-  const analyticsSnippet = `<script defer src="${location.origin}/tracker.js" data-key="${created.key}" data-endpoint="${INGEST_ORIGIN}/v1/browser"></script>\n\n<!-- After the tracker loads: window.appHealth.track('signup.completed') -->`;
+  const analyticsSnippet = `<script defer src="${location.origin}/tracker.js" data-key="${created.key}" data-project="${created.record.app_id}" data-identity="${identityMode}" data-endpoint="${INGEST_ORIGIN}/v1/browser"></script>\n\n<!-- After the tracker loads: window.appHealth.track('signup.completed') -->`;
   return (
     <div className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
       <strong className="block text-sm">Copy this key now; it is shown once.</strong>
@@ -2041,9 +2047,28 @@ function PublicKeyReveal({
           <p className="text-sm font-medium">
             Page views, live sessions, and named analytics events
           </p>
+          <IdentitySelect
+            label="Visitor recognition"
+            value={identityMode}
+            onValueChange={setIdentityMode}
+            options={[
+              { value: 'persistent', label: 'Persistent anonymous visitors' },
+              { value: 'session', label: 'Session only' },
+            ]}
+          />
+          <p className="text-xs text-muted-foreground">
+            This choice is saved in the script you install. Persistent IDs recognize the same
+            browser for up to 90 days within this project. Session-only tracking omits visitor IDs.
+          </p>
           <pre className="overflow-x-auto rounded-md bg-zinc-950 p-4 text-xs leading-6 text-zinc-100">
             <code>{analyticsSnippet}</code>
           </pre>
+          <AgentSetupPrompt
+            project={project}
+            capabilities={['analytics']}
+            publicKey={created.key}
+            analyticsSnippet={analyticsSnippet}
+          />
         </>
       ) : null}
       {purpose !== 'analytics' ? (
@@ -2808,6 +2833,7 @@ function CapabilitySetup({
           {project.environment}. Failed validation or delivery never marks it connected.
         </AlertDescription>
       </Alert>
+      <AgentSetupPrompt project={project} capabilities={[id]} />
       {id === 'analytics' || id === 'logs' ? (
         <PublicKeysPanel
           project={project}
@@ -2834,7 +2860,7 @@ const VIEW_HEADINGS: Record<DashboardView, [string, string, string]> = {
   analytics: [
     'Workspace',
     'Web analytics',
-    'Active sessions now. Page views and manual events over the last 24 hours.',
+    'Explore visitors, sources, and product activity over time.',
   ],
   events: [
     'Product behavior',
@@ -3473,7 +3499,7 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  function selectProject(value: SavedProject): void {
+  function selectProject(value: SavedProject, replaceHistory = false): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
     setProject(value);
     setRequestedProject({ appId: value.appId, environmentId: value.environmentId });
@@ -3486,7 +3512,11 @@ export function App(): JSX.Element {
       environment: value.environmentId,
     }).toString();
     if (!url.hash) url.hash = '#analytics';
-    history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    history[replaceHistory ? 'replaceState' : 'pushState'](
+      null,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
     setCreated(null);
   }
 
@@ -3523,15 +3553,15 @@ export function App(): JSX.Element {
           ) ?? null)
         : authorizedProject(project, available);
     setProjects(available);
-    if (selected) selectProject(selected);
+    if (selected) selectProject(selected, true);
     else if (strictRequestedProject && requestedProject) {
       setProject(null);
       setSelectionError(projectUnavailableMessage(requestedProject));
-    } else reset();
+    } else reset(true);
     setOwnerToken(token);
   }
 
-  function reset(): void {
+  function reset(replaceHistory = false): void {
     localStorage.removeItem(STORAGE_KEY);
     setCreated(null);
     setProject(null);
@@ -3541,7 +3571,7 @@ export function App(): JSX.Element {
     const url = new URL(window.location.href);
     url.pathname = '/app';
     url.search = '';
-    history.pushState(null, '', `${url.pathname}${url.hash}`);
+    history[replaceHistory ? 'replaceState' : 'pushState'](null, '', `${url.pathname}${url.hash}`);
   }
 
   async function lock(): Promise<void> {

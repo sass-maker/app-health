@@ -308,14 +308,14 @@ describe('Google account boundary with real D1 SQL', () => {
         series: expect.any(Array),
         events: [],
       });
-      expect(provider).toHaveBeenCalledTimes(5);
+      expect(provider).toHaveBeenCalledTimes(8);
       for (const [, init] of provider.mock.calls) {
         expect(String(init?.body)).toContain(`index1 = '${account.workspace.id}'`);
         expect(String(init?.body)).toContain("blob5 = 'signup'");
       }
       provider.mockClear();
       expect((await report(`?app_id=${aliceApp.app.id}`, bobCookie)).status).toBe(403);
-      expect((await report('?range=7d')).status).toBe(400);
+      expect((await report('?range=invalid')).status).toBe(400);
       expect((await report('?workspace=another')).status).toBe(400);
       expect((await report('', 'garbage')).status).toBe(401);
       expect(provider).not.toHaveBeenCalled();

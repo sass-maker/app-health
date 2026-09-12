@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PublicAnalyticsView } from '../src/PublicAnalyticsView.js';
 
@@ -69,7 +69,7 @@ it('keeps the full public page linked and exposes page views without event colum
     '/',
   );
   fireEvent.click(screen.getByText('View chart values'));
-  expect(screen.getByText('Page views')).toBeTruthy();
+  expect(screen.getAllByText('Page views').length).toBeGreaterThan(0);
   expect(screen.queryByText('Events')).toBeNull();
 });
 
@@ -109,7 +109,7 @@ it('renders sampled historical data and an unavailable traffic state honestly', 
   expect(await screen.findByText('Storefront')).toBeTruthy();
   expect(screen.getByText('—')).toBeTruthy();
   expect(screen.getByText(/Traffic is (temporarily )?unavailable/)).toBeTruthy();
-  expect(screen.getByText(/Event totals may arrive later/)).toBeTruthy();
+  expect(screen.getByText(/Traffic totals may arrive later/)).toBeTruthy();
   expect(screen.getByText(/Sampled estimates/)).toBeTruthy();
 });
 
@@ -152,4 +152,69 @@ it('pauses polling while hidden and requests immediately on resume', async () =>
   act(() => document.dispatchEvent(new Event('visibilitychange')));
   await act(async () => await Promise.resolve());
   expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+it('shows a report-shaped accessible skeleton on first load without fake metrics', () => {
+  setLocation({ hash: `#token=${token}` });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => new Promise(() => {})),
+  );
+  render(<PublicAnalyticsView />);
+  expect(screen.getByRole('status', { name: 'Loading shared analytics' })).toBeVisible();
+  expect(document.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(10);
+  expect(screen.queryByText('0')).toBeNull();
+});
+
+it('shows approved route and source rankings, session totals and event totals without event names', async () => {
+  setLocation({ hash: `#token=${token}` });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({
+        ...payload,
+        breakdowns: {
+          sessions: 14,
+          events: 9,
+          pages: [
+            { name: '/pricing', count: 21 },
+            { name: '/', count: 7 },
+          ],
+          sources: [
+            { name: 'example.com', count: 7 },
+            { name: 'Direct / unknown', count: 21 },
+          ],
+          private_event_names: ['checkout.private'],
+        },
+      }),
+    ),
+  );
+  render(<PublicAnalyticsView />);
+  expect(await screen.findByRole('heading', { name: 'Top routes' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Top sources' })).toBeVisible();
+  expect(screen.getByText('/pricing')).toBeVisible();
+  expect(screen.getByText('example.com')).toBeVisible();
+  expect(screen.getAllByText('75.0%')).toHaveLength(2);
+  expect(within(screen.getByRole('group', { name: 'Sessions' })).getByText('14')).toBeVisible();
+  expect(
+    within(screen.getByRole('group', { name: 'Product events' })).getByText('9'),
+  ).toBeVisible();
+  expect(screen.queryByText('checkout.private')).toBeNull();
+});
+
+it('keeps historical metrics on a failed refresh while hiding the old live count', async () => {
+  vi.useFakeTimers();
+  setLocation({ hash: `#token=${token}` });
+  vi.stubGlobal(
+    'fetch',
+    vi.fn().mockResolvedValueOnce(Response.json(payload)).mockRejectedValue(new Error('offline')),
+  );
+  render(<PublicAnalyticsView />);
+  await act(async () => await Promise.resolve());
+  expect(screen.getByText('4')).toBeVisible();
+  await act(async () => await vi.advanceTimersByTimeAsync(10_000));
+  expect(screen.getAllByText('28')[0]).toBeVisible();
+  expect(screen.queryByText('4')).toBeNull();
+  expect(screen.getByText(/Connection interrupted/)).toBeVisible();
+  expect(screen.queryByRole('status', { name: 'Loading shared analytics' })).toBeNull();
 });

@@ -148,6 +148,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  [data-slot='skeleton'],
   [data-slot='sheet-content'],
   [data-slot='sheet-overlay'],
   .animate-ping {

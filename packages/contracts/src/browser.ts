@@ -28,12 +28,51 @@ export const BrowserEventV1 = z
   );
 export type BrowserEventV1 = z.infer<typeof BrowserEventV1>;
 
+export const BrowserAttribution = z
+  .object({
+    source: z
+      .string()
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .default(''),
+    medium: z
+      .string()
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .default(''),
+    campaign: z
+      .string()
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .default(''),
+    content: z
+      .string()
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .default(''),
+    term: z
+      .string()
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .default(''),
+    entry_path: z
+      .string()
+      .startsWith('/')
+      .max(256)
+      .regex(/^[^?#@\\\s]*$/),
+  })
+  .strict();
+export type BrowserAttribution = z.infer<typeof BrowserAttribution>;
+
 export const BrowserBatchV1 = z
   .object({
     schema_version: z.literal(1),
     batch_id: z.string().uuid(),
     public_key: z.string().startsWith('ahk_pub_').max(256),
     session_id: z.string().uuid(),
+    visitor_id: z.string().uuid().optional(),
+    visit_type: z.enum(['new', 'returning']).optional(),
+    attribution: BrowserAttribution.optional(),
     events: z.array(BrowserEventV1).max(25),
   })
   .strict();
@@ -80,7 +119,8 @@ export type BrowserSummary = z.infer<typeof BrowserSummary>;
 
 export const BrowserReportFilter = z
   .object({
-    range: z.enum(['1h', '24h']).default('24h'),
+    range: z.enum(['1h', '24h', '7d', '30d']).default('24h'),
+    breakdown: z.enum(['audience', 'acquisition', 'technology']).optional(),
     app_id: z
       .string()
       .regex(/^[a-zA-Z0-9-]{1,100}$/)
@@ -96,6 +136,25 @@ export const BrowserReportFilter = z
   })
   .strict();
 export type BrowserReportFilter = z.infer<typeof BrowserReportFilter>;
+const dimensionRows = z
+  .array(z.object({ name: z.string().max(256), count: z.number().finite().nonnegative() }).strict())
+  .max(20);
+export const BrowserAudience = z
+  .object({
+    visitors: z.number().finite().nonnegative(),
+    new_sessions: z.number().finite().nonnegative(),
+    returning_sessions: z.number().finite().nonnegative(),
+    unidentified_sessions: z.number().finite().nonnegative(),
+    channels: dimensionRows,
+    campaigns: dimensionRows,
+    devices: dimensionRows,
+    browsers: dimensionRows,
+    countries: dimensionRows,
+    entry_pages: dimensionRows,
+  })
+  .strict();
+export type BrowserAudience = z.infer<typeof BrowserAudience>;
+
 export const BrowserReport = z
   .object({
     from: z.number().finite().nonnegative(),
@@ -131,6 +190,16 @@ export const BrowserReport = z
       )
       .max(100),
     sessions: z.number().finite().nonnegative(),
+    audience: BrowserAudience.optional(),
+    previous: z
+      .object({
+        pageviews: z.number().finite().nonnegative(),
+        events: z.number().finite().nonnegative(),
+        sessions: z.number().finite().nonnegative(),
+        visitors: z.number().finite().nonnegative(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type BrowserReport = z.infer<typeof BrowserReport>;

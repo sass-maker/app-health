@@ -1,3 +1,4 @@
+import { browserMetadata } from './browser-metadata.js';
 import { readPublicJson } from './public-body.js';
 import { BrowserReportFilter, BrowserBatchV1, type BrowserSummary } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
@@ -14,7 +15,10 @@ import { queryBrowserReport } from './browser-reports.js';
 import { telemetryScope } from './analytics-engine.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import type { SharedAnalytics } from '@app-health/contracts';
-import { queryPublicBrowserTraffic } from './public-browser-report.js';
+import {
+  queryPublicBrowserBreakdowns,
+  queryPublicBrowserTraffic,
+} from './public-browser-report.js';
 
 export interface BrowserEnvironment extends BrowserBindings {
   DB?: D1DatabaseLike;
@@ -33,6 +37,43 @@ function cors(request: Request, response: Response): Response {
   return response;
 }
 
+function validBrowserEvents(input: BrowserBatchV1, now: number): boolean {
+  if (input.attribution && /[@?#\\\s]/.test(decodeURIComponent(input.attribution.entry_path)))
+    return false;
+  return !input.events.some(
+    (event) =>
+      event.timestamp < now - 86_400_000 ||
+      event.timestamp > now + 60_000 ||
+      /[@?#\\\s]/.test(decodeURIComponent(event.path)),
+  );
+}
+async function browserContext(
+  input: BrowserBatchV1,
+  request: Request,
+  app: string,
+  environment: string,
+) {
+  const identity = input.visitor_id
+    ? {
+        visitor_hash: await browserSessionScope(app, environment, `visitor:${input.visitor_id}`),
+        visit_type: input.visit_type,
+      }
+    : {};
+  const attribution = input.attribution ?? {
+    source: input.events[0]?.referrer ?? '',
+    medium: '',
+    campaign: '',
+    content: '',
+    term: '',
+    entry_path: input.events[0]?.path ?? '/',
+  };
+  return {
+    ...identity,
+    attribution: input.attribution,
+    metadata: browserMetadata(request, attribution),
+  };
+}
+
 async function collectBrowser(
   request: Request,
   env: BrowserEnvironment,
@@ -43,14 +84,7 @@ async function collectBrowser(
   if (!parsed.success) return json(400, { error: 'invalid browser batch' });
   const input = parsed.data;
   const now = Date.now();
-  if (
-    input.events.some(
-      (event) =>
-        event.timestamp < now - 86_400_000 ||
-        event.timestamp > now + 60_000 ||
-        /[@?#\\\s]/.test(decodeURIComponent(event.path)),
-    )
-  )
+  if (!validBrowserEvents(input, now))
     return json(400, { error: 'invalid event timestamp or path' });
   const key = await repos.publicKeys?.verifyPublicKey(input.public_key);
   if (!key || !key.allowed_origins.includes(request.headers.get('origin') ?? ''))
@@ -74,6 +108,7 @@ async function collectBrowser(
     batch_id: input.batch_id,
     received_at: now,
     events: input.events,
+    ...(await browserContext(input, request, key.app_id, key.environment_id)),
   };
   return acceptBrowser(batch, input.session_id, env, repos, local);
 }
@@ -272,6 +307,7 @@ export async function sharedBrowserMetrics(
   scope: { workspace: string; app_id: string; environment_id: string },
   env: BrowserEnvironment,
   local: boolean,
+  includeBreakdowns = false,
 ): Promise<Omit<SharedAnalytics, 'project'>> {
   const emptyLive = { active: null, measured_at: Date.now(), ttl_ms: 45000 } as const;
   if (local) {
@@ -297,11 +333,29 @@ export async function sharedBrowserMetrics(
         series,
         pageviews: series.reduce((sum, row) => sum + row.pageviews, 0),
       },
+      ...(includeBreakdowns
+        ? {
+            breakdowns: {
+              sessions: report.sessions,
+              events: report.series.reduce((sum, row) => sum + row.events, 0),
+              pages: report.pages,
+              sources: report.sources,
+            },
+          }
+        : {}),
     };
   }
   const accountId = env.CLOUDFLARE_ACCOUNT_ID ?? '';
   const key = JSON.stringify([scope.app_id, scope.environment_id]);
-  const [live, history] = await Promise.all([
+  const reportPromise = includeBreakdowns
+    ? cachedAnalytics(accountId, scope.workspace, `shared-report:${key}`, () =>
+        queryPublicBrowserBreakdowns(scope.workspace, scope.app_id, scope.environment_id, {
+          accountId,
+          token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
+        }),
+      ).catch(() => null)
+    : Promise.resolve(null);
+  const [live, report] = await Promise.all([
     cachedAnalytics(
       accountId,
       scope.workspace,
@@ -314,18 +368,23 @@ export async function sharedBrowserMetrics(
       undefined,
       10,
     ).catch(() => emptyLive),
-    cachedAnalytics(accountId, scope.workspace, `shared-traffic:${key}`, () =>
-      queryPublicBrowserTraffic(scope.workspace, scope.app_id, scope.environment_id, {
-        accountId,
-        token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
-      }),
-    ).catch(() => null),
+    reportPromise,
   ]);
+  const history = report
+    ? { traffic: report.traffic, sampled: report.sampled }
+    : await cachedAnalytics(accountId, scope.workspace, `shared-traffic:${key}`, () =>
+        queryPublicBrowserTraffic(scope.workspace, scope.app_id, scope.environment_id, {
+          accountId,
+          token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
+        }),
+      ).catch(() => null);
+  const traffic = history?.traffic;
   return {
     source: 'analytics-engine',
-    sampled: history?.sampled ?? false,
+    sampled: report?.sampled ?? history?.sampled ?? false,
     updated_at: Date.now(),
     live,
-    traffic: history?.traffic ?? null,
+    traffic: traffic ?? null,
+    ...(report ? { breakdowns: report.breakdowns } : {}),
   };
 }

@@ -2,8 +2,8 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Public live analytics, embeds and product links",
-  "surfaceMode": "operate",
+  "target": "Owner audience, acquisition and technology reports; stable public analytics",
+  "surfaceMode": "read",
   "mode": "preserve",
   "register": "product",
   "context": {
@@ -15,7 +15,7 @@
     "probes": [],
     "selected": "existing-shadcn-public-analytics",
     "approval": "agent-selected",
-    "before": ".fleet/evidence/public-analytics/before.png",
+    "before": ".fleet/evidence/analytics-report/before.png",
     "library": {
       "strategy": "upstream-first",
       "primary": "shadcn/ui new-york-v4",
@@ -41,12 +41,12 @@
     },
     "contract": {
       "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
-      "purposeSource": "PRODUCT.md and Site Health purposeContract updated from owner clarification on 2026-09-12.",
+      "purposeSource": "PRODUCT.md and saas-maker/catalog/projects.json app-health purposeContract, verified 2026-09-12.",
       "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
       "purposeAlignment": "match",
       "driftNote": "",
       "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
-      "job": "Publish a revocable, aggregate-only live analytics page or embedded panel for one product environment, and move between authorized product dashboards.",
+      "job": "Understand recognized visitors, visits, traffic sources, campaign performance and device mix over selectable periods; read limited live public analytics.",
       "thesis": "A calm editorial product story opens into a precise analytics workspace, using dark graphite surfaces and quiet indigo data marks.",
       "system": "System sans typography with restrained weights, semantic graphite surfaces, indigo actions and data, emerald live state, fine grid lines, and compact evidence labels. Light mode uses warm neutral surfaces with the same semantic hierarchy.",
       "signature": "A shared traffic-and-event pulse chart links the illustrative landing proof to the authenticated report.",
@@ -58,56 +58,74 @@
       {
         "width": 390,
         "theme": "dark",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-dark-390.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-dark-768.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-dark-1440.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-1440.png"
       },
       {
         "width": 390,
         "theme": "light",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-light-390.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-390.png"
       },
       {
         "width": 768,
         "theme": "light",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-light-768.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-768.png"
       },
       {
         "width": 1440,
         "theme": "light",
-        "surface": "public live analytics",
-        "path": ".fleet/evidence/public-analytics/public-light-1440.png"
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-1440.png"
       },
       {
         "width": 390,
         "theme": "dark",
-        "surface": "owner share controls",
-        "path": ".fleet/evidence/public-analytics/sharing-390.png"
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "owner share controls",
-        "path": ".fleet/evidence/public-analytics/sharing-768.png"
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "owner share controls",
-        "path": ".fleet/evidence/public-analytics/sharing-1440.png"
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "owner audience report",
+        "path": ".fleet/evidence/analytics-audience/audience-light-1440.png"
       }
     ],
     "projectCheck": {
@@ -115,7 +133,7 @@
       "status": "pass"
     },
     "critique": {
-      "score": 35,
+      "score": 34,
       "maximum": 40
     },
     "audit": {
@@ -125,7 +143,7 @@
     "unresolved": {
       "p0": 0,
       "p1": 0,
-      "p2": 3
+      "p2": 2
     },
     "detector": {
       "posture": "advisory",
@@ -153,10 +171,10 @@
       },
       "mismatches": []
     },
-    "notes": "Independent Luna visual critique 35/40 and audit 17/20; zero P0/P1. Root inspected final owner mobile and public desktop screenshots, aligned live card to content height, increased mobile action targets, and focused/selects the copy fallback. Remaining P2: sparse traffic presentation, chart disclosure breathing room, and locale-dependent timestamp wrapping. Public link/iframe browser canary passes actual collector ingestion, anonymous aggregate reads and clearing after revocation. Standard shadcn preserve lane; local only. Full repository gate passes, including 101 browser cases, workerd/D1 canaries, actual sample integrations and unchanged coverage/complexity/duplication thresholds. Sequential readiness follow-up: root inspected native setup in dark/mobile and light/desktop; existing shadcn components retained. Full gate passes with 102 browser cases, native workerd checks and real cross-origin viewer SDK canary. Native screenshots are in .fleet/evidence/native/."
+    "notes": "Preserve lane, native shadcn components. Root reviewed final desktop dark and mobile light evidence, corrected duplicate controls, wrong theme capture, mobile KPI density, ranking denominators, and period labels. Critique 34/40 and audit 17/20; zero P0/P1. P2: long-page density and limited comparison visualization. Real local ingestion supplies visitor and campaign report screenshots; all six theme/width captures assert no horizontal overflow. Full pnpm run check passes, including 107 browser cases, workerd/D1 canaries, scoped SQL execution, retry and storage-failure tests, coverage, lint/typecheck, complexity and duplication gates. No new runtime dependency. Identity/report/outbox changes are uncommitted and undeployed; public breakdown migration 0012 remains unapplied. Dedicated server bot report remains tracked in issue58."
   },
   "ownerFeedback": {
     "decision": "agent-selected",
-    "note": "Owner explicitly requested public revocable sharing and live analytics embedded on each product; preserve the established shadcn system."
+    "note": "Owner requested richer analytics on both public and signed-in reports, stable loading, hidden share credential in report UI and maximum efficiency. Preserve standard shadcn."
   }
 }

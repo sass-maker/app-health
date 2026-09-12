@@ -50,11 +50,10 @@ const scope: ShareScope = { workspace: 'workspace-a', app_id: 'app-a', environme
 const otherScope: ShareScope = { ...scope, workspace: 'workspace-b' };
 
 async function migration(db: DatabaseSync) {
-  const sql = await readFile(
-    join(dirname(fileURLToPath(import.meta.url)), '../migrations/0009_analytics_shares.sql'),
-    'utf8',
-  );
-  db.exec(sql);
+  for (const file of ['0009_analytics_shares.sql', '0012_analytics_share_breakdowns.sql'])
+    db.exec(
+      await readFile(join(dirname(fileURLToPath(import.meta.url)), '../migrations', file), 'utf8'),
+    );
 }
 
 async function stores(): Promise<{

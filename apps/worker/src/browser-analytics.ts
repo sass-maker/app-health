@@ -1,6 +1,7 @@
 import {
   PRESENCE_TTL_MS,
   type BrowserEventV1,
+  type BrowserAttribution,
   type BrowserReportFilter,
   type BrowserSummary,
   type PresenceSnapshot,
@@ -30,6 +31,10 @@ export interface CollectedBrowserBatch {
   events: BrowserEventV1[];
   /** Scoped one-way session identifier; raw browser session IDs never persist. */
   session_hash?: string;
+  visitor_hash?: string;
+  visit_type?: 'new' | 'returning';
+  attribution?: BrowserAttribution;
+  metadata?: { channel: string; device: string; browser: string; country: string };
 }
 export interface BrowserBindings {
   BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
@@ -53,6 +58,8 @@ export interface BrowserBindings {
   };
 }
 
+export { projectBrowserBatch } from './browser-projection.js';
+
 /** Credential-free development only; never used as a production fallback. */
 export class LocalBrowserAnalytics {
   private batches = new Map<string, CollectedBrowserBatch>();
@@ -62,7 +69,7 @@ export class LocalBrowserAnalytics {
   >();
   ingest(batch: CollectedBrowserBatch, session?: string): void {
     for (const [id, saved] of this.batches)
-      if (saved.received_at < Date.now() - 86_400_000) this.batches.delete(id);
+      if (saved.received_at < Date.now() - 60 * 86_400_000) this.batches.delete(id);
     const batchKey = `${batch.app_id}/${batch.environment_id}/${batch.batch_id}`;
     if (batch.events.length && !this.batches.has(batchKey)) {
       if (this.batches.size >= 10_000) throw new Error('local analytics capacity exceeded');
@@ -134,7 +141,7 @@ export class LocalBrowserAnalytics {
         sessionGroups.set(key, sessions);
         row.sessions = sessions.size;
       }
-      grouped.set(key, row);
+      if (row.pageviews || row.events) grouped.set(key, row);
     }
     return {
       enabled: true,
@@ -148,35 +155,6 @@ export class LocalBrowserAnalytics {
 }
 
 /** AE is a best-effort, potentially sampled projection; durable archives are authoritative. */
-export function projectBrowserBatch(batch: CollectedBrowserBatch, env: BrowserBindings): void {
-  try {
-    if (!env.BROWSER_ANALYTICS) throw new Error('browser analytical projection missing');
-    for (const event of batch.events)
-      env.BROWSER_ANALYTICS.writeDataPoint({
-        indexes: [batch.workspace],
-        blobs: [
-          batch.app_id,
-          batch.environment_id,
-          event.type,
-          event.path,
-          event.name ?? '',
-          event.referrer,
-          batch.session_hash ?? '',
-        ],
-        doubles: [1, event.timestamp],
-      });
-  } catch {
-    // AE has no per-event acknowledgement. Retrying partial projections can double count.
-    console.error(
-      JSON.stringify({
-        event: 'browser_projection_failed',
-        workspace: batch.workspace,
-        batch_id: batch.batch_id,
-      }),
-    );
-  }
-}
-
 export async function queryBrowserSummary(
   workspace: string,
   options: {

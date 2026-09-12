@@ -1,6 +1,7 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PublicAnalyticsView } from '../src/PublicAnalyticsView.js';
+import { usePublicAnalytics } from '../src/usePublicAnalytics.js';
 
 const tokenA = `ahs_${'a'.repeat(43)}`;
 const tokenB = `ahs_${'b'.repeat(43)}`;
@@ -45,6 +46,23 @@ function setVisibility(value: 'visible' | 'hidden') {
     configurable: true,
     get: () => (hidden ? 'hidden' : 'visible'),
   });
+}
+
+const parseProbe = (body: unknown) => body as typeof payload;
+
+function Probe({ token }: { token: string | null }) {
+  const { state, retry } = usePublicAnalytics(token, parseProbe);
+  return (
+    <div>
+      <output data-testid="state">
+        {state.kind}:
+        {state.kind === 'ready'
+          ? `${state.data.project.name}:${state.refreshing}:${state.stale}`
+          : ''}
+      </output>
+      <button onClick={retry}>retry</button>
+    </div>
+  );
 }
 
 async function flush() {
@@ -92,7 +110,7 @@ it('starts a fresh request on resume and ignores the stale request finalizer', a
   await flush();
 });
 
-it('clears old metrics after a ten second timeout and retries when abort is ignored', async () => {
+it('keeps old metrics during a timeout and marks the report stale before retrying', async () => {
   vi.useFakeTimers();
   setLocation(tokenA);
   setVisibility('visible');
@@ -111,8 +129,8 @@ it('clears old metrics after a ten second timeout and retries when abort is igno
   expect(fetch).toHaveBeenCalledTimes(2);
   await act(async () => vi.advanceTimersByTimeAsync(10_000));
   await flush();
-  expect(screen.queryAllByText('28')).toHaveLength(0);
-  expect(screen.getByRole('alert')).toHaveTextContent(/temporarily unavailable/i);
+  expect(screen.getAllByText('28').length).toBeGreaterThan(0);
+  expect(screen.queryByRole('alert')).toBeNull();
   await act(async () => vi.advanceTimersByTimeAsync(60_000));
   await flush();
   expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(3);
@@ -157,4 +175,66 @@ it('switches to the new hash token and never reuses the old authorization header
     `Bearer ${tokenB}`,
   );
   expect(screen.getAllByText('Lifecycle app').length).toBeGreaterThan(0);
+});
+
+it('keeps the report visible while polling and during a transient failure', async () => {
+  vi.useFakeTimers();
+  setVisibility('visible');
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(payload))
+    .mockRejectedValueOnce(new Error('offline'));
+  vi.stubGlobal('fetch', fetch);
+  render(<Probe token={tokenA} />);
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:false:false');
+  await act(async () => vi.advanceTimersByTimeAsync(10_000));
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:false:true');
+  expect(screen.getByTestId('state')).not.toHaveTextContent('loading');
+});
+
+it('marks retained metrics stale while the tab is hidden', async () => {
+  vi.useFakeTimers();
+  setVisibility('visible');
+  const resumed = deferred<Response>();
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(response(payload))
+    .mockReturnValueOnce(resumed.promise);
+  vi.stubGlobal('fetch', fetch);
+  render(<Probe token={tokenA} />);
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:false:false');
+
+  setVisibility('hidden');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:false:true');
+
+  setVisibility('visible');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:true:true');
+  resumed.resolve(response(payload));
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('ready:Lifecycle app:false:false');
+});
+
+it('invalidates the previous token scope synchronously', async () => {
+  vi.useFakeTimers();
+  setVisibility('visible');
+  const first = deferred<Response>();
+  const second = deferred<Response>();
+  const fetch = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  vi.stubGlobal('fetch', fetch);
+  const view = render(<Probe token={tokenA} />);
+  await flush();
+  first.resolve(response(payload));
+  await flush();
+  expect(screen.getByTestId('state')).toHaveTextContent('Lifecycle app');
+  view.rerender(<Probe token={tokenB} />);
+  expect(screen.getByTestId('state')).toHaveTextContent('loading:');
+  expect(screen.getByTestId('state')).not.toHaveTextContent('Lifecycle app');
+  second.resolve(response(payload));
+  await flush();
 });

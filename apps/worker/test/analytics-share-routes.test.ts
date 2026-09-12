@@ -50,9 +50,18 @@ async function localFixture() {
   return { repos: adapter.asRepositories(), env: {} as BrowserEnvironment };
 }
 
-function ownerRequest(method: string, query = scopeQuery, origin?: string): Request {
+function ownerRequest(
+  method: string,
+  query = scopeQuery,
+  origin?: string,
+  body?: unknown,
+): Request {
   const headers = origin ? { origin } : undefined;
-  return new Request(`http://localhost/v1/analytics/shares?${query}`, { method, headers });
+  return new Request(`http://localhost/v1/analytics/shares?${query}`, {
+    method,
+    headers: body ? { ...headers, 'content-type': 'application/json' } : headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
 }
 
 async function createLocalShare() {
@@ -115,6 +124,73 @@ describe('analytics share owner boundary', () => {
     expect(JSON.stringify(payload)).not.toContain(fixture.body.token);
     await handleAnalyticsShareOwner(
       ownerRequest('DELETE', `${scopeQuery}&id=${fixture.body.share.id}`),
+      fixture.env,
+      owner,
+      fixture.repos,
+      true,
+    );
+  });
+
+  it('defaults to aggregate sharing and supports scoped breakdown opt-in', async () => {
+    const fixture = await localFixture();
+    const created = await handleAnalyticsShareOwner(
+      ownerRequest('POST'),
+      fixture.env,
+      owner,
+      fixture.repos,
+      true,
+    );
+    const body = (await created!.json()) as { share: Record<string, unknown>; token: string };
+    expect(body.share.include_breakdowns).toBe(false);
+    const opted = await handleAnalyticsShareOwner(
+      ownerRequest('POST', scopeQuery, undefined, { include_breakdowns: true }),
+      fixture.env,
+      owner,
+      fixture.repos,
+      true,
+    );
+    const optedBody = (await opted!.json()) as { share: Record<string, unknown>; token: string };
+    expect(optedBody.share.include_breakdowns).toBe(true);
+    expect(
+      (await handleAnalyticsShareOwner(
+        ownerRequest('PATCH', `${scopeQuery}&id=${body.share.id}`, undefined, {
+          include_breakdowns: true,
+        }),
+        fixture.env,
+        owner,
+        fixture.repos,
+        true,
+      ))!.status,
+    ).toBe(200);
+    expect(
+      (await handleAnalyticsShareOwner(
+        ownerRequest('GET', scopeQuery),
+        fixture.env,
+        owner,
+        fixture.repos,
+        true,
+      ))!.status,
+    ).toBe(200);
+    expect(
+      (await handleAnalyticsShareOwner(
+        ownerRequest('PATCH', `${scopeQuery}&id=${body.share.id}`, undefined, {
+          include_breakdowns: false,
+        }),
+        fixture.env,
+        { ...owner, appIds: ['other'] },
+        fixture.repos,
+        true,
+      ))!.status,
+    ).toBe(403);
+    await handleAnalyticsShareOwner(
+      ownerRequest('DELETE', `${scopeQuery}&id=${body.share.id}`),
+      fixture.env,
+      owner,
+      fixture.repos,
+      true,
+    );
+    await handleAnalyticsShareOwner(
+      ownerRequest('DELETE', `${scopeQuery}&id=${optedBody.share.id}`),
       fixture.env,
       owner,
       fixture.repos,
@@ -306,11 +382,13 @@ describe('public analytics share boundary', () => {
 describe('production D1 ownership check', () => {
   it('creates through D1 and invalidates a link after ownership moves', async () => {
     const sqlite = new DatabaseSync(':memory:');
-    const migration = await readFile(
-      join(dirname(fileURLToPath(import.meta.url)), '../migrations/0009_analytics_shares.sql'),
-      'utf8',
-    );
-    sqlite.exec(migration);
+    for (const file of ['0009_analytics_shares.sql', '0012_analytics_share_breakdowns.sql'])
+      sqlite.exec(
+        await readFile(
+          join(dirname(fileURLToPath(import.meta.url)), '../migrations', file),
+          'utf8',
+        ),
+      );
     sqlite.exec(
       'CREATE TABLE apps (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)',
     );

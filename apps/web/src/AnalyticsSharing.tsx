@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Copy, ExternalLink, Link2 } from 'lucide-react';
 import type { AnalyticsShare } from '@app-health/contracts';
 import { Button } from './components/ui/button.js';
@@ -19,10 +19,16 @@ async function shareRequest(
   url: string,
   ownerToken: string,
   method = 'GET',
+  payload?: Record<string, boolean>,
 ): Promise<{ shares?: AnalyticsShare[]; share?: AnalyticsShare; token?: string }> {
+  const headers: Record<string, string> = ownerToken
+    ? { authorization: `Bearer ${ownerToken}` }
+    : {};
+  if (payload) headers['content-type'] = 'application/json';
   const response = await fetch(url, {
     method,
-    headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
+    headers,
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
   });
   const body = (await response.json()) as {
     error?: string;
@@ -120,58 +126,91 @@ export function AnalyticsSharing({
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [includeBreakdowns, setIncludeBreakdowns] = useState(false);
   const [revision, setRevision] = useState(0);
+  const scope = `${project.appId}/${project.environmentId}/${ownerToken}`;
+  const scopeRef = useRef(scope);
+  scopeRef.current = scope;
   useEffect(() => {
     let cancelled = false;
     setShares([]);
     setCreated(null);
     setError('');
     setLoading(true);
+    setIncludeBreakdowns(false);
+    const requestScope = scope;
     void shareRequest(endpoint(project), ownerToken)
       .then((body) => {
-        if (!cancelled) setShares(body.shares ?? []);
+        if (!cancelled && scopeRef.current === requestScope) setShares(body.shares ?? []);
       })
       .catch((cause) => {
-        if (!cancelled)
+        if (!cancelled && scopeRef.current === requestScope)
           setError(cause instanceof Error ? cause.message : 'Sharing is unavailable.');
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && scopeRef.current === requestScope) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [project.appId, project.environmentId, ownerToken, revision]);
+  }, [project.appId, project.environmentId, ownerToken, revision, scope]);
   async function create() {
+    const requestScope = scope;
     setPending(true);
     setError('');
     try {
-      const body = await shareRequest(endpoint(project), ownerToken, 'POST');
+      const body = await shareRequest(endpoint(project), ownerToken, 'POST', {
+        include_breakdowns: includeBreakdowns,
+      });
       if (!body.share || !body.token || !/^ahs_[A-Za-z0-9_-]{43}$/.test(body.token))
         throw new Error(
           'The public link could not be read. Refresh the link list before retrying.',
         );
+      if (scopeRef.current !== requestScope) return;
       setCreated({ id: body.share.id, token: body.token });
       setShares((current) => [body.share!, ...current]);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create a link.');
+      if (scopeRef.current === requestScope)
+        setError(cause instanceof Error ? cause.message : 'Could not create a link.');
     } finally {
-      setPending(false);
+      if (scopeRef.current === requestScope) setPending(false);
     }
   }
   async function revoke(id: string) {
+    const requestScope = scope;
     setPending(true);
     setError('');
     try {
       await shareRequest(`${endpoint(project)}&id=${encodeURIComponent(id)}`, ownerToken, 'DELETE');
+      if (scopeRef.current !== requestScope) return;
       setShares((current) =>
         current.map((share) => (share.id === id ? { ...share, revoked_at: Date.now() } : share)),
       );
       if (created?.id === id) setCreated(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not revoke the link.');
+      if (scopeRef.current === requestScope)
+        setError(cause instanceof Error ? cause.message : 'Could not revoke the link.');
     } finally {
-      setPending(false);
+      if (scopeRef.current === requestScope) setPending(false);
+    }
+  }
+  async function updateBreakdowns(id: string, value: boolean) {
+    const requestScope = scope;
+    setPending(true);
+    setError('');
+    try {
+      await shareRequest(`${endpoint(project)}&id=${encodeURIComponent(id)}`, ownerToken, 'PATCH', {
+        include_breakdowns: value,
+      });
+      if (scopeRef.current !== requestScope) return;
+      setShares((current) =>
+        current.map((share) => (share.id === id ? { ...share, include_breakdowns: value } : share)),
+      );
+    } catch (cause) {
+      if (scopeRef.current === requestScope)
+        setError(cause instanceof Error ? cause.message : 'Could not update the public link.');
+    } finally {
+      if (scopeRef.current === requestScope) setPending(false);
     }
   }
   return (
@@ -181,10 +220,28 @@ export function AnalyticsSharing({
         <CardDescription>
           Let visitors see {project.name}’s live sessions and 24-hour traffic on your website. This
           shares {project.environment} only. Logs, keys, event names and other projects stay
-          private.
+          private. You can optionally share aggregate sessions, event totals, top routes and
+          referrer hosts.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <label className="flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm">
+          <input
+            id="analytics-share-breakdowns-create"
+            type="checkbox"
+            checked={includeBreakdowns}
+            onChange={(event) => setIncludeBreakdowns(event.currentTarget.checked)}
+            disabled={pending || loading}
+            className="mt-0.5 size-4 accent-primary"
+          />
+          <span>
+            <span className="font-medium">Share top routes and sources</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              Includes aggregate sessions, event totals, top routes and referrer hosts. Event names,
+              logs, keys and identities stay private.
+            </span>
+          </span>
+        </label>
         <Button
           disabled={
             pending || loading || shares.filter((share) => share.revoked_at === null).length >= 5
@@ -223,16 +280,33 @@ export function AnalyticsSharing({
                 </p>
               </div>
               {share.revoked_at === null ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-h-11 sm:min-h-0"
-                  disabled={pending}
-                  aria-label={`Revoke link ${share.id.slice(0, 8)}`}
-                  onClick={() => void revoke(share.id)}
-                >
-                  Revoke
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label
+                    htmlFor={`analytics-share-breakdowns-${share.id}`}
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                  >
+                    <input
+                      id={`analytics-share-breakdowns-${share.id}`}
+                      type="checkbox"
+                      checked={share.include_breakdowns === true}
+                      onChange={(event) =>
+                        void updateBreakdowns(share.id, event.currentTarget.checked)
+                      }
+                      disabled={pending}
+                    />
+                    Routes and sources
+                  </label>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="min-h-11 sm:min-h-0"
+                    disabled={pending}
+                    aria-label={`Revoke link ${share.id.slice(0, 8)}`}
+                    onClick={() => void revoke(share.id)}
+                  >
+                    Revoke
+                  </Button>
+                </div>
               ) : (
                 <Badge variant="secondary">Revoked</Badge>
               )}

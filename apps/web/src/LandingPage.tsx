@@ -1,3 +1,5 @@
+import { useEffect } from 'react';
+import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
   ArrowRight,
@@ -316,7 +318,12 @@ function HonestStatus(): JSX.Element {
   );
 }
 
-export function LandingPage(): JSX.Element {
+export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
+  useEffect(() => {
+    const controller = new AbortController();
+    void redirectSignedInLanding(props.fetchImpl ?? fetch, props.navigate, controller.signal);
+    return () => controller.abort();
+  }, [props.fetchImpl, props.navigate]);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur-xl">

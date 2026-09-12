@@ -1,3 +1,4 @@
+import { projectBrowserBatch } from './browser-projection.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 
@@ -9,9 +10,12 @@ const MAX_STAGE_BATCHES = 100;
 const MAX_BATCH_BYTES = 64 * 1024;
 const FLUSH_DELAY = 60_000;
 const DEDUPE_RETENTION = 31 * 86_400_000;
+const PROJECTION_BATCHES = 50;
+const PROJECTION_MAX_BACKOFF = 60 * 60_000;
 
 export interface BrowserArchiveEnvironment {
-  BROWSER_HISTORY: Pick<R2Bucket, 'put'>;
+  BROWSER_HISTORY: Pick<R2Bucket, 'put' | 'list' | 'delete'>;
+  BROWSER_ANALYTICS?: Pick<AnalyticsEngineDataset, 'writeDataPoint'>;
 }
 type BatchIdentity = Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>;
 export interface BrowserArchiveStageResult {
@@ -32,6 +36,8 @@ type PendingRow = {
   payload: string;
   bytes: number;
 };
+type ProjectionRow = { identity: string; payload: string; attempts: number };
+
 type SegmentRow = {
   id: string;
   object_key: string;
@@ -52,7 +58,14 @@ async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch
   const bytes = new TextEncoder().encode(`${payload}\n`).byteLength;
   if (bytes > MAX_BATCH_BYTES) throw new Error('Archive batch exceeds 64 KiB');
   // Collector retries may update received_at without changing the accepted events.
-  const content = JSON.stringify([...names, batch.events]);
+  const content = JSON.stringify([
+    ...names,
+    batch.events,
+    batch.session_hash,
+    batch.visitor_hash,
+    batch.visit_type,
+    batch.attribution,
+  ]);
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
   const fingerprint = Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join(
     '',
@@ -87,6 +100,24 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         added_at INTEGER NOT NULL, segment_id TEXT
       );
       CREATE INDEX IF NOT EXISTS archive_pending_segment ON archive_pending(segment_id, added_at);
+      CREATE TABLE IF NOT EXISTS projection_pending (
+        identity TEXT PRIMARY KEY, payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at INTEGER NOT NULL, bytes INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS projection_pending_due ON projection_pending(next_attempt_at, identity);
+      CREATE TABLE IF NOT EXISTS projection_counts (
+        id INTEGER PRIMARY KEY CHECK (id = 1), pending_batches INTEGER NOT NULL,
+        pending_bytes INTEGER NOT NULL
+      );
+      INSERT OR IGNORE INTO projection_counts (id, pending_batches, pending_bytes) VALUES (1, 0, 0);
+      CREATE TRIGGER IF NOT EXISTS projection_pending_insert AFTER INSERT ON projection_pending BEGIN
+        UPDATE projection_counts SET pending_batches = pending_batches + 1,
+          pending_bytes = pending_bytes + NEW.bytes WHERE id = 1;
+      END;
+      CREATE TRIGGER IF NOT EXISTS projection_pending_delete AFTER DELETE ON projection_pending BEGIN
+        UPDATE projection_counts SET pending_batches = pending_batches - 1,
+          pending_bytes = pending_bytes - OLD.bytes WHERE id = 1;
+      END;
       CREATE TABLE IF NOT EXISTS archive_segments (id TEXT PRIMARY KEY, object_key TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS archive_counts (
         id INTEGER PRIMARY KEY CHECK (id = 1), pending_batches INTEGER NOT NULL,
@@ -129,8 +160,15 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     this.prune();
     const fresh = this.newBatches(batches);
     const stats = this.status();
+    const projection = this.ctx.storage.sql
+      .exec<{ pending_batches: number; pending_bytes: number }>(
+        'SELECT pending_batches, pending_bytes FROM projection_counts WHERE id = 1',
+      )
+      .one();
     const bytes = fresh.reduce((total, batch) => total + batch.bytes, 0);
     if (
+      projection.pending_batches + fresh.length > MAX_PENDING_BATCHES ||
+      projection.pending_bytes + bytes > MAX_PENDING_BYTES ||
       stats.pending_batches + fresh.length > MAX_PENDING_BATCHES ||
       stats.pending_bytes + bytes > MAX_PENDING_BYTES ||
       stats.ledger_batches + fresh.length > MAX_LEDGER_BATCHES
@@ -148,6 +186,13 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         batch.payload,
         batch.bytes,
         Date.now(),
+      );
+      this.ctx.storage.sql.exec(
+        'INSERT INTO projection_pending (identity, payload, next_attempt_at, bytes) VALUES (?, ?, ?, ?) ON CONFLICT(identity) DO UPDATE SET payload = excluded.payload, attempts = 0, next_attempt_at = excluded.next_attempt_at, bytes = excluded.bytes',
+        batch.identity,
+        batch.payload,
+        Date.now(),
+        batch.bytes,
       );
     }
     return {
@@ -191,7 +236,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
 
   private prune(): void {
     this.ctx.storage.sql.exec(
-      'DELETE FROM archive_seen WHERE identity IN (SELECT identity FROM archive_seen WHERE expires_at <= ? ORDER BY expires_at LIMIT 1000)',
+      'DELETE FROM archive_seen WHERE identity IN (SELECT seen.identity FROM archive_seen seen LEFT JOIN projection_pending projection ON projection.identity = seen.identity WHERE seen.expires_at <= ? AND projection.identity IS NULL ORDER BY seen.expires_at LIMIT 1000)',
       Date.now(),
     );
   }
@@ -203,11 +248,16 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       .exec<{ retry_after: number }>('SELECT retry_after FROM archive_meta WHERE id = 1')
       .one();
     const expiry = this.ctx.storage.sql
-      .exec<{ expiry: number | null }>('SELECT MIN(expires_at) AS expiry FROM archive_seen')
+      .exec<{ expiry: number | null }>(
+        'SELECT MIN(seen.expires_at) AS expiry FROM archive_seen seen LEFT JOIN projection_pending projection ON projection.identity = seen.identity WHERE projection.identity IS NULL',
+      )
       .one().expiry;
     const pending = this.ctx.storage.sql
       .exec<{ oldest: number | null }>('SELECT MIN(added_at) AS oldest FROM archive_pending')
       .one().oldest;
+    const projection = this.ctx.storage.sql
+      .exec<{ due: number | null }>('SELECT MIN(next_attempt_at) AS due FROM projection_pending')
+      .one().due;
     const flushAt =
       pending === null
         ? Infinity
@@ -215,7 +265,10 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
             meta.retry_after,
             stats.pending_bytes >= FLUSH_BYTES ? Date.now() : pending + FLUSH_DELAY,
           );
-    const target = Math.max(Date.now() + 1000, Math.min(expiry ?? Infinity, flushAt));
+    const target = Math.max(
+      Date.now() + 1000,
+      Math.min(expiry ?? Infinity, flushAt, projection ?? Infinity),
+    );
     if (Number.isFinite(target) && (current === null || target < current))
       await this.ctx.storage.setAlarm(target);
   }
@@ -308,11 +361,47 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     const retry = this.ctx.storage.sql
       .exec<{ retry_after: number }>('SELECT retry_after FROM archive_meta WHERE id = 1')
       .one().retry_after;
+    await this.projectPending();
     if (retry > Date.now()) {
       await this.schedule();
       return;
     }
-    await this.flush();
+    const oldest = this.ctx.storage.sql
+      .exec<{ oldest: number | null }>('SELECT MIN(added_at) AS oldest FROM archive_pending')
+      .one().oldest;
+    if (
+      oldest !== null &&
+      (oldest + FLUSH_DELAY <= Date.now() || this.status().pending_bytes >= FLUSH_BYTES)
+    )
+      await this.flush();
     await this.schedule();
+  }
+
+  private async projectPending(): Promise<void> {
+    const rows = this.ctx.storage.sql
+      .exec<ProjectionRow>(
+        'SELECT identity, payload, attempts FROM projection_pending WHERE next_attempt_at <= ? ORDER BY next_attempt_at, identity LIMIT ?',
+        Date.now(),
+        PROJECTION_BATCHES,
+      )
+      .toArray();
+    for (const row of rows) {
+      try {
+        projectBrowserBatch(JSON.parse(row.payload) as CollectedBrowserBatch, this.env);
+        this.ctx.storage.sql.exec(
+          'DELETE FROM projection_pending WHERE identity = ?',
+          row.identity,
+        );
+      } catch {
+        const attempts = Math.min(row.attempts + 1, 31);
+        const backoff = Math.min(PROJECTION_MAX_BACKOFF, 1000 * 2 ** Math.min(attempts, 10));
+        this.ctx.storage.sql.exec(
+          'UPDATE projection_pending SET attempts = ?, next_attempt_at = ? WHERE identity = ?',
+          attempts,
+          Date.now() + backoff,
+          row.identity,
+        );
+      }
+    }
   }
 }

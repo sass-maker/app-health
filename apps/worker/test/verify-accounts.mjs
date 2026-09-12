@@ -323,7 +323,7 @@ try {
   assert.equal(reportBody.source, 'analytics-engine');
   assert.equal(reportBody.series.length, 24);
   assert.deepEqual(reportBody.events, []);
-  assert.equal((await request('/v1/analytics/report?range=7d')).status, 400);
+  assert.equal((await request('/v1/analytics/report?range=invalid')).status, 400);
   assert.equal((await request('/v1/analytics/report', undefined, false)).status, 401);
   const sharePath = `/v1/analytics/shares?app_id=${project.app.id}&environment_id=${project.environment.id}`;
   const shareCreation = await request(sharePath, {});

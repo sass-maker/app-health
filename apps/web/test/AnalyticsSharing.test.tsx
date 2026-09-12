@@ -23,7 +23,10 @@ it('creates a scope-specific public link and embed, exposes copy fallback, then 
   const request = vi.fn(async (url: string, init: RequestInit) => {
     expect(url).toContain('app_id=app-one&environment_id=prod-one');
     expect(new Headers(init.headers).get('authorization')).toBe('Bearer owner-only');
-    if (init.method === 'POST') return Response.json({ share, token }, { status: 201 });
+    if (init.method === 'POST') {
+      expect(JSON.parse(String(init.body))).toEqual({ include_breakdowns: false });
+      return Response.json({ share, token }, { status: 201 });
+    }
     if (init.method === 'DELETE') return Response.json({ revoked: true });
     return Response.json({ shares: [] });
   });
@@ -50,6 +53,44 @@ it('creates a scope-specific public link and embed, exposes copy fallback, then 
   fireEvent.click(screen.getByRole('button', { name: 'Revoke link one-link' }));
   expect(await screen.findByText('Revoked', { exact: true })).toBeVisible();
   expect(screen.queryByLabelText('Public page')).toBeNull();
+});
+
+it('requires an explicit opt-in for breakdowns and updates an active share', async () => {
+  const requests: Array<{ method?: string; body?: string }> = [];
+  const detailed = { ...share, include_breakdowns: false };
+  const createdShare = { ...detailed, id: 'two-link-id' };
+  const request = vi.fn(async (_url: string, init: RequestInit) => {
+    requests.push({ method: init.method, body: init.body as string | undefined });
+    if (init.method === 'POST')
+      return Response.json({ share: createdShare, token }, { status: 201 });
+    if (init.method === 'PATCH')
+      return Response.json({ share: { ...detailed, include_breakdowns: true } });
+    return Response.json({ shares: [detailed] });
+  });
+  vi.stubGlobal('fetch', request);
+  render(<AnalyticsSharing project={project} ownerToken="owner-only" />);
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Create public link' })).toBeEnabled(),
+  );
+  const createChoice = screen.getByRole('checkbox', { name: /Share top routes and sources/i });
+  fireEvent.click(createChoice);
+  fireEvent.click(screen.getByRole('button', { name: 'Create public link' }));
+  await screen.findByLabelText('Public page');
+  expect(JSON.parse(requests.find((entry) => entry.method === 'POST')?.body ?? '{}')).toEqual({
+    include_breakdowns: true,
+  });
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Create public link' })).toBeEnabled(),
+  );
+  const activeChoice = document.getElementById(
+    'analytics-share-breakdowns-one-link-id',
+  ) as HTMLInputElement | null;
+  expect(activeChoice).toBeTruthy();
+  fireEvent.click(activeChoice!);
+  await waitFor(() => expect(requests.some((entry) => entry.method === 'PATCH')).toBe(true));
+  expect(JSON.parse(requests.find((entry) => entry.method === 'PATCH')?.body ?? '{}')).toEqual({
+    include_breakdowns: true,
+  });
 });
 it('shows load failure without claiming sharing is off, then retries', async () => {
   const request = vi

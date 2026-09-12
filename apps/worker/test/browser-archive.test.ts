@@ -69,10 +69,22 @@ function batch(id: string, extra = '') {
 async function harness() {
   const path = await mkdtemp(join(tmpdir(), 'app-health-archive-'));
   const source = await readFile(new URL('../src/browser-archive.ts', import.meta.url), 'utf8');
+  const projection = await readFile(
+    new URL('../src/browser-projection.ts', import.meta.url),
+    'utf8',
+  );
+  const archiveSource = source.replace(
+    "import { projectBrowserBatch } from './browser-projection.js';",
+    '',
+  );
   const script =
-    ts.transpileModule(source, {
+    ts.transpileModule(projection, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-    }).outputText + wrapper;
+    }).outputText +
+    ts.transpileModule(archiveSource, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    }).outputText +
+    wrapper;
   const start = () =>
     new Miniflare({
       modules: true,
@@ -120,7 +132,7 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     expect(full.alarm).toBeLessThan(Date.now() + 2000);
     expect((await app.call('flush')).body.error).toBe('R2 unavailable');
     const retry = (await app.call('inspect')).body;
-    expect(retry.alarm).toBeGreaterThan(Date.now() + 59_000);
+    expect(retry.alarm).toBeGreaterThan(Date.now());
     expect(
       (
         await app.call(
@@ -169,8 +181,8 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     });
     const state = (await app.call('inspect')).body;
     expect(state.pending_batches).toBe(1);
-    expect(state.alarm).toBeGreaterThanOrEqual(before + 59_000);
-    expect(state.alarm).toBeLessThan(Date.now() + 61_000);
+    expect(state.alarm).toBeGreaterThan(before);
+    expect(state.alarm).toBeLessThan(Date.now() + 2_000);
     expect((await app.call('stage', [{ ...batch('one'), received_at: 999 }])).body.duplicates).toBe(
       1,
     );
@@ -240,7 +252,7 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     expect(state.expiry).toBeGreaterThan(Date.now() + 30 * 86_400_000);
     expect((await app.call('stage', [batch('one')])).body.duplicates).toBe(1);
     await app.call('expire');
-    expect((await app.call('stage', [batch('one')])).body.accepted).toHaveLength(1);
+    expect((await app.call('stage', [batch('one')])).body.duplicates).toBe(1);
   }, 30_000);
 
   it('rejects oversize and whole calls at the pending batch cap without partial acceptance', async () => {
@@ -279,7 +291,7 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
   }, 30_000);
 });
 
-function unitArchive() {
+function unitArchive(withAnalytics = false) {
   const db = new DatabaseSync(':memory:');
   const statements: string[] = [];
   let alarm: number | null = null;
@@ -290,6 +302,7 @@ function unitArchive() {
     objects.set(key, data);
     return { key };
   });
+  const writeDataPoint = vi.fn();
   const storage = {
     sql: {
       exec(query: string, ...bindings: (string | number | null)[]) {
@@ -328,7 +341,8 @@ function unitArchive() {
   };
   const create = () =>
     new BrowserArchive(ctx as unknown as DurableObjectState, {
-      BROWSER_HISTORY: { put } as unknown as Pick<R2Bucket, 'put'>,
+      BROWSER_HISTORY: { put } as unknown as Pick<R2Bucket, 'put' | 'list' | 'delete'>,
+      ...(withAnalytics ? { BROWSER_ANALYTICS: { writeDataPoint } } : {}),
     });
   const archive = create();
   return {
@@ -338,6 +352,7 @@ function unitArchive() {
     statements,
     objects,
     put,
+    writeDataPoint,
     storage,
     ready: () => ready,
     clearAlarm: () => {
@@ -390,6 +405,7 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     expect(unit.put).toHaveBeenCalledTimes(1);
     expect(restarted.status()).toEqual({ pending_batches: 0, pending_bytes: 0, ledger_batches: 1 });
     await restarted.flush();
+    unit.db.exec('DELETE FROM projection_pending');
     unit.db.exec('UPDATE archive_seen SET expires_at = 1');
     unit.clearAlarm();
     await restarted.alarm();
@@ -413,6 +429,7 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     expect(failed).toMatchObject({ pending_batches: 1, ledger_batches: 1 });
     expect(unit.put.mock.calls[0][0]).toBe(unit.put.mock.calls[1][0]);
     await unit.archive.alarm();
+    await unit.archive.flush();
     expect(unit.archive.status().pending_bytes).toBe(0);
     expect(
       [...unit.objects.values()].map(
@@ -463,11 +480,111 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     expect(unit.archive.status().pending_batches).toBeGreaterThan(0);
     const raw = gunzipSync(Buffer.from([...unit.objects.values()][0]));
     expect(raw.byteLength).toBeLessThanOrEqual(1024 * 1024);
-    await unit.archive.alarm();
+    await unit.archive.flush();
     expect(unit.archive.status()).toMatchObject({
       pending_batches: 0,
       pending_bytes: 0,
       ledger_batches: 20,
     });
+  });
+});
+
+describe('BrowserArchive projection outbox', () => {
+  it('retains projection work when the analytics binding is unavailable', async () => {
+    const unit = unitArchive();
+    await unit.ready();
+    await unit.archive.stage([collected('missing-binding')]);
+    expect(unit.db.prepare('SELECT COUNT(*) AS count FROM projection_pending').get()!.count).toBe(
+      1,
+    );
+    unit.db.close();
+  });
+
+  it('runs an early projection alarm without flushing a tiny R2 segment', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    await unit.archive.stage([collected('early-projection')]);
+    await unit.archive.alarm();
+    expect(unit.writeDataPoint!).toHaveBeenCalledTimes(1);
+    expect(unit.put).not.toHaveBeenCalled();
+    unit.db.close();
+  });
+
+  it('rejects new projection work at its independent bounded backlog', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    unit.db.exec(
+      "WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 1024) INSERT INTO projection_pending(identity, payload, attempts, next_attempt_at, bytes) SELECT 'full-' || value, '{}', 0, 0, 1 FROM n",
+    );
+    unit.db.exec('UPDATE projection_counts SET pending_batches = 1024, pending_bytes = 8388608');
+    await expect(unit.archive.stage([collected('backlog-full')])).rejects.toThrow('capacity');
+    unit.db.close();
+  });
+
+  it('deduplicates metadata changes but rejects immutable visitor changes', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    const original = collected('fingerprint');
+    await unit.archive.stage([
+      { ...original, metadata: { channel: '', device: 'mobile', browser: '', country: '' } },
+    ]);
+    expect(
+      (
+        await unit.archive.stage([
+          { ...original, metadata: { channel: '', device: 'desktop', browser: '', country: '' } },
+        ])
+      ).duplicates,
+    ).toBe(1);
+    await expect(
+      unit.archive.stage([{ ...original, visitor_hash: 'changed-visitor' }]),
+    ).rejects.toThrow('identity reused');
+    unit.db.close();
+  });
+
+  it('does not spin expiry alarms for projection-pending identities', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    await unit.archive.stage([collected('expired-projection')]);
+    unit.db.exec('UPDATE archive_seen SET expires_at = 1');
+    unit.db
+      .prepare('UPDATE projection_pending SET next_attempt_at = ?')
+      .run(Date.now() + 60 * 60_000);
+    unit.clearAlarm();
+    await unit.archive.alarm();
+    expect(await unit.storage.getAlarm()).toBeGreaterThan(Date.now() + 59_000);
+    unit.db.close();
+  });
+
+  it('retains staged projection work across restart and clears it after delivery', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    await unit.archive.stage([collected('outbox')]);
+    expect(unit.db.prepare('SELECT COUNT(*) AS count FROM projection_pending').get()!.count).toBe(
+      1,
+    );
+    const restarted = unit.create();
+    await unit.ready();
+    await restarted.alarm();
+    expect(unit.writeDataPoint!).toHaveBeenCalledTimes(1);
+    expect(unit.db.prepare('SELECT COUNT(*) AS count FROM projection_pending').get()!.count).toBe(
+      0,
+    );
+    unit.db.close();
+  });
+
+  it('keeps failed projection work for a bounded backoff retry', async () => {
+    const unit = unitArchive(true);
+    await unit.ready();
+    unit.writeDataPoint!.mockImplementationOnce(() => {
+      throw new Error('projection unavailable');
+    });
+    await unit.archive.stage([collected('retry-projection')]);
+    await unit.archive.alarm();
+    const row = unit.db
+      .prepare('SELECT attempts, next_attempt_at FROM projection_pending')
+      .get() as { attempts: number; next_attempt_at: number };
+    expect(row.attempts).toBe(1);
+    expect(row.next_attempt_at).toBeGreaterThan(Date.now());
+    unit.db.close();
   });
 });

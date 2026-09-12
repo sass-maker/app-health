@@ -61,6 +61,9 @@ describe('analytics visibility lifecycle', () => {
     hidden = true;
     act(() => document.dispatchEvent(new Event('visibilitychange')));
     expect(Socket.instances[0].close).toHaveBeenCalledOnce();
+    const requestsBeforeHidden = fetch.mock.calls.length;
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(fetch).toHaveBeenCalledTimes(requestsBeforeHidden);
     act(() => Socket.instances[0].onclose?.({ code: 1006 }));
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
     expect(Socket.instances).toHaveLength(1);
@@ -82,6 +85,7 @@ describe('analytics visibility lifecycle', () => {
     let hidden = true;
     vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
     const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(init?.cache).toBe('no-store');
       if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
       return Response.json(report);
     });
@@ -175,6 +179,23 @@ describe('analytics visibility lifecycle', () => {
       await Promise.resolve();
     });
     expect(view.result.current.report).toEqual(report);
+    view.unmount();
+  });
+
+  it('keeps the last report visible during a manual refresh', async () => {
+    let resolveRefresh!: (value: Response) => void;
+    const refresh = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json(report)).mockReturnValueOnce(refresh);
+    vi.stubGlobal('fetch', fetch);
+    const view = renderHook(() => useBrowserReport('owner', '1h', '', '', ''));
+    await waitFor(() => expect(view.result.current.report).toEqual(report));
+    act(() => view.result.current.reload());
+    expect(view.result.current.report).toEqual(report);
+    expect(view.result.current.loading).toBe(false);
+    resolveRefresh(Response.json(report));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     view.unmount();
   });
 

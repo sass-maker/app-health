@@ -1,8 +1,4 @@
-import {
-  projectBrowserBatch,
-  type BrowserBindings,
-  type CollectedBrowserBatch,
-} from './browser-analytics.js';
+import type { BrowserBindings, CollectedBrowserBatch } from './browser-analytics.js';
 
 /** Fixed shard count is part of the dedupe contract; do not change inside its retention window. */
 export async function browserArchiveShard(batch: CollectedBrowserBatch): Promise<string> {
@@ -44,7 +40,7 @@ async function stageGroup(
     );
     const accepted = new Set(result.accepted.map(identity));
     for (const message of messages) {
-      if (accepted.delete(identity(message.body))) projectBrowserBatch(message.body, env);
+      accepted.delete(identity(message.body));
       message.ack();
     }
   } catch {

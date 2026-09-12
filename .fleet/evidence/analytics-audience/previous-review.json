@@ -1,0 +1,144 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "Public analytics report, rankings and stable loading",
+  "surfaceMode": "read",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": ["shadcn/ui new-york-v4 registry"],
+    "probes": [],
+    "selected": "existing-shadcn-public-analytics",
+    "approval": "agent-selected",
+    "before": ".fleet/evidence/analytics-report/before.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "shadcn/ui new-york-v4",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/select.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/chart.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/sidebar.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/sheet.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/skeleton.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/alert.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json"
+      ],
+      "runtime": "selective",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md and saas-maker/catalog/projects.json app-health purposeContract, verified 2026-09-12.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
+      "job": "Read live sessions, 24-hour traffic and owner-approved top routes and sources in a stable report that embeds on a product.",
+      "thesis": "A calm editorial product story opens into a precise analytics workspace, using dark graphite surfaces and quiet indigo data marks.",
+      "system": "System sans typography with restrained weights, semantic graphite surfaces, indigo actions and data, emerald live state, fine grid lines, and compact evidence labels. Light mode uses warm neutral surfaces with the same semantic hierarchy.",
+      "signature": "A shared traffic-and-event pulse chart links the illustrative landing proof to the authenticated report.",
+      "risk": "Anonymous sharing is an intentional disclosure; dedicated read credentials and visible scope keep private telemetry outside the public surface."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "theme": "dark",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "dark",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "public analytics report",
+        "path": ".fleet/evidence/analytics-report/report-light-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "mise exec node@24.20.0 -- pnpm run check",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 34,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 17,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0,
+      "p2": 2
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    },
+    "notes": "Independent agent review: critique 34/40, accessibility audit 17/20, no P0/P1. Root inspected desktop dark, mobile light, tightened KPI density and ranking spacing, and verified real local ingestion and public opt-in with Playwright. Remaining P2: sparse mobile chart time labels and stronger ranking column narration. Before receipt retained under analytics-report/previous-review.json. Initial loading uses shadcn Skeleton; refresh retains historical data with stale live counts suppressed. No new runtime dependencies. Release and additive migration 0012 remain pending. Full pnpm run check passed including 106 browser cases, local workerd/D1 canaries, SDK compatibility, coverage, lint/typecheck and unchanged complexity/duplication gates."
+  },
+  "ownerFeedback": {
+    "decision": "agent-selected",
+    "note": "Owner requested richer analytics on both public and signed-in reports, stable loading, hidden share credential in report UI and maximum efficiency. Preserve standard shadcn."
+  }
+}

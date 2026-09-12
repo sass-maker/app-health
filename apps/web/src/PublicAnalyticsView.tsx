@@ -1,10 +1,11 @@
+import { AnalyticsReportLoading } from './AnalyticsReportLoading.js';
 import {
   parseSharedAnalytics,
   type SharedAnalytics as PublicAnalytics,
 } from '@app-health/contracts/sharing';
 import { useEffect, useMemo, useState } from 'react';
 import { usePublicAnalytics } from './usePublicAnalytics.js';
-import { AnalyticsChart } from './AnalyticsChart.js';
+import { PublicAnalyticsReport } from './PublicAnalyticsReport.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
@@ -14,10 +15,6 @@ const TOKEN_PATTERN = /^ahs_[A-Za-z0-9_-]{43}$/;
 function tokenFromLocation(): string | null {
   const value = new URLSearchParams(window.location.hash.slice(1)).get('token');
   return value && TOKEN_PATTERN.test(value) ? value : null;
-}
-
-function formatTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function PublicHeader({ data, embed }: { data: PublicAnalytics | null; embed: boolean }) {
@@ -77,55 +74,6 @@ function PublicUnavailable({ reason, retry }: { reason: 'link' | 'temporary'; re
     </Card>
   );
 }
-function PublicMetrics({ data, embed }: { data: PublicAnalytics; embed: boolean }) {
-  const series = data.traffic?.series.map((row) => ({ ...row, events: 0 })) ?? [];
-  return (
-    <div className="space-y-4">
-      <section
-        className="grid items-start gap-4 sm:grid-cols-[minmax(0,1fr)_2fr]"
-        aria-label="Live and traffic analytics"
-      >
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Live sessions</CardDescription>
-            <CardTitle className="text-4xl tabular-nums">{data.live.active ?? '—'}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-xs leading-relaxed text-muted-foreground">
-            <span
-              className={`mr-1 inline-block size-2 rounded-full ${data.live.active === null ? 'bg-muted-foreground' : 'bg-emerald-500'}`}
-              aria-hidden="true"
-            />
-            {data.live.active === null
-              ? 'Live count unavailable'
-              : 'Active within the last 45 seconds'}
-            <p className="mt-2">Refreshes every 10 seconds</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-1">
-            <CardDescription>Page views · last 24 hours</CardDescription>
-            <CardTitle className="text-3xl tabular-nums">
-              {data.traffic?.pageviews.toLocaleString() ?? '—'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {data.traffic ? (
-              <AnalyticsChart series={series} compact={embed} onlyMetric={true} />
-            ) : (
-              <p className="py-8 text-sm text-muted-foreground">
-                Traffic is temporarily unavailable.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {data.source === 'local' ? 'Local development data' : 'Event totals may arrive later'}
-        {data.sampled ? ' · Sampled estimates' : ''} · Updated {formatTime(data.updated_at)}
-      </p>
-    </div>
-  );
-}
 export function PublicAnalyticsView(): JSX.Element {
   const [token, setToken] = useState(tokenFromLocation);
   useEffect(() => {
@@ -151,13 +99,17 @@ export function PublicAnalyticsView(): JSX.Element {
           <PublicUnavailable reason={state.reason} retry={retry} />
         ) : null}
         {state.kind === 'loading' ? (
-          <Card>
-            <CardContent className="py-10 text-sm text-muted-foreground" role="status">
-              Loading shared analytics…
-            </CardContent>
-          </Card>
+          <AnalyticsReportLoading label="Loading shared analytics" />
         ) : null}
-        {data ? <PublicMetrics data={data} embed={embed} /> : null}
+        {state.kind === 'ready' ? (
+          <PublicAnalyticsReport
+            data={state.data}
+            embed={embed}
+            stale={state.stale ?? false}
+            refreshing={state.refreshing ?? false}
+            retry={retry}
+          />
+        ) : null}
       </div>
     </main>
   );

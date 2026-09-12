@@ -9,6 +9,7 @@ import {
 import { sharedBrowserMetrics, type BrowserEnvironment } from './browser-routes.js';
 import type { OwnerIdentity } from './identity.js';
 import type { AppHealthRepositories } from './repository.js';
+import { readPublicJson } from './public-body.js';
 const localStore = new MemoryAnalyticsShareStore();
 const storeFor = (env: BrowserEnvironment, local: boolean) => {
   if (local) return localStore;
@@ -31,6 +32,7 @@ const descriptor = (share: ShareRecord): AnalyticsShare => ({
   environment_id: share.environment_id,
   created_at: share.created_at,
   revoked_at: share.revoked_at,
+  include_breakdowns: share.include_breakdowns,
 });
 
 /** Share tokens never pass through the owner or ingestion authentication adapters. */
@@ -68,7 +70,7 @@ async function publicRead(
     if (!share) return json(404, { error: 'This analytics link is unavailable.' });
     const project = local ? await localProject(repos, share) : await publicProject(env, share);
     if (!project) return json(404, { error: 'This analytics link is unavailable.' });
-    const metrics = await sharedBrowserMetrics(share, env, local);
+    const metrics = await sharedBrowserMetrics(share, env, local, share.include_breakdowns);
     const response: SharedAnalytics = {
       project,
       ...metrics,
@@ -119,6 +121,27 @@ function shareMutationAllowed(request: Request, url: URL): boolean {
   );
 }
 
+async function breakdownFlag(request: Request, required: boolean): Promise<boolean | null> {
+  if (!request.body) return required ? null : false;
+  try {
+    const body = await readPublicJson(request, 4096);
+    if (!isRecord(body)) return null;
+    return body.include_breakdowns === undefined
+      ? required
+        ? null
+        : false
+      : typeof body.include_breakdowns === 'boolean'
+        ? body.include_breakdowns
+        : null;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export async function handleAnalyticsShareOwner(
   request: Request,
   env: BrowserEnvironment,
@@ -128,7 +151,7 @@ export async function handleAnalyticsShareOwner(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname !== '/v1/analytics/shares') return null;
-  if (!['GET', 'POST', 'DELETE'].includes(request.method))
+  if (!['GET', 'POST', 'PATCH', 'DELETE'].includes(request.method))
     return json(405, { error: 'Method not allowed' });
   if (!shareMutationAllowed(request, url))
     return json(403, { error: 'Same-origin request required' });
@@ -165,8 +188,18 @@ async function shareOperation(
       ? json(200, { revoked: true })
       : json(404, { error: 'Share link not found' });
   }
+  if (request.method === 'PATCH') {
+    const id = new URL(request.url).searchParams.get('id') ?? '';
+    const enabled = await breakdownFlag(request, true);
+    if (enabled === null) return json(400, { error: 'include_breakdowns must be boolean' });
+    return (await store.setBreakdowns(scope, id, enabled))
+      ? json(200, { updated: true })
+      : json(404, { error: 'Share link not found' });
+  }
   try {
-    const created = await store.create(scope);
+    const enabled = await breakdownFlag(request, false);
+    if (enabled === null) return json(400, { error: 'include_breakdowns must be boolean' });
+    const created = await store.create(scope, enabled);
     return json(201, { share: descriptor(created.share), token: created.token });
   } catch (error) {
     if (error instanceof AnalyticsShareLimitError)

@@ -16,12 +16,17 @@ export interface ShareRecord extends ShareScope {
   id: string;
   created_at: number;
   revoked_at: number | null;
+  include_breakdowns: boolean;
 }
 
 export interface AnalyticsShareStore {
-  create(scope: ShareScope): Promise<{ share: ShareRecord; token: string }>;
+  create(
+    scope: ShareScope,
+    includeBreakdowns?: boolean,
+  ): Promise<{ share: ShareRecord; token: string }>;
   list(scope: ShareScope): Promise<ShareRecord[]>;
   revoke(scope: ShareScope, id: string): Promise<boolean>;
+  setBreakdowns(scope: ShareScope, id: string, enabled: boolean): Promise<boolean>;
   resolve(token: string): Promise<ShareRecord | null>;
 }
 
@@ -52,6 +57,7 @@ function record(row: {
   environment_id: string;
   created_at: number;
   revoked_at: number | null;
+  include_breakdowns: number | boolean;
 }): ShareRecord {
   return {
     id: row.id,
@@ -60,6 +66,7 @@ function record(row: {
     environment_id: row.environment_id,
     created_at: row.created_at,
     revoked_at: row.revoked_at,
+    include_breakdowns: Boolean(row.include_breakdowns),
   };
 }
 
@@ -82,7 +89,10 @@ function pruneSql(): string {
 export class D1AnalyticsShareStore implements AnalyticsShareStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
-  async create(scope: ShareScope): Promise<{ share: ShareRecord; token: string }> {
+  async create(
+    scope: ShareScope,
+    includeBreakdowns = false,
+  ): Promise<{ share: ShareRecord; token: string }> {
     const rawToken = token();
     const now = Date.now();
     const share: ShareRecord = {
@@ -90,14 +100,15 @@ export class D1AnalyticsShareStore implements AnalyticsShareStore {
       id: crypto.randomUUID(),
       created_at: now,
       revoked_at: null,
+      include_breakdowns: includeBreakdowns,
     };
     const values = scopeValues(scope);
     await this.prune(scope);
     const inserted = await this.db
       .prepare(
         `INSERT INTO analytics_shares
-        (id, workspace_id, app_id, environment_id, token_hash, created_at, revoked_at)
-        SELECT ?, ?, ?, ?, ?, ?, NULL
+        (id, workspace_id, app_id, environment_id, token_hash, created_at, revoked_at, include_breakdowns)
+        SELECT ?, ?, ?, ?, ?, ?, NULL, ?
         WHERE (SELECT COUNT(*) FROM analytics_shares
           WHERE workspace_id = ? AND app_id = ? AND environment_id = ? AND revoked_at IS NULL) < ${ACTIVE_LIMIT}`,
       )
@@ -108,6 +119,7 @@ export class D1AnalyticsShareStore implements AnalyticsShareStore {
         scope.environment_id,
         await hash(rawToken),
         now,
+        includeBreakdowns ? 1 : 0,
         ...values,
       )
       .run();
@@ -119,7 +131,7 @@ export class D1AnalyticsShareStore implements AnalyticsShareStore {
     const values = scopeValues(scope);
     const { results } = await this.db
       .prepare(
-        `SELECT id, workspace_id, app_id, environment_id, created_at, revoked_at
+        `SELECT id, workspace_id, app_id, environment_id, created_at, revoked_at, include_breakdowns
         FROM analytics_shares WHERE workspace_id = ? AND app_id = ? AND environment_id = ?
         ORDER BY (revoked_at IS NOT NULL), created_at DESC, id DESC LIMIT ${HISTORY_LIMIT}`,
       )
@@ -149,11 +161,28 @@ export class D1AnalyticsShareStore implements AnalyticsShareStore {
     return true;
   }
 
+  async setBreakdowns(scope: ShareScope, id: string, enabled: boolean): Promise<boolean> {
+    const found = await this.db
+      .prepare(
+        'SELECT id FROM analytics_shares WHERE id = ? AND workspace_id = ? AND app_id = ? AND environment_id = ?',
+      )
+      .bind(id, ...scopeValues(scope))
+      .first<{ id: string }>();
+    if (!found) return false;
+    await this.db
+      .prepare(
+        'UPDATE analytics_shares SET include_breakdowns = ? WHERE id = ? AND workspace_id = ? AND app_id = ? AND environment_id = ?',
+      )
+      .bind(enabled ? 1 : 0, id, ...scopeValues(scope))
+      .run();
+    return true;
+  }
+
   async resolve(rawToken: string): Promise<ShareRecord | null> {
     if (!TOKEN_PATTERN.test(rawToken)) return null;
     const row = await this.db
       .prepare(
-        `SELECT id, workspace_id, app_id, environment_id, created_at, revoked_at
+        `SELECT id, workspace_id, app_id, environment_id, created_at, revoked_at, include_breakdowns
         FROM analytics_shares WHERE token_hash = ? AND revoked_at IS NULL LIMIT 1`,
       )
       .bind(await hash(rawToken))
@@ -174,13 +203,17 @@ export class MemoryAnalyticsShareStore implements AnalyticsShareStore {
   private readonly shares = new Map<string, { share: ShareRecord; hash: string }>();
   private mutation: Promise<void> = Promise.resolve();
 
-  async create(scope: ShareScope): Promise<{ share: ShareRecord; token: string }> {
+  async create(
+    scope: ShareScope,
+    includeBreakdowns = false,
+  ): Promise<{ share: ShareRecord; token: string }> {
     const rawToken = token();
     const share: ShareRecord = {
       ...scope,
       id: crypto.randomUUID(),
       created_at: Date.now(),
       revoked_at: null,
+      include_breakdowns: includeBreakdowns,
     };
     const tokenHash = await hash(rawToken);
     return this.serialized(() => {
@@ -211,6 +244,15 @@ export class MemoryAnalyticsShareStore implements AnalyticsShareStore {
       if (!entry || !sameScope(entry.share, scope)) return false;
       if (entry.share.revoked_at === null) entry.share.revoked_at = Date.now();
       this.prune(scope);
+      return true;
+    });
+  }
+
+  async setBreakdowns(scope: ShareScope, id: string, enabled: boolean): Promise<boolean> {
+    return this.serialized(() => {
+      const entry = this.shares.get(id);
+      if (!entry || !sameScope(entry.share, scope)) return false;
+      entry.share.include_breakdowns = enabled;
       return true;
     });
   }

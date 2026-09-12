@@ -63,8 +63,12 @@ export function AnalyticsChart({
 }): JSX.Element {
   const id = useId().replace(/:/g, '');
   const label = metric === 'events' ? 'Events' : 'Page views';
+  const multiDay =
+    series.length > 1 && series[series.length - 1].timestamp - series[0].timestamp > 86_400_000;
   const time = (timestamp: number) =>
-    new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    multiDay
+      ? new Date(timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   return (
     <div>
       <ChartContainer
