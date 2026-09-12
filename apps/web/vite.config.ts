@@ -1,6 +1,8 @@
 import { defineConfig, type Plugin } from 'vite';
-import { coverageConfigDefaults } from 'vitest/config';
+import { configDefaults, coverageConfigDefaults } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 interface LocalWorkerModule {
@@ -8,6 +10,15 @@ interface LocalWorkerModule {
     fetch(request: Request, env: { APP_HEALTH_MODE: string }): Promise<Response>;
   };
 }
+
+interface ShadcnSource {
+  path: string;
+}
+
+const shadcnSources = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, '../../docs/shadcn-sources.json'), 'utf8'),
+) as ShadcnSource[];
+const shadcnCoverageExcludes = shadcnSources.map(({ path }) => path.replace(/^apps\/web\//u, ''));
 
 /** Serve the credential-free in-memory Worker through Vite during local development. */
 function localWorkerApi(): Plugin {
@@ -53,21 +64,29 @@ function localWorkerApi(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), localWorkerApi()],
+  plugins: [react(), tailwindcss(), localWorkerApi()],
   build: {
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
+        live: resolve(import.meta.dirname, 'live.html'),
         changelog: resolve(import.meta.dirname, 'changelog.html'),
       },
     },
   },
   test: {
+    exclude: [...configDefaults.exclude, 'e2e/**'],
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./test/setup.ts'],
     coverage: {
-      exclude: [...coverageConfigDefaults.exclude, '**/scripts/*.d.mts'],
+      exclude: [
+        ...coverageConfigDefaults.exclude,
+        'e2e/**',
+        'playwright.config.ts',
+        '**/scripts/*.d.mts',
+        ...shadcnCoverageExcludes,
+      ],
     },
   },
 });

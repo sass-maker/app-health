@@ -33,6 +33,8 @@ import {
   type TransportResult,
 } from './transport.js';
 import { randomUUID } from './uuid.js';
+import { takeSizedBatch } from './batch-size.js';
+import { observe } from './observe.js';
 
 /** Input accepted by `record()`. Only endpoint-summary fields are permitted. */
 export interface EventInput {
@@ -179,12 +181,12 @@ async function drainQueues({ cfg, queue, logQueue, diag }: ClientState): Promise
     recordDeliveryResult(result, items, diag);
   };
   while (queue.length > 0) {
-    const events = queue.splice(0, cfg.maxBatchSize);
+    const events = takeSizedBatch(queue, Math.min(cfg.maxBatchSize, 250));
     const batch = buildBatch(events, cfg.uuid, cfg.runtime, cfg.environment, cfg.defaultRelease);
     await send(batch, cfg.endpointUrl, events);
   }
   while (logQueue.length > 0) {
-    const logs = logQueue.splice(0, cfg.logBatchSize);
+    const logs = takeSizedBatch(logQueue, cfg.logBatchSize);
     await send(buildLogBatch(logs, cfg.uuid, cfg.environment), cfg.logsEndpointUrl, logs);
   }
 }
@@ -230,6 +232,7 @@ export function createAppHealthClient(options: AppHealthClientOptions): AppHealt
   }
 
   function flush(): Promise<void> {
+    if (flushing) return flushing;
     if (queued() === 0) return Promise.resolve();
     // Coalesce concurrent flush calls into a single drain.
     const run =
@@ -253,9 +256,17 @@ export function createAppHealthClient(options: AppHealthClientOptions): AppHealt
   const { now, uuid, defaultRelease } = cfg;
   return {
     record: (event) =>
-      enqueue(queue, buildEventV1(event, { now, uuid, defaultRelease }), cfg.maxBatchSize),
+      enqueue(
+        queue,
+        observe(() => buildEventV1(event, { now, uuid, defaultRelease })) ?? null,
+        cfg.maxBatchSize,
+      ),
     log: (event, input = {}) =>
-      enqueue(logQueue, buildLogEventV1(event, input, { now, uuid }), cfg.logBatchSize),
+      enqueue(
+        logQueue,
+        observe(() => buildLogEventV1(event, input, { now, uuid })) ?? null,
+        cfg.logBatchSize,
+      ),
     flush,
     close,
     diagnostics: () => diag.snapshot(),

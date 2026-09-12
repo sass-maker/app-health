@@ -3,6 +3,7 @@
 // Pages routing is file-based, so the caller supplies the trusted route
 // template. The adapter deliberately never derives identity from request.url.
 
+import { observe } from './observe.js';
 import type { AppHealthClient } from './client.js';
 import {
   normalizeMethod,
@@ -73,10 +74,10 @@ export function withPagesFunctionHealth<
     const start = nowMs();
     try {
       const response = await handler(context);
-      recordPages(context, options, route, release, response.status, start);
+      observe(() => recordPages(context, options, route, release, response.status, start));
       return response;
     } catch (error) {
-      recordPages(context, options, route, release, 500, start);
+      observe(() => recordPages(context, options, route, release, 500, start));
       throw error;
     }
   };

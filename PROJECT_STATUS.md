@@ -1,19 +1,33 @@
 # app-health — PROJECT STATUS
 
-Last updated: 2026-09-11
+Last updated: 2026-09-12
 
 ## Why / What
 
-App Health V0 gives a service an ingest key and shows how every observed endpoint is performing.
+App Health combines endpoint health, intentional application logs, and web/native
+product analytics in one project-and-environment workspace. It is a Fleet product;
+Site Health remains Fleet's separate internal portfolio dashboard.
 
-**Users:** A developer or operator who wants immediate endpoint health after installing one small SDK or connecting an existing OpenTelemetry pipeline.
+**Users:** Product teams and founders who want traffic, events, and service health
+in one clear view; developers connect the optional instrumentation modules.
 
-**IN scope:** App/environment creation, one ingest key, Express, Hono Workers,
-Cloudflare Pages Functions, Echo, Go `net/http`, and OTLP/HTTP trace projection,
-asynchronous endpoint summaries, aggregate-only storage, and a
-15-minute/1-hour/24-hour observed-endpoint performance table.
+**IN scope:** Google accounts, workspace-owned projects, environment-scoped public
+and private credentials, endpoint measurement, explicit logs, browser and Swift
+analytics, recent active sessions, revocable aggregate-only public links, dark/light
+shadcn dashboard, and bounded ingest, retries, archival, and retention.
 
-**OUT of scope:** Unobserved source-route discovery, Problems/incidents, raw logs, stored trace exploration, request or response content, user identity, AI, alerts, deployment recovery, GitHub installation, teams/roles, and billing.
+**OUT of scope:** Team roles, billing, session replay, funnels, revenue attribution,
+App Store Connect imports, and archive replay into Analytics Engine.
+
+## Unified release candidate — 2026-09-12
+
+Tracked in https://github.com/sass-maker/app-health/issues/58. Production resource
+setup and additive migrations 0007–0011 are complete; Google credentials are held
+as Worker secrets. The App Health operational project is configured for its own
+browser analytics and server-generated `signup.completed` / `project.created`
+logs. New runtime deployment and real Google callback verification are pending.
+Local checks cover workerd/D1, browser setup flows, public-share revocation, SDK
+runtime compatibility, Swift delivery, retention, and milestone deduplication.
 
 ## Dependencies
 

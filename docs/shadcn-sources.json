@@ -1,0 +1,130 @@
+[
+  {
+    "component": "button",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
+    "upstreamSha256": "79dd6f75f8136394442202d6b8b922fb269eaad0a5dba579397c9d5b41f893bb",
+    "path": "apps/web/src/components/ui/button.tsx",
+    "localSha256": "3409df0e449c0890ed8e2825d85c7ac869e0da0999c92233242153aa89153d2d",
+    "adaptations": "Local imports and formatting; React.forwardRef on Button / dialog Overlay for React 18 Radix Slot and Presence compatibility."
+  },
+  {
+    "component": "card",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+    "upstreamSha256": "ef8305b12c3112dab42a4708b41b1ebcc042fa5ab4c20f039da8d45b09ed5059",
+    "path": "apps/web/src/components/ui/card.tsx",
+    "localSha256": "f56fbb83eca25a869544ff25402efd67259d4ad0d105c038f0c1485de25781ae",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "badge",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
+    "upstreamSha256": "13a9380dfff853ee730c14a52df49f22aecd31f40f2998d7c1e7ec458b6e1650",
+    "path": "apps/web/src/components/ui/badge.tsx",
+    "localSha256": "13d336ec7407df41cfcf6fd280eb2c009457055e6de0577170c50cf5147cdd44",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "tabs",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/tabs.json",
+    "upstreamSha256": "e1df6e2f95ece373ca909c1d54b8ba8cf4c47dd425c1784bbb9a01c38dd0936b",
+    "path": "apps/web/src/components/ui/tabs.tsx",
+    "localSha256": "91b49927f230ac1a342b2008606358010633530d8230d0d5a2b1b2eb9fe24b4f",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "table",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/table.json",
+    "upstreamSha256": "bd1a9fc83a5a2149e504038e274bb7e5a0351af59f6896df52ac4d5b439695ac",
+    "path": "apps/web/src/components/ui/table.tsx",
+    "localSha256": "e44746df424cce1a4d7f28fa2e344c99e289cdb796578b145227450dd5c27230",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "select",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/select.json",
+    "upstreamSha256": "962830436bd0b7ee50e556f0747e277d6a86869ed27d167516346b15f26309d8",
+    "path": "apps/web/src/components/ui/select.tsx",
+    "localSha256": "10632ff51c2cf4c349b26cc3301762f814a0ef0c2af7df05cac0068c0b7a35df",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "sheet",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/sheet.json",
+    "upstreamSha256": "ea473d38a26a9b0b879e5a13139899ad45e9782e896b3fa205c7763a6c506876",
+    "path": "apps/web/src/components/ui/sheet.tsx",
+    "localSha256": "3dc9637396a05706b1ac82adebfd42a478293cf95d9b60e0d589e7eb3ade1532",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "separator",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/separator.json",
+    "upstreamSha256": "ad7d5403fe337160e41dbf04147896e448ae3a747b8d06660d627d74d60021bc",
+    "path": "apps/web/src/components/ui/separator.tsx",
+    "localSha256": "88c0609cc8fdf174e99c76b5da482962082cc7fa6effd9ac12a74fae6c66f2b8",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "chart",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/chart.json",
+    "upstreamSha256": "35e2fa755465ef8eb8ff8b483d493204d452152e7a8863474b1a69f5d44484db",
+    "path": "apps/web/src/components/ui/chart.tsx",
+    "localSha256": "26744cb569b4394b9ab291bfd50b5391f9dadaa4a7c5bc04c2d389ea5c7f0de0",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "sidebar",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/sidebar.json",
+    "upstreamSha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
+    "path": "apps/web/src/components/ui/sidebar.tsx",
+    "localSha256": "8c177422f7bdb836ff42cebd80da261ae1eeca506cef0fc41477f794593b77ca",
+    "adaptations": "Local relative imports and repository formatting; sidebar cookie persistence removed."
+  },
+  {
+    "component": "tooltip",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/tooltip.json",
+    "upstreamSha256": "611e4305879b2773eafe76bf3c5caa69d8e47367fd97887a71634a27828f4433",
+    "path": "apps/web/src/components/ui/tooltip.tsx",
+    "localSha256": "4373c645c17820a1e9a6e1f24ebba9b66b08514212ecd510ec2c4b06db11176e",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "input",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/input.json",
+    "upstreamSha256": "0c9457181f6ddc80969bcf854e92c362903a55b6e889fbef3fd85343ecc4af5b",
+    "path": "apps/web/src/components/ui/input.tsx",
+    "localSha256": "a935b2e7bb64e74b057c0d2ba860a56fd715e7e7d2e7383fbada2dac8f148193",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "skeleton",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/skeleton.json",
+    "upstreamSha256": "f51ce0fcd31e5c31437382e80ea0af94b4fc3d64221d27091d36824546780a43",
+    "path": "apps/web/src/components/ui/skeleton.tsx",
+    "localSha256": "9507115a10d34f48c543e02ed5d87143de61e9d88c12482d71a99b2f08ff1149",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "use-mobile",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/use-mobile.json",
+    "upstreamSha256": "ad0936f84f1df79d3697bfbff9c18f8ad58431c1cbaf2359c6a853b0fcc9f28b",
+    "path": "apps/web/src/hooks/use-mobile.ts",
+    "localSha256": "58b2cc5fa259358e9192125abf072c832144193d87f3d66a90b13089a0196cef",
+    "adaptations": "Repository formatting only; upstream mobile detection behavior retained."
+  },
+  {
+    "component": "alert",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/alert.json",
+    "upstreamSha256": "d03dcae5cdb63c381c1144ca9a0c49ba0e46466967d7deb94662034042acb034",
+    "path": "apps/web/src/components/ui/alert.tsx",
+    "localSha256": "035d536cc138d6e080e63c4a541a5027ce875dcc1f535d1905d4fd1d245d7497",
+    "adaptations": "Local relative imports and repository formatting."
+  },
+  {
+    "component": "alert-dialog",
+    "source": "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json",
+    "upstreamSha256": "b3dfb83e54ed8c82071df5289e5149628bf573458fc2da2d62f93f8380041b28",
+    "path": "apps/web/src/components/ui/alert-dialog.tsx",
+    "localSha256": "2999df5b1a9d9f3c10f9fc20b51a0794e1ef69e320806c88346ce77c85ca5ff1",
+    "adaptations": "Local imports and formatting; React.forwardRef on Button / dialog Overlay for React 18 Radix Slot and Presence compatibility."
+  }
+]

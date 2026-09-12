@@ -9,7 +9,7 @@ README carries the one-paragraph summary.
 
 1. Create the app in the dashboard (or reuse one) and copy its ingest key.
 2. Send logs one of two ways:
-   - **Node SDK**: `appHealth.log('signup', { title: user.email, props: { plan } })`
+   - **Node SDK**: `appHealth.log('signup', { title: 'New signup', props: { plan } })`
      on the existing client. Logs share the queue and flush cycle with endpoint
      events and travel to `/v1/logs`.
    - **Any runtime, zero dependencies**: copy `examples/dropin-log-client/ping.ts`
@@ -18,11 +18,14 @@ README carries the one-paragraph summary.
      so it is safe to merge first. Set `APP_HEALTH_ENVIRONMENT` to the
      environment name the product key should route to (default `production`).
 3. Name events `noun` or `noun.verb`, lowercase: `signup`, `waitlist.join`,
-   `payment.failed`. Put the human identifier in `title`, filterable fields in
+   `payment.failed`. Put a short description in `title`, filterable fields in
    `props`. Never put secrets or tokens in a log.
-4. Open the Logs tab and filter by level or event. For Slack, set the
+4. Open the Logs tab and filter by level or event. For legacy operator-owned
+   projects, Slack uses the
    `LOG_ALERT_WEBHOOK_URL` secret on the Worker; `LOG_ALERT_MIN_LEVEL` (var,
-   default `info`) decides what gets posted.
+   default `info`) decides what gets posted. Account-owned projects never forward
+   logs to this deployment-wide webhook. Workspace-owned destinations are not
+   implemented yet.
 
 ### Hook points in the fleet
 
@@ -139,3 +142,34 @@ The Node SDK is installed from GitHub release tarballs, so the eight fleet
 apps on Cloudflare Workers would each need a release bump to adopt `log()`.
 A ~90-line zero-dependency file that speaks `LogBatchV1` lets them start now;
 it is the same contract, so switching to the SDK later is a one-line change.
+
+## Readiness verification — 2026-09-12
+
+Log ingestion rejects events more than five minutes in the future or older than
+30 days before consuming browser quota or writing data. Queries apply the same
+clock and retention bounds, even if physical cleanup falls behind.
+
+Server and browser batches use separate retry claims in the existing bounded
+dedupe store. A repeated batch returns `accepted: 0` and its `duplicates` count,
+with no repeated sink delivery while the claim is retained. Legacy clients
+without batch IDs use a stable digest of log IDs. Individual stored log IDs
+remain unique within the project/environment. Repacking logs into a different
+batch is not a guarantee of external-sink idempotence; external alerts remain
+best effort rather than an exactly-once delivery system.
+
+Optional legacy webhook delivery has a two-second per-request timeout and a
+ten-second batch budget. Failed or budget-exhausted deliveries are not retried;
+stored logs remain available. Account-owned logs cannot reach the legacy global
+webhook, and ownership lookup failures suppress external delivery.
+
+The Logs dashboard validates response contracts, cancels obsolete reads, uses an
+eight-second timeout, and clears mismatched filter results. It shows up to the
+latest 200 matching logs; the API supports a maximum of 500. Pagination and raw
+archive export are not implemented. Stored logs expire after 30 days.
+
+The workerd canary exercises all four levels, scalar properties, server/browser
+source labels, repeated batches and future timestamp rejection against actual
+D1 storage. The Cloudflare checkout sample uses both server and browser log
+clients. Unit tests cover retention clocks, failed-storage retry, external
+delivery bounds and workspace isolation. Production activation and runtime SDK
+qualification remain separate readiness stages.

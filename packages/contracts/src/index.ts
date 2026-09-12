@@ -11,3 +11,10 @@ export * from './installation.js';
 export * from './health.js';
 export * from './fixtures.js';
 export * from './seeded.js';
+
+export * from './browser.js';
+
+export * from './capabilities.js';
+
+export * from './sharing.js';
+export * from './native.js';

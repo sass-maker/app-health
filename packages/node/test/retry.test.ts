@@ -3,6 +3,19 @@ import { createAppHealthClient } from '../src/index.js';
 import { createFetchController } from './helpers.js';
 
 describe('client retry and outage behavior', () => {
+  it('releases the unused response body after delivery', async () => {
+    const response = new Response('collector receipt', { status: 202 });
+    const client = createAppHealthClient({
+      key: 'test',
+      endpoint: 'http://localhost/v1/ingest',
+      disableTimer: true,
+      fetch: async () => response,
+    });
+    client.record({ method: 'GET', route: '/health', status_code: 200, duration_ms: 1 });
+    await client.close();
+    expect(response.bodyUsed).toBe(true);
+    expect(client.diagnostics().sentEvents).toBe(1);
+  });
   it('retries transient 5xx responses up to maxRetries, then succeeds', async () => {
     const controller = createFetchController();
     controller.setResponses([{ status: 503 }, { status: 503 }, { ok: true, status: 202 }]);

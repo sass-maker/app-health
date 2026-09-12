@@ -59,6 +59,7 @@ export const CreateAppRequestV1 = z
   .object({
     name: z.string().trim().min(1).max(128),
     environment: EnvironmentName,
+    key_scope: z.enum(['product', 'environment']).optional(),
   })
   .strict();
 

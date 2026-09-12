@@ -11,7 +11,8 @@ import type {
   PublicLogKeyV1,
   StoredLogV1,
 } from '@app-health/contracts';
-import { LOG_LEVELS, PUBLIC_LOG_KEY_PREFIX } from '@app-health/contracts';
+import { LOG_LEVELS, LOG_RETENTION_DAYS, PUBLIC_LOG_KEY_PREFIX } from '@app-health/contracts';
+import { D1Capabilities } from './capability-store.js';
 import { generateRawKey, hashKey } from './crypto.js';
 import type {
   AppHealthRepositories,
@@ -53,6 +54,19 @@ function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+async function prepareScopedKey(appId: string, envId: string, now: number) {
+  const rawKey = generateRawKey();
+  const record: KeyRecordV1 = {
+    id: id('key'),
+    app_id: appId,
+    environment_id: envId,
+    verifier_hash: await hashKey(rawKey),
+    created_at: now,
+    revoked_at: null,
+  };
+  return { record, rawKey };
+}
+
 export class D1ControlPlane
   implements
     AppRepository,
@@ -66,10 +80,14 @@ export class D1ControlPlane
     PublicLogKeyRepository,
     SetupRepository
 {
-  constructor(private readonly db: D1DatabaseLike) {}
+  constructor(
+    private readonly db: D1DatabaseLike,
+    private readonly workspaceId?: string | null,
+  ) {}
 
   asRepositories(buckets: BucketRepository): AppHealthRepositories {
     return {
+      capabilities: new D1Capabilities(this.db),
       apps: this,
       environments: this,
       keys: this,
@@ -84,7 +102,12 @@ export class D1ControlPlane
     };
   }
 
-  async createAppEnvironmentKey(name: string, environmentName: string, now: number) {
+  async createAppEnvironmentKey(
+    name: string,
+    environmentName: string,
+    now: number,
+    keyScope: 'product' | 'environment' = 'product',
+  ) {
     const app: AppV1 = { id: id('app'), name, created_at: now };
     const environment: EnvironmentV1 = {
       id: id('env'),
@@ -96,29 +119,42 @@ export class D1ControlPlane
     const record: KeyRecordV1 = {
       id: id('key'),
       app_id: app.id,
-      environment_id: null,
+      environment_id: keyScope === 'environment' ? environment.id : null,
       verifier_hash: await hashKey(rawKey),
       created_at: now,
       revoked_at: null,
     };
-    const results = await this.db.batch([
+    const statements = [
       this.db
         .prepare('INSERT INTO apps (id, name, created_at) VALUES (?, ?, ?)')
         .bind(app.id, app.name, now),
       this.db
         .prepare('INSERT INTO environments (id, app_id, name, created_at) VALUES (?, ?, ?, ?)')
         .bind(environment.id, app.id, environment.name, now),
-      this.db
-        .prepare(
-          'INSERT INTO product_keys (id, app_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, NULL)',
-        )
-        .bind(record.id, app.id, record.verifier_hash, now),
+      record.environment_id
+        ? this.db
+            .prepare(
+              'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
+            )
+            .bind(record.id, app.id, environment.id, record.verifier_hash, now)
+        : this.db
+            .prepare(
+              'INSERT INTO product_keys (id, app_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, NULL)',
+            )
+            .bind(record.id, app.id, record.verifier_hash, now),
       this.db
         .prepare(
           'INSERT INTO installation_status (app_id, environment_id, runtime, first_seen, last_seen) VALUES (?, ?, NULL, NULL, NULL)',
         )
         .bind(app.id, environment.id),
-    ]);
+    ];
+    if (this.workspaceId)
+      statements.push(
+        this.db
+          .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+          .bind(app.id, this.workspaceId),
+      );
+    const results = await this.db.batch(statements);
     if (results.some((result) => !result.success)) throw new Error('D1 setup transaction failed');
     return { app, environment, record, rawKey };
   }
@@ -140,9 +176,22 @@ export class D1ControlPlane
   }
 
   async listApps(): Promise<AppV1[]> {
+    if (this.workspaceId)
+      return (
+        await this.db
+          .prepare(
+            'SELECT a.id, a.name, a.created_at FROM apps a JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? ORDER BY a.created_at DESC',
+          )
+          .bind(this.workspaceId)
+          .all<AppV1>()
+      ).results;
     return (
       await this.db
-        .prepare('SELECT id, name, created_at FROM apps ORDER BY created_at DESC')
+        .prepare(
+          this.workspaceId === null
+            ? 'SELECT id, name, created_at FROM apps WHERE NOT EXISTS (SELECT 1 FROM workspace_apps w WHERE w.app_id = apps.id) ORDER BY created_at DESC'
+            : 'SELECT id, name, created_at FROM apps ORDER BY created_at DESC',
+        )
         .all<AppV1>()
     ).results;
   }
@@ -161,24 +210,12 @@ export class D1ControlPlane
     name: string,
     now: number,
   ): Promise<EnvironmentV1 | null> {
-    const existing = await this.db
-      .prepare(
-        'SELECT id, app_id, name, created_at FROM environments WHERE app_id = ? AND name = ?',
-      )
-      .bind(appId, name)
-      .first<EnvironmentV1>();
-    if (existing) return existing;
-    const count = await this.db
-      .prepare('SELECT COUNT(*) AS count FROM environments WHERE app_id = ?')
-      .bind(appId)
-      .first<{ count: number }>();
-    if ((count?.count ?? 0) >= MAX_ENVIRONMENTS_PER_APP) return null;
     const environment: EnvironmentV1 = { id: id('env'), app_id: appId, name, created_at: now };
     await this.db
       .prepare(
-        'INSERT OR IGNORE INTO environments (id, app_id, name, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO environments (id, app_id, name, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM environments WHERE app_id = ? AND name = ?) AND (SELECT COUNT(*) FROM environments WHERE app_id = ?) < ?',
       )
-      .bind(environment.id, appId, name, now)
+      .bind(environment.id, appId, name, now, appId, name, appId, MAX_ENVIRONMENTS_PER_APP)
       .run();
     return (
       (await this.db
@@ -186,7 +223,7 @@ export class D1ControlPlane
           'SELECT id, app_id, name, created_at FROM environments WHERE app_id = ? AND name = ?',
         )
         .bind(appId, name)
-        .first<EnvironmentV1>()) ?? environment
+        .first<EnvironmentV1>()) ?? null
     );
   }
 
@@ -208,16 +245,32 @@ export class D1ControlPlane
     ).results;
   }
 
+  async createEnvironmentKey(appId: string, name: string, now: number) {
+    const environment: EnvironmentV1 = { id: id('env'), app_id: appId, name, created_at: now };
+    const { record, rawKey } = await prepareScopedKey(appId, environment.id, now);
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          'INSERT INTO environments (id, app_id, name, created_at) SELECT ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM environments WHERE app_id = ? AND name = ?) AND (SELECT COUNT(*) FROM environments WHERE app_id = ?) < ?',
+        )
+        .bind(environment.id, appId, name, now, appId, name, appId, MAX_ENVIRONMENTS_PER_APP),
+      this.db
+        .prepare(
+          'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) SELECT ?, ?, ?, ?, ?, NULL WHERE EXISTS (SELECT 1 FROM environments WHERE id = ?)',
+        )
+        .bind(record.id, appId, environment.id, record.verifier_hash, now, environment.id),
+      this.db
+        .prepare(
+          'INSERT INTO installation_status (app_id, environment_id, runtime, first_seen, last_seen) SELECT ?, ?, NULL, NULL, NULL WHERE EXISTS (SELECT 1 FROM environments WHERE id = ?)',
+        )
+        .bind(appId, environment.id, environment.id),
+    ]);
+    if (results.some((result) => !result.success)) throw new Error('Environment creation failed');
+    return results[0].meta.changes ? { environment, record, rawKey } : null;
+  }
+
   async createKey(appId: string, envId: string, now: number) {
-    const rawKey = generateRawKey();
-    const record: KeyRecordV1 = {
-      id: id('key'),
-      app_id: appId,
-      environment_id: envId,
-      verifier_hash: await hashKey(rawKey),
-      created_at: now,
-      revoked_at: null,
-    };
+    const { record, rawKey } = await prepareScopedKey(appId, envId, now);
     await this.db
       .prepare(
         'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
@@ -243,6 +296,25 @@ export class D1ControlPlane
       )
       .bind(record.id, appId, record.verifier_hash, now)
       .run();
+    return { record, rawKey };
+  }
+
+  async rotateEnvironmentKey(appId: string, envId: string, now: number) {
+    const { record, rawKey } = await prepareScopedKey(appId, envId, now);
+    const results = await this.db.batch([
+      this.db
+        .prepare(
+          'UPDATE keys SET revoked_at = ? WHERE app_id = ? AND environment_id = ? AND revoked_at IS NULL',
+        )
+        .bind(now, appId, envId),
+      this.db
+        .prepare(
+          'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
+        )
+        .bind(record.id, appId, envId, record.verifier_hash, now),
+    ]);
+    if (results.some((result) => !result.success))
+      throw new Error('Private key could not be replaced');
     return { record, rawKey };
   }
 
@@ -437,8 +509,14 @@ export class D1ControlPlane
   }
   async listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]> {
     const levels = LOG_LEVELS.slice(LOG_LEVELS.indexOf(query.minLevel));
-    const binds: unknown[] = [appId, envId, ...levels];
-    let where = `app_id = ? AND environment_id = ? AND level IN (${levels.map(() => '?').join(', ')})`;
+    const binds: unknown[] = [
+      appId,
+      envId,
+      (query.now ?? Date.now()) - LOG_RETENTION_DAYS * 86_400_000,
+      ...levels,
+    ];
+    let where = `app_id = ? AND environment_id = ? AND timestamp >= ? AND timestamp <= ? AND level IN (${levels.map(() => '?').join(', ')})`;
+    binds.splice(3, 0, (query.now ?? Date.now()) + 5 * 60 * 1000);
     if (query.source !== undefined) {
       where += ' AND source = ?';
       binds.push(query.source);
@@ -494,6 +572,15 @@ export class D1ControlPlane
         'SELECT id, app_id, environment_id, allowed_origins, created_at, revoked_at FROM public_log_keys WHERE verifier_hash = ? AND revoked_at IS NULL LIMIT 1',
       )
       .bind(await hashKey(rawKey))
+      .first<PublicKeyRow>();
+    return row ? publicKeyFromRow(row) : null;
+  }
+  async getPublicKey(keyId: string): Promise<PublicLogKeyV1 | null> {
+    const row = await this.db
+      .prepare(
+        'SELECT id, app_id, environment_id, allowed_origins, created_at, revoked_at FROM public_log_keys WHERE id = ?',
+      )
+      .bind(keyId)
       .first<PublicKeyRow>();
     return row ? publicKeyFromRow(row) : null;
   }

@@ -3,6 +3,45 @@ import { createAppHealthClient } from '../src/index.js';
 import { createFetchController } from './helpers.js';
 
 describe('client batching and overflow', () => {
+  it('splits high-cardinality endpoint batches below provider capacity', async () => {
+    const controller = createFetchController();
+    const client = createAppHealthClient({
+      key: 'test',
+      endpoint: 'http://localhost/v1/ingest',
+      fetch: controller.fetch,
+      disableTimer: true,
+      maxBatchSize: 1000,
+    });
+    for (let i = 0; i < 251; i++)
+      client.record({ method: 'GET', route: `/route-${i}`, status_code: 200, duration_ms: 1 });
+    await client.close();
+    expect(controller.requests.map((request) => JSON.parse(request.body).events.length)).toEqual([
+      250, 1,
+    ]);
+    expect(client.diagnostics().sentEvents).toBe(251);
+  });
+  it('splits valid large Unicode logs below the collector byte limit without losing entries', async () => {
+    const controller = createFetchController();
+    const client = createAppHealthClient({
+      key: 'test',
+      endpoint: 'http://localhost/v1/ingest',
+      fetch: controller.fetch,
+      disableTimer: true,
+    });
+    const props = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`field${i}`, '🚀'.repeat(250)]),
+    );
+    for (let i = 0; i < 50; i++) client.log('payload.test', { props });
+    await client.close();
+    expect(controller.requests.length).toBeGreaterThan(1);
+    expect(
+      controller.requests.every((request) => Buffer.byteLength(request.body) <= 256 * 1024),
+    ).toBe(true);
+    expect(
+      controller.requests.reduce((sum, request) => sum + JSON.parse(request.body).logs.length, 0),
+    ).toBe(50);
+    expect(client.diagnostics().sentEvents).toBe(50);
+  });
   it('batches events up to maxBatchSize and sends one batch per flush', async () => {
     const controller = createFetchController();
     const client = createAppHealthClient({
@@ -61,7 +100,9 @@ describe('client batching and overflow', () => {
     client.record({ method: 'GET', route: 'no-slash', status_code: 200, duration_ms: 1 });
     client.record({ method: 'GET', route: '/health', status_code: 99, duration_ms: 1 });
     client.record({ method: 'GET', route: '/health', status_code: 200, duration_ms: 999_999_999 });
-    expect(client.diagnostics().droppedInvalid).toBe(4);
+    expect(() => client.record(null as never)).not.toThrow();
+    expect(() => client.log('bad.input', null as never)).not.toThrow();
+    expect(client.diagnostics().droppedInvalid).toBe(6);
     expect(client.diagnostics().queued).toBe(0);
   });
 

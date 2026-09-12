@@ -12,6 +12,9 @@ export interface OwnerIdentity {
   label: string;
   /** Product scope resolved from an active product key; absent for global owners. */
   appId?: string;
+  /** Account sessions are restricted to a server-resolved workspace and its apps. */
+  workspaceId?: string;
+  appIds?: readonly string[];
 }
 
 /**

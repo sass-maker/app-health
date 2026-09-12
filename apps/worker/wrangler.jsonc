@@ -1,7 +1,8 @@
 {
   "name": "app-health-worker",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-07-21",
+  "main": "src/analytics-entry.ts",
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "routes": [
     {
@@ -23,7 +24,31 @@
       "binding": "TELEMETRY",
       "dataset": "app_health_endpoint_v1",
     },
+    { "binding": "BROWSER_ANALYTICS", "dataset": "app_health_browser_v1" },
   ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "WORKSPACE_PRESENCE", "class_name": "WorkspacePresence" },
+      { "name": "BROWSER_ARCHIVE", "class_name": "BrowserArchive" },
+    ],
+  },
+  "migrations": [
+    { "tag": "v1-analytics", "new_sqlite_classes": ["WorkspacePresence", "BrowserArchive"] },
+  ],
+  "queues": {
+    "producers": [{ "binding": "BROWSER_EVENTS", "queue": "app-health-browser-events" }],
+    "consumers": [
+      {
+        "queue": "app-health-browser-events",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "max_concurrency": 2,
+        "dead_letter_queue": "app-health-browser-events-dlq",
+      },
+    ],
+  },
+  "r2_buckets": [{ "binding": "BROWSER_HISTORY", "bucket_name": "app-health-browser-history" }],
   "d1_databases": [
     {
       "binding": "DB",
@@ -39,6 +64,10 @@
     "cpu_ms": 50,
   },
   "vars": {
+    "APP_HEALTH_ACCOUNTS": "enabled",
+    "APP_HEALTH_SELF_APP_ID": "app-65d2a116-5fe8-43d5-8741-19680311e867",
+    "APP_HEALTH_SELF_ENVIRONMENT_ID": "env-4612f0f1-1370-4f08-bb73-a1f0f592f741",
+    "APP_HEALTH_SELF_PUBLIC_KEY": "ahk_pub_615e6c5ef9811ee35dd60c7de84a03b69ec2668f61c5c9899dfd71f1242d741e",
     "APP_HEALTH_DASHBOARD_HOST": "health.sassmaker.com",
     "APP_HEALTH_INGEST_HOST": "ingest.sassmaker.com",
     "APP_HEALTH_INGEST_ORIGIN": "https://ingest.sassmaker.com",

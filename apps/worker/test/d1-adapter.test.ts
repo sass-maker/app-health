@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import {
   D1ControlPlane,
   type D1DatabaseLike,
@@ -44,6 +45,35 @@ class Database implements D1DatabaseLike {
   }
   async batch(statements: D1PreparedStatement[]) {
     return this.batchResults ?? statements.map(() => ({ success: true, meta: { changes: 1 } }));
+  }
+}
+
+class SQLiteD1 implements D1DatabaseLike {
+  constructor(readonly sqlite: DatabaseSync) {}
+
+  prepare(sql: string): D1PreparedStatement {
+    const statement = this.sqlite.prepare(sql);
+    let values: unknown[] = [];
+    return {
+      bind(...next: unknown[]) {
+        values = next;
+        return this;
+      },
+      async first<T>() {
+        return (statement.get(...(values as never[])) as T | undefined) ?? null;
+      },
+      async all<T>() {
+        return { results: statement.all(...(values as never[])) as T[] };
+      },
+      async run() {
+        const result = statement.run(...(values as never[]));
+        return { success: true, meta: { changes: Number(result.changes) } };
+      },
+    };
+  }
+
+  async batch(statements: D1PreparedStatement[]) {
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 }
 
@@ -104,24 +134,56 @@ describe('D1 control plane', () => {
     expect(created.record.environment_id).toBeNull();
     expect(db.statements[0].sql).toContain('INSERT INTO product_keys');
 
-    db.firstResults.push(
-      null,
-      { count: 1 },
-      {
-        id: 'env-local',
-        app_id: 'app-1',
-        name: 'local',
-        created_at: 100,
-      },
-    );
+    db.firstResults.push({
+      id: 'env-local',
+      app_id: 'app-1',
+      name: 'local',
+      created_at: 100,
+    });
     await expect(control.resolveEnvironment('app-1', 'local', 100)).resolves.toMatchObject({
       id: 'env-local',
       app_id: 'app-1',
       name: 'local',
     });
-    expect(db.statements.some((statement) => statement.sql.includes('INSERT OR IGNORE'))).toBe(
-      true,
+    expect(db.statements[1].sql).toContain('WHERE NOT EXISTS');
+    expect(db.statements[1].sql).toContain('COUNT(*)');
+  });
+
+  it('resolves concurrent same-name creates to one SQLite row', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(
+      'CREATE TABLE environments (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL)',
     );
+    const control = new D1ControlPlane(new SQLiteD1(sqlite));
+    const resolved = await Promise.all(
+      Array.from({ length: 12 }, () => control.resolveEnvironment('app-1', 'local', 100)),
+    );
+    expect(new Set(resolved.map((environment) => environment?.id)).size).toBe(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM environments').get()).toMatchObject({
+      count: 1,
+    });
+    sqlite.close();
+  });
+
+  it('returns null when the SQLite environment cap is already reached', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(
+      'CREATE TABLE environments (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL)',
+    );
+    const max = 20;
+    const insert = sqlite.prepare('INSERT INTO environments VALUES (?, ?, ?, ?)');
+    for (let index = 0; index < max; index += 1)
+      insert.run(`env-${index}`, 'app-1', `env-${index}`, index);
+    const resolved = await new D1ControlPlane(new SQLiteD1(sqlite)).resolveEnvironment(
+      'app-1',
+      'overflow',
+      100,
+    );
+    expect(resolved).toBeNull();
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM environments').get()).toMatchObject({
+      count: max,
+    });
+    sqlite.close();
   });
 
   it('revokes active keys and propagates D1 write failures', async () => {

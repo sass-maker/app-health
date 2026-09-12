@@ -6,9 +6,31 @@
       "project": ["scripts/**/*.mjs"],
       "ignoreDependencies": ["@vitest/coverage-v8", "jscpd"]
     },
+    "apps/web": {
+      "entry": ["public/tracker.d.ts", "src/public-main.tsx"],
+      "ignoreIssues": {
+        "src/components/ui/button.tsx": ["exports", "types"],
+        "src/components/ui/card.tsx": ["exports", "types"],
+        "src/components/ui/badge.tsx": ["exports", "types"],
+        "src/components/ui/tabs.tsx": ["exports", "types"],
+        "src/components/ui/table.tsx": ["exports", "types"],
+        "src/components/ui/select.tsx": ["exports", "types"],
+        "src/components/ui/sheet.tsx": ["exports", "types"],
+        "src/components/ui/separator.tsx": ["exports", "types"],
+        "src/components/ui/chart.tsx": ["exports", "types"],
+        "src/components/ui/sidebar.tsx": ["exports", "types"],
+        "src/components/ui/tooltip.tsx": ["exports", "types"],
+        "src/components/ui/input.tsx": ["exports", "types"],
+        "src/components/ui/skeleton.tsx": ["exports", "types"],
+        "src/hooks/use-mobile.ts": ["exports", "types"],
+        "src/components/ui/alert.tsx": ["exports", "types"],
+        "src/components/ui/alert-dialog.tsx": ["exports", "types"]
+      }
+    },
     "apps/worker": {
+      "entry": ["src/analytics-entry.ts"],
       "ignore": ["src/agent-edge.d.mts"],
-      "ignoreDependencies": ["wrangler"]
+      "ignoreDependencies": ["wrangler", "cloudflare"]
     },
     "packages/node": {
       "ignoreIssues": {

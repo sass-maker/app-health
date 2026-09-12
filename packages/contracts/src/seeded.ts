@@ -6,7 +6,7 @@
 
 import type { BucketV1, EndpointAggregateV1 } from './aggregate.js';
 import { LATENCY_HISTOGRAM_BUCKETS } from './aggregate.js';
-import { BUCKET_MS, LATENCY_BUCKET_BOUNDS_MS, WINDOW_MS } from './constants.js';
+import { BUCKET_MS, LATENCY_BUCKET_BOUNDS_MS, MAX_DURATION_MS, WINDOW_MS } from './constants.js';
 import { healthState } from './health.js';
 
 /** Seeded app/environment/key identifiers used by the dev adapter. */
@@ -127,9 +127,7 @@ export function approximatePercentiles(histogram: readonly number[]): {
   const total = histogram.reduce((sum, c) => sum + c, 0);
   if (total === 0) return { p50_ms: 0, p95_ms: 0 };
   const bucketUpperBound = (idx: number): number =>
-    idx < LATENCY_BUCKET_BOUNDS_MS.length
-      ? LATENCY_BUCKET_BOUNDS_MS[idx]
-      : LATENCY_BUCKET_BOUNDS_MS[LATENCY_BUCKET_BOUNDS_MS.length - 1] * 2;
+    idx < LATENCY_BUCKET_BOUNDS_MS.length ? LATENCY_BUCKET_BOUNDS_MS[idx] : MAX_DURATION_MS;
   const valueAtPercentile = (p: number): number => {
     const target = Math.ceil(total * p);
     let running = 0;
@@ -158,7 +156,7 @@ export function mergeBuckets(
     byKey.set(key, list);
   }
   const aggregates: EndpointAggregateV1[] = [];
-  for (const [key, list] of byKey) {
+  for (const list of byKey.values()) {
     const request_count = list.reduce((sum, b) => sum + b.request_count, 0);
     if (request_count === 0) continue;
     const error_count = list.reduce((sum, b) => sum + b.error_count, 0);
@@ -172,7 +170,7 @@ export function mergeBuckets(
     const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
     const { p50_ms, p95_ms } = approximatePercentiles(mergedHistogram);
     const error_rate = request_count > 0 ? error_count / request_count : 0;
-    const [method, route] = key.split('|');
+    const { method, route } = list[0];
     aggregates.push({
       method,
       route,
@@ -184,6 +182,7 @@ export function mergeBuckets(
       last_seen,
       health_state: healthState({ request_count, error_rate, p95_ms }),
       ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
+      ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),
     });
   }
   // deterministic default sort: unhealthy > degraded > healthy > insufficient-data,

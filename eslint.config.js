@@ -37,12 +37,20 @@ export default tseslint.config(
     },
   },
   {
-    files: ['examples/dropin-log-client/**/*.js'],
+    files: ['examples/dropin-log-client/**/*.js', 'apps/web/public/tracker.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',
       globals: {
         crypto: 'readonly',
+        AbortController: 'readonly',
+        URL: 'readonly',
+        sessionStorage: 'readonly',
+        history: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
         document: 'readonly',
         navigator: 'readonly',
         Blob: 'readonly',

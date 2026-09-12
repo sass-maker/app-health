@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./sharing": {
+      "types": "./src/sharing.ts",
+      "import": "./src/sharing.ts"
     }
   },
   "scripts": {

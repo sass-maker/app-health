@@ -6,6 +6,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { checkShadcnVendor, shadcnVendorPaths } from './shadcn-vendor.mjs';
+
+checkShadcnVendor();
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const productionPaths = [
@@ -156,6 +159,7 @@ function checkComplexity() {
     '**/*_test.go',
     '-x',
     '**/*.d.mts',
+    ...shadcnVendorPaths.flatMap((path) => ['-x', path]),
     '--csv',
   ]);
   const rows = result.stdout
@@ -201,7 +205,15 @@ function checkDuplication() {
     '--mode',
     'strict',
     '--ignore',
-    '**/*.test.*,**/*_test.go,**/*.d.mts,**/node_modules/**,**/coverage/**,**/dist/**',
+    [
+      '**/*.test.*',
+      '**/*_test.go',
+      '**/*.d.mts',
+      '**/node_modules/**',
+      '**/coverage/**',
+      '**/dist/**',
+      ...shadcnVendorPaths,
+    ].join(','),
     '--reporters',
     'json',
     '--output',

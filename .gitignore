@@ -10,5 +10,9 @@ dist/
 *.tsbuildinfo
 .turbo/
 coverage/
+test-results/
+playwright-report/
 /apps/web/changelog.html
 /examples/go/go
+/packages/swift/.build/
+/packages/swift/.swiftpm/

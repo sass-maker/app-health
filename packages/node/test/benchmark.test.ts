@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { once } from 'node:events';
 import express from 'express';
 import request from 'supertest';
 import { createAppHealthClient } from '../src/index.js';
@@ -13,11 +14,21 @@ const WARMUP = 50;
 const ITERATIONS = 300;
 
 async function timeRequests(app: express.Express, n: number): Promise<number> {
-  const t0 = performance.now();
-  for (let i = 0; i < n; i += 1) {
-    await request(app).get('/health');
+  // Keep one listener for the run: recycling an ephemeral listener on every
+  // request can race pooled sockets and measures server setup, not middleware.
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const t0 = performance.now();
+    for (let i = 0; i < n; i += 1) {
+      await request(server).get('/health').expect(200);
+    }
+    return performance.now() - t0;
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
   }
-  return performance.now() - t0;
 }
 
 describe('middleware overhead benchmark', () => {

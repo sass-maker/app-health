@@ -19,6 +19,7 @@ import {
   SEED_PUBLIC_KEY,
   SEED_PUBLIC_KEY_ORIGINS,
   PUBLIC_LOG_KEY_PREFIX,
+  LOG_RETENTION_DAYS,
   buildSeedBuckets,
   type AppV1,
   type BucketV1,
@@ -34,6 +35,7 @@ import {
   type StoredLogV1,
   logLevelAtLeast,
 } from '@app-health/contracts';
+import { MemoryCapabilities } from './capability-store.js';
 import { generateRawKey, hashKey } from './crypto.js';
 import type {
   AppHealthRepositories,
@@ -106,6 +108,7 @@ export class InMemoryAdapter
     PublicLogKeyRepository,
     BucketRepository
 {
+  private readonly capabilities = new MemoryCapabilities();
   private readonly apps = new Map<string, AppV1>();
   private readonly environments = new Map<string, EnvironmentV1>();
   private readonly keysById = new Map<string, KeyRecordV1>();
@@ -128,12 +131,14 @@ export class InMemoryAdapter
   static async create(): Promise<InMemoryAdapter> {
     const adapter = new InMemoryAdapter();
     await adapter.seed();
+    await adapter.capabilities.recordCapability(SEED_APP_ID, SEED_ENV_ID, 'endpoints', Date.now());
     return adapter;
   }
 
   /** Return this adapter as the aggregate repository shape the service expects. */
   asRepositories(): AppHealthRepositories {
     return {
+      capabilities: this.capabilities,
       apps: this,
       environments: this,
       keys: this,
@@ -255,6 +260,15 @@ export class InMemoryAdapter
 
   // --- KeyRepository ---
 
+  async createEnvironmentKey(appId: string, name: string, now: number) {
+    const envs = [...this.environments.values()].filter((env) => env.app_id === appId);
+    if (envs.length >= MAX_ENVIRONMENTS_PER_APP || envs.some((env) => env.name === name))
+      return null;
+    const environment = await this.createEnvironment(appId, name, now);
+    const created = await this.createKey(appId, environment.id, now);
+    return { environment, ...created };
+  }
+
   async createProductKey(
     appId: string,
     now: number,
@@ -298,6 +312,20 @@ export class InMemoryAdapter
     this.keysById.set(record.id, record);
     this.keysByVerifier.set(verifier, record);
     return { record: { ...record }, rawKey };
+  }
+
+  async rotateEnvironmentKey(appId: string, envId: string, now: number) {
+    const created = await this.createKey(appId, envId, now);
+    for (const key of this.keysById.values()) {
+      if (
+        key.app_id === appId &&
+        key.environment_id === envId &&
+        key.id !== created.record.id &&
+        key.revoked_at === null
+      )
+        key.revoked_at = now;
+    }
+    return created;
   }
 
   async verifyKey(rawKey: string): Promise<KeyRecordV1 | null> {
@@ -448,10 +476,14 @@ export class InMemoryAdapter
   }
   async listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]> {
     const prefix = `${appId}|${envId}|`;
+    const reference = query.now ?? Date.now();
+    const cutoff = reference - LOG_RETENTION_DAYS * 86_400_000;
     return [...this.logEvents.entries()]
       .filter(
         ([key, log]) =>
           key.startsWith(prefix) &&
+          log.timestamp >= cutoff &&
+          log.timestamp <= reference + 5 * 60 * 1000 &&
           logLevelAtLeast(log.level, query.minLevel) &&
           (query.source === undefined || log.source === query.source) &&
           (query.event === undefined || log.event === query.event),
@@ -486,6 +518,9 @@ export class InMemoryAdapter
   async verifyPublicKey(rawKey: string): Promise<PublicLogKeyV1 | null> {
     const found = this.publicKeysByVerifier.get(await hashKey(rawKey));
     return found && found.revoked_at === null ? { ...found } : null;
+  }
+  async getPublicKey(keyId: string): Promise<PublicLogKeyV1 | null> {
+    return this.publicKeysById.get(keyId) ?? null;
   }
   async listPublicKeys(appId: string): Promise<PublicLogKeyV1[]> {
     return [...this.publicKeysById.values()]

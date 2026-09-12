@@ -76,6 +76,30 @@ try {
   assert.ok(Number.isFinite(aggregate.p95_ms) && aggregate.p95_ms >= aggregate.p50_ms);
   assert.ok(!JSON.stringify(result).includes('private-one'));
   assert.ok(!JSON.stringify(result).includes('not-collected'));
+  for (const window of ['1h', '24h']) {
+    query.set('window', window);
+    const windowed = await read('endpoints');
+    assert.equal(windowed.window, window);
+    assert.equal(windowed.endpoints[0].request_count, 3);
+    assert.equal(windowed.endpoints[0].error_count, 1);
+  }
+  const failures = await read('failures');
+  assert.equal(failures.failures.length, 1);
+  assert.equal(failures.failures[0].status_code, 503);
+  assert.equal(failures.failures[0].route, '/synthetic/:id');
+  const revoked = await globalThis.fetch(
+    `${api}/v1/apps/${created.app.id}/environments/${created.environment.id}/revoke`,
+    { method: 'POST' },
+  );
+  assert.equal(revoked.status, 200);
+  assert.equal((await read('installation/status')).state, 'revoked');
+  const rejected = await globalThis.fetch(`${api}/v1/ingest`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${created.key.key}`, 'content-type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(rejected.status, 401);
+  assert.equal((await read('endpoints')).endpoints[0].request_count, 3);
   globalThis.console.log(
     JSON.stringify(
       { mode: 'local-synthetic-sdk', installation: installation.state, aggregate },
