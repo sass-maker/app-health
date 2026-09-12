@@ -97,10 +97,14 @@ it('survives disabled storage and malformed or oversized paths, and stores only 
   api().page('/' + 'abcd/'.repeat(100));
   api().page('/alice%40example.com');
   await api().flush();
-  const events = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)).events;
-  const blockedBody = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
-  expect(BrowserBatchV1.safeParse(blockedBody).success).toBe(true);
-  expect(blockedBody.session_id).toMatch(/^[a-f0-9-]{36}$/);
+  // Losing storage can start a fallback session. Each session retains its own batch.
+  await api().flush();
+  const batches = vi.mocked(fetch).mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+  for (const batch of batches) {
+    expect(BrowserBatchV1.safeParse(batch).success).toBe(true);
+    expect(batch.session_id).toMatch(/^[a-f0-9-]{36}$/);
+  }
+  const events = batches.flatMap((batch) => batch.events);
   expect(events.slice(1).map((event: { path: string }) => event.path)).toEqual([
     '/',
     '/:path',
