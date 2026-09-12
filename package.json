@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "typecheck": "pnpm --silent -r run typecheck",
+    "typecheck": "pnpm -r run typecheck",
     "test": "pnpm --silent -r run test",
     "verify:local-sdk": "pnpm --filter @saas-maker/app-health build && node scripts/verify-local-sdk.mjs",
     "verify:js-runtimes": "pnpm --filter @saas-maker/app-health build && node scripts/verify-js-runtimes.mjs",
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",
+    "@types/node": "^24.13.4",
     "@vitest/coverage-v8": "3.2.7",
     "eslint": "^9.18.0",
     "eslint-config-prettier": "^9.1.0",
@@ -59,7 +60,8 @@
       "js-yaml@>=4.0.0 <5.0.0": "4.3.2",
       "nanoid@>=3.0.0 <4.0.0": "3.3.18",
       "sharp@<0.35.4": "0.35.4",
-      "undici@>=7.0.0 <8.0.0": "7.29.0"
+      "undici@>=7.0.0 <8.0.0": "7.29.0",
+      "@types/node": "24.13.4"
     }
   }
 }
