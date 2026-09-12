@@ -6,8 +6,10 @@ product; Site Health remains Fleet's private portfolio system. Production
 resources and account migrations are deployed. A real Google sign-in created
 the owner workspace, and production recorded one `signup.completed` and one
 `project.created` milestone. A real Node SDK canary produced two successful
-requests and one measured error. The analytics reporting correction and SDK
-0.4.0 release are undergoing final deployment verification.
+requests and one measured error. The analytics reporting correction and JavaScript SDK
+0.4.0 are released. Known production traffic matched expected sessions, page
+views, events, referral sources, time windows, and retry deduplication. Public
+sharing and revocation passed. See [release verification](release-2026-09-12.md).
 
 | Stage               | Verified behavior                                                                                                                                                                              | Integration guide                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
@@ -41,8 +43,7 @@ can only read a deliberately limited aggregate projection.
 
 ## Remaining activation and capability boundaries
 
-Final analytics deployment, SDK publication, and integration into other Fleet
-apps still need their own live receipts. Swift remains a local-package
+Integration into other Fleet apps still needs its own live receipts. Swift remains a local-package
 integration until a separately installable release is published. Self account milestones are server-side, scoped to the
 configured App Health app/environment, and carry no profile, project identifier,
 or credential data. All credentials in local canaries are synthetic.

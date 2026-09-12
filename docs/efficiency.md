@@ -61,31 +61,25 @@ measurements (Miniflare plus a real browser, not production billing or capacity)
 - The proof kept private keys out of browser assets, preserved environment
   isolation, and product responses survived collector failure.
 
-These are repeatable local integration measurements, not a forecast. Production
-resources and account settings are prepared separately; the Worker code remains
-undeployed, so these measurements do not establish production capacity or billing.
+These are repeatable local integration measurements, not a production capacity
+or billing forecast. The unified runtime and bounded production resources are
+now deployed. See [release verification](release-2026-09-12.md) for actual
+Google, ingestion, analytics, and public-sharing receipts.
 
-## Activation checklist
+## Operational boundaries
 
-Production still requires an explicitly authorized deployment and live canary:
-verify the Google callback, account isolation and retention cleanup, SQLite
-Durable Object migration, Queue retries and dead-letter behavior, R2 lifecycle,
-AE authorization, projection latency, and resource usage. The real Google
-callback is unverified and native Swift integration is not implemented; keep
-both explicit in the readiness record rather than treating local checks as proof.
+Queue retries, immutable archive staging, and retention cleanup have real local
+workerd tests. Production has bounded Queue retention and a 30-day R2 lifecycle;
+full retention expiry and sustained-load billing have not been observed over a
+month. Analytics Engine is a best-effort projection and historical reports can
+lag ingestion; archive replay is not implemented. Keep these limitations visible.
 
 ## Native integration boundary
 
-Swift is a required target, but the existing browser contract is not a safe
-native installation path. Browser public keys require an exact HTTP Origin;
-private server credentials must never be embedded in a distributed Apple app.
-The current analytics schema describes page views and browser events, and log
-sources distinguish only browser and server.
-
-Native readiness therefore needs a separately scoped public-client ingestion
-policy, native event/log source semantics through reports, and a dependency-free
-Foundation Swift package with bounded buffering, retry, and flush tests. Native
-screens must not be silently reported as web page views, and native-observed
-network timing must not enter server endpoint health. Do not spoof an Origin or
-ship the private key to bypass these missing contracts. App Store Connect is
-outside this product.
+The Foundation Swift package uses separately scoped native public keys, named
+native events, explicit logs, and opt-in foreground sessions. It never fabricates
+browser page views or puts client-observed network timing into server endpoint
+health. Twelve Swift tests and a real native executable-to-collector canary passed.
+See [native integration](native-integration.md) for local-package installation;
+remote Swift package publication and persistent offline delivery remain separate.
+App Store Connect is outside this product.

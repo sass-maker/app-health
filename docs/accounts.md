@@ -57,25 +57,18 @@ D1 work attached to an earlier Worker request, so auth instances are request-loc
 The ordinary Vite workflow remains credential-free and does not emulate a Google
 account. Browser UI fixtures are not proof of a successful Google callback.
 
-## Production readiness — deployment pending
+## Production readiness — released 2026-09-12
 
-The feature remains deployment-gated. Production preparation is complete for the
-`app-health-browser-events` queue and dead-letter queue, the
-`app-health-browser-history` R2 bucket with a 30-day lifecycle, the Fleet OAuth
-project and scoped Google client, the Worker Google and Better Auth secrets, and
-additive migrations `0007_accounts.sql` through `0011_account_retention.sql`.
-The applied migrations have a private backup. Worker code has not been deployed,
-and a real Google callback has not been verified.
+The unified Worker, analytics Queue/DLQ, R2 bucket with a 30-day lifecycle,
+SQLite Durable Objects, dedicated Google client, Worker secrets, and additive
+migrations `0007_accounts.sql` through `0011_account_retention.sql` are deployed.
+The applied migrations have a private backup. A real Google callback created
+the owner's workspace, and project creation and server milestone logs were
+verified in production. Existing unrelated legacy projects remain unclaimed.
 
-After explicit authorization, activation requires:
-
-1. Deploy the prepared Worker code and verify the applied schema while confirming
-   legacy rows remain unclaimed. The local runtime test uses `nodejs_compat` and
-   compatibility date `2026-07-22`; it does not establish deployed behavior.
-2. Enable `APP_HEALTH_ACCOUNTS=enabled` after deployment. Missing
-   configuration fails closed, and the Google button only appears when configured.
-3. Verify real Google signup, returning login, two-account isolation, project
-   creation, ingest, and sign-out against the deployed version.
+Two-account isolation, invalid callbacks, and retention cleanup are verified by
+the real local workerd/D1 suite; no second production person's account was used
+for the release. See [release verification](release-2026-09-12.md).
 
 Set `APP_HEALTH_ACCOUNTS=disabled` to turn off Google entry. Once the ownership
 schema exists, legacy access stays restricted even if the flag is removed.

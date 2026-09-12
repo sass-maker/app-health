@@ -19,7 +19,7 @@ shadcn dashboard, and bounded ingest, retries, archival, and retention.
 **OUT of scope:** Team roles, billing, session replay, funnels, revenue attribution,
 App Store Connect imports, and archive replay into Analytics Engine.
 
-## Unified release candidate — 2026-09-12
+## Unified release — 2026-09-12
 
 Tracked in https://github.com/sass-maker/app-health/issues/58. Production resource
 setup and additive migrations 0007–0011 are complete; Google credentials are held
@@ -27,8 +27,10 @@ as Worker secrets. The App Health operational project is configured for its own
 browser analytics and server-generated `signup.completed` / `project.created`
 logs. The unified runtime is deployed and a real Google callback, workspace
 creation, project creation, both milestone logs, and a Node endpoint canary have
-been verified. Final analytics query corrections, historical session counts, and
-the updated JavaScript package are in final release verification.
+been verified. Historical session counts, production query corrections, public
+sharing/revocation, and the JavaScript SDK 0.4.0 release are verified. Production
+canary totals matched all expected counts without retry inflation; see
+[release verification](docs/release-2026-09-12.md).
 Local checks cover workerd/D1, browser setup flows, public-share revocation, SDK
 runtime compatibility, Swift delivery, retention, and milestone deduplication.
 
