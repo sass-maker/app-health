@@ -2,7 +2,7 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Distinct product events, visible API monitoring, and stable private-shell loading",
+  "target": "Focused product navigation with canonical routes and shared page definitions",
   "surfaceMode": "operate",
   "mode": "preserve",
   "register": "product",
@@ -50,11 +50,11 @@
       "purposeAlignment": "match",
       "driftNote": "",
       "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
-      "job": "Move between traffic, intentional product actions, backend API health, and logs without confusing their roles.",
-      "thesis": "One shadcn workspace with four legible tools: web acquisition, product actions, API reliability, and logs.",
+      "job": "Find traffic, named actions, or backend health through three consistent product destinations.",
+      "thesis": "One shadcn workspace: Overview, Analytics, Events, Backend, and Settings. Backend owns local API, logs, and diagnostics tabs.",
       "system": "Preserve the existing shadcn graphite/light shell. Web analytics uses indigo traffic signals; Product events uses pink action signals; API monitoring retains method and health status colors; Logs retain severity. Every tool remains reachable and owns its setup or connected state.",
       "signature": "A product-event workspace that begins with named actions and progressively reveals the selected action's pages and sources.",
-      "risk": "Keep the shared analytics query contract without allowing the Product events page to inherit the web analytics information hierarchy."
+      "risk": "Old dashboard hashes intentionally fall back to Analytics; no compatibility aliases."
     }
   },
   "evidence": {
@@ -133,15 +133,15 @@
       }
     ],
     "projectCheck": {
-      "command": "pnpm run check; final copy-only change also passed App tests and web typecheck",
+      "command": "pnpm run check: quality gates and 119 browser cases passed; stale Analytics heading assertion fixed and affected browser case passed; final App tests 60/60 and web typecheck passed",
       "status": "pass"
     },
     "critique": {
-      "score": 38,
+      "score": 36,
       "maximum": 40
     },
     "audit": {
-      "score": 19,
+      "score": 18,
       "maximum": 20
     },
     "unresolved": {
@@ -175,10 +175,10 @@
       },
       "mismatches": []
     },
-    "notes": "Preserve lane: existing shadcn composition and Evil Charts area treatment retained; no dependency added. Product events now leads with named actions, action counts, sessions, and an event-only trend; page, source, and audience detail appears only after selecting an event. Web analytics retains traffic, acquisition, audience, and engagement. API monitoring and Logs are permanently visible under Backend and route to setup when disabled or empty. The app frame uses the shadcn inset sidebar, section-specific icon treatment, sticky scope controls, and responsive endpoint cards before the table becomes cramped. Root inspected both surfaces at 390, 768, and 1440 pixels in dark and light; no P0, P1, or P2 findings. The private app uses a dedicated 1.32 kB theme-stable HTML document, while the public 9.88 kB SEO document remains exclusive to the landing page. Local Cloudflare asset routing verified the exact app entry. Full pnpm run check passed with 120 browser scenarios; final capability copy also passed 59 App tests and web typecheck. No production measurement or deployment in this turn."
+    "notes": "Preserve lane. Reviewed current Playwright screenshots for desktop dark Backend, tablet light Backend, and mobile light Events. Clear primary product grouping, selected Backend tab, readable cards and event rows, semantic colors, no clipping in inspected views. Existing dark/light responsive suites validate 390/768/1440 states. Canonical route names and shared page titles replace old route aliases. No additional components or dependencies. Broader dashboard density and polish remain optional follow-up, not a claim of a new visual system."
   },
   "ownerFeedback": {
-    "decision": "agent-selected",
-    "note": "Owner identified Web analytics and Events as visually conflated and could not find the backend product. Product events and API monitoring are now distinct, visible surfaces. Implemented locally; no release requested for this turn."
+    "decision": "delegated",
+    "note": "Owner explicitly requested the cleanest focused product and waived legacy navigation compatibility."
   }
 }

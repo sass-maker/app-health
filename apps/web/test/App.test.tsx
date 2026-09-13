@@ -306,7 +306,7 @@ describe('App Health V0 UI', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', storage);
     localStorage.clear();
-    window.history.replaceState({}, '', '/app#endpoints');
+    window.history.replaceState({}, '', '/app#backend');
   });
 
   afterEach(() => {
@@ -529,7 +529,7 @@ describe('App Health V0 UI', () => {
       );
     expect(JSON.parse(String(createCall?.[1]?.body)).key_scope).toBe('environment');
     fireEvent.click(screen.getByRole('button', { name: /save key and choose capabilities/i }));
-    expect(await screen.findByRole('heading', { name: 'Project settings' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy();
     expect(screen.queryByText('ahk_one_time_secret')).toBeNull();
   });
 
@@ -669,7 +669,7 @@ describe('App Health V0 UI', () => {
         '/v1/installation/status',
       ]);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Data received' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
     await waitFor(() => {
       const failureCall = fetchMock.mock.calls
         .map(([input]) => (input instanceof URL ? input : null))
@@ -810,7 +810,7 @@ describe('App Health V0 UI', () => {
       ),
     ).toBe(false);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Data received' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
     expect(await screen.findByText('/orders/:id')).toBeTruthy();
     expect(screen.getByText('503')).toBeTruthy();
     expect(screen.getByText('812 ms')).toBeTruthy();
@@ -841,7 +841,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ failureFail: true });
     render(<App />);
-    fireEvent.click(screen.getByRole('button', { name: 'Data received' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
     expect(await screen.findByText('Failure details are unavailable')).toBeTruthy();
     expect(screen.getByText('Never collected')).toBeTruthy();
     expect(screen.getByText(/2xx and 3xx requests are folded into counts/i)).toBeTruthy();
@@ -1004,12 +1004,13 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: 'Web analytics' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Product events' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'API monitoring' }));
+    expect(await screen.findByRole('button', { name: 'Analytics' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Events' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Backend' }));
     expect(await screen.findByText('API monitoring is not selected')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Enable API monitoring' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Logs' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Diagnostics' })).toBeTruthy();
   });
 
   it('keeps capability settings open and explains a failed enable request', async () => {
@@ -1028,7 +1029,7 @@ describe('App Health V0 UI', () => {
 
     fireEvent.click((await screen.findAllByRole('button', { name: 'Open setup' }))[0]);
     expect(await screen.findByText('API returned 503')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Project settings' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
     expect(location.hash).toBe('#settings');
   });
 
@@ -1130,6 +1131,16 @@ describe('App Health V0 UI', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Replace key' })).toHaveFocus());
   });
 
+  it('normalizes an obsolete dashboard route without preserving an alias', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#logs');
+    installFetch();
+    render(<App />);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Analytics' })).toBeTruthy();
+    expect(location.hash).toBe('#analytics');
+    expect(screen.queryByRole('tablist', { name: 'Backend sections' })).toBeNull();
+  });
+
   it('synchronizes the dashboard when the URL hash changes', async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch();
@@ -1137,11 +1148,11 @@ describe('App Health V0 UI', () => {
     await screen.findAllByText('/orders');
 
     act(() => {
-      window.history.replaceState({}, '', '/app#logs');
+      window.history.replaceState({}, '', '/app#backend/logs');
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
     expect(await screen.findByText('Application logs')).toBeTruthy();
-    expect(document.title).toBe('Logs — App Health');
+    expect(document.title).toBe('Backend — App Health');
   });
 });
 
@@ -1172,7 +1183,7 @@ describe('Logs view', () => {
     vi.stubGlobal('localStorage', storage);
     localStorage.clear();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
-    window.history.replaceState({}, '', '/app#endpoints');
+    window.history.replaceState({}, '', '/app#backend');
   });
 
   afterEach(() => {
@@ -1189,7 +1200,7 @@ describe('Logs view', () => {
       );
     expect(logCalls()).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('ada@example.com')).toBeTruthy();
     expect(screen.getByText('payment.failed')).toBeTruthy();
     expect(screen.getByText('card declined')).toBeTruthy();
@@ -1247,7 +1258,7 @@ describe('Logs view', () => {
       ],
     });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('payment.failed')).toBeTruthy();
     expect(screen.getByText('browser')).toBeTruthy();
 
@@ -1304,7 +1315,7 @@ describe('Logs view', () => {
   it('reports browser key API failures without hiding the logs', async () => {
     installFetch({ logRows, publicKeyFail: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('ada@example.com')).toBeTruthy();
     expect(await screen.findByText('API returned 503')).toBeTruthy();
   });
@@ -1312,7 +1323,7 @@ describe('Logs view', () => {
   it('shows the empty state with a next action and recovers from an API failure', async () => {
     installFetch({ logRows: [] });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('No logs match')).toBeTruthy();
     expect(screen.getByText(/POST/)).toBeTruthy();
   });
@@ -1320,10 +1331,11 @@ describe('Logs view', () => {
   it('keeps the shell usable when logs cannot load', async () => {
     installFetch({ logFail: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'API monitoring' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Backend' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'API monitoring' })).toBeTruthy();
   });
 
   it('rejects malformed log responses instead of showing an empty feed', async () => {
@@ -1338,13 +1350,13 @@ describe('Logs view', () => {
       }),
     );
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
     expect(screen.queryByText('No logs match')).toBeNull();
   });
 
   it('shows capability-specific browser and Cloudflare Worker log setup', async () => {
-    window.history.replaceState({}, '', '/app#logs');
+    window.history.replaceState({}, '', '/app#backend/logs');
     installFetch({
       capabilityRows: [
         { id: 'analytics', enabled: false, first_received_at: null, last_received_at: null },

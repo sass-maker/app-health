@@ -1,3 +1,9 @@
+import {
+  DASHBOARD_PAGES,
+  type DashboardView,
+  type BackendView,
+  capabilityView,
+} from './dashboard-navigation.js';
 import { LabeledSelect as IdentitySelect } from './LabeledSelect.js';
 import { AnalyticsSharing } from './AnalyticsSharing.js';
 import { NativeKeys } from './NativeKeys.js';
@@ -107,8 +113,6 @@ const STORAGE_KEY = 'app-health-v0-project';
 
 type SortKey = 'health' | 'requests' | 'error_rate' | 'p95' | 'last_seen';
 type SortDirection = 'asc' | 'desc';
-type DashboardView =
-  'endpoints' | 'data' | 'logs' | 'analytics' | 'events' | 'install' | 'projects' | 'settings';
 
 const WINDOW_LABELS: Record<Window, string> = {
   '15m': '15 minutes',
@@ -2858,49 +2862,6 @@ function CapabilitySetup(props: {
   );
 }
 
-const VIEW_HEADINGS: Record<DashboardView, [string, string, string]> = {
-  analytics: [
-    'Product analytics',
-    'Web analytics',
-    'Explore visitors, acquisition sources, entry pages, and traffic over time.',
-  ],
-  events: [
-    'Product analytics',
-    'Product events',
-    'Measure the intentional actions that show activation, conversion, and retention.',
-  ],
-  endpoints: [
-    'Backend health',
-    'API monitoring',
-    'Track request volume, errors, and latency for every backend route.',
-  ],
-  data: [
-    'Backend health',
-    'Data received',
-    'The exact telemetry App Health accepts and retains for this environment.',
-  ],
-  logs: [
-    'Backend health',
-    'Logs',
-    'Debug application behavior with structured records by severity, source, and time.',
-  ],
-  install: [
-    'Browser analytics',
-    'Install web analytics',
-    'Add page views, live sessions, and the named events your team chooses.',
-  ],
-  settings: [
-    'Workspace configuration',
-    'Project settings',
-    'Manage this project’s environments, capabilities, and environment-scoped keys.',
-  ],
-  projects: [
-    'Workspace overview',
-    'Overview',
-    'See product traffic and live sessions across your environments.',
-  ],
-};
-
 interface DashboardHandlers {
   onProjectChange: (project: SavedProject) => void;
   onReset: () => void;
@@ -2909,20 +2870,9 @@ interface DashboardHandlers {
   onEnvironmentCreated: (environment: SavedProject) => void;
 }
 
-const DASHBOARD_VIEWS: DashboardView[] = [
-  'analytics',
-  'events',
-  'projects',
-  'endpoints',
-  'data',
-  'logs',
-  'install',
-  'settings',
-];
-
 function viewFromHash(): DashboardView {
   const saved = location.hash.slice(1);
-  return DASHBOARD_VIEWS.includes(saved as DashboardView) ? (saved as DashboardView) : 'analytics';
+  return Object.hasOwn(DASHBOARD_PAGES, saved) ? (saved as DashboardView) : 'analytics';
 }
 
 function useEndpointData(
@@ -3017,10 +2967,15 @@ function useEndpointData(
 function useDashboardNavigation(): [DashboardView, (value: DashboardView) => void] {
   const [view, setView] = useState<DashboardView>(viewFromHash);
   useEffect(() => {
-    document.title = `${VIEW_HEADINGS[view][1]} — App Health`;
+    document.title = `${DASHBOARD_PAGES[view].title} — App Health`;
   }, [view]);
   useEffect(() => {
-    const syncView = () => setView(viewFromHash());
+    const syncView = () => {
+      const next = viewFromHash();
+      if (location.hash !== `#${next}`) history.replaceState(null, '', `#${next}`);
+      setView(next);
+    };
+    syncView();
     window.addEventListener('hashchange', syncView);
     window.addEventListener('popstate', syncView);
     return () => {
@@ -3114,10 +3069,16 @@ interface DashboardContentProps {
   onView: (value: DashboardView) => void;
 }
 
-function DashboardContent(props: DashboardContentProps): JSX.Element {
+function isBackendView(view: DashboardView): view is BackendView {
+  return view === 'backend' || view === 'backend/logs' || view === 'backend/diagnostics';
+}
+
+function DashboardBackend(props: DashboardContentProps & { view: BackendView }): JSX.Element {
   const { view, project, ownerToken, capabilities } = props;
-  if (view === 'endpoints')
-    return (
+  let content: ReactNode;
+
+  if (view === 'backend')
+    content = (
       <EndpointPanel
         project={project}
         ownerToken={ownerToken}
@@ -3134,8 +3095,20 @@ function DashboardContent(props: DashboardContentProps): JSX.Element {
         onManage={props.onManage}
       />
     );
-  if (view === 'data')
-    return (
+  else if (view === 'backend/logs')
+    content = (
+      <CapabilityBoundary
+        id="logs"
+        project={project}
+        ownerToken={ownerToken}
+        controller={capabilities}
+        onManage={props.onManage}
+      >
+        <LogsView project={project} ownerToken={ownerToken} />
+      </CapabilityBoundary>
+    );
+  else
+    content = (
       <CapabilityBoundary
         id="endpoints"
         project={project}
@@ -3149,6 +3122,35 @@ function DashboardContent(props: DashboardContentProps): JSX.Element {
         </div>
       </CapabilityBoundary>
     );
+
+  return (
+    <Tabs
+      value={view}
+      onValueChange={(value) => props.onView(value as BackendView)}
+      className="gap-5"
+    >
+      <TabsList variant="line" aria-label="Backend sections" className="max-w-full overflow-x-auto">
+        <TabsTrigger value="backend" onClick={() => props.onView('backend')}>
+          API monitoring
+        </TabsTrigger>
+        <TabsTrigger value="backend/logs" onClick={() => props.onView('backend/logs')}>
+          Logs
+        </TabsTrigger>
+        <TabsTrigger
+          value="backend/diagnostics"
+          onClick={() => props.onView('backend/diagnostics')}
+        >
+          Diagnostics
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value={view}>{content}</TabsContent>
+    </Tabs>
+  );
+}
+
+function DashboardContent(props: DashboardContentProps): JSX.Element {
+  const { view } = props;
+  if (isBackendView(view)) return <DashboardBackend {...props} view={view} />;
   return view === 'analytics' || view === 'events' ? (
     <DashboardAnalytics {...props} />
   ) : (
@@ -3170,7 +3172,7 @@ function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
       <AnalyticsView
         key={view}
         mode={view === 'events' ? 'events' : 'web'}
-        onInstall={() => props.onView('install')}
+        onInstall={() => props.onView('analytics/setup')}
         project={project}
         projects={projects}
         ownerToken={ownerToken}
@@ -3185,7 +3187,7 @@ function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
 
 function DashboardManagement(props: DashboardContentProps): JSX.Element {
   const { view, project, projects, ownerToken, handlers, capabilities } = props;
-  if (view === 'projects')
+  if (view === 'overview')
     return (
       <ProjectsView
         projects={projects}
@@ -3196,27 +3198,18 @@ function DashboardManagement(props: DashboardContentProps): JSX.Element {
         }}
       />
     );
-  if (view === 'install')
+  if (view === 'analytics/setup')
     return <PublicKeysPanel project={project} ownerToken={ownerToken} installMode />;
-  if (view === 'logs')
-    return (
-      <CapabilityBoundary
-        id="logs"
-        project={project}
-        ownerToken={ownerToken}
-        controller={capabilities}
-        onManage={props.onManage}
-      >
-        <LogsView project={project} ownerToken={ownerToken} />
-      </CapabilityBoundary>
-    );
   return (
     <ProjectSettings
       project={project}
       projects={projects}
       ownerToken={ownerToken}
       controller={capabilities}
-      actions={{ onEnvironmentCreated: handlers.onEnvironmentCreated, onOpen: props.onView }}
+      actions={{
+        onEnvironmentCreated: handlers.onEnvironmentCreated,
+        onOpen: (id) => props.onView(capabilityView(id)),
+      }}
     />
   );
 }
@@ -3241,7 +3234,7 @@ function Dashboard({
     project,
     ownerToken,
     windowKey,
-    view === 'endpoints',
+    view === 'backend',
   );
 
   const sorted = useMemo(
@@ -3260,9 +3253,9 @@ function Dashboard({
   return (
     <ProductShell
       view={view}
-      eyebrow={VIEW_HEADINGS[view][0]}
-      title={VIEW_HEADINGS[view][1]}
-      description={VIEW_HEADINGS[view][2]}
+      eyebrow={DASHBOARD_PAGES[view].eyebrow}
+      title={DASHBOARD_PAGES[view].title}
+      description={DASHBOARD_PAGES[view].description}
       project={project}
       projects={projects}
       onView={changeView}

@@ -162,7 +162,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   }
   await page.getByRole('combobox', { name: 'Project', exact: true }).click();
   await page.getByRole('option', { name: project.name, exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Web analytics', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Analytics', exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
   await expect(page.getByText('Your projects', { exact: true })).toHaveCount(0);
 });

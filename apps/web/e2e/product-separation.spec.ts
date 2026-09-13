@@ -52,22 +52,24 @@ for (const theme of ['dark', 'light']) {
             (surface === 'events' ? path === '/v1/analytics/report' : path === '/v1/endpoints')
           );
         });
-        await page.goto(`/app?demo=populated#${surface}`);
+        await page.goto(
+          `/app?demo=populated#${({ endpoints: 'backend', logs: 'backend/logs', data: 'backend/diagnostics' } as Record<string, string>)[surface] ?? surface}`,
+        );
         await response;
 
         if (surface === 'events') {
-          await expect(
-            page.getByRole('heading', { level: 1, name: 'Product events' }),
-          ).toBeVisible();
+          await expect(page.getByRole('heading', { level: 1, name: 'Events' })).toBeVisible();
           await expect(
             page.getByRole('heading', { name: 'Product events over time' }),
           ).toBeVisible();
           await expect(page.getByRole('heading', { name: 'Top pages' })).toHaveCount(0);
           await expect(page.getByRole('tab', { name: 'Audience' })).toHaveCount(0);
         } else {
-          await expect(
-            page.getByRole('heading', { level: 1, name: 'API monitoring' }),
-          ).toBeVisible();
+          await expect(page.getByRole('heading', { level: 1, name: 'Backend' })).toBeVisible();
+          await expect(page.getByRole('tab', { name: 'API monitoring' })).toHaveAttribute(
+            'aria-selected',
+            'true',
+          );
           await expect(
             page.getByText('/health', { exact: true }).filter({ visible: true }),
           ).toBeVisible();

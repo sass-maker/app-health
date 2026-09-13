@@ -40,7 +40,7 @@ document.title =
       ? 'Changelog — App Health'
       : RootView === LandingPage
         ? 'App Health — Web analytics, product events, and app health'
-        : 'Web analytics — App Health';
+        : 'App Health';
 createRoot(root).render(
   <StrictMode>
     <RootView />

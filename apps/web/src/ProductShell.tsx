@@ -1,12 +1,11 @@
+import { type DashboardView } from './dashboard-navigation.js';
 import { useEffect, useRef, type ReactNode } from 'react';
 import {
   Activity,
   ArrowUpRight,
   BarChart3,
   CircleHelp,
-  Database,
   Layers3,
-  ListFilter,
   Plus,
   Settings2,
   Zap,
@@ -40,15 +39,13 @@ interface Project {
 }
 interface Props {
   children: ReactNode;
-  view: string;
+  view: DashboardView;
   eyebrow: string;
   title: string;
   description: string;
   project: Project;
   projects: Project[];
-  onView: (
-    view: 'analytics' | 'events' | 'endpoints' | 'logs' | 'data' | 'projects' | 'settings',
-  ) => void;
+  onView: (view: DashboardView) => void;
   onProject: (project: Project) => void;
   onAdd: () => void;
   onLock: () => void;
@@ -57,29 +54,24 @@ interface Props {
 const productViews = [
   {
     id: 'analytics' as const,
-    label: 'Web analytics',
+    label: 'Analytics',
     icon: BarChart3,
+    activeViews: ['analytics', 'analytics/setup'] as const,
   },
-  { id: 'events' as const, label: 'Product events', icon: Zap },
-];
-const healthViews = [
+  { id: 'events' as const, label: 'Events', icon: Zap },
   {
-    id: 'endpoints' as const,
-    label: 'API monitoring',
+    id: 'backend' as const,
+    label: 'Backend',
     icon: Activity,
-  },
-  { id: 'logs' as const, label: 'Logs', icon: ListFilter },
-  {
-    id: 'data' as const,
-    label: 'Data received',
-    icon: Database,
+    activeViews: ['backend', 'backend/logs', 'backend/diagnostics'] as const,
   },
 ];
-const manageViews = [{ id: 'settings' as const, label: 'Project settings', icon: Settings2 }];
+const manageViews = [{ id: 'settings' as const, label: 'Settings', icon: Settings2 }];
 type NavigationItem = {
-  id: 'analytics' | 'events' | 'endpoints' | 'logs' | 'data' | 'projects' | 'settings';
+  id: DashboardView;
   label: string;
   icon: LucideIcon;
+  activeViews?: readonly string[];
 };
 export function ProductBrand(): JSX.Element {
   return (
@@ -108,14 +100,13 @@ function WorkspaceSidebar({
       <SidebarContent>
         <NavigationGroup
           label="Workspace"
-          items={[{ id: 'projects', label: 'Overview', icon: Layers3 }]}
+          items={[{ id: 'overview', label: 'Overview', icon: Layers3 }]}
           view={view}
           onView={onView}
         />
-        {view !== 'projects' ? (
+        {view !== 'overview' ? (
           <>
-            <NavigationGroup label="Product" items={productViews} view={view} onView={onView} />
-            <NavigationGroup label="Backend" items={healthViews} view={view} onView={onView} />
+            <NavigationGroup label="Products" items={productViews} view={view} onView={onView} />
             <NavigationGroup label="Manage" items={manageViews} view={view} onView={onView} />
           </>
         ) : null}
@@ -153,7 +144,7 @@ function NavigationGroup({
 }: {
   label: string;
   items: readonly NavigationItem[];
-  view: string;
+  view: DashboardView;
   onView: Props['onView'];
 }): JSX.Element {
   const { setOpenMobile } = useSidebar();
@@ -166,7 +157,7 @@ function NavigationGroup({
             <SidebarMenuItem key={item.id}>
               <SidebarMenuButton
                 className="h-10 px-3 data-[active=true]:bg-background data-[active=true]:shadow-sm data-[active=true]:[&>svg]:text-primary"
-                isActive={view === item.id}
+                isActive={item.activeViews?.includes(view) ?? view === item.id}
                 onClick={() => {
                   onView(item.id);
                   setOpenMobile(false);
@@ -196,24 +187,24 @@ function ProjectPicker({
       <LabeledSelect
         label="Project"
         triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-44"
-        value={view === 'projects' ? 'all' : project.appId}
+        value={view === 'overview' ? 'all' : project.appId}
         options={[
           { value: 'all', label: 'All projects' },
           ...apps.map((candidate) => ({ value: candidate.appId, label: candidate.name })),
         ]}
         onValueChange={(value) => {
           if (value === 'all') {
-            onView('projects');
+            onView('overview');
             return;
           }
           const next = projects.find((candidate) => candidate.appId === value);
           if (next) {
             onProject(next);
-            if (view === 'projects') onView('analytics');
+            if (view === 'overview') onView('analytics');
           }
         }}
       />
-      {view !== 'projects' ? (
+      {view !== 'overview' ? (
         <LabeledSelect
           label="Environment"
           triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-32"
@@ -248,7 +239,7 @@ function MobileFocusReturn({ triggerId }: { triggerId: string }) {
 }
 export function ProductShell(props: Props): JSX.Element {
   const triggerId = 'workspace-navigation-trigger';
-  const presentation = viewPresentation[props.view] ?? viewPresentation.projects;
+  const presentation = viewPresentation[props.view.split('/')[0]] ?? viewPresentation.overview;
   const ViewIcon = presentation.icon;
   return (
     <SidebarProvider>
@@ -319,9 +310,7 @@ export function ProductShell(props: Props): JSX.Element {
 const viewPresentation: Record<string, { icon: LucideIcon; tone: string }> = {
   analytics: { icon: BarChart3, tone: 'var(--chart-1)' },
   events: { icon: Zap, tone: 'var(--chart-4)' },
-  endpoints: { icon: Activity, tone: 'var(--chart-2)' },
-  logs: { icon: ListFilter, tone: 'var(--chart-3)' },
-  data: { icon: Database, tone: 'var(--chart-5)' },
+  backend: { icon: Activity, tone: 'var(--chart-2)' },
   settings: { icon: Settings2, tone: 'var(--primary)' },
-  projects: { icon: Layers3, tone: 'var(--primary)' },
+  overview: { icon: Layers3, tone: 'var(--primary)' },
 };

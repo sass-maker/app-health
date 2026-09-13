@@ -78,3 +78,15 @@ native distributed clients must never contain private server credentials. Swift 
 a future slice. Prioritize integrating these clients into Fleet's Cloudflare and Swift projects
 and verifying their real events end to end. App Store Connect belongs to a different project and
 is outside App Health's scope.
+
+## Focused dashboard scope
+
+The owner narrowed scope to an easy-to-consume product rather than full analytics-suite
+parity. The dashboard has Overview across projects, then Analytics, Events, Backend,
+and Settings for a project and environment. Backend groups API monitoring, Logs,
+and Diagnostics. Setup is part of the relevant product; it is not another product.
+Dashboard routes use those names directly, without old route aliases. Persisted data
+and ingestion contracts are independent of dashboard navigation.
+
+Keep advanced funnels, cohorts, revenue attribution, experiments, team management,
+and session replay out of the current scope. Clarity covers replay and heat maps.

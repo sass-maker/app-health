@@ -18,7 +18,9 @@ for (const theme of ['dark', 'light']) {
           }));
           await route.fulfill({ response, json: body });
         });
-        await page.goto(`/app?demo=populated#${surface}`);
+        await page.goto(
+          `/app?demo=populated#${({ endpoints: 'backend', logs: 'backend/logs', data: 'backend/diagnostics' } as Record<string, string>)[surface] ?? surface}`,
+        );
         if (surface === 'settings')
           await expect(
             page.getByText('Capabilities in this environment', { exact: true }),

@@ -55,7 +55,9 @@ for (const theme of ['dark', 'light']) {
           const loaded = page.waitForResponse(
             (response) => new URL(response.url()).pathname === `/v1/${path}`,
           );
-          await page.goto(`/app?demo=populated#${view}`);
+          await page.goto(
+            `/app?demo=populated#${({ endpoints: 'backend', logs: 'backend/logs', data: 'backend/diagnostics' } as Record<string, string>)[view] ?? view}`,
+          );
           await loaded;
           await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
           if (state === 'error') await expect(page.getByRole('alert').first()).toBeVisible();

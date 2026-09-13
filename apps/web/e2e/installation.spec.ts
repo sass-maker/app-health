@@ -61,9 +61,7 @@ for (const theme of ['dark', 'light']) {
       );
       await expect(page.getByText('First valid data', { exact: false })).toBeVisible();
       await page.goto('/app#settings');
-      await expect(
-        page.getByRole('heading', { name: 'Project settings', exact: true }),
-      ).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
       const revoke = page.getByRole('button', { name: /Revoke browser key/ });
       await revoke.click();
       const dialog = page.getByRole('alertdialog');

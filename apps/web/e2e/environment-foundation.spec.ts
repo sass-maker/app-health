@@ -37,7 +37,7 @@ for (const theme of ['dark', 'light']) {
         })
       ).ok(),
     ).toBe(true);
-    await page.goto('/app#logs');
+    await page.goto('/app#backend/logs');
     await expect(page.getByText('Waiting for the first valid logs event')).toBeVisible();
     await checkReadability(page);
     const log = {
@@ -59,7 +59,7 @@ for (const theme of ['dark', 'light']) {
     await checkReadability(page);
     await page.goto('/app#analytics');
     await expect(page.getByText('Install web analytics', { exact: true })).toBeVisible();
-    await page.goto('/app#endpoints');
+    await page.goto('/app#backend');
     await expect(page.getByText('Waiting for the first valid api monitoring event')).toBeVisible();
     const endpoint = {
       schema_version: 'v1',
@@ -89,9 +89,7 @@ for (const theme of ['dark', 'light']) {
       page.getByText('/foundation', { exact: true }).filter({ visible: true }),
     ).toBeVisible({ timeout: 12000 });
     await page.goto('/app#settings');
-    await expect(
-      page.getByRole('heading', { name: 'Project settings', exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
     await checkReadability(page);
     await page.getByLabel('New environment name').fill('staging');
     const added = page.waitForResponse(

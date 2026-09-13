@@ -60,7 +60,7 @@ always paired with text and the 45-second browser-session definition.
 - Label local data, sampling, freshness, and illustrative landing data next to the surface they
   qualify.
 - Do not claim funnels, revenue attribution, or hosted production activation before they exist.
-- Keep backend terms inside App health, Logs, Data received, and installation details.
+- Keep backend terms inside Backend and its API monitoring, Logs, and Diagnostics tabs.
 
 ## Interaction and accessibility
 
