@@ -21,7 +21,15 @@ type Row = {
 
 async function rows(sql: string, options: Options): Promise<Row[]> {
   const response = await browserQuery(sql, options);
-  if (!response.ok) throw new Error('Public analytics unavailable');
+  if (!response.ok) {
+    // Public queries contain only fixed projections and validated scope IDs.
+    // Keep provider diagnostics bounded and never include the query credential.
+    console.error('public_analytics_query_failed', {
+      status: response.status,
+      detail: (await response.text()).replaceAll(options.token, '[redacted]').slice(0, 512),
+    });
+    throw new Error('Public analytics unavailable');
+  }
   const body = (await response.json()) as { data?: Row[] };
   if (!Array.isArray(body.data) || body.data.length > 100)
     throw new Error('Invalid public analytics');
