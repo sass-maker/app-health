@@ -1,7 +1,12 @@
+import { browserReportPlan } from '../src/browser-report-plan.js';
 import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { normalizeAnalyticsSource } from '@app-health/contracts';
+import {
+  normalizeAnalyticsSource,
+  ANALYTICS_SOURCE_HOSTS,
+  ANALYTICS_SOURCE_ALIASES,
+} from '@app-health/contracts';
 import { analyticsSourceFrom, analyticsSourceSql } from '../src/browser-source-sql.js';
 
 describe('analytics source SQL', () => {
@@ -28,7 +33,8 @@ describe('analytics source SQL', () => {
       'www.google',
       'search.search.yahoo.com',
       'WWW.Reddit.com.',
-      ...['reddit.com', 'x.com', 'google.co.in', 'search.yahoo.com'].flatMap((host) =>
+      ...Object.keys(ANALYTICS_SOURCE_ALIASES),
+      ...ANALYTICS_SOURCE_HOSTS.flatMap(([, hosts]) => hosts).flatMap((host) =>
         ['', 'www.', 'm.', 'mobile.', 'old.', 'l.', 'out.', 'news.', 'search.'].flatMap(
           (prefix) => [prefix + host, prefix + host + '.'],
         ),
@@ -58,4 +64,18 @@ describe('analytics source SQL', () => {
     expect(sql.length).toBeLessThan(10_000);
     db.close();
   });
+});
+
+it('keeps complete workspace reports bounded and excludes archived project scope from all queries', () => {
+  const ids = Array.from(
+    { length: 40 },
+    (_, i) => `app-00000000-0000-0000-0000-${String(i).padStart(12, '0')}`,
+  );
+  const plan = browserReportPlan('workspace', { range: '24h' }, 1000, 2000, 40, ids);
+  for (const sql of plan.sql) {
+    expect(sql).toContain(`blob1 IN ('${ids[0]}'`);
+    expect(sql.length).toBeLessThan(10_000);
+  }
+  for (const sql of browserReportPlan('workspace', { range: '24h' }, 1000, 2000, 40, []).sql)
+    expect(sql).toContain('1 = 0');
 });

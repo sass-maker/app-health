@@ -88,7 +88,7 @@ test('public breakdowns require owner opt-in and render a responsive report', as
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await expect(page.getByText('news.ycombinator.com', { exact: true })).toBeVisible();
+      await expect(page.getByText('Hacker News', { exact: true })).toBeVisible();
       await page.screenshot({
         path: resolve(evidence, `report-${theme}-${width}.png`),
         fullPage: true,

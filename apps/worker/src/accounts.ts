@@ -118,7 +118,7 @@ export async function accountIdentity(
     onSignup?.(session.user.id),
   );
   const { results } = await env.DB.prepare(
-    'SELECT app_id FROM workspace_apps WHERE workspace_id = ?',
+    'SELECT w.app_id FROM workspace_apps w JOIN apps a ON a.id = w.app_id WHERE w.workspace_id = ? AND a.archived_at IS NULL',
   )
     .bind(workspace.id)
     .all<{ app_id: string }>();

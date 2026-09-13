@@ -1,3 +1,4 @@
+import { useReportCache } from './AnalyticsCache.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   BrowserReport,
@@ -151,7 +152,9 @@ export function useWorkspaceAnalytics(ownerToken: string) {
         const next = await readSummary(response);
         if (cancelled || hidden || controller.signal.aborted) return;
         setData(next);
-        setLive(next.live);
+        setLive((current) =>
+          current && current.measured_at > next.live.measured_at ? current : next.live,
+        );
         setError('');
         if (next.stream) sockets.connect();
       } catch (cause) {
@@ -177,10 +180,12 @@ export function useWorkspaceAnalytics(ownerToken: string) {
         setConnected(false);
       } else {
         poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
+        if (!import.meta.env.DEV) sockets.connect();
         void load();
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
+    if (!hidden && !import.meta.env.DEV) sockets.connect();
     if (!hidden) void load();
     if (!hidden) poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
     return () => {
@@ -220,6 +225,42 @@ function reportParameters(
   return params;
 }
 
+function useReportState(scope: string) {
+  const cache = useReportCache();
+  const cached = cache.read(scope);
+  const [report, setReport] = useState<BrowserReportData | null>(cached);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(!cached);
+  const [retry, setRetry] = useState(0);
+  const reportDataScopeRef = useRef<string | null>(cached ? scope : null);
+  return {
+    cache,
+    report,
+    setReport,
+    error,
+    setError,
+    loading,
+    setLoading,
+    retry,
+    setRetry,
+    reportDataScopeRef,
+  };
+}
+
+function reportConfiguration(
+  range: string,
+  appId: string,
+  environmentId: string,
+  event: string,
+  options: ReportOptions,
+) {
+  const breakdown = typeof options === 'string' ? options : options.breakdown;
+  const segmentQuery = new URLSearchParams(
+    typeof options === 'string' ? [] : Object.entries(options.segments).sort(),
+  ).toString();
+  return reportParameters(range, appId, environmentId, event, breakdown, segmentQuery);
+}
+
 export function useBrowserReport(
   ownerToken: string,
   range: string,
@@ -228,27 +269,24 @@ export function useBrowserReport(
   event: string,
   options: ReportOptions = 'audience',
 ) {
-  const breakdown = typeof options === 'string' ? options : options.breakdown;
-  const segmentQuery = new URLSearchParams(
-    typeof options === 'string' ? [] : Object.entries(options.segments).sort(),
-  ).toString();
-  const [report, setReport] = useState<BrowserReportData | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [retry, setRetry] = useState(0);
-  const scope = `${ownerToken}/${range}/${appId}/${environmentId}/${event}/${breakdown}/${segmentQuery}`;
-  const reportDataScopeRef = useRef<string | null>(null);
+  const params = reportConfiguration(range, appId, environmentId, event, options);
+  const scope = JSON.stringify([ownerToken, params.toString()]);
+  const state = useReportState(scope);
   useEffect(() => {
     let cancelled = false;
     let hidden = document.hidden;
     let loading = false;
     let request: AbortController | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
-    const preserveReport = reportDataScopeRef.current === scope;
-    const params = reportParameters(range, appId, environmentId, event, breakdown, segmentQuery);
-    if (!preserveReport) setReport(null);
-    setLoading(!preserveReport);
-    setError('');
+    const hit = state.retry === 0 ? state.cache.read(scope) : null;
+    const preserveReport = state.reportDataScopeRef.current === scope;
+    if (hit) {
+      state.setReport(hit);
+      state.reportDataScopeRef.current = scope;
+    }
+    if (!preserveReport && !hit) state.setReport(null);
+    state.setLoading(!preserveReport && !hit);
+    state.setError('');
     async function load() {
       if (cancelled || hidden || loading) return;
       loading = true;
@@ -263,17 +301,18 @@ export function useBrowserReport(
         });
         const parsed = await readReport(response);
         if (!cancelled && !controller.signal.aborted) {
-          setReport(parsed);
-          reportDataScopeRef.current = scope;
-          setError('');
+          state.cache.write(scope, parsed);
+          state.setReport(parsed);
+          state.reportDataScopeRef.current = scope;
+          state.setError('');
         }
       } catch (cause) {
         if (requestCanUpdate(cancelled, hidden, controller, timeout.expired()))
-          setError(requestError(cause, timeout.expired(), 'Report'));
+          state.setError(requestError(cause, timeout.expired(), 'Report'));
       } finally {
         timeout.clear();
         if (request === controller && (!controller.signal.aborted || timeout.expired()))
-          setLoading(false);
+          state.setLoading(false);
         if (request === controller) {
           request = undefined;
           loading = false;
@@ -294,7 +333,7 @@ export function useBrowserReport(
       }
     }
     document.addEventListener('visibilitychange', onVisibilityChange);
-    if (!hidden) void load();
+    if (!hidden && !hit) void load();
     if (!hidden) timer = setInterval(() => void load(), 60000);
     return () => {
       cancelled = true;
@@ -302,11 +341,11 @@ export function useBrowserReport(
       request?.abort();
       if (timer) clearInterval(timer);
     };
-  }, [ownerToken, range, appId, environmentId, event, breakdown, segmentQuery, retry]);
+  }, [ownerToken, scope, state.retry]);
   return {
-    report: reportDataScopeRef.current === scope ? report : null,
-    error,
-    loading,
-    reload: () => setRetry((value) => value + 1),
+    report: state.reportDataScopeRef.current === scope ? state.report : null,
+    error: state.error,
+    loading: state.loading,
+    reload: () => state.setRetry((value) => value + 1),
   };
 }

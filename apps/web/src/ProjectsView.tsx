@@ -207,7 +207,9 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
                 .reduce((sum, row) => sum + row.pageviews, 0),
             }))
             .sort((a, b) => b.count - a.count)}
-          total={workspace.data.projects.reduce((sum, row) => sum + row.pageviews, 0)}
+          total={workspace.data.projects
+            .filter((row) => grouped.has(row.app_id))
+            .reduce((sum, row) => sum + row.pageviews, 0)}
           onSelect={(appId) => {
             const next = projects.find((project) => project.appId === appId);
             if (next) onOpen(next);
@@ -244,13 +246,18 @@ function WorkspaceTotals({
   workspace: ReturnType<typeof useWorkspaceAnalytics>;
   projects: ProjectsViewProject[];
 }) {
-  const totals = workspace.data?.projects.reduce(
-    (sum, row) => ({ views: sum.views + row.pageviews, events: sum.events + row.events }),
-    { views: 0, events: 0 },
-  );
+  const active = new Set(projects.map((project) => project.appId));
+  const totals = workspace.data?.projects
+    .filter((row) => active.has(row.app_id))
+    .reduce((sum, row) => ({ views: sum.views + row.pageviews, events: sum.events + row.events }), {
+      views: 0,
+      events: 0,
+    });
   const live =
     workspace.data?.source === 'local' || workspace.connected
-      ? (workspace.live?.projects.reduce((sum, row) => sum + row.active, 0) ?? null)
+      ? (workspace.live?.projects
+          .filter((row) => active.has(row.app_id))
+          .reduce((sum, row) => sum + row.active, 0) ?? null)
       : null;
   const cells = [
     {

@@ -238,30 +238,37 @@ export async function handleBrowserOwner(
       }),
     );
   }
-  return workspaceSummary(workspace, env, presence);
+  return workspaceSummary(workspace, env, presence, owner.appIds ?? []);
 }
 
 async function workspaceSummary(
   workspace: string,
   env: BrowserEnvironment,
   presence: ReturnType<NonNullable<BrowserBindings['WORKSPACE_PRESENCE']>['getByName']>,
+  appIds: readonly string[],
 ): Promise<Response> {
   try {
-    const metrics = await cachedAnalytics(
-      env.CLOUDFLARE_ACCOUNT_ID ?? '',
-      workspace,
-      'summary',
-      () =>
+    const [metrics, live] = await Promise.all([
+      cachedAnalytics(env.CLOUDFLARE_ACCOUNT_ID ?? '', workspace, 'summary', () =>
         queryBrowserSummary(workspace, {
           accountId: env.CLOUDFLARE_ACCOUNT_ID ?? '',
           token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
         }),
-    );
+      ),
+      presence.snapshot(),
+    ]);
+    const active = new Set(appIds);
+    const liveProjects = live.projects.filter((project) => active.has(project.app_id));
     const body: BrowserSummary = {
       ...metrics,
       enabled: true,
       source: 'analytics-engine',
-      live: await presence.snapshot(),
+      projects: metrics.projects.filter((project) => active.has(project.app_id)),
+      live: {
+        ...live,
+        projects: liveProjects,
+        total: liveProjects.reduce((sum, project) => sum + project.active, 0),
+      },
       stream: true,
     };
     return json(200, body);
@@ -290,11 +297,16 @@ async function browserReport(
   try {
     return json(
       200,
-      await cachedAnalytics(accountId, owner.workspaceId!, JSON.stringify(filter.data), () =>
-        queryBrowserReport(owner.workspaceId!, filter.data, {
-          accountId,
-          token,
-        }),
+      await cachedAnalytics(
+        accountId,
+        owner.workspaceId!,
+        JSON.stringify([filter.data, owner.appIds ?? []]),
+        () =>
+          queryBrowserReport(owner.workspaceId!, filter.data, {
+            accountId,
+            token,
+            appIds: owner.appIds ?? [],
+          }),
       ),
     );
   } catch {

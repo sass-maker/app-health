@@ -170,7 +170,7 @@ export class D1ControlPlane
 
   getApp(appId: string): Promise<AppV1 | null> {
     return this.db
-      .prepare('SELECT id, name, created_at FROM apps WHERE id = ?')
+      .prepare('SELECT id, name, created_at FROM apps WHERE id = ? AND archived_at IS NULL')
       .bind(appId)
       .first<AppV1>();
   }
@@ -180,7 +180,7 @@ export class D1ControlPlane
       return (
         await this.db
           .prepare(
-            'SELECT a.id, a.name, a.created_at FROM apps a JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? ORDER BY a.created_at DESC',
+            'SELECT a.id, a.name, a.created_at FROM apps a JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? AND a.archived_at IS NULL ORDER BY a.created_at DESC',
           )
           .bind(this.workspaceId)
           .all<AppV1>()
@@ -189,8 +189,8 @@ export class D1ControlPlane
       await this.db
         .prepare(
           this.workspaceId === null
-            ? 'SELECT id, name, created_at FROM apps WHERE NOT EXISTS (SELECT 1 FROM workspace_apps w WHERE w.app_id = apps.id) ORDER BY created_at DESC'
-            : 'SELECT id, name, created_at FROM apps ORDER BY created_at DESC',
+            ? 'SELECT id, name, created_at FROM apps WHERE archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM workspace_apps w WHERE w.app_id = apps.id) ORDER BY created_at DESC'
+            : 'SELECT id, name, created_at FROM apps WHERE archived_at IS NULL ORDER BY created_at DESC',
         )
         .all<AppV1>()
     ).results;

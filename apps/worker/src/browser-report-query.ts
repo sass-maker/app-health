@@ -6,7 +6,12 @@ import {
   type BrowserEngagement,
 } from '@app-health/contracts';
 import { reportWindow } from './browser-report-window.js';
-type QueryOptions = { accountId: string; token: string; fetchImpl?: typeof fetch };
+type QueryOptions = {
+  accountId: string;
+  token: string;
+  fetchImpl?: typeof fetch;
+  appIds?: readonly string[];
+};
 
 interface QueryResponse {
   data: QueryRow[];
@@ -208,7 +213,14 @@ async function loadReport(
   step: number,
   options: QueryOptions,
 ) {
-  const plan = browserReportPlan(workspace, filter, from, to, step);
+  const plan = browserReportPlan(
+    workspace,
+    filter,
+    from,
+    to,
+    step,
+    filter.app_id ? [filter.app_id] : options.appIds,
+  );
   const optionalStart =
     filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
   const [results, optional] = await Promise.all([

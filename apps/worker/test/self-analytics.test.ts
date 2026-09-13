@@ -18,7 +18,7 @@ function fixture() {
     .sort())
     sql.exec(readFileSync(new URL(file, directory), 'utf8'));
   sql.exec(
-    "INSERT INTO apps VALUES ('self', 'App Health', 1); INSERT INTO environments VALUES ('prod', 'self', 'production', 1)",
+    "INSERT INTO apps (id, name, created_at) VALUES ('self', 'App Health', 1); INSERT INTO environments VALUES ('prod', 'self', 'production', 1)",
   );
   const db: D1DatabaseLike = {
     prepare(query: string) {

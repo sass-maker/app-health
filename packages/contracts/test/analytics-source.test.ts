@@ -36,3 +36,12 @@ describe('analytics source normalization', () => {
     expect(analyticsSourceChannel('   ', '   ')).toBe('Unknown');
   });
 });
+
+it.each(['chatgpt.com', 'chat.openai.com', 'perplexity.ai', 'claude.ai', 'gemini.google.com'])(
+  'recognizes %s as an AI assistant while respecting an explicit medium',
+  (source) => {
+    expect(analyticsSourceChannel(source, '')).toBe('AI assistants');
+    expect(analyticsSourceChannel(source, 'email')).toBe('Email');
+    expect(analyticsSourceChannel(source + '.evil.test', '')).toBe('Referral');
+  },
+);

@@ -390,12 +390,14 @@ describe('production D1 ownership check', () => {
         ),
       );
     sqlite.exec(
-      'CREATE TABLE apps (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL)',
+      'CREATE TABLE apps (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at INTEGER NOT NULL, archived_at INTEGER)',
     );
     sqlite.exec(
       'CREATE TABLE environments (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL)',
     );
-    sqlite.prepare('INSERT INTO apps VALUES (?, ?, ?)').run(SEED_APP_ID, 'demo-app', Date.now());
+    sqlite
+      .prepare('INSERT INTO apps (id, name, created_at) VALUES (?, ?, ?)')
+      .run(SEED_APP_ID, 'demo-app', Date.now());
     sqlite
       .prepare('INSERT INTO environments VALUES (?, ?, ?, ?)')
       .run(SEED_ENV_ID, SEED_APP_ID, 'prod', Date.now());

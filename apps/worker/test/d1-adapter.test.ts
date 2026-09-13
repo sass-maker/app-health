@@ -78,6 +78,26 @@ class SQLiteD1 implements D1DatabaseLike {
 }
 
 describe('D1 control plane', () => {
+  it('excludes archived projects from every owner inventory while preserving records', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(`CREATE TABLE apps (id TEXT PRIMARY KEY, name TEXT, created_at INTEGER, archived_at INTEGER);
+      CREATE TABLE workspace_apps (app_id TEXT, workspace_id TEXT);
+      INSERT INTO apps VALUES ('real', 'Real', 1, NULL), ('demo', 'Demo', 2, 100), ('legacy', 'Legacy', 3, NULL), ('canary', 'Canary', 4, 100);
+      INSERT INTO workspace_apps VALUES ('real', 'ws'), ('demo', 'ws');`);
+    const db = new SQLiteD1(sqlite);
+    expect((await new D1ControlPlane(db).listApps()).map((app) => app.id)).toEqual([
+      'legacy',
+      'real',
+    ]);
+    expect((await new D1ControlPlane(db, 'ws').listApps()).map((app) => app.id)).toEqual(['real']);
+    expect((await new D1ControlPlane(db, null).listApps()).map((app) => app.id)).toEqual([
+      'legacy',
+    ]);
+    expect(await new D1ControlPlane(db).getApp('demo')).toBeNull();
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM apps').get()).toMatchObject({ count: 4 });
+    sqlite.close();
+  });
+
   it('creates app, environment, hashed key, and installation state in one batch', async () => {
     const db = new Database();
     const created = await new D1ControlPlane(db).createAppEnvironmentKey('api', 'production', 100);

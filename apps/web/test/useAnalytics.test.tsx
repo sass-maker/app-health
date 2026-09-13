@@ -31,6 +31,7 @@ const report = {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('analytics visibility lifecycle', () => {
@@ -248,4 +249,47 @@ it('clears the old segment immediately and ignores its late response after a fil
   expect(view.result.current.report?.sessions).toBe(7);
   expect(fetch.mock.calls[0][0]).toContain('country=IN');
   expect(fetch.mock.calls[1][0]).toContain('country=US');
+});
+
+it('opens live presence before a slow summary and never replaces a newer live reading', async () => {
+  vi.stubEnv('DEV', false);
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  );
+  class Socket {
+    static instances: Socket[] = [];
+    onopen?: () => void;
+    onmessage?: (event: { data: string }) => void;
+    close = vi.fn();
+    constructor() {
+      Socket.instances.push(this);
+    }
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  const view = renderHook(() => useWorkspaceAnalytics(''));
+  expect(Socket.instances).toHaveLength(1);
+  expect(view.result.current.data).toBeNull();
+  const fresh = {
+    ...live,
+    measured_at: 20,
+    total: 7,
+    projects: [{ ...live.projects[0], active: 7 }],
+  };
+  act(() => {
+    Socket.instances[0].onopen?.();
+    Socket.instances[0].onmessage?.({ data: JSON.stringify(fresh) });
+  });
+  expect(view.result.current.connected).toBe(true);
+  expect(view.result.current.live).toEqual(fresh);
+  finish(Response.json(summary));
+  await waitFor(() => expect(view.result.current.data).toEqual(summary));
+  expect(view.result.current.live).toEqual(fresh);
+  view.unmount();
 });

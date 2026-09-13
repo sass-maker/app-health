@@ -1,3 +1,4 @@
+import { AnalyticsCacheProvider } from './AnalyticsCache.js';
 import {
   DASHBOARD_PAGES,
   type DashboardView,
@@ -3264,25 +3265,27 @@ function Dashboard({
       onLock={handlers.onLock}
       accountSession={handlers.accountSession}
     >
-      <DashboardContent
-        view={view}
-        project={project}
-        projects={projects}
-        ownerToken={ownerToken}
-        handlers={handlers}
-        capabilities={capabilities}
-        windowKey={windowKey}
-        setWindowKey={setWindowKey}
-        status={status}
-        error={error}
-        loading={loading}
-        endpoints={sorted}
-        sortKey={sortKey}
-        sortDirection={sortDirection}
-        onSort={changeSort}
-        onManage={() => changeView('settings')}
-        onView={changeView}
-      />
+      <AnalyticsCacheProvider key={ownerToken}>
+        <DashboardContent
+          view={view}
+          project={project}
+          projects={projects}
+          ownerToken={ownerToken}
+          handlers={handlers}
+          capabilities={capabilities}
+          windowKey={windowKey}
+          setWindowKey={setWindowKey}
+          status={status}
+          error={error}
+          loading={loading}
+          endpoints={sorted}
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onSort={changeSort}
+          onManage={() => changeView('settings')}
+          onView={changeView}
+        />
+      </AnalyticsCacheProvider>
     </ProductShell>
   );
 }

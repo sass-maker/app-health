@@ -28,6 +28,7 @@ describe('Google account boundary with real D1 SQL', () => {
       '0006_browser_logs.sql',
       '0007_accounts.sql',
       '0008_environment_capabilities.sql',
+      '0013_archive_projects.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql
@@ -455,6 +456,31 @@ describe('Google account boundary with real D1 SQL', () => {
         (c) => !c.enabled,
       ),
     ).toBe(true);
+  });
+
+  it('removes archived projects from account inventory and denies direct reads and key creation', async () => {
+    const created = await request('/v1/apps', aliceCookie, {
+      name: 'Archived fixture',
+      environment: 'production',
+    });
+    const project = (await created.json()) as typeof aliceApp;
+    await env
+      .DB!.prepare('UPDATE apps SET archived_at = 100 WHERE id = ?')
+      .bind(project.app.id)
+      .run();
+    const listed = (await (await request('/v1/apps')).json()) as { apps: Array<{ id: string }> };
+    expect(listed.apps.some((app) => app.id === project.app.id)).toBe(false);
+    const query = `app_id=${project.app.id}&environment_id=${project.environment.id}`;
+    expect((await request(`/v1/logs?${query}`)).status).toBe(403);
+    expect(
+      (
+        await request('/v1/public-keys', aliceCookie, {
+          app_id: project.app.id,
+          environment_id: project.environment.id,
+          allowed_origins: ['https://example.com'],
+        })
+      ).status,
+    ).toBe(403);
   });
 
   it('revokes the actual session on sign-out', async () => {
