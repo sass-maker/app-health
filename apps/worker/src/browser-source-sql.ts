@@ -41,7 +41,7 @@ function sourceClauses(): Array<[string, string]> {
 }
 
 function conditionalTree(clauses: Array<[string, string]>): string {
-  if (clauses.length <= 10) {
+  if (clauses.length <= 5) {
     return clauses.reduceRight(
       (fallback, [condition, label]) => `IF(${condition},'${label}',${fallback})`,
       'source_value',
