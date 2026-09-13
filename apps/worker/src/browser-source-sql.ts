@@ -2,7 +2,11 @@
 export function analyticsSourceSql(
   expression: 'blob6' | 'blob10' | "IF(blob10 != '', blob10, blob6)",
 ): string {
-  const value = `substring(lower(${expression}), 1, 100)`;
+  const compact = expression.replaceAll(' ', '');
+  const value = `substring(lower(${compact}),1,100)`;
+  const dot = `position('.' IN ${compact})`;
+  const prefixes = "'www.','m.','mobile.','old.','l.','out.','news.','search.'";
+  const host = `IF(substring(${value},1,${dot}) IN (${prefixes}),substring(${value},${dot}+1),${value})`;
   const aliases: Record<string, string> = {
     Reddit: 'reddit, redd.it',
     X: 'x, twitter, x-twitter',
@@ -34,22 +38,13 @@ export function analyticsSourceSql(
     Yandex: ['yandex.ru', 'yandex.com'],
   };
   const clauses: Array<[string, string]> = [[`${value} = ''`, 'Unknown']];
-  for (const [label, values] of Object.entries(aliases))
-    clauses.push([
-      `${value} IN (${values
-        .split(', ')
-        .map((item) => `'${item}'`)
-        .join(', ')})`,
-      label,
-    ]);
   for (const [label, hosts] of Object.entries(domains)) {
-    const checks = hosts.flatMap((host) =>
-      ['', 'www.', 'm.', 'mobile.', 'old.', 'l.', 'out.', 'news.', 'search.'].flatMap((prefix) => [
-        `'${prefix}${host}'`,
-        `'${prefix}${host}.'`,
-      ]),
-    );
-    clauses.push([`${value} IN (${checks.join(', ')})`, label]);
+    const checks = hosts.flatMap((domain) => [`'${domain}'`, `'${domain}.'`]);
+    const names = aliases[label]
+      .split(', ')
+      .map((item) => `'${item}'`)
+      .join(',');
+    clauses.push([`${value} IN (${names}) OR ${host} IN (${checks.join(',')})`, label]);
   }
   return clauses.reduceRight(
     (otherwise, [condition, label]) => `IF(${condition}, '${label}', ${otherwise})`,

@@ -60,10 +60,6 @@ function scopedSource(workspace: string, filter: BrowserReportFilter, from: numb
   if (filter.entry_path) clauses.push(`blob17 = ${sqlLiteral(filter.entry_path)}`);
   if (filter.country)
     clauses.push(`IF(blob16 = '', 'Unknown', blob16) = ${sqlLiteral(filter.country)}`);
-  if (filter.source)
-    clauses.push(
-      `${analyticsSourceSql("IF(blob10 != '', blob10, blob6)")} = ${sqlLiteral(canonicalSource(filter.source))}`,
-    );
   if (filter.device)
     clauses.push(`IF(blob14 = '', 'Unknown', blob14) = ${sqlLiteral(filter.device)}`);
   if (filter.browser)
@@ -74,7 +70,12 @@ function scopedSource(workspace: string, filter: BrowserReportFilter, from: numb
   if (filter.medium) clauses.push(`blob11 = ${sqlLiteral(filter.medium)}`);
   if (filter.content) clauses.push(`blob18 = ${sqlLiteral(filter.content)}`);
   if (filter.term) clauses.push(`blob19 = ${sqlLiteral(filter.term)}`);
-  return `FROM app_health_browser_v1 WHERE ${clauses.join(' AND ')}`;
+  const source = `FROM app_health_browser_v1 WHERE ${clauses.join(' AND ')}`;
+  // Project this long expression once: repeating it in SELECT and WHERE can
+  // exceed Analytics Engine's 10,000-character limit for an entire query.
+  return filter.source
+    ? `FROM (SELECT *, ${analyticsSourceSql("IF(blob10 != '', blob10, blob6)")} AS normalized_source ${source}) WHERE normalized_source = ${sqlLiteral(canonicalSource(filter.source))}`
+    : source;
 }
 function sqlLiteral(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
@@ -103,7 +104,10 @@ export function browserReportPlan(
   const sql = [
     `SELECT FLOOR((double2 - ${from}) / ${step}) AS bucket, ${totals}, ${sample} ${source} GROUP BY bucket ORDER BY bucket LIMIT 24`,
     ranking('blob4', pageSource),
-    ranking(analyticsSourceSql("IF(blob10 != '', blob10, blob6)"), pageSource),
+    ranking(
+      filter.source ? 'normalized_source' : analyticsSourceSql("IF(blob10 != '', blob10, blob6)"),
+      pageSource,
+    ),
     `SELECT blob5 AS name, SUM(_sample_interval) AS count, MAX(double2) AS last_seen, ${sample} ${source} AND blob3 = 'event' GROUP BY name ORDER BY count DESC LIMIT 100`,
     `SELECT ${identities}, ${visits}, ${sample} ${source}`,
     ...dimensionBlobs.map(([key, blob]) => {

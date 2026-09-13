@@ -24,10 +24,20 @@ describe('analytics source SQL', () => {
       'a@b.reddit.com',
       '\treddit.com',
       'reddit.com' + 'x'.repeat(120),
+      'www.google',
+      'search.search.yahoo.com',
+      'WWW.Reddit.com.',
+      ...['reddit.com', 'x.com', 'google.co.in', 'search.yahoo.com'].flatMap((host) =>
+        ['', 'www.', 'm.', 'mobile.', 'old.', 'l.', 'out.', 'news.', 'search.'].flatMap(
+          (prefix) => [prefix + host, prefix + host + '.'],
+        ),
+      ),
     ];
     const insert = db.prepare('INSERT INTO sources VALUES (?)');
     for (const value of values) insert.run(value);
-    const sql = analyticsSourceSql('blob6').replaceAll('blob6', 'value');
+    const sql = analyticsSourceSql('blob6')
+      .replaceAll('blob6', 'value')
+      .replaceAll("position('.' IN value)", "instr(value, '.')");
     // SQLite accepts CASE, but Analytics Engine's supported conditional is IF.
     expect(sql).not.toMatch(/\bCASE\b/);
     const rows = db.prepare(`SELECT value, ${sql} AS normalized FROM sources`).all() as Array<{

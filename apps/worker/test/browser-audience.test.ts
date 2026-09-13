@@ -1,3 +1,4 @@
+import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { localBrowserReport, queryBrowserReport } from '../src/browser-reports.js';
@@ -92,7 +93,7 @@ describe('visitor reporting across periods and legacy clients', () => {
       );
     vi.spyOn(Date, 'now').mockReturnValue(now);
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
-      Response.json({ data: database.prepare(String(init?.body)).all() }),
+      Response.json({ data: database.prepare(sqliteAnalyticsSql(String(init?.body))).all() }),
     );
     try {
       const report = await queryBrowserReport(

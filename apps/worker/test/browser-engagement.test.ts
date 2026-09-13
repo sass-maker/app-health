@@ -1,3 +1,4 @@
+import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { localBrowserReport, queryBrowserReport } from '../src/browser-reports.js';
@@ -129,7 +130,9 @@ describe('browser engagement metrics', () => {
       try {
         if (failEngagement && String(init?.body).includes('pageview_sessions'))
           throw new Error('optional engagement unavailable');
-        return Response.json({ data: database.prepare(String(init?.body)).all() });
+        return Response.json({
+          data: database.prepare(sqliteAnalyticsSql(String(init?.body))).all(),
+        });
       } catch (error) {
         queryError = error;
         if (failEngagement) throw error;

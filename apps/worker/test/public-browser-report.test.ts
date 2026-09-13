@@ -7,6 +7,17 @@ import {
 const options = { accountId: 'a'.repeat(32), token: 'query-token' };
 const row = { bucket: 0, pageviews: '6', sample_interval: '2' };
 
+it('bounds complete public breakdown queries at maximum scope lengths', async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ data: [] }));
+  await queryPublicBrowserBreakdowns('w'.repeat(100), 'a'.repeat(100), 'e'.repeat(100), {
+    ...options,
+    fetchImpl,
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(5);
+  for (const [, init] of fetchImpl.mock.calls)
+    expect(Buffer.byteLength(String(init?.body))).toBeLessThanOrEqual(10_000);
+});
+
 function provider(data: unknown, ok = true) {
   return vi
     .fn<typeof fetch>()

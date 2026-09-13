@@ -1,8 +1,10 @@
+import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { localBrowserReport, queryBrowserReport } from '../src/browser-reports.js';
 import { browserReportPlan } from '../src/browser-report-plan.js';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
+import { BrowserReportFilter } from '@app-health/contracts';
 
 const now = 1_800_000_000_000;
 const day = 86_400_000;
@@ -93,7 +95,7 @@ async function remoteReport(
 ) {
   const database = sqliteFixture(rows);
   const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
-    Response.json({ data: database.prepare(String(init?.body)).all() }),
+    Response.json({ data: database.prepare(sqliteAnalyticsSql(String(init?.body))).all() }),
   );
   try {
     return await queryBrowserReport('workspace', filter, {
@@ -109,6 +111,34 @@ async function remoteReport(
 afterEach(() => vi.restoreAllMocks());
 
 describe('browser segment filters', () => {
+  it('keeps complete queries within the provider limit with every maximum-length filter', () => {
+    for (const breakdown of ['audience', 'acquisition', 'technology'] as const) {
+      for (const source of [undefined, 'a'.repeat(100)]) {
+        for (const path of ['/' + "'".repeat(255), '/' + '界'.repeat(255)]) {
+          const filter = BrowserReportFilter.parse({
+            app_id: 'a'.repeat(100),
+            environment_id: 'e'.repeat(100),
+            breakdown,
+            source,
+            path,
+            entry_path: path,
+            event: 'e'.repeat(64),
+            country: 'Unknown',
+            device: 'Desktop',
+            browser: 'Firefox',
+            channel: 'Organic search',
+            campaign: 'a'.repeat(100),
+            medium: 'a'.repeat(100),
+            content: 'a'.repeat(100),
+            term: 'a'.repeat(100),
+          });
+          for (const sql of browserReportPlan('w'.repeat(100), filter, now - day, now, day / 24)
+            .sql)
+            expect(Buffer.byteLength(sql)).toBeLessThanOrEqual(10_000);
+        }
+      }
+    }
+  });
   it('applies all eight filters together without cross-field false matches or scope leakage', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(now);
     const target = fixture();
