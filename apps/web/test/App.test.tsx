@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
@@ -310,6 +311,7 @@ describe('App Health V0 UI', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('resolves a valid explicit analytics link without local storage', async () => {
@@ -383,7 +385,8 @@ describe('App Health V0 UI', () => {
     );
   });
 
-  it('resumes a Google workspace, switches projects, and signs out without persisting credentials', async () => {
+  it('resumes a Google workspace once in StrictMode, switches projects, and signs out without persisting credentials', async () => {
+    vi.stubEnv('DEV', false);
     const apps = ['alpha', 'beta'].map((name) => ({
       app: { id: `app-${name}`, name, created_at: Date.now() },
       environments: [
@@ -391,9 +394,19 @@ describe('App Health V0 UI', () => {
       ],
     }));
     const mock = installFetch({ google: true, apps });
-    render(<App />);
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
     const picker = await screen.findByRole('combobox', { name: 'Project' });
     expect(picker).toHaveTextContent('alpha');
+    // Production bootstrap reuses its inventory even under StrictMode effect replay.
+    expect(
+      mock.mock.calls.filter(
+        ([input, init]) => String(input).endsWith('/v1/apps') && (init?.method ?? 'GET') === 'GET',
+      ),
+    ).toHaveLength(1);
     fireEvent.keyDown(picker, { key: 'ArrowDown' });
     fireEvent.click(await screen.findByRole('option', { name: 'beta' }));
     await waitFor(() => expect(localStorage.getItem(STORAGE_KEY)).toContain('app-beta'));
@@ -418,6 +431,13 @@ describe('App Health V0 UI', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out');
     expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
+  });
+
+  it('keeps Google sign-in available when the signed-out inventory probe is unauthorized', async () => {
+    vi.stubEnv('DEV', false);
+    installFetch({ google: true, appsFail: true });
+    render(<App />);
+    expect(await screen.findByRole('button', { name: 'Continue with Google' })).toBeTruthy();
   });
 
   it('offers Google sign-in and reports provider failures without losing the deployment-key option', async () => {

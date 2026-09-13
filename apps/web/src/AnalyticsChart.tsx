@@ -63,6 +63,7 @@ export function AnalyticsChart({
 }): JSX.Element {
   const id = useId().replace(/:/g, '');
   const label = metric === 'events' ? 'Events' : 'Page views';
+  const color = metric === 'events' ? 'var(--chart-4)' : 'var(--chart-1)';
   const multiDay =
     series.length > 1 && series[series.length - 1].timestamp - series[0].timestamp > 86_400_000;
   const time = (timestamp: number) =>
@@ -72,7 +73,7 @@ export function AnalyticsChart({
   return (
     <div>
       <ChartContainer
-        config={{ [metric]: { label, color: 'var(--chart-1)' } }}
+        config={{ [metric]: { label, color } }}
         className={compact ? 'h-44 w-full aspect-auto' : 'h-64 w-full aspect-auto'}
       >
         <AreaChart
@@ -81,10 +82,7 @@ export function AnalyticsChart({
           margin={{ left: 0, right: 12, top: 10, bottom: 0 }}
         >
           <defs>
-            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="var(--chart-1)" stopOpacity={0.015} />
-            </linearGradient>
+            <EvilAreaFill id={id} color={color} />
           </defs>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
           {!compact ? (
@@ -120,9 +118,11 @@ export function AnalyticsChart({
           <Area
             type="monotone"
             dataKey={metric}
-            stroke="var(--chart-1)"
+            stroke={color}
             strokeWidth={2}
             fill={`url(#${id})`}
+            dot={{ r: 2, fill: color, stroke: 'var(--background)', strokeWidth: 1 }}
+            activeDot={{ r: 4, fill: color, stroke: 'var(--background)', strokeWidth: 2 }}
             isAnimationActive={false}
           />
         </AreaChart>
@@ -131,5 +131,24 @@ export function AnalyticsChart({
         <ChartValues series={series} time={time} metric={metric} onlyMetric={onlyMetric} />
       ) : null}
     </div>
+  );
+}
+
+// Selectively adapted from Evil Charts GradientPattern (MIT).
+// Pinned source and retained license: docs/frontend-redesign-evidence.md.
+function EvilAreaFill({ id, color }: { id: string; color: string }): JSX.Element {
+  return (
+    <>
+      <linearGradient id={`${id}-fade`} x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stopColor="white" stopOpacity={0.24} />
+        <stop offset="100%" stopColor="white" stopOpacity={0} />
+      </linearGradient>
+      <mask id={`${id}-mask`}>
+        <rect width="100%" height="100%" fill={`url(#${id}-fade)`} />
+      </mask>
+      <pattern id={id} patternUnits="userSpaceOnUse" width="100%" height="100%">
+        <rect width="100%" height="100%" fill={color} mask={`url(#${id}-mask)`} />
+      </pattern>
+    </>
   );
 }

@@ -230,6 +230,50 @@ describe('browser collector boundary', () => {
       headers: { origin },
       body: JSON.stringify(body),
     });
+  it('preserves legacy event referrer and entry path when attribution is omitted', async () => {
+    const repos = await fixture();
+    const sent: CollectedBrowserBatch[] = [];
+    const body = {
+      ...input(),
+      events: [{ ...batch().events[0], path: '/landing', referrer: 'reddit.com' }],
+    };
+    const statement = {
+      bind() {
+        return statement;
+      },
+      first: async <T>() => ({ workspace_id: 'local' }) as T,
+      all: async () => ({ results: [] }),
+      run: async () => ({ success: true, meta: {} }),
+    };
+    const response = await handleBrowserIngest(
+      request(body),
+      {
+        APP_HEALTH_INGEST_HOST: 'localhost',
+        DB: { prepare: () => statement, batch: async () => [] },
+        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        WORKSPACE_PRESENCE: {
+          getByName: () => ({
+            heartbeat: async () => {},
+            snapshot: async () => ({ measured_at: 0, ttl_ms: 45000, total: 0, projects: [] }),
+            fetch: async () => new Response(null, { status: 404 }),
+          }),
+        },
+        BROWSER_HISTORY: {
+          put: async () => ({}) as R2Object,
+          list: async () => ({ objects: [], delimitedPrefixes: [], truncated: false }),
+          delete: async () => {},
+        },
+        BROWSER_ARCHIVE: {
+          getByName: () => ({ stage: async () => ({ accepted: [], duplicates: 0 }) }),
+        },
+        BROWSER_ANALYTICS: { writeDataPoint: () => {} },
+      },
+      repos,
+      false,
+    );
+    expect(response?.status).toBe(202);
+    expect(sent[0].attribution).toMatchObject({ source: 'reddit.com', entry_path: '/landing' });
+  });
   it('accepts only valid origin-bound public keys, counts retries once, and honors revocation', async () => {
     const repos = await fixture();
     const body = input();

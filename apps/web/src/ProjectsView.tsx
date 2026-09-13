@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { AnalyticsRanking } from './AnalyticsRanking.js';
+import { Skeleton } from './components/ui/skeleton.js';
 import { Activity, ArrowUpRight, Check, Copy, RefreshCw } from 'lucide-react';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
@@ -89,8 +91,8 @@ function ProjectCard({
   const active = activeSessions(workspace, project);
 
   return (
-    <Card className="min-w-0 shadow-none transition-colors hover:border-primary/40">
-      <CardHeader className="gap-3 border-b pb-5">
+    <Card className="min-w-0 gap-0 py-0 shadow-none transition-colors hover:border-primary/40">
+      <CardHeader className="gap-2 border-b p-5">
         <div className="flex min-w-0 items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="truncate text-base font-semibold tracking-tight">{project.name}</h3>
@@ -173,24 +175,17 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
 
   return (
     <section aria-labelledby="projects-title" className="mx-auto w-full max-w-6xl space-y-8">
-      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
-        <div>
-          <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-            Workspace
-          </p>
-          <h2 id="projects-title" className="mt-2 text-2xl font-semibold tracking-tight">
-            Projects
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Product traffic and live sessions across your environments.
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-4">
+        <h2 id="projects-title" className="text-sm font-medium text-muted-foreground">
+          All projects · Last 24 hours
+        </h2>
         {workspace.error ? (
           <Button type="button" variant="outline" onClick={workspace.reload}>
             <RefreshCw /> Try again
           </Button>
         ) : null}
       </div>
+      <WorkspaceTotals workspace={workspace} projects={projects} />
       {workspace.error ? (
         <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="p-4 text-sm">
@@ -199,34 +194,107 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           </CardContent>
         </Card>
       ) : null}
-      {!workspace.data && !workspace.error ? (
-        <div
-          role="status"
-          aria-label="Loading analytics"
-          className="rounded-xl border p-6 text-sm text-muted-foreground"
-        >
-          Loading analytics…
+      {workspace.data ? (
+        <AnalyticsRanking
+          title="Traffic by project"
+          label="Views · 24h"
+          rows={[...grouped.entries()]
+            .map(([appId, environments]) => ({
+              name: environments[0].name,
+              value: appId,
+              count: workspace
+                .data!.projects.filter((row) => row.app_id === appId)
+                .reduce((sum, row) => sum + row.pageviews, 0),
+            }))
+            .sort((a, b) => b.count - a.count)}
+          total={workspace.data.projects.reduce((sum, row) => sum + row.pageviews, 0)}
+          onSelect={(appId) => {
+            const next = projects.find((project) => project.appId === appId);
+            if (next) onOpen(next);
+          }}
+        />
+      ) : !workspace.error ? (
+        <div role="status" aria-label="Loading analytics">
+          <Skeleton className="h-52 w-full rounded-xl" />
+          <span className="sr-only">Loading analytics…</span>
         </div>
       ) : null}
-      {[...grouped.entries()].map(([appId, environments]) => (
-        <div key={appId} className="space-y-3">
-          <h3 className="text-sm font-medium text-muted-foreground">{environments[0].name}</h3>
-          <div className="grid gap-4 md:grid-cols-2">
-            {environments.map((project) => (
-              <ProjectCard
-                key={`${project.appId}:${project.environmentId}`}
-                project={project}
-                workspace={workspace}
-                onOpen={onOpen}
-              />
-            ))}
-          </div>
-        </div>
-      ))}
+      <div className="grid gap-4 md:grid-cols-2">
+        {projects.map((project) => (
+          <ProjectCard
+            key={`${project.appId}:${project.environmentId}`}
+            project={project}
+            workspace={workspace}
+            onOpen={onOpen}
+          />
+        ))}
+      </div>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Live counts describe sessions observed in the last 45
         seconds.
       </p>
     </section>
+  );
+}
+
+function WorkspaceTotals({
+  workspace,
+  projects,
+}: {
+  workspace: ReturnType<typeof useWorkspaceAnalytics>;
+  projects: ProjectsViewProject[];
+}) {
+  const totals = workspace.data?.projects.reduce(
+    (sum, row) => ({ views: sum.views + row.pageviews, events: sum.events + row.events }),
+    { views: 0, events: 0 },
+  );
+  const live =
+    workspace.data?.source === 'local' || workspace.connected
+      ? (workspace.live?.projects.reduce((sum, row) => sum + row.active, 0) ?? null)
+      : null;
+  const cells = [
+    {
+      label: 'Projects',
+      value: new Set(projects.map((project) => project.appId)).size,
+      note: `${projects.length} environments`,
+      color: 'var(--chart-3)',
+    },
+    {
+      label: 'Page views',
+      value: totals?.views,
+      note: workspace.data?.sampled ? 'Estimated · last 24 hours' : 'Last 24 hours',
+      color: 'var(--chart-1)',
+    },
+    {
+      label: 'Product events',
+      value: totals?.events,
+      note: 'Named actions · last 24 hours',
+      color: 'var(--chart-4)',
+    },
+    {
+      label: 'Active now',
+      value: live,
+      note: 'Browser sessions · last 45 seconds',
+      color: 'var(--chart-2)',
+    },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="Workspace totals">
+      {cells.map((cell) => (
+        <Card
+          key={cell.label}
+          className="border-t-2 py-0 shadow-none"
+          style={{ borderTopColor: cell.color }}
+        >
+          <CardContent className="p-5">
+            <p className="text-xs font-medium text-muted-foreground">{cell.label}</p>
+            <p className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">
+              {cell.value == null ? '—' : number(cell.value)}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-muted-foreground">{cell.note}</p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 }

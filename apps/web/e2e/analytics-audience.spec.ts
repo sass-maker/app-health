@@ -8,7 +8,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   baseURL,
 }) => {
   test.setTimeout(60_000);
-  const evidence = resolve(import.meta.dirname, '../../../.fleet/evidence/analytics-acquisition');
+  const evidence = resolve(import.meta.dirname, '../../../.fleet/evidence/dashboard-polish');
   await mkdir(evidence, { recursive: true });
   const created = await (
     await request.post('/v1/apps', {
@@ -131,4 +131,38 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   await period.click();
   await page.getByRole('option', { name: 'Last 7 days', exact: true }).click();
   await expect(period).toHaveText('Last 7 days');
+  await page.getByRole('combobox', { name: 'Project', exact: true }).click();
+  await page.getByRole('option', { name: 'All projects', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Traffic by project' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
+  for (const theme of ['dark', 'light']) {
+    for (const width of [390, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      if ((await page.locator('html').getAttribute('data-theme')) !== theme)
+        await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      if (width === 1440) {
+        const picker = await page
+          .getByRole('combobox', { name: 'Project', exact: true })
+          .boundingBox();
+        const themeButton = await page
+          .getByRole('button', { name: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` })
+          .boundingBox();
+        expect(picker!.x).toBeLessThan(themeButton!.x / 2);
+      }
+      await page.screenshot({
+        path: resolve(evidence, `overview-${theme}-${width}.png`),
+        fullPage: true,
+        animations: 'disabled',
+      });
+    }
+  }
+  await page.getByRole('combobox', { name: 'Project', exact: true }).click();
+  await page.getByRole('option', { name: project.name, exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Web analytics', exact: true })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
+  await expect(page.getByText('Your projects', { exact: true })).toHaveCount(0);
 });

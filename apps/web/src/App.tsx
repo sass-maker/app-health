@@ -2894,8 +2894,8 @@ const VIEW_HEADINGS: Record<DashboardView, [string, string, string]> = {
   ],
   projects: [
     'Workspace overview',
-    'Projects',
-    'Product traffic and live sessions across your environments.',
+    'Overview',
+    'See product traffic and live sessions across your environments.',
   ],
 };
 
@@ -3384,6 +3384,11 @@ export function App(): JSX.Element {
   const [inventoryRetry, setInventoryRetry] = useState(0);
   const [created, setCreated] = useState<CreateAppResponseV1 | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
+  const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
+  const accountBootstrap = useRef<Promise<{
+    google: boolean;
+    listed: ListAppsResponseV1 | null;
+  } | null> | null>(null);
 
   useEffect(() => {
     if (ownerToken === null) return;
@@ -3391,12 +3396,19 @@ export function App(): JSX.Element {
     let cancelled = false;
     setInventoryLoading(strictRequestedProject);
     setInventoryError('');
+    async function readInventory(): Promise<SavedProject[]> {
+      const prefetched = prefetchedInventory.current;
+      if (prefetched?.token === token) {
+        prefetchedInventory.current = null;
+        return prefetched.available;
+      }
+      const response = await ownerFetch('/v1/apps', token);
+      if (!response.ok) throw new Error(`Workspace returned ${response.status}`);
+      return availableProjects((await response.json()) as ListAppsResponseV1);
+    }
     async function load(): Promise<void> {
       try {
-        const response = await ownerFetch('/v1/apps', token);
-        if (!response.ok) throw new Error(`Workspace returned ${response.status}`);
-        const listed = (await response.json()) as ListAppsResponseV1;
-        const available = availableProjects(listed);
+        const available = await readInventory();
         if (cancelled) return;
         setProjects(available);
         if (!strictRequestedProject && !project) {
@@ -3479,20 +3491,22 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+    accountBootstrap.current ??= (async () => {
       const config = await fetch('/v1/account/config');
-      if (!config.ok) return;
+      if (!config.ok) return null;
       const options = (await config.json()) as { google?: boolean };
-      if (!options.google || cancelled) return;
-      setGoogleEnabled(true);
-      const response = await fetch('/v1/apps');
-      if (!response.ok) return;
-      const listed = (await response.json()) as ListAppsResponseV1;
-      if (cancelled) return;
-      handleUnlock('', listed);
+      if (!options.google) return { google: false, listed: null };
+      const response = await fetch('/v1/apps').catch(() => null);
+      if (!response?.ok) return { google: true, listed: null };
+      return { google: true, listed: (await response.json()) as ListAppsResponseV1 };
+    })().catch(() => null);
+    void accountBootstrap.current.then((result) => {
+      if (!result || cancelled) return;
+      if (result.google) setGoogleEnabled(true);
+      if (!result.listed) return;
+      prefetchedInventory.current = { token: '', available: availableProjects(result.listed) };
+      handleUnlock('', result.listed);
       setAccountSession(true);
-    })().catch(() => {
-      /* Legacy deployments continue to offer their existing unlock. */
     });
     return () => {
       cancelled = true;

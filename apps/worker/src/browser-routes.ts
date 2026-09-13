@@ -69,7 +69,7 @@ async function browserContext(
   };
   return {
     ...identity,
-    attribution: input.attribution,
+    attribution,
     metadata: browserMetadata(request, attribution),
   };
 }

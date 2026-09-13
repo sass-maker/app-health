@@ -2,8 +2,8 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Acquisition details and previous-period KPI comparisons",
-  "surfaceMode": "read",
+  "target": "Workspace overview, left project selection and analytics report hierarchy",
+  "surfaceMode": "operate",
   "mode": "preserve",
   "register": "product",
   "context": {
@@ -11,11 +11,14 @@
     "design": "DESIGN.md"
   },
   "direction": {
-    "references": ["shadcn/ui new-york-v4 registry"],
+    "references": [
+      "shadcn/ui new-york-v4 registry",
+      "Evil Charts Recharts area chart, pinned MIT source"
+    ],
     "probes": [],
-    "selected": "existing-shadcn-public-analytics",
+    "selected": "existing-shadcn-workspace",
     "approval": "agent-selected",
-    "before": ".fleet/evidence/analytics-segments/segments-dark-1440.png",
+    "before": ".fleet/evidence/dashboard-polish/before-audience-dark-1440.png",
     "library": {
       "strategy": "upstream-first",
       "primary": "shadcn/ui new-york-v4",
@@ -30,7 +33,8 @@
         "https://ui.shadcn.com/r/styles/new-york-v4/sheet.json",
         "https://ui.shadcn.com/r/styles/new-york-v4/skeleton.json",
         "https://ui.shadcn.com/r/styles/new-york-v4/alert.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json"
+        "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json",
+        "https://github.com/legions-developer/evilcharts/blob/500ecd44c1fdcf319ba83ea68f3771bc76125974/src/registry/charts/recharts-area-chart.tsx"
       ],
       "runtime": "selective",
       "customReplacement": {
@@ -41,16 +45,16 @@
     },
     "contract": {
       "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
-      "purposeSource": "PRODUCT.md and saas-maker/catalog/projects.json app-health purposeContract, verified 2026-09-12.",
+      "purposeSource": "PRODUCT.md and site-health/apps/backend/config/projects.json publicDirectory app-health purposeContract, verified 2026-09-13.",
       "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
       "purposeAlignment": "match",
       "driftNote": "",
       "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
-      "job": "Understand recognized visitors, visits, traffic sources, campaign performance and device mix over selectable periods; read limited live public analytics.",
-      "thesis": "A calm editorial product story opens into a precise analytics workspace, using dark graphite surfaces and quiet indigo data marks.",
-      "system": "System sans typography with restrained weights, semantic graphite surfaces, indigo actions and data, emerald live state, fine grid lines, and compact evidence labels. Light mode uses warm neutral surfaces with the same semantic hierarchy.",
-      "signature": "A shared traffic-and-event pulse chart links the illustrative landing proof to the authenticated report.",
-      "risk": "Anonymous sharing is an intentional disclosure; dedicated read credentials and visible scope keep private telemetry outside the public surface."
+      "job": "Compare projects, then investigate traffic for one environment.",
+      "thesis": "A focused shadcn workspace with colorful, legible traffic charts and acquisition close to the trend.",
+      "system": "Existing shadcn graphite/light surfaces and system sans. Indigo page views, pink product events, amber sessions/country, emerald live activity and sources. Compact metric cards and a single scope selector; no dashboard footer.",
+      "signature": "Live session signal beside project traffic, with a distinct all-project overview.",
+      "risk": "Use more chart color without turning status or missing data into decoration."
     }
   },
   "evidence": {
@@ -58,46 +62,118 @@
       {
         "width": 390,
         "theme": "dark",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-390.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-768.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-1440.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-dark-1440.png"
       },
       {
         "width": 390,
         "theme": "light",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-390.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-light-390.png"
       },
       {
         "width": 768,
         "theme": "light",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-768.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-light-768.png"
       },
       {
         "width": 1440,
         "theme": "light",
-        "surface": "acquisition filters and KPI comparisons",
-        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-1440.png"
+        "surface": "audience",
+        "path": ".fleet/evidence/dashboard-polish/audience-light-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "dark",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "dark",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "acquisition",
+        "path": ".fleet/evidence/dashboard-polish/acquisition-light-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "dark",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-dark-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "dark",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-dark-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "overview",
+        "path": ".fleet/evidence/dashboard-polish/overview-light-1440.png"
       }
     ],
     "projectCheck": {
-      "command": "mise exec node@24.20.0 -- pnpm run check",
+      "command": "mise exec node@24.20.0 -- pnpm run check; final chart: web tsc, build, focused tests and analytics-audience Playwright",
       "status": "pass"
     },
     "critique": {
-      "score": 35,
+      "score": 36,
       "maximum": 40
     },
     "audit": {
@@ -107,7 +183,7 @@
     "unresolved": {
       "p0": 0,
       "p1": 0,
-      "p2": 2
+      "p2": 1
     },
     "detector": {
       "posture": "advisory",
@@ -135,10 +211,10 @@
       },
       "mismatches": []
     },
-    "notes": "Preserve lane, existing shadcn cards/rankings/chips. Root reviewed desktop dark/mobile light; independent Luna reviewed current acquisition UI and comparison behavior. All six width/theme screenshots from real local ingestion, matching three campaign filters and no overflow. Campaign terms explicitly labelled as UTM values; untagged traffic stays in denominators. Zero baselines never show infinity; sampled unique count comparisons withheld. Full pnpm run check passes, including108 browser cases, workerd/D1/SDK canaries and code-health gates; final label tests12/12. Reviewer suggested extra explanations around product-event empty states and project-wide live counts: root triaged as P2 because headings already explicitly say tracked product events and unfiltered. Other P2 long-report density. No unresolved correctness or visual P0/P1. Local changes, no commit/deploy or production proof. No new ingestion/storage/dependency; Acquisition alone adds three bounded cached dimension queries."
+    "notes": "Preserve lane: shadcn composition and selective Evil Charts GradientPattern adaptation and area-chart point treatment, MIT license retained; no dependency added. Root inspected desktop dark and mobile light, Luna independently reviewed both with no P0/P1. Project/environment selectors moved left; Overview aggregates existing workspace response with no extra analytics queries; project report drops duplicate selectors/roster and places top pages/sources after trend. Mobile remains a long report (P2). Browser fixture names are explicit test content, not product data. Missing country/source retained and explained. Bootstrap repeat inventory fetch removed; report query waves concurrent with unchanged counts and optional-failure degradation. Full gate passed with 108 browser cases, all coverage and code-health gates, SDK and account canaries. Final isolated chart-pattern refinement separately passed web types/build/lint and focused unit/browser checks. No production latency measurement or deployment in this turn."
   },
   "ownerFeedback": {
     "decision": "agent-selected",
-    "note": "Owner requested richer analytics on both public and signed-in reports, stable loading, hidden share credential in report UI and maximum efficiency. Preserve standard shadcn."
+    "note": "Owner requested left scope selection, all-project overview, more color using Evil Charts, speed and honest attribution improvements. Implemented locally; no release requested for this turn."
   }
 }

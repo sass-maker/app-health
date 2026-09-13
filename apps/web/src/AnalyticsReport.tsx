@@ -34,13 +34,14 @@ function MetricCard(props: {
   note: string;
   icon: typeof BarChart3;
   live?: boolean;
+  tone?: string;
   previous?: number;
   sampled?: boolean;
   unique?: boolean;
 }): JSX.Element {
   const { label, value, note, icon: Icon, live } = props;
   return (
-    <Card className="shadow-none">
+    <Card className="border-t-2 py-0 shadow-none" style={{ borderTopColor: props.tone }}>
       <CardContent className="p-5">
         <div className="flex items-center justify-between text-muted-foreground">
           <span className="text-xs font-medium">{label}</span>
@@ -50,7 +51,7 @@ function MetricCard(props: {
               <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
             </span>
           ) : (
-            <Icon className="size-4" />
+            <Icon className="size-4" style={{ color: props.tone }} />
           )}
         </div>
         <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
@@ -194,6 +195,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
     <div className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
       {!selected ? (
         <MetricCard
+          tone="var(--chart-1)"
           label="Page views"
           previous={props.report.previous?.pageviews}
           sampled={props.report.sampled}
@@ -203,6 +205,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
         />
       ) : null}
       <MetricCard
+        tone="var(--chart-4)"
         label={selected ? 'Event occurrences' : 'Product events'}
         previous={props.report.previous?.events}
         sampled={props.report.sampled}
@@ -211,6 +214,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
         icon={MousePointer2}
       />
       <MetricCard
+        tone="var(--chart-3)"
         label="Sessions"
         previous={props.report.previous?.sessions}
         sampled={props.report.sampled}
@@ -222,6 +226,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
         icon={Clock3}
       />
       <MetricCard
+        tone="var(--chart-2)"
         label={props.segmented ? 'Active now · unfiltered' : 'Active now'}
         value={active}
         note={
@@ -295,6 +300,12 @@ function ReportRankings(props: AnalyticsReportProps): JSX.Element {
       <AnalyticsRanking
         title={selected ? 'Event referral sources' : 'Referral sources'}
         label={selected ? 'Events' : 'Views'}
+        tone="var(--chart-2)"
+        description={
+          report.sources.some((row) => row.name === 'Unknown')
+            ? 'Unknown means no referring site was recorded: direct visits, private app handoffs, or older events.'
+            : undefined
+        }
         rows={report.sources}
         onSelect={props.onFilter ? (value) => props.onFilter?.('source', value) : undefined}
         total={selected ? props.totals.events : props.totals.pageviews}
@@ -317,6 +328,7 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
       ) : null}
       <ReportMetrics {...props} />
       <ReportChart {...props} />
+      <ReportRankings {...props} />
       {!selected && mode === 'web' && !props.segmented ? (
         <AnalyticsEngagement report={report} />
       ) : null}
@@ -335,7 +347,6 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
           />
         </TabsContent>
       </Tabs>
-      <ReportRankings {...props} />
       {mode === 'web' ? (
         <EventTable
           rows={report.events}

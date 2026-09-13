@@ -26,14 +26,14 @@ export function AnalyticsAudience({
   const groups = audienceGroups(audience, breakdown);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4">
         {[
           ['Visitors', audience.visitors],
           ['New sessions', audience.new_sessions],
           ['Returning sessions', audience.returning_sessions],
           ['Unidentified sessions', audience.unidentified_sessions],
         ].map(([label, value]) => (
-          <div key={String(label)} className="rounded-lg border bg-card p-4">
+          <div key={String(label)} className="bg-card p-4">
             <p className="text-xs text-muted-foreground">{label}</p>
             <p className="mt-2 text-2xl font-semibold tabular-nums">
               {Number(value).toLocaleString()}
@@ -53,7 +53,7 @@ export function AnalyticsAudience({
           </div>
         ))}
       </div>
-      <div className="grid gap-5 lg:grid-cols-2">
+      <div className="grid gap-5 xl:grid-cols-3">
         {groups.map(([title, rows]) => (
           <AnalyticsRanking
             key={String(title)}
@@ -61,6 +61,12 @@ export function AnalyticsAudience({
             label={metric === 'events' ? 'Occurrences' : 'Page views'}
             rows={rows as { name: string; count: number; value?: string }[]}
             total={total}
+            tone={String(title) === 'Countries' ? 'var(--chart-3)' : 'var(--chart-2)'}
+            description={
+              String(title) === 'Countries'
+                ? 'Connection location from the edge. Unknown means location was not recorded, including older events. VPNs may change the reported country.'
+                : undefined
+            }
             onSelect={
               onFilter ? (value) => onFilter(dimensionKeys[String(title)], value) : undefined
             }

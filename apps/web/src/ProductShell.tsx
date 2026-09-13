@@ -79,10 +79,7 @@ const healthViews = [
     capability: 'endpoints' as const,
   },
 ];
-const manageViews = [
-  { id: 'projects' as const, label: 'Projects', icon: Layers3 },
-  { id: 'settings' as const, label: 'Project settings', icon: Settings2 },
-];
+const manageViews = [{ id: 'settings' as const, label: 'Project settings', icon: Settings2 }];
 type NavigationItem = {
   id: 'analytics' | 'events' | 'endpoints' | 'logs' | 'data' | 'projects' | 'settings';
   label: string;
@@ -125,20 +122,30 @@ function WorkspaceSidebar({
       </SidebarHeader>
       <SidebarContent>
         <NavigationGroup
-          label="Product"
-          items={productViews}
+          label="Workspace"
+          items={[{ id: 'projects', label: 'Overview', icon: Layers3 }]}
           view={view}
           onView={onView}
-          enabledCapabilities={enabledCapabilities}
         />
-        <NavigationGroup
-          label="Monitor"
-          items={healthViews}
-          view={view}
-          onView={onView}
-          enabledCapabilities={enabledCapabilities}
-        />
-        <NavigationGroup label="Manage" items={manageViews} view={view} onView={onView} />
+        {view !== 'projects' ? (
+          <>
+            <NavigationGroup
+              label="Product"
+              items={productViews}
+              view={view}
+              onView={onView}
+              enabledCapabilities={enabledCapabilities}
+            />
+            <NavigationGroup
+              label="Monitor"
+              items={healthViews}
+              view={view}
+              onView={onView}
+              enabledCapabilities={enabledCapabilities}
+            />
+            <NavigationGroup label="Manage" items={manageViews} view={view} onView={onView} />
+          </>
+        ) : null}
         <div className="px-5 pt-4">
           <Button
             variant="outline"
@@ -179,31 +186,30 @@ function NavigationGroup({
   enabledCapabilities?: CapabilityId[];
 }): JSX.Element {
   const { setOpenMobile } = useSidebar();
+  const visibleItems = items.filter(
+    (item) => !item.capability || enabledCapabilities?.includes(item.capability) !== false,
+  );
+  if (!visibleItems.length) return <></>;
   return (
     <SidebarGroup className="px-3">
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
-          {items
-            .filter(
-              (item) =>
-                !item.capability || enabledCapabilities?.includes(item.capability) !== false,
-            )
-            .map((item) => (
-              <SidebarMenuItem key={item.id}>
-                <SidebarMenuButton
-                  className="h-11 px-3"
-                  isActive={view === item.id}
-                  onClick={() => {
-                    onView(item.id);
-                    setOpenMobile(false);
-                  }}
-                >
-                  <item.icon />
-                  <span>{item.label}</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+          {visibleItems.map((item) => (
+            <SidebarMenuItem key={item.id}>
+              <SidebarMenuButton
+                className="h-11 px-3"
+                isActive={view === item.id}
+                onClick={() => {
+                  onView(item.id);
+                  setOpenMobile(false);
+                }}
+              >
+                <item.icon />
+                <span>{item.label}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
@@ -213,7 +219,9 @@ function ProjectPicker({
   project,
   projects,
   onProject,
-}: Pick<Props, 'project' | 'projects' | 'onProject'>): JSX.Element {
+  onView,
+  view,
+}: Pick<Props, 'project' | 'projects' | 'onProject' | 'onView' | 'view'>): JSX.Element {
   const apps = projects.filter((p, i) => projects.findIndex((row) => row.appId === p.appId) === i);
   const environments = projects.filter((candidate) => candidate.appId === project.appId);
   return (
@@ -221,26 +229,40 @@ function ProjectPicker({
       <LabeledSelect
         label="Project"
         triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-44"
-        value={project.appId}
-        options={apps.map((candidate) => ({ value: candidate.appId, label: candidate.name }))}
+        value={view === 'projects' ? 'all' : project.appId}
+        options={[
+          { value: 'all', label: 'All projects' },
+          ...apps.map((candidate) => ({ value: candidate.appId, label: candidate.name })),
+        ]}
         onValueChange={(value) => {
+          if (value === 'all') {
+            onView('projects');
+            return;
+          }
           const next = projects.find((candidate) => candidate.appId === value);
-          if (next) onProject(next);
+          if (next) {
+            onProject(next);
+            if (view === 'projects') onView('analytics');
+          }
         }}
       />
-      <LabeledSelect
-        label="Environment"
-        triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-32"
-        value={project.environmentId}
-        options={environments.map((candidate) => ({
-          value: candidate.environmentId,
-          label: candidate.environment,
-        }))}
-        onValueChange={(value) => {
-          const next = projects.find((candidate) => candidate.environmentId === value);
-          if (next) onProject(next);
-        }}
-      />
+      {view !== 'projects' ? (
+        <LabeledSelect
+          label="Environment"
+          triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-32"
+          value={project.environmentId}
+          options={environments.map((candidate) => ({
+            value: candidate.environmentId,
+            label: candidate.environment,
+          }))}
+          onValueChange={(value) => {
+            const next = projects.find(
+              (candidate) => candidate.appId === project.appId && candidate.environmentId === value,
+            );
+            if (next) onProject(next);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -273,18 +295,17 @@ export function ProductShell(props: Props): JSX.Element {
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger id={triggerId} className="size-11" />
             <Separator orientation="vertical" className="!h-5" />
-            <span className="hidden text-xs text-muted-foreground md:inline">Workspace</span>
-            <span className="hidden text-xs text-muted-foreground md:inline">/</span>
-            <span className="hidden text-xs font-medium lg:inline">{props.title}</span>
           </div>
-          <div className="order-last w-full min-w-0 sm:order-none sm:ml-auto sm:w-auto">
+          <div className="order-last w-full min-w-0 sm:order-none sm:w-auto">
             <ProjectPicker
               project={props.project}
               projects={props.projects}
               onProject={props.onProject}
+              onView={props.onView}
+              view={props.view}
             />
           </div>
-          <div className="flex min-w-0 items-center gap-1 sm:gap-3">
+          <div className="ml-auto flex min-w-0 items-center gap-1 sm:gap-3">
             <ThemeToggle />
             <Button
               variant="ghost"

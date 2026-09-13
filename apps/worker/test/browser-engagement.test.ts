@@ -180,4 +180,32 @@ describe('browser engagement metrics', () => {
       vi.useRealTimers();
     }
   });
+
+  it('starts optional engagement queries while core analytics are still pending', async () => {
+    let releaseCore!: () => void;
+    const coreGate = new Promise<void>((resolve) => {
+      releaseCore = resolve;
+    });
+    let blockedCore = false;
+    let optionalStarted = false;
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+      const sql = String(init?.body);
+      if (!blockedCore && !sql.includes('pageview_sessions')) {
+        blockedCore = true;
+        await coreGate;
+      }
+      if (sql.includes('pageview_sessions')) optionalStarted = true;
+      return Response.json({ data: [] });
+    });
+    const report = queryBrowserReport(
+      'workspace',
+      { range: '24h' },
+      { accountId: 'a'.repeat(32), token: 'fixture', fetchImpl },
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(optionalStarted).toBe(true);
+    releaseCore();
+    await report;
+  });
 });

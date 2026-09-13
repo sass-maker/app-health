@@ -211,12 +211,10 @@ async function loadReport(
   const plan = browserReportPlan(workspace, filter, from, to, step);
   const optionalStart =
     filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
-  const results = await Promise.all(
-    plan.sql.slice(0, optionalStart).map((sql) => query(sql, options)),
-  );
-  const optional = await Promise.allSettled(
-    plan.sql.slice(optionalStart).map((sql) => query(sql, options)),
-  );
+  const [results, optional] = await Promise.all([
+    Promise.all(plan.sql.slice(0, optionalStart).map((sql) => query(sql, options))),
+    Promise.allSettled(plan.sql.slice(optionalStart).map((sql) => query(sql, options))),
+  ]);
   const [trend, pages, sources, events, audienceRows, ...rest] = results;
   const engagementRows = optional[0]?.status === 'fulfilled' ? optional[0].value : [];
   const exitRows = optional[1]?.status === 'fulfilled' ? optional[1].value : [];

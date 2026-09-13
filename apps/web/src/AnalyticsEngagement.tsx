@@ -24,9 +24,9 @@ export function AnalyticsEngagement({ report }: { report: BrowserReport }): JSX.
   ];
   return (
     <section aria-label="Session engagement" className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3">
         {cells.map(([label, value, note]) => (
-          <div key={label} className="rounded-lg border bg-card p-4">
+          <div key={label} className="bg-card p-4">
             <h2 className="text-xs text-muted-foreground">{label}</h2>
             <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
             <p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p>

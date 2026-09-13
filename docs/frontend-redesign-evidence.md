@@ -11,6 +11,18 @@ tables, selects, tabs, inputs, alerts, sheets, and confirmation dialogs. The old
 removed rather than layered with more overrides. Shared semantic colors cover both themes.
 The source manifest records upstream provenance, React 18 compatibility changes, and local hashes.
 
+## Analytics chart provenance
+
+`AnalyticsChart.tsx` selectively adapts Evil Charts' `GradientPattern` into `EvilAreaFill`:
+a vertical fade mask over a metric-colored area pattern. The adaptation uses existing semantic
+color tokens, increases the top opacity to 0.24 for legibility, and retains unique per-chart IDs.
+The surrounding Recharts/shadcn chart keeps accessible values, static polling-safe rendering,
+and visible points with a stronger active point. The full upstream wrapper is not imported.
+The source reference is `https://github.com/legions-developer/evilcharts/blob/500ecd44c1fdcf319ba83ea68f3771bc76125974/src/registry/charts/recharts-area-chart.tsx`,
+licensed under MIT at `https://github.com/legions-developer/evilcharts/blob/500ecd44c1fdcf319ba83ea68f3771bc76125974/LICENSE`.
+No Evil Charts runtime dependency was added; the existing Recharts and shadcn chart primitives
+remain in use. Polling and reduced-motion behavior stays static with Recharts animation disabled.
+
 ## Browser regression coverage
 
 The committed Playwright suite runs against its own local server and checks actual rendered text

@@ -6,6 +6,8 @@ export function AnalyticsRanking(props: {
   rows: { name: string; count: number; value?: string }[];
   onSelect?: (value: string) => void;
   total?: number;
+  tone?: string;
+  description?: string;
 }): JSX.Element {
   const { title, label, rows, total } = props;
   const max = Math.max(1, ...rows.map((row) => row.count));
@@ -25,13 +27,13 @@ export function AnalyticsRanking(props: {
               >
                 <span
                   aria-hidden="true"
-                  className="absolute inset-y-1 left-0 bg-primary/7"
-                  style={{ width: `${(row.count / max) * 100}%` }}
+                  className="absolute inset-y-1 left-0 rounded-r-sm opacity-15"
+                  style={{
+                    width: `${(row.count / max) * 100}%`,
+                    backgroundColor: props.tone ?? 'var(--chart-1)',
+                  }}
                 />
-                <span
-                  className="relative min-w-0 flex-1 break-all font-mono text-xs"
-                  title={row.name}
-                >
+                <span className="relative min-w-0 flex-1 break-words text-xs" title={row.name}>
                   {props.onSelect ? (
                     <button
                       type="button"
@@ -62,6 +64,11 @@ export function AnalyticsRanking(props: {
           </p>
         )}
       </CardContent>
+      {props.description ? (
+        <p className="border-t px-5 py-3 text-xs leading-5 text-muted-foreground">
+          {props.description}
+        </p>
+      ) : null}
     </Card>
   );
 }

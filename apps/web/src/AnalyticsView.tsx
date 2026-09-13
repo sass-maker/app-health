@@ -6,7 +6,7 @@ import { AnalyticsReport, type AnalyticsReportProps } from './AnalyticsReport.js
 import { useBrowserReport, useWorkspaceAnalytics } from './useAnalytics.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader } from './components/ui/card.js';
+import { Card, CardContent } from './components/ui/card.js';
 import { LabeledSelect as ReportSelect } from './LabeledSelect.js';
 import { AnalyticsReportLoading } from './AnalyticsReportLoading.js';
 
@@ -16,8 +16,6 @@ interface Project {
   name: string;
   environment: string;
 }
-
-const count = (value: number) => value.toLocaleString();
 
 function ReportError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
@@ -35,54 +33,6 @@ function ReportError({ message, onRetry }: { message: string; onRetry: () => voi
   );
 }
 
-function ProjectRows({
-  projects,
-  summary,
-  onSelect,
-}: {
-  projects: Project[];
-  summary: ReturnType<typeof useWorkspaceAnalytics>['data'];
-  onSelect: (project: Project) => void;
-}) {
-  return (
-    <Card className="shadow-none">
-      <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
-        <h2 className="text-sm font-semibold">Your projects</h2>
-        <span className="text-xs text-muted-foreground">Open app health</span>
-      </CardHeader>
-      <CardContent className="p-0">
-        {projects.map((project) => {
-          const row = summary?.projects.find(
-            (item) =>
-              item.app_id === project.appId && item.environment_id === project.environmentId,
-          );
-          return (
-            <button
-              key={project.environmentId}
-              className="grid min-h-16 w-full grid-cols-[1fr_auto] items-center gap-4 border-b px-5 text-left last:border-0 hover:bg-muted/50 sm:grid-cols-[1fr_8rem_8rem_auto]"
-              onClick={() => onSelect(project)}
-            >
-              <span className="min-w-0">
-                <strong className="block truncate text-sm font-medium">{project.name}</strong>
-                <small className="text-xs text-muted-foreground">{project.environment}</small>
-              </span>
-              <span className="hidden text-right text-sm tabular-nums sm:block">
-                {row ? count(row.pageviews) : '—'}{' '}
-                <small className="block text-xs text-muted-foreground">views · 24h</small>
-              </span>
-              <span className="hidden text-right text-sm tabular-nums sm:block">
-                {row ? count(row.events) : '—'}{' '}
-                <small className="block text-xs text-muted-foreground">events · 24h</small>
-              </span>
-              <ArrowRight className="size-4 text-muted-foreground" />
-            </button>
-          );
-        })}
-      </CardContent>
-    </Card>
-  );
-}
-
 interface AnalyticsViewProps {
   projects: Project[];
   project: Project;
@@ -93,58 +43,18 @@ interface AnalyticsViewProps {
 }
 
 interface ReportFiltersProps {
-  apps: Project[];
-  environments: Project[];
-  appId: string;
-  environmentId: string;
   range: string;
   selected: string;
-  onApp: (value: string) => void;
-  onEnvironment: (value: string) => void;
   onRange: (value: string) => void;
   onClearEvent: () => void;
   onInstall?: () => void;
 }
 
 function ReportFilters(props: ReportFiltersProps): JSX.Element {
-  const {
-    apps,
-    environments,
-    appId,
-    environmentId,
-    range,
-    selected,
-    onApp,
-    onEnvironment,
-    onRange,
-    onClearEvent,
-    onInstall,
-  } = props;
+  const { range, selected, onRange, onClearEvent, onInstall } = props;
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
       <div className="flex flex-1 flex-col gap-2 sm:flex-row">
-        <ReportSelect
-          label="Analytics project"
-          value={appId}
-          onValueChange={onApp}
-          triggerClassName="h-10 min-w-40"
-          options={[
-            { value: 'all', label: 'All projects' },
-            ...apps.map((item) => ({ value: item.appId, label: item.name })),
-          ]}
-        />
-        {appId !== 'all' ? (
-          <ReportSelect
-            label="Analytics environment"
-            value={environmentId}
-            onValueChange={onEnvironment}
-            triggerClassName="h-10 min-w-40"
-            options={environments.map((item) => ({
-              value: item.environmentId,
-              label: item.environment,
-            }))}
-          />
-        ) : null}
         <ReportSelect
           label="Analytics period"
           value={range}
@@ -247,22 +157,10 @@ function reportTotals(report: ReturnType<typeof useBrowserReport>['report']) {
   );
 }
 
-function useReportSelection(project: Project, projects: Project[]) {
+function useReportSelection(project: Project) {
   const [segments, setSegments] = useState<BrowserSegmentFilter>({});
-  const [appId, setAppId] = useState(project.appId);
-  const [environmentId, setEnvironmentId] = useState(project.environmentId);
+  const { appId, environmentId } = project;
   const [selected, setSelected] = useState('');
-  const onEnvironment = (value: string) => {
-    setEnvironmentId(value);
-    setSelected('');
-    setSegments({});
-  };
-  const onApp = (value: string) => {
-    setAppId(value);
-    onEnvironment(
-      value === 'all' ? '' : (projects.find((row) => row.appId === value)?.environmentId ?? ''),
-    );
-  };
   const removeSegment = (key: keyof BrowserSegmentFilter) =>
     setSegments((current) => {
       const next = { ...current };
@@ -276,25 +174,14 @@ function useReportSelection(project: Project, projects: Project[]) {
     environmentId,
     selected,
     setSelected,
-    onEnvironment,
-    onApp,
     removeSegment,
   };
 }
 
 export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
-  const { projects, project, ownerToken, onSelect, mode = 'web', onInstall } = props;
-  const {
-    segments,
-    setSegments,
-    appId,
-    environmentId,
-    selected,
-    setSelected,
-    onEnvironment,
-    onApp,
-    removeSegment,
-  } = useReportSelection(project, projects);
+  const { project, ownerToken, mode = 'web', onInstall } = props;
+  const { segments, setSegments, appId, environmentId, selected, setSelected, removeSegment } =
+    useReportSelection(project);
   const [range, setRange] = useState('24h');
   const [metric, setMetric] = useState<'pageviews' | 'events'>(
     mode === 'events' ? 'events' : 'pageviews',
@@ -312,10 +199,6 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   const report = detail.report;
   const totalsValue = reportTotals(report);
   const active = activeSessionCount(workspace, appId, environmentId);
-  const apps = projects.filter(
-    (project, index) => projects.findIndex((row) => row.appId === project.appId) === index,
-  );
-  const environments = projects.filter((candidate) => candidate.appId === appId);
   const sourceNote = reportSourceNote(report);
   const selectEvent = (event: string) => {
     setSelected(event);
@@ -324,14 +207,8 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   return (
     <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
-        apps={apps}
-        environments={environments}
-        appId={appId}
-        environmentId={environmentId}
         range={range}
         selected={selected}
-        onApp={onApp}
-        onEnvironment={onEnvironment}
         onRange={setRange}
         onClearEvent={() => {
           setSelected('');
@@ -366,7 +243,6 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         segmented={Object.keys(segments).length > 0}
         onFilter={(key, value) => setSegments((current) => ({ ...current, [key]: value }))}
       />
-      <ProjectRows projects={projects} summary={workspace.data} onSelect={onSelect} />
       <AnalyticsFooter sourceNote={sourceNote} workspace={workspace} />
     </section>
   );

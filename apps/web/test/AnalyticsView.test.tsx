@@ -43,7 +43,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('shows traffic, top pages, sources, event names and a path to application health', async () => {
+it('shows focused project traffic, sources and events without a duplicate project roster', async () => {
   const fetch = install();
   const select = vi.fn();
   const setup = vi.fn();
@@ -60,8 +60,8 @@ it('shows traffic, top pages, sources, event names and a path to application hea
   expect(screen.getByText('google.com')).toBeTruthy();
   expect(screen.getByText('signup.completed')).toBeTruthy();
   expect(screen.getByText('Sessions')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: /My project/ }));
-  expect(select).toHaveBeenCalledWith(project);
+  expect(screen.queryByText('Your projects')).toBeNull();
+  expect(screen.queryByRole('combobox', { name: 'Analytics project' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /Install tracker/ }));
   expect(setup).toHaveBeenCalledOnce();
   expect(fetch).toHaveBeenCalledTimes(2);
@@ -84,10 +84,6 @@ it('queries an event drill-down, project and time filters, and clears the select
     expect(mock.mock.calls.some(([url]) => url.includes('event=signup.completed'))).toBe(true),
   );
   expect(await screen.findByRole('heading', { name: 'Where this event happens' })).toBeTruthy();
-  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics project' }), {
-    key: 'ArrowDown',
-  });
-  fireEvent.click(await screen.findByRole('option', { name: 'My project' }));
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });
