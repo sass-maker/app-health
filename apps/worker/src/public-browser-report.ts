@@ -1,3 +1,4 @@
+import { analyticsSourceSql } from './browser-source-sql.js';
 import { browserQuery } from './browser-query.js';
 import { BrowserReportFilter, type SharedAnalytics } from '@app-health/contracts';
 
@@ -27,7 +28,7 @@ async function rows(sql: string, options: Options): Promise<Row[]> {
   return body.data;
 }
 
-/** Four aggregate queries for opt-in public breakdowns; named events are excluded. */
+/** Five aggregate queries for opt-in public breakdowns; named events are excluded. */
 export async function queryPublicBrowserBreakdowns(
   workspace: string,
   appId: string,
@@ -45,7 +46,7 @@ export async function queryPublicBrowserBreakdowns(
   const from = to - 86400000;
   const step = 3600000;
   const source = `FROM app_health_browser_v1 WHERE index1 = '${workspace}' AND blob1 = '${appId}' AND blob2 = '${environmentId}' AND double2 >= ${from} AND double2 < ${to}`;
-  const [trend, pages, sources, sessions] = await Promise.all([
+  const [trend, pages, sources, sessions, countries] = await Promise.all([
     rows(
       `SELECT FLOOR((double2 - ${from}) / ${step}) AS bucket, SUM(IF(blob3 = 'pageview', _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', _sample_interval, 0)) AS events, MAX(_sample_interval) AS sample_interval ${source} GROUP BY bucket ORDER BY bucket LIMIT 24`,
       options,
@@ -55,11 +56,15 @@ export async function queryPublicBrowserBreakdowns(
       options,
     ),
     rows(
-      `SELECT IF(blob10 != '', blob10, blob6) AS name, SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval ${source} AND blob3 = 'pageview' GROUP BY name ORDER BY count DESC LIMIT 20`,
+      `SELECT ${analyticsSourceSql("IF(blob10 != '', blob10, blob6)")} AS name, SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval ${source} AND blob3 = 'pageview' GROUP BY name ORDER BY count DESC LIMIT 20`,
       options,
     ),
     rows(
       `SELECT COUNT(DISTINCT blob7) AS sessions, MAX(_sample_interval) AS sample_interval ${source} AND blob7 != ''`,
+      options,
+    ),
+    rows(
+      `SELECT IF(blob16 = '', 'Unknown', blob16) AS name, SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval ${source} AND blob3 = 'pageview' GROUP BY name ORDER BY count DESC LIMIT 20`,
       options,
     ),
   ]);
@@ -67,6 +72,7 @@ export async function queryPublicBrowserBreakdowns(
   const pageRows = publicRanking(pages, 256, false);
   const sourceRows = publicRanking(sources, 253, true);
   const visits = publicSessions(sessions);
+  const geography = publicCountries(countries);
   return {
     traffic: {
       from,
@@ -74,12 +80,18 @@ export async function queryPublicBrowserBreakdowns(
       series: pulse.series,
       pageviews: pulse.series.reduce((sum, row) => sum + row.pageviews, 0),
     },
-    sampled: pulse.sampled || pageRows.sampled || sourceRows.sampled || visits.sampled,
+    sampled:
+      pulse.sampled ||
+      pageRows.sampled ||
+      sourceRows.sampled ||
+      visits.sampled ||
+      geography.sampled,
     breakdowns: {
       sessions: visits.count,
       events: pulse.events,
       pages: pageRows.rows,
       sources: sourceRows.rows,
+      countries: geography.rows,
     },
   };
 }
@@ -124,7 +136,20 @@ function publicRanking(items: Row[], maxLength: number, direct: boolean) {
       throw new Error('Invalid public name');
     const interval = sampleInterval(row.sample_interval);
     sampled = interval > 1 || sampled;
-    return { name: row.name || 'Direct / unknown', count: validNumber(row.count) };
+    return { name: row.name || 'Unknown', count: validNumber(row.count) };
+  });
+  return { rows, sampled };
+}
+
+function publicCountries(items: Row[]) {
+  if (items.length > 20) throw new Error('Invalid public country bounds');
+  let sampled = false;
+  const rows = items.map((row) => {
+    if (typeof row.name !== 'string' || !/^(?:[A-Z]{2}|Unknown)$/.test(row.name))
+      throw new Error('Invalid public country');
+    const interval = sampleInterval(row.sample_interval);
+    sampled = interval > 1 || sampled;
+    return { name: row.name, count: validNumber(row.count) };
   });
   return { rows, sampled };
 }

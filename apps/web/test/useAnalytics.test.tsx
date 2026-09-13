@@ -220,3 +220,32 @@ describe('analytics visibility lifecycle', () => {
     view.unmount();
   });
 });
+
+it('clears the old segment immediately and ignores its late response after a filter change', async () => {
+  let finishOld!: (response: Response) => void;
+  const fetch = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          finishOld = resolve;
+        }),
+    )
+    .mockResolvedValueOnce(Response.json({ ...report, sessions: 7 }));
+  vi.stubGlobal('fetch', fetch);
+  const view = renderHook(
+    ({ country }) =>
+      useBrowserReport('', '24h', 'app', 'env', '', {
+        breakdown: 'audience',
+        segments: { country },
+      }),
+    { initialProps: { country: 'IN' } },
+  );
+  view.rerender({ country: 'US' });
+  expect(view.result.current.report).toBeNull();
+  await waitFor(() => expect(view.result.current.report?.sessions).toBe(7));
+  await act(async () => finishOld(Response.json({ ...report, sessions: 99 })));
+  expect(view.result.current.report?.sessions).toBe(7);
+  expect(fetch.mock.calls[0][0]).toContain('country=IN');
+  expect(fetch.mock.calls[1][0]).toContain('country=US');
+});

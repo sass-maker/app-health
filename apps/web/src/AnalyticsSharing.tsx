@@ -235,7 +235,7 @@ export function AnalyticsSharing({
             className="mt-0.5 size-4 accent-primary"
           />
           <span>
-            <span className="font-medium">Share top routes and sources</span>
+            <span className="font-medium">Share top routes, sources and countries</span>
             <span className="mt-1 block text-xs text-muted-foreground">
               Includes aggregate sessions, event totals, top routes and referrer hosts. Event names,
               logs, keys and identities stay private.

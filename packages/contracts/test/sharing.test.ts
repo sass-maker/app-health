@@ -56,3 +56,22 @@ it('accepts only the bounded opt-in breakdown projection', () => {
   expect(projected?.breakdowns).toEqual(breakdowns);
   expect(JSON.stringify(projected)).not.toContain('secret');
 });
+
+it('projects coarse public countries and rejects more precise private geography', () => {
+  const breakdowns = {
+    sessions: 1,
+    events: 0,
+    pages: [],
+    sources: [],
+    countries: [{ name: 'IN', count: 1, city: 'Private' }],
+  };
+  expect(parseSharedAnalytics({ ...valid, breakdowns })?.breakdowns?.countries).toEqual([
+    { name: 'IN', count: 1 },
+  ]);
+  expect(
+    parseSharedAnalytics({
+      ...valid,
+      breakdowns: { ...breakdowns, countries: [{ name: 'Private city', count: 1 }] },
+    }),
+  ).toBeNull();
+});

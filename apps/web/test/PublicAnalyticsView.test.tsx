@@ -184,6 +184,10 @@ it('shows approved route and source rankings, session totals and event totals wi
             { name: 'example.com', count: 7 },
             { name: 'Direct / unknown', count: 21 },
           ],
+          countries: [
+            { name: 'IN', count: 14 },
+            { name: 'US', count: 7 },
+          ],
           private_event_names: ['checkout.private'],
         },
       }),
@@ -193,6 +197,10 @@ it('shows approved route and source rankings, session totals and event totals wi
   expect(await screen.findByRole('heading', { name: 'Top routes' })).toBeVisible();
   expect(screen.getByRole('heading', { name: 'Top sources' })).toBeVisible();
   expect(screen.getByText('/pricing')).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'Countries' })).toBeVisible();
+  expect(screen.getByText('India')).toBeVisible();
+  expect(screen.getByText('United States')).toBeVisible();
+  expect(screen.getByText('50.0%')).toBeVisible();
   expect(screen.getByText('example.com')).toBeVisible();
   expect(screen.getAllByText('75.0%')).toHaveLength(2);
   expect(within(screen.getByRole('group', { name: 'Sessions' })).getByText('14')).toBeVisible();

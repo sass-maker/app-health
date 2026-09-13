@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   BrowserReport,
+  type BrowserSegmentFilter,
   BrowserSummary,
   PresenceSnapshot,
   type BrowserSummary as BrowserSummaryData,
@@ -193,19 +194,49 @@ export function useWorkspaceAnalytics(ownerToken: string) {
   return { data, live, error, connected, reload: () => setRetry((value) => value + 1) };
 }
 
+type ReportOptions =
+  | 'audience'
+  | 'acquisition'
+  | 'technology'
+  | {
+      breakdown: 'audience' | 'acquisition' | 'technology';
+      segments: BrowserSegmentFilter;
+    };
+
+function reportParameters(
+  range: string,
+  appId: string,
+  environmentId: string,
+  event: string,
+  breakdown: string,
+  segmentQuery: string,
+) {
+  const params = new URLSearchParams({ range });
+  if (appId) params.set('app_id', appId);
+  if (environmentId) params.set('environment_id', environmentId);
+  if (event) params.set('event', event);
+  if (breakdown !== 'audience') params.set('breakdown', breakdown);
+  new URLSearchParams(segmentQuery).forEach((value, key) => params.set(key, value));
+  return params;
+}
+
 export function useBrowserReport(
   ownerToken: string,
   range: string,
   appId: string,
   environmentId: string,
   event: string,
-  breakdown: 'audience' | 'acquisition' | 'technology' = 'audience',
+  options: ReportOptions = 'audience',
 ) {
+  const breakdown = typeof options === 'string' ? options : options.breakdown;
+  const segmentQuery = new URLSearchParams(
+    typeof options === 'string' ? [] : Object.entries(options.segments).sort(),
+  ).toString();
   const [report, setReport] = useState<BrowserReportData | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
-  const scope = `${ownerToken}/${range}/${appId}/${environmentId}/${event}/${breakdown}`;
+  const scope = `${ownerToken}/${range}/${appId}/${environmentId}/${event}/${breakdown}/${segmentQuery}`;
   const reportDataScopeRef = useRef<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -214,11 +245,7 @@ export function useBrowserReport(
     let request: AbortController | undefined;
     let timer: ReturnType<typeof setInterval> | undefined;
     const preserveReport = reportDataScopeRef.current === scope;
-    const params = new URLSearchParams({ range });
-    if (appId) params.set('app_id', appId);
-    if (environmentId) params.set('environment_id', environmentId);
-    if (event) params.set('event', event);
-    if (breakdown !== 'audience') params.set('breakdown', breakdown);
+    const params = reportParameters(range, appId, environmentId, event, breakdown, segmentQuery);
     if (!preserveReport) setReport(null);
     setLoading(!preserveReport);
     setError('');
@@ -275,7 +302,7 @@ export function useBrowserReport(
       request?.abort();
       if (timer) clearInterval(timer);
     };
-  }, [ownerToken, range, appId, environmentId, event, breakdown, retry]);
+  }, [ownerToken, range, appId, environmentId, event, breakdown, segmentQuery, retry]);
   return {
     report: reportDataScopeRef.current === scope ? report : null,
     error,

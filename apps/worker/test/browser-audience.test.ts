@@ -105,9 +105,52 @@ describe('visitor reporting across periods and legacy clients', () => {
         new_sessions: 1,
         returning_sessions: 1,
         unidentified_sessions: 1,
+        countries: [{ name: 'Unknown', count: 4 }],
       });
       expect(report.previous).toEqual({ pageviews: 1, events: 0, visitors: 1, sessions: 1 });
       expect(report.sessions).toBe(3);
+      database
+        .prepare(
+          'INSERT INTO app_health_browser_v1 (index1,blob1,blob2,blob3,blob4,blob5,blob6,blob7,blob10,blob12,blob13,blob14,blob15,blob16,blob17,double1,double2,_sample_interval) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        )
+        .run(
+          'workspace',
+          'app',
+          'env',
+          'pageview',
+          "/a'b",
+          '',
+          'google.com',
+          'quoted-session',
+          'google.com',
+          'hello',
+          'Email',
+          'Mobile',
+          'Chrome',
+          'IN',
+          '/start',
+          1,
+          now - 100,
+          1,
+        );
+      const segmented = await queryBrowserReport(
+        'workspace',
+        {
+          range: '7d',
+          app_id: 'app',
+          path: "/a'b",
+          entry_path: '/start',
+          source: 'google.com',
+          country: 'IN',
+          device: 'Mobile',
+          browser: 'Chrome',
+          channel: 'Email',
+          campaign: 'hello',
+        },
+        { accountId: 'a'.repeat(32), token: 'fixture', fetchImpl },
+      );
+      expect(segmented.pages).toEqual([{ name: "/a'b", count: 1 }]);
+      expect(segmented.engagement).toBeUndefined();
       const empty = await queryBrowserReport(
         'workspace',
         { range: '7d', app_id: 'absent' },

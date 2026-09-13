@@ -308,7 +308,7 @@ describe('Google account boundary with real D1 SQL', () => {
         series: expect.any(Array),
         events: [],
       });
-      expect(provider).toHaveBeenCalledTimes(8);
+      expect(provider).toHaveBeenCalledTimes(9);
       for (const [, init] of provider.mock.calls) {
         expect(String(init?.body)).toContain(`index1 = '${account.workspace.id}'`);
         expect(String(init?.body)).toContain("blob5 = 'signup'");

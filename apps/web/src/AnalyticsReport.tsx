@@ -1,5 +1,7 @@
+import { AnalyticsComparison } from './AnalyticsComparison.js';
+import { AnalyticsEngagement } from './AnalyticsEngagement.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
-import type { BrowserReport } from '@app-health/contracts';
+import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
 import { ArrowRight, BarChart3, Clock3, MousePointer2, Radio } from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
 import { Badge } from './components/ui/badge.js';
@@ -28,10 +30,13 @@ const formatLastSeen = (timestamp: number) =>
 
 function MetricCard(props: {
   label: string;
-  value: string;
+  value: number | null;
   note: string;
   icon: typeof BarChart3;
   live?: boolean;
+  previous?: number;
+  sampled?: boolean;
+  unique?: boolean;
 }): JSX.Element {
   const { label, value, note, icon: Icon, live } = props;
   return (
@@ -48,8 +53,17 @@ function MetricCard(props: {
             <Icon className="size-4" />
           )}
         </div>
-        <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">{value}</p>
+        <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
+          {value === null ? '—' : formatCount(value)}
+        </p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{note}</p>
+        <AnalyticsComparison
+          label={label}
+          current={value ?? 0}
+          previous={props.previous}
+          sampled={props.sampled}
+          unique={props.unique}
+        />
       </CardContent>
     </Card>
   );
@@ -58,9 +72,18 @@ function MetricCard(props: {
 function EventTable(props: {
   rows: BrowserReport['events'];
   selected: string;
+  filtered?: boolean;
   onSelect: (event: string) => void;
 }): JSX.Element {
   const { rows, selected, onSelect } = props;
+  if (!rows.length && props.filtered)
+    return (
+      <Card className="shadow-none">
+        <CardContent className="p-6 text-sm text-muted-foreground">
+          No tracked product events in this segment. Remove a filter or choose another period.
+        </CardContent>
+      </Card>
+    );
   return (
     <Card className="overflow-hidden shadow-none">
       <CardHeader className="flex flex-row items-start justify-between gap-4 border-b">
@@ -161,6 +184,8 @@ export interface AnalyticsReportProps {
   onEvent: (event: string) => void;
   breakdown: 'audience' | 'acquisition' | 'technology';
   onBreakdown: (value: 'audience' | 'acquisition' | 'technology') => void;
+  segmented?: boolean;
+  onFilter?: (key: keyof BrowserSegmentFilter, value: string) => void;
 }
 
 function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
@@ -170,29 +195,40 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
       {!selected ? (
         <MetricCard
           label="Page views"
-          value={formatCount(totals.pageviews)}
+          previous={props.report.previous?.pageviews}
+          sampled={props.report.sampled}
+          value={totals.pageviews}
           note="Pages opened in this period"
           icon={BarChart3}
         />
       ) : null}
       <MetricCard
         label={selected ? 'Event occurrences' : 'Product events'}
-        value={formatCount(totals.events)}
+        previous={props.report.previous?.events}
+        sampled={props.report.sampled}
+        value={totals.events}
         note="Named actions received"
         icon={MousePointer2}
       />
       <MetricCard
         label="Sessions"
-        value={formatCount(props.report.sessions)}
+        previous={props.report.previous?.sessions}
+        sampled={props.report.sampled}
+        unique={true}
+        value={props.report.sessions}
         note={
           props.report.sampled ? 'Sampled lower bound for this period' : 'Sessions in this period'
         }
         icon={Clock3}
       />
       <MetricCard
-        label="Active now"
-        value={active === null ? '—' : formatCount(active)}
-        note="Browser sessions · last 45 seconds"
+        label={props.segmented ? 'Active now · unfiltered' : 'Active now'}
+        value={active}
+        note={
+          props.segmented
+            ? 'All project sessions · not filtered'
+            : 'Browser sessions · last 45 seconds'
+        }
         icon={Radio}
         live
       />
@@ -234,7 +270,9 @@ function ReportChart(props: AnalyticsReportProps): JSX.Element {
           </TabsContent>
           {totals.pageviews === 0 && totals.events === 0 ? (
             <p className="mt-3 text-center text-xs text-muted-foreground">
-              No activity in this period. Install the tracker or choose another project.
+              {props.segmented
+                ? 'No events match these filters. Remove a filter or choose another period.'
+                : 'No activity in this period. Install the tracker or choose another project.'}
             </p>
           ) : null}
         </CardContent>
@@ -251,12 +289,14 @@ function ReportRankings(props: AnalyticsReportProps): JSX.Element {
         title={selected ? 'Where this event happens' : 'Top pages'}
         label={selected ? 'Events' : 'Views'}
         rows={report.pages}
+        onSelect={props.onFilter ? (value) => props.onFilter?.('path', value) : undefined}
         total={selected ? props.totals.events : props.totals.pageviews}
       />
       <AnalyticsRanking
         title={selected ? 'Event referral sources' : 'Referral sources'}
         label={selected ? 'Events' : 'Views'}
         rows={report.sources}
+        onSelect={props.onFilter ? (value) => props.onFilter?.('source', value) : undefined}
         total={selected ? props.totals.events : props.totals.pageviews}
       />
     </div>
@@ -268,10 +308,18 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
   return (
     <>
       {mode === 'events' ? (
-        <EventTable rows={report.events} selected={selected} onSelect={onEvent} />
+        <EventTable
+          rows={report.events}
+          selected={selected}
+          onSelect={onEvent}
+          filtered={props.segmented}
+        />
       ) : null}
       <ReportMetrics {...props} />
       <ReportChart {...props} />
+      {!selected && mode === 'web' && !props.segmented ? (
+        <AnalyticsEngagement report={report} />
+      ) : null}
       <Tabs value={breakdown} onValueChange={(value) => onBreakdown(value as typeof breakdown)}>
         <TabsList aria-label="Analytics breakdown">
           <TabsTrigger value="audience">Audience</TabsTrigger>
@@ -282,13 +330,19 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
           <AnalyticsAudience
             report={report}
             breakdown={breakdown}
+            onFilter={props.onFilter}
             metric={selected ? 'events' : 'pageviews'}
           />
         </TabsContent>
       </Tabs>
       <ReportRankings {...props} />
       {mode === 'web' ? (
-        <EventTable rows={report.events} selected={selected} onSelect={onEvent} />
+        <EventTable
+          rows={report.events}
+          selected={selected}
+          onSelect={onEvent}
+          filtered={props.segmented}
+        />
       ) : null}
     </>
   );

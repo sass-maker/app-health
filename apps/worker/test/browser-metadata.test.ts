@@ -37,7 +37,7 @@ describe('coarse browser metadata', () => {
       ['newsletter', 'email', 'Email'],
       ['t.co', '', 'Social'],
       ['evilgoogle.com', '', 'Referral'],
-      ['', '', 'Direct / unknown'],
+      ['', '', 'Unknown'],
     ])
       expect(browserMetadata(request, attribution(source, medium)).channel).toBe(channel);
     expect(browserMetadata(request).device).toBe('Unknown');

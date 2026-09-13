@@ -1,0 +1,180 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "Owner and public country rankings, automatic source grouping, and observed session metrics",
+  "surfaceMode": "read",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": ["shadcn/ui new-york-v4 registry"],
+    "probes": [],
+    "selected": "existing-shadcn-public-analytics",
+    "approval": "agent-selected",
+    "before": ".fleet/evidence/analytics-audience/audience-dark-1440.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "shadcn/ui new-york-v4",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/select.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/chart.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/sidebar.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/sheet.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/skeleton.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/alert.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json"
+      ],
+      "runtime": "selective",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md and saas-maker/catalog/projects.json app-health purposeContract, verified 2026-09-12.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
+      "job": "Understand recognized visitors, visits, traffic sources, campaign performance and device mix over selectable periods; read limited live public analytics.",
+      "thesis": "A calm editorial product story opens into a precise analytics workspace, using dark graphite surfaces and quiet indigo data marks.",
+      "system": "System sans typography with restrained weights, semantic graphite surfaces, indigo actions and data, emerald live state, fine grid lines, and compact evidence labels. Light mode uses warm neutral surfaces with the same semantic hierarchy.",
+      "signature": "A shared traffic-and-event pulse chart links the illustrative landing proof to the authenticated report.",
+      "risk": "Anonymous sharing is an intentional disclosure; dedicated read credentials and visible scope keep private telemetry outside the public surface."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "theme": "dark",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-dark-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "dark",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-dark-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "owner country and engagement report",
+        "path": ".fleet/evidence/analytics-country/audience-light-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "dark",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-dark-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "dark",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-dark-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "dark",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-dark-1440.png"
+      },
+      {
+        "width": 390,
+        "theme": "light",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-light-390.png"
+      },
+      {
+        "width": 768,
+        "theme": "light",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-light-768.png"
+      },
+      {
+        "width": 1440,
+        "theme": "light",
+        "surface": "public country report",
+        "path": ".fleet/evidence/analytics-country-public/report-light-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "mise exec node@24.20.0 -- pnpm run check",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 34,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 18,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0,
+      "p2": 3
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    },
+    "notes": "Preserve lane using existing shadcn ranking components and semantic theme tokens. Root inspected owner desktop dark/mobile light and public desktop dark; independent Luna reviewed owner/public desktop dark and mobile light. Local collector screenshots at 390/768/1440 in both themes assert no horizontal overflow; metadata fixtures verify actual country names and trusted edge provenance. Local countries are correctly Unknown. Reviewer flagged production-named local environment and metric terminology: root classified these as P2 clarity followups because Local preview/title/footer and browser-session/observed-duration definitions explicitly delimit evidence; environment is user-selected metadata, not deployment proof. Other P2: long dashboard density. Full pnpm run check passed including 107 browser tests; final backend country fallback and malformed optional metric refinements passed 15 focused SQL tests, Worker typecheck, ESLint and complexity. No new dependency, migration, commit or deployment. OpenPanel parity remains incomplete in issue60."
+  },
+  "ownerFeedback": {
+    "decision": "agent-selected",
+    "note": "Owner requested richer analytics on both public and signed-in reports, stable loading, hidden share credential in report UI and maximum efficiency. Preserve standard shadcn."
+  }
+}

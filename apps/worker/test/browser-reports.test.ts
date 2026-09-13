@@ -38,7 +38,7 @@ describe('browser reports', () => {
       { name: '/', count: 1 },
       { name: '/pricing', count: 1 },
     ]);
-    expect(report.sources).toEqual([{ name: 'google.com', count: 2 }]);
+    expect(report.sources).toEqual([{ name: 'Google', count: 2 }]);
     expect(report.events[0]).toEqual({ name: 'signup.completed', count: 2, last_seen: now - 4000 });
     expect(report.sessions).toBe(1);
     expect(
@@ -56,15 +56,13 @@ describe('browser reports', () => {
       now,
     );
     expect(report.pages).toEqual([{ name: '/pricing', count: 2 }]);
-    expect(report.sources).toEqual([{ name: 'google.com', count: 2 }]);
+    expect(report.sources).toEqual([{ name: 'Google', count: 2 }]);
     expect(report.series.reduce((n, r) => n + r.pageviews, 0)).toBe(0);
     expect(report.events).toHaveLength(1);
     const direct = { ...batch, events: [{ ...batch.events[0], referrer: '' }] };
-    expect(localBrowserReport([direct], { range: '24h' }, now).sources[0].name).toBe(
-      'Direct / unknown',
-    );
+    expect(localBrowserReport([direct], { range: '24h' }, now).sources[0].name).toBe('Unknown');
   });
-  it('queries four bounded aggregates with workspace and validated filters in every query', async () => {
+  it('queries bounded aggregates with workspace and validated filters in every query', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
     const fetchImpl = vi
@@ -103,6 +101,9 @@ describe('browser reports', () => {
       )
       .mockResolvedValueOnce(Response.json({ data: [{ name: '/', count: 4, sample_interval: 2 }] }))
       .mockResolvedValueOnce(
+        Response.json({ data: [{ name: 'IN', count: 4, sample_interval: 2 }] }),
+      )
+      .mockResolvedValueOnce(
         Response.json({
           data: [{ pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 }],
         }),
@@ -115,14 +116,14 @@ describe('browser reports', () => {
     );
     expect(report.sampled).toBe(true);
     expect(report.series[23].events).toBe(4);
-    expect(report.sources[0].name).toBe('Direct / unknown');
+    expect(report.sources[0].name).toBe('Unknown');
     for (const [, init] of fetchImpl.mock.calls) {
       expect(init?.body).toContain("index1 = 'w-one'");
       expect(init?.body).toContain("blob1 = 'a-one'");
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
     expect(report.sessions).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(8);
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();
@@ -177,4 +178,44 @@ describe('browser reports', () => {
       ),
     ).rejects.toThrow('bucket');
   });
+});
+
+it.each([
+  {
+    pageviews: 1,
+    pageview_sessions: 2,
+    bounced_sessions: 0,
+    average_session_duration_ms: 10,
+    sample_interval: 1,
+  },
+  {
+    pageviews: 2,
+    pageview_sessions: 1,
+    bounced_sessions: 2,
+    average_session_duration_ms: 10,
+    sample_interval: 1,
+  },
+  {
+    pageviews: 2,
+    pageview_sessions: 1,
+    bounced_sessions: 0,
+    average_session_duration_ms: 10,
+    sample_interval: 'broken',
+  },
+])('isolates malformed optional session aggregates from core analytics', async (row) => {
+  const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
+    Response.json({ data: String(init?.body).includes('pageview_sessions') ? [row] : [] }),
+  );
+  const report = await queryBrowserReport(
+    'workspace',
+    { range: '24h' },
+    {
+      accountId: 'a'.repeat(32),
+      token: 'fixture',
+      fetchImpl,
+    },
+  );
+  expect(report.engagement).toBeUndefined();
+  expect(report.series).toHaveLength(24);
+  expect(report.sources).toEqual([]);
 });

@@ -10,8 +10,8 @@ The public page shows the project and environment names, active browser and
 opt-in native foreground sessions seen within 45 seconds, and web pageview totals
 and hourly trends for the past 24 hours.
 Existing links remain limited to those totals. Owners can enable **Share top
-routes and sources** for a new or existing link. This adds 24-hour browser
-sessions, product-event totals, and the top 20 routes and referrer hosts with
+routes, sources and countries** for a new or existing link. This adds 24-hour browser
+sessions, product-event totals, and the top 20 routes, normalized sources, and countries with
 counts and percentage of all page views. Disabling it removes those breakdowns
 on the next read without rotating the link. Event names, session IDs, logs,
 ingestion keys, and other projects' metrics are never included. Sessions are not unique people. Unavailable data
@@ -88,8 +88,8 @@ back off to at most once per minute after transient errors. Each request has a
 ten-second timeout. Production reads use two indexed D1 queries for the token
 and current project scope. Scope-specific internal caches reuse live counts for
 ten seconds and the single hourly traffic aggregate query for sixty seconds.
-Opted-in reports use four parallel aggregate queries (trend, routes, sources,
-sessions), cached for sixty seconds. They never query named-event rankings.
+Opted-in reports use five parallel aggregate queries (trend, routes, sources,
+sessions, countries), cached for sixty seconds. They never query named-event rankings.
 Concurrent misses share one in-flight load per cache instance and project scope;
 the in-flight map is capped at 128 entries and releases failed loads. Presence
 and historical report reads run in parallel. Revocation is checked before using
@@ -127,3 +127,5 @@ App Health release, and a deployed `/live` deep-link and embedding canary. Exist
 links default to limited totals. Enable breakdowns on Highsignal's existing link
 after release; the iframe token does not need to change.
 Local shares are in-memory and disappear when the local server restarts.
+
+Country rankings use the existing server-derived country code, displayed as a country name. They do not expose IP addresses, cities, or precise location. VPNs and proxies can change the reported connection country. This country extension is local and unreleased.

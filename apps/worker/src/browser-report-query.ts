@@ -1,6 +1,10 @@
-import { browserReportPlan } from './browser-report-plan.js';
+import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
 import { browserQuery } from './browser-query.js';
-import { type BrowserReport, BrowserReportFilter } from '@app-health/contracts';
+import {
+  type BrowserReport,
+  BrowserReportFilter,
+  type BrowserEngagement,
+} from '@app-health/contracts';
 import { reportWindow } from './browser-report-window.js';
 type QueryOptions = { accountId: string; token: string; fetchImpl?: typeof fetch };
 
@@ -19,6 +23,9 @@ interface QueryRow {
   new_sessions?: number | string;
   returning_sessions?: number | string;
   unidentified_sessions?: number | string;
+  bounced_sessions?: number | string;
+  pageview_sessions?: number | string;
+  average_session_duration_ms?: number | string;
   sample_interval: number | string;
 }
 const number = (value: unknown): number => {
@@ -55,6 +62,9 @@ export async function queryBrowserReport(
     dimensionRows,
     previousRows,
     dimensionBlobs,
+    engagementRows,
+    exitRows,
+    engagementAvailable,
   } = await loadReport(workspace, filter, from, to, step, options);
   const series = Array.from({ length: 24 }, (_, i) => ({
     timestamp: from + i * step,
@@ -70,33 +80,88 @@ export async function queryBrowserReport(
     series[bucket].pageviews = number(row.pageviews);
     series[bucket].events = number(row.events);
   }
+  const coreSampled = [
+    ...trend,
+    ...pages,
+    ...sources,
+    ...events,
+    ...audienceRows,
+    ...dimensionRows.flat(),
+    ...previousRows,
+  ].some((row) => sampleInterval(row.sample_interval) > 1);
+  const optionalSampled = [...engagementRows, ...exitRows].some((row) => {
+    try {
+      return sampleInterval(row.sample_interval) > 1;
+    } catch {
+      return false;
+    }
+  });
+  const sampled = coreSampled || optionalSampled;
+  const engagement: BrowserEngagement | undefined =
+    filter.event || hasSegmentFilter(filter)
+      ? undefined
+      : !engagementAvailable
+        ? undefined
+        : sampled
+          ? {
+              pages_per_session: null,
+              bounce_rate: null,
+              average_session_duration_ms: null,
+              exit_pages: [],
+            }
+          : safeEngagementResult(engagementRows, exitRows);
   return {
     from,
     to,
     source: 'analytics-engine',
-    sampled: [
-      ...trend,
-      ...pages,
-      ...sources,
-      ...events,
-      ...audienceRows,
-      ...dimensionRows.flat(),
-      ...previousRows,
-    ].some((row) => sampleInterval(row.sample_interval) > 1),
+    sampled,
     series,
     pages: ranked(pages),
     sources: ranked(sources),
     events: ranked(events).map((row, i) => ({ ...row, last_seen: number(events[i].last_seen) })),
     sessions: aggregateValue(audienceRows, 'sessions'),
     audience: audienceResult(audienceRows, dimensionBlobs, dimensionRows),
+    engagement,
     previous: previousResult(previousRows),
   };
+}
+
+function engagementResult(rows: QueryRow[], exits: QueryRow[]): BrowserEngagement {
+  const row = aggregateRow(rows);
+  if (
+    rows.length === 1 &&
+    !['pageviews', 'pageview_sessions', 'bounced_sessions'].every((key) => key in row)
+  )
+    throw new Error('invalid engagement response');
+  const pageviews = number(row.pageviews ?? 0);
+  const sessions = number(row.pageview_sessions ?? 0);
+  const bounced = number(row.bounced_sessions ?? 0);
+  if (bounced > sessions || sessions > pageviews) throw new Error('invalid engagement denominator');
+  for (const item of [...rows, ...exits]) sampleInterval(item.sample_interval);
+  const average = sessions ? number(row.average_session_duration_ms) : null;
+  return {
+    pages_per_session: sessions ? pageviews / sessions : null,
+    bounce_rate: sessions ? bounced / sessions : null,
+    average_session_duration_ms: average,
+    exit_pages: ranked(exits),
+  };
+}
+function safeEngagementResult(rows: QueryRow[], exits: QueryRow[]): BrowserEngagement | undefined {
+  try {
+    return engagementResult(rows, exits);
+  } catch {
+    return undefined;
+  }
+}
+function aggregateRow(rows: QueryRow[]) {
+  if (rows.length > 1) throw new Error('invalid aggregate response');
+  return rows[0] ?? {};
 }
 
 const ranked = (rows: QueryRow[]) =>
   rows.map((row) => {
     if (typeof row.name !== 'string') throw new Error('invalid analytical name');
-    return { name: row.name || 'Direct / unknown', count: number(row.count) };
+    return { name: row.name || 'Unknown', count: number(row.count) };
   });
 
 function aggregateValue(rows: QueryRow[], key: keyof QueryRow) {
@@ -144,8 +209,17 @@ async function loadReport(
   options: QueryOptions,
 ) {
   const plan = browserReportPlan(workspace, filter, from, to, step);
-  const results = await Promise.all(plan.sql.map((sql) => query(sql, options)));
+  const optionalStart =
+    filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
+  const results = await Promise.all(
+    plan.sql.slice(0, optionalStart).map((sql) => query(sql, options)),
+  );
+  const optional = await Promise.allSettled(
+    plan.sql.slice(optionalStart).map((sql) => query(sql, options)),
+  );
   const [trend, pages, sources, events, audienceRows, ...rest] = results;
+  const engagementRows = optional[0]?.status === 'fulfilled' ? optional[0].value : [];
+  const exitRows = optional[1]?.status === 'fulfilled' ? optional[1].value : [];
   const previousRows = rest.pop() ?? [];
   return {
     trend,
@@ -155,6 +229,9 @@ async function loadReport(
     audienceRows,
     dimensionRows: rest,
     previousRows,
+    engagementRows,
+    exitRows,
+    engagementAvailable: optional.every((result) => result.status === 'fulfilled'),
     dimensionBlobs: plan.dimensionBlobs,
   };
 }

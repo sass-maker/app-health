@@ -1,5 +1,6 @@
 import type { SharedAnalytics } from '@app-health/contracts/sharing';
 import { AnalyticsChart } from './AnalyticsChart.js';
+import { countryName } from './country-name.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
@@ -128,13 +129,23 @@ export function PublicAnalyticsReport({
             rows={details.sources}
             total={data.traffic?.pageviews}
           />
+          {details.countries ? (
+            <AnalyticsRanking
+              title="Countries"
+              label="Page views"
+              rows={details.countries.map((row) => ({ ...row, name: countryName(row.name) }))}
+              total={data.traffic?.pageviews}
+            />
+          ) : null}
         </section>
       ) : null}
       <p className="text-xs leading-relaxed text-muted-foreground">
         {data.source === 'local' ? 'Local development data' : 'Traffic totals may arrive later'}
         {data.sampled ? ' · Sampled estimates' : ''} · Updated{' '}
         {new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        {details ? ' · Sessions are browser visits, not unique people.' : ''}
+        {details
+          ? ' · Sessions are browser visits, not unique people. Country reflects connection location.'
+          : ''}
       </p>
     </div>
   );

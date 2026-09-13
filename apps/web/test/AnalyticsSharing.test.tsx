@@ -72,7 +72,9 @@ it('requires an explicit opt-in for breakdowns and updates an active share', asy
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Create public link' })).toBeEnabled(),
   );
-  const createChoice = screen.getByRole('checkbox', { name: /Share top routes and sources/i });
+  const createChoice = screen.getByRole('checkbox', {
+    name: /Share top routes, sources and countries/i,
+  });
   fireEvent.click(createChoice);
   fireEvent.click(screen.getByRole('button', { name: 'Create public link' }));
   await screen.findByLabelText('Public page');

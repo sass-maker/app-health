@@ -1,3 +1,5 @@
+import type { BrowserSegmentFilter } from '@app-health/contracts';
+import { AnalyticsSegments } from './AnalyticsSegments.js';
 import { useState } from 'react';
 import { Activity, ArrowRight, RefreshCw, X } from 'lucide-react';
 import { AnalyticsReport, type AnalyticsReportProps } from './AnalyticsReport.js';
@@ -235,12 +237,65 @@ function reportSourceNote(report: ReturnType<typeof useBrowserReport>['report'])
   return report?.sampled ? 'Sampled analytics estimates' : 'Event totals may arrive later';
 }
 
-export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
-  const { projects, project, ownerToken, onSelect, mode = 'web', onInstall } = props;
-  const [range, setRange] = useState('24h');
+function reportTotals(report: ReturnType<typeof useBrowserReport>['report']) {
+  return (report?.series ?? []).reduce(
+    (total, row) => ({
+      pageviews: total.pageviews + row.pageviews,
+      events: total.events + row.events,
+    }),
+    { pageviews: 0, events: 0 },
+  );
+}
+
+function useReportSelection(project: Project, projects: Project[]) {
+  const [segments, setSegments] = useState<BrowserSegmentFilter>({});
   const [appId, setAppId] = useState(project.appId);
   const [environmentId, setEnvironmentId] = useState(project.environmentId);
   const [selected, setSelected] = useState('');
+  const onEnvironment = (value: string) => {
+    setEnvironmentId(value);
+    setSelected('');
+    setSegments({});
+  };
+  const onApp = (value: string) => {
+    setAppId(value);
+    onEnvironment(
+      value === 'all' ? '' : (projects.find((row) => row.appId === value)?.environmentId ?? ''),
+    );
+  };
+  const removeSegment = (key: keyof BrowserSegmentFilter) =>
+    setSegments((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  return {
+    segments,
+    setSegments,
+    appId,
+    environmentId,
+    selected,
+    setSelected,
+    onEnvironment,
+    onApp,
+    removeSegment,
+  };
+}
+
+export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
+  const { projects, project, ownerToken, onSelect, mode = 'web', onInstall } = props;
+  const {
+    segments,
+    setSegments,
+    appId,
+    environmentId,
+    selected,
+    setSelected,
+    onEnvironment,
+    onApp,
+    removeSegment,
+  } = useReportSelection(project, projects);
+  const [range, setRange] = useState('24h');
   const [metric, setMetric] = useState<'pageviews' | 'events'>(
     mode === 'events' ? 'events' : 'pageviews',
   );
@@ -252,16 +307,10 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     appId === 'all' ? '' : appId,
     appId === 'all' ? '' : environmentId,
     selected,
-    breakdown,
+    { breakdown, segments },
   );
   const report = detail.report;
-  const totals = report?.series.reduce(
-    (all, row) => ({
-      pageviews: all.pageviews + row.pageviews,
-      events: all.events + row.events,
-    }),
-    { pageviews: 0, events: 0 },
-  );
+  const totalsValue = reportTotals(report);
   const active = activeSessionCount(workspace, appId, environmentId);
   const apps = projects.filter(
     (project, index) => projects.findIndex((row) => row.appId === project.appId) === index,
@@ -272,7 +321,6 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     setSelected(event);
     setMetric('events');
   };
-  const totalsValue = totals ?? { pageviews: 0, events: 0 };
   return (
     <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
@@ -282,19 +330,8 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         environmentId={environmentId}
         range={range}
         selected={selected}
-        onApp={(value) => {
-          setAppId(value);
-          setEnvironmentId(
-            value === 'all'
-              ? ''
-              : (projects.find((candidate) => candidate.appId === value)?.environmentId ?? ''),
-          );
-          setSelected('');
-        }}
-        onEnvironment={(value) => {
-          setEnvironmentId(value);
-          setSelected('');
-        }}
+        onApp={onApp}
+        onEnvironment={onEnvironment}
         onRange={setRange}
         onClearEvent={() => {
           setSelected('');
@@ -303,6 +340,15 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         onInstall={onInstall}
       />
 
+      <AnalyticsSegments
+        filters={segments}
+        onClear={() => {
+          setSegments({});
+          setSelected('');
+          setMetric(mode === 'events' ? 'events' : 'pageviews');
+        }}
+        onRemove={removeSegment}
+      />
       <AnalyticsResults
         workspace={workspace}
         detail={detail}
@@ -317,6 +363,8 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         onEvent={selectEvent}
         breakdown={breakdown}
         onBreakdown={setBreakdown}
+        segmented={Object.keys(segments).length > 0}
+        onFilter={(key, value) => setSegments((current) => ({ ...current, [key]: value }))}
       />
       <ProjectRows projects={projects} summary={workspace.data} onSelect={onSelect} />
       <AnalyticsFooter sourceNote={sourceNote} workspace={workspace} />

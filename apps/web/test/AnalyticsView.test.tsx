@@ -167,3 +167,65 @@ it('validates live frames and closes the workspace socket on unmount', async () 
   view.unmount();
   expect(Socket.latest.close).toHaveBeenCalledOnce();
 });
+
+it('stacks clicked page and source filters, preserves them across periods, and clears them independently', async () => {
+  const mock = install();
+  render(
+    <AnalyticsView project={project} projects={[project]} ownerToken="" onSelect={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole('button', { name: 'Filter Top pages by /pricing' }));
+  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('path=%2Fpricing'));
+  fireEvent.click(
+    await screen.findByRole('button', { name: 'Filter Referral sources by google.com' }),
+  );
+  await waitFor(() => {
+    const url = new URL(mock.mock.calls.at(-1)![0], 'https://local.test');
+    expect(url.searchParams.get('path')).toBe('/pricing');
+    expect(url.searchParams.get('source')).toBe('google.com');
+  });
+  expect(screen.getByText('All project sessions · not filtered')).toBeVisible();
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
+    key: 'ArrowDown',
+  });
+  fireEvent.click(await screen.findByRole('option', { name: 'Last 7 days' }));
+  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('range=7d'));
+  expect(mock.mock.calls.at(-1)?.[0]).toContain('path=%2Fpricing');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Page: /pricing filter' }));
+  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).not.toContain('path='));
+  expect(mock.mock.calls.at(-1)?.[0]).toContain('source=google.com');
+  fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
+  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('event=signup.completed'));
+  fireEvent.click(screen.getByRole('button', { name: 'Clear all filters' }));
+  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).not.toContain('source='));
+  expect(screen.queryByRole('button', { name: /Remove Source/ })).toBeNull();
+  expect(mock.mock.calls.at(-1)?.[0]).not.toContain('event=');
+});
+
+it('uses the matching prior-period counts in the main KPI cards', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) =>
+      Response.json(
+        url.includes('/report')
+          ? {
+              ...report,
+              previous: { pageviews: 6, events: 6, sessions: 2, visitors: 0 },
+            }
+          : summary,
+      ),
+    ),
+  );
+  render(
+    <AnalyticsView project={project} projects={[project]} ownerToken="" onSelect={() => {}} />,
+  );
+  expect(await screen.findByLabelText('Page views comparison')).toHaveTextContent(
+    '+100% vs previous period',
+  );
+  expect(screen.getByLabelText('Product events comparison')).toHaveTextContent(
+    '-50% vs previous period',
+  );
+  expect(screen.getByLabelText('Sessions comparison')).toHaveTextContent(
+    'No change vs previous period',
+  );
+  expect(screen.queryByLabelText('Active now comparison')).toBeNull();
+});

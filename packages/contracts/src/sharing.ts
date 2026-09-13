@@ -13,6 +13,7 @@ export interface SharedAnalytics {
     events: number;
     pages: { name: string; count: number }[];
     sources: { name: string; count: number }[];
+    countries?: { name: string; count: number }[];
   };
   source: 'local' | 'analytics-engine';
   sampled: boolean;
@@ -47,7 +48,22 @@ function isBreakdowns(value: unknown): value is SharedAnalytics['breakdowns'] {
     value.pages.every(rows) &&
     Array.isArray(value.sources) &&
     value.sources.length <= 20 &&
-    value.sources.every(rows)
+    value.sources.every(rows) &&
+    (value.countries === undefined || isCountries(value.countries))
+  );
+}
+
+function isCountries(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length <= 20 &&
+    value.every(
+      (row) =>
+        isRecord(row) &&
+        typeof row.name === 'string' &&
+        /^(?:[A-Z]{2}|Unknown)$/.test(row.name) &&
+        isNumber(row.count),
+    )
   );
 }
 
@@ -57,6 +73,9 @@ function projectBreakdowns(value: NonNullable<SharedAnalytics['breakdowns']>) {
     events: value.events,
     pages: value.pages.map(({ name, count }) => ({ name, count })),
     sources: value.sources.map(({ name, count }) => ({ name, count })),
+    ...(value.countries
+      ? { countries: value.countries.map(({ name, count }) => ({ name, count })) }
+      : {}),
   };
 }
 

@@ -1,14 +1,18 @@
-import type { BrowserReport } from '@app-health/contracts';
+import { AnalyticsComparison } from './AnalyticsComparison.js';
+import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
+import { countryName } from './country-name.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
 
 export function AnalyticsAudience({
   report,
   breakdown,
   metric = 'pageviews',
+  onFilter,
 }: {
   report: BrowserReport;
   breakdown: 'audience' | 'acquisition' | 'technology';
   metric?: 'pageviews' | 'events';
+  onFilter?: (key: keyof BrowserSegmentFilter, value: string) => void;
 }): JSX.Element {
   const audience = report.audience;
   if (!audience)
@@ -19,23 +23,7 @@ export function AnalyticsAudience({
     );
   const total = report.series.reduce((sum, row) => sum + row[metric], 0);
   const previous = report.previous?.visitors;
-  const change = previous === undefined ? null : audience.visitors - previous;
-  const groups =
-    breakdown === 'audience'
-      ? [
-          ['Channels', audience.channels],
-          ['Entry pages', audience.entry_pages],
-        ]
-      : breakdown === 'acquisition'
-        ? [
-            ['Campaigns', audience.campaigns],
-            ['Channels', audience.channels],
-          ]
-        : [
-            ['Devices', audience.devices],
-            ['Browsers', audience.browsers],
-            ['Countries', audience.countries],
-          ];
+  const groups = audienceGroups(audience, breakdown);
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -53,12 +41,14 @@ export function AnalyticsAudience({
             <p className="mt-1 text-xs text-muted-foreground">
               {report.sampled ? 'Sampled lower bound' : 'Browser-scoped'}
             </p>
-            {label === 'Visitors' && change !== null ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {change === 0
-                  ? 'No change'
-                  : `${change > 0 ? '+' : ''}${change.toLocaleString()} vs previous`}
-              </p>
+            {label === 'Visitors' ? (
+              <AnalyticsComparison
+                current={audience.visitors}
+                previous={previous}
+                label="Visitors"
+                sampled={report.sampled}
+                unique={true}
+              />
             ) : null}
           </div>
         ))}
@@ -69,15 +59,75 @@ export function AnalyticsAudience({
             key={String(title)}
             title={String(title)}
             label={metric === 'events' ? 'Occurrences' : 'Page views'}
-            rows={rows as { name: string; count: number }[]}
+            rows={rows as { name: string; count: number; value?: string }[]}
             total={total}
+            onSelect={
+              onFilter ? (value) => onFilter(dimensionKeys[String(title)], value) : undefined
+            }
           />
         ))}
       </div>
+      {breakdown === 'acquisition' ? (
+        <p className="text-xs leading-5 text-muted-foreground">
+          Campaign details come from UTM tags; referral sources work without them. Percentages
+          include untagged traffic in the total.
+        </p>
+      ) : null}
       <p className="text-xs leading-5 text-muted-foreground">
         Visitors are browser-scoped. Legacy sessions without identity appear as unknown; sampled
-        unique counts are lower bounds.
+        unique counts are lower bounds. Countries describe connection location and may reflect a
+        VPN.
       </p>
     </div>
   );
+}
+
+const dimensionKeys: Record<string, keyof BrowserSegmentFilter> = {
+  Channels: 'channel',
+  'Entry pages': 'entry_path',
+  Countries: 'country',
+  Campaigns: 'campaign',
+  Mediums: 'medium',
+  'Campaign content': 'content',
+  'Campaign terms': 'term',
+  Devices: 'device',
+  Browsers: 'browser',
+};
+
+function audienceGroups(audience: NonNullable<BrowserReport['audience']>, breakdown: string) {
+  const groups =
+    breakdown === 'audience'
+      ? [
+          ['Channels', audience.channels],
+          ['Entry pages', audience.entry_pages],
+          [
+            'Countries',
+            audience.countries.map((row) => ({
+              ...row,
+              value: row.name,
+              name: countryName(row.name),
+            })),
+          ],
+        ]
+      : breakdown === 'acquisition'
+        ? [
+            ['Campaigns', audience.campaigns],
+            ['Channels', audience.channels],
+            ['Mediums', audience.mediums ?? []],
+            ['Campaign content', audience.contents ?? []],
+            ['Campaign terms', audience.terms ?? []],
+          ]
+        : [
+            ['Devices', audience.devices],
+            ['Browsers', audience.browsers],
+            [
+              'Countries',
+              audience.countries.map((row) => ({
+                ...row,
+                value: row.name,
+                name: countryName(row.name),
+              })),
+            ],
+          ];
+  return groups;
 }

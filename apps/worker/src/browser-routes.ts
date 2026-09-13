@@ -340,6 +340,7 @@ export async function sharedBrowserMetrics(
               events: report.series.reduce((sum, row) => sum + row.events, 0),
               pages: report.pages,
               sources: report.sources,
+              countries: report.audience?.countries ?? [],
             },
           }
         : {}),

@@ -163,3 +163,83 @@ use actual local collector events from two projects, not fixture metric counts.
 
 Remaining product work in #58 includes richer filtering, a dedicated bot report, funnels,
 revenue/payment attribution, exports/replay, alerting, and full DataFast parity.
+
+## Source, country, and session reporting
+
+Reports group common referral domains (including Reddit and X link shorteners)
+before applying the top-20 limit. The browser captures the external referrer
+without requiring UTMs and retains it across internal navigation in the session.
+Explicit UTM attribution still takes precedence. Missing referral evidence is
+reported as Unknown; apps that strip referrers cannot be reliably reconstructed.
+Arbitrary campaign source labels are preserved apart from case normalization.
+
+Countries appear in the default audience view and optionally in public reports.
+They come from Cloudflare request metadata already projected at ingestion, never
+from client-submitted location or an extra geolocation service. Only coarse country
+codes are stored; this adds no raw-IP storage or per-event lookup. A VPN's exit
+country can differ from the visitor's physical location.
+
+Owner reports additionally show pages per session, single-page bounce rate,
+observed visit duration, and exit pages. Only sessions with a pageview contribute.
+Duration is the span between first and last recorded events within the selected
+window; a single-event visit has zero observed duration. This is not reading time,
+and ongoing visits and window boundaries limit the observation. Exit pages use the
+last observed pageview; simultaneous pageviews may tie. Sessions are scoped to
+project and environment. Sampled results suppress engagement figures rather than
+claiming exact per-session behavior. Event-specific reports omit these metrics.
+
+The default audience adds one bounded country aggregate; engagement adds two
+aggregate queries over grouped sessions, without transferring raw events to the
+Worker. Failed engagement queries leave the core report available. Existing
+retention, batching, and report cache behavior remain in place. These reporting
+extensions are local and unreleased.
+
+## Explore a segment
+
+On the signed-in dashboard, click a country, source, page, entry page, device,
+browser, channel, or campaign value to narrow the report. Different dimensions
+combine with AND; clicking another value for the same dimension replaces it.
+Remove a chip to broaden the selection or use Clear all filters. Period and
+breakdown changes preserve the selection; changing project or environment clears it.
+Country chips show readable names while requests use the original country codes.
+
+The owner report endpoint accepts these optional exact-match query parameters:
+`country`, `source`, `path`, `entry_path`, `device`, `browser`, `channel`, `campaign`.
+For example, `country=IN&source=Reddit&device=Mobile` selects matching events.
+The same predicates apply to previous-period comparison, trends, totals, and
+rankings. Known sources use the same canonical grouping as the source table.
+`source=Unknown` selects missing attribution; lowercase `source=unknown` selects
+a campaign literally labelled unknown. Unknown connection/device metadata is
+coalesced consistently between local and provider reports.
+
+These are event filters, not whole-session membership queries. Presence remains
+project-wide and is explicitly labelled. Session engagement is omitted while any
+segment filter is active, because filtering out pages would distort bounce rates,
+visit duration, and exits. Empty segments offer filter recovery, not installation
+instructions. Pending responses from an old selection cannot replace the new report.
+
+Filters reuse existing projected columns, query calls and the scoped bounded
+report cache. No ingestion, raw storage, dependency or retention changes are needed.
+Public shares remain aggregate-only and do not accept these owner filters. This
+filtering extension is local and unreleased.
+
+## Campaign details and comparisons
+
+Acquisition includes campaign names, channels, medium (`utm_medium`), content
+(`utm_content`) and terms (`utm_term`). Source rankings still work from referrers
+without UTMs. Only nonempty campaign values appear in these tables; untagged
+traffic remains included in overall totals. Click a value to filter, or use the
+owner query parameters `medium`, `content`, and `term`. These combine with the
+other exact-match filters and apply to the previous period too.
+
+This reads existing `blob11`, `blob18`, and `blob19` projections. It adds three
+bounded ranking queries only to the Acquisition tab; other breakdowns and public
+sharing do not query them. There is no new ingestion or storage cost.
+
+Main pageview, product-event, session and visitor cards compare against the
+immediately preceding equal-length period with the same filters. A zero baseline
+shows no previous activity instead of infinite growth; two zeros show no change.
+Weighted sampled event comparisons are labelled estimated. Comparisons of sampled
+unique counts are withheld because independent samples do not establish changes
+in actual sessions or visitors. Live presence has no historical comparison.
+These reporting extensions remain local and unreleased.

@@ -2,7 +2,7 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Owner audience, acquisition and technology reports; stable public analytics",
+  "target": "Acquisition details and previous-period KPI comparisons",
   "surfaceMode": "read",
   "mode": "preserve",
   "register": "product",
@@ -15,7 +15,7 @@
     "probes": [],
     "selected": "existing-shadcn-public-analytics",
     "approval": "agent-selected",
-    "before": ".fleet/evidence/analytics-report/before.png",
+    "before": ".fleet/evidence/analytics-segments/segments-dark-1440.png",
     "library": {
       "strategy": "upstream-first",
       "primary": "shadcn/ui new-york-v4",
@@ -58,74 +58,38 @@
       {
         "width": 390,
         "theme": "dark",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-dark-390.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-dark-768.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-dark-1440.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-dark-1440.png"
       },
       {
         "width": 390,
         "theme": "light",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-light-390.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-390.png"
       },
       {
         "width": 768,
         "theme": "light",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-light-768.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-768.png"
       },
       {
         "width": 1440,
         "theme": "light",
-        "surface": "public analytics report",
-        "path": ".fleet/evidence/analytics-report/report-light-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "dark",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-dark-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "dark",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-dark-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "dark",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-dark-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "light",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-light-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "light",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-light-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "light",
-        "surface": "owner audience report",
-        "path": ".fleet/evidence/analytics-audience/audience-light-1440.png"
+        "surface": "acquisition filters and KPI comparisons",
+        "path": ".fleet/evidence/analytics-acquisition/acquisition-light-1440.png"
       }
     ],
     "projectCheck": {
@@ -133,11 +97,11 @@
       "status": "pass"
     },
     "critique": {
-      "score": 34,
+      "score": 35,
       "maximum": 40
     },
     "audit": {
-      "score": 17,
+      "score": 18,
       "maximum": 20
     },
     "unresolved": {
@@ -171,7 +135,7 @@
       },
       "mismatches": []
     },
-    "notes": "Preserve lane, native shadcn components. Root reviewed final desktop dark and mobile light evidence, corrected duplicate controls, wrong theme capture, mobile KPI density, ranking denominators, and period labels. Critique 34/40 and audit 17/20; zero P0/P1. P2: long-page density and limited comparison visualization. Real local ingestion supplies visitor and campaign report screenshots; all six theme/width captures assert no horizontal overflow. Full pnpm run check passes, including 107 browser cases, workerd/D1 canaries, scoped SQL execution, retry and storage-failure tests, coverage, lint/typecheck, complexity and duplication gates. No new runtime dependency. Identity/report/outbox changes are uncommitted and undeployed; public breakdown migration 0012 remains unapplied. Dedicated server bot report remains tracked in issue58."
+    "notes": "Preserve lane, existing shadcn cards/rankings/chips. Root reviewed desktop dark/mobile light; independent Luna reviewed current acquisition UI and comparison behavior. All six width/theme screenshots from real local ingestion, matching three campaign filters and no overflow. Campaign terms explicitly labelled as UTM values; untagged traffic stays in denominators. Zero baselines never show infinity; sampled unique count comparisons withheld. Full pnpm run check passes, including108 browser cases, workerd/D1/SDK canaries and code-health gates; final label tests12/12. Reviewer suggested extra explanations around product-event empty states and project-wide live counts: root triaged as P2 because headings already explicitly say tracked product events and unfiltered. Other P2 long-report density. No unresolved correctness or visual P0/P1. Local changes, no commit/deploy or production proof. No new ingestion/storage/dependency; Acquisition alone adds three bounded cached dimension queries."
   },
   "ownerFeedback": {
     "decision": "agent-selected",

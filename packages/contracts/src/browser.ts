@@ -125,6 +125,24 @@ export const BrowserReportFilter = z
       .string()
       .regex(/^[a-zA-Z0-9-]{1,100}$/)
       .optional(),
+    medium: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .optional(),
+    content: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .optional(),
+    term: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .optional(),
     environment_id: z
       .string()
       .regex(/^[a-zA-Z0-9-]{1,100}$/)
@@ -133,12 +151,68 @@ export const BrowserReportFilter = z
       .string()
       .regex(/^[a-z][a-z0-9_.:-]{0,63}$/)
       .optional(),
+    country: z.union([z.literal('Unknown'), z.string().regex(/^[A-Z]{2}$/)]).optional(),
+    source: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .optional(),
+    path: z
+      .string()
+      .startsWith('/')
+      .max(256)
+      .regex(/^[^?#@\\\s]*$/)
+      .optional(),
+    entry_path: z
+      .string()
+      .startsWith('/')
+      .max(256)
+      .regex(/^[^?#@\\\s]*$/)
+      .optional(),
+    device: z.enum(['Desktop', 'Mobile', 'Tablet', 'Unknown']).optional(),
+    browser: z.enum(['Chrome', 'Safari', 'Firefox', 'Edge', 'Opera', 'Unknown']).optional(),
+    channel: z
+      .enum(['Paid', 'Email', 'Social', 'Organic search', 'Referral', 'Unknown'])
+      .optional(),
+    campaign: z
+      .string()
+      .min(1)
+      .max(100)
+      .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
+      .optional(),
   })
   .strict();
 export type BrowserReportFilter = z.infer<typeof BrowserReportFilter>;
+export type BrowserSegmentFilter = Pick<
+  BrowserReportFilter,
+  | 'country'
+  | 'source'
+  | 'path'
+  | 'entry_path'
+  | 'device'
+  | 'browser'
+  | 'channel'
+  | 'campaign'
+  | 'medium'
+  | 'content'
+  | 'term'
+>;
 const dimensionRows = z
   .array(z.object({ name: z.string().max(256), count: z.number().finite().nonnegative() }).strict())
   .max(20);
+const engagementExitPages = z
+  .array(z.object({ name: z.string(), count: z.number().finite().nonnegative() }).strict())
+  .max(20);
+export const BrowserEngagement = z
+  .object({
+    pages_per_session: z.number().finite().nonnegative().nullable(),
+    bounce_rate: z.number().finite().min(0).max(1).nullable(),
+    average_session_duration_ms: z.number().finite().nonnegative().nullable(),
+    exit_pages: engagementExitPages,
+  })
+  .strict();
+export type BrowserEngagement = z.infer<typeof BrowserEngagement>;
 export const BrowserAudience = z
   .object({
     visitors: z.number().finite().nonnegative(),
@@ -151,6 +225,9 @@ export const BrowserAudience = z
     browsers: dimensionRows,
     countries: dimensionRows,
     entry_pages: dimensionRows,
+    mediums: dimensionRows.optional(),
+    contents: dimensionRows.optional(),
+    terms: dimensionRows.optional(),
   })
   .strict();
 export type BrowserAudience = z.infer<typeof BrowserAudience>;
@@ -191,6 +268,7 @@ export const BrowserReport = z
       .max(100),
     sessions: z.number().finite().nonnegative(),
     audience: BrowserAudience.optional(),
+    engagement: BrowserEngagement.optional(),
     previous: z
       .object({
         pageviews: z.number().finite().nonnegative(),

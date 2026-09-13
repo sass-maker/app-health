@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { BrowserBatchV1, BrowserEventV1, PresenceSnapshot } from '../src/browser.js';
+import {
+  BrowserBatchV1,
+  BrowserEventV1,
+  BrowserReportFilter,
+  PresenceSnapshot,
+} from '../src/browser.js';
 const event = {
   event_id: 'df6d2fa1-c91d-4c10-b65f-38c63b05c122',
   timestamp: 123,
@@ -45,5 +50,21 @@ describe('opt-in browser contract', () => {
       PresenceSnapshot.safeParse({ measured_at: 1, ttl_ms: 45000, total: -1, projects: [] })
         .success,
     ).toBe(false);
+  });
+
+  it('bounds segment filters and rejects injection shaped values', () => {
+    expect(
+      BrowserReportFilter.safeParse({
+        range: '24h',
+        path: "/a'b",
+        country: 'Unknown',
+        device: 'Mobile',
+      }).success,
+    ).toBe(true);
+    expect(BrowserReportFilter.safeParse({ range: '24h', path: '/?secret' }).success).toBe(false);
+    expect(BrowserReportFilter.safeParse({ range: '24h', country: 'india' }).success).toBe(false);
+    expect(BrowserReportFilter.safeParse({ range: '24h', browser: "Chrome' OR 1=1" }).success).toBe(
+      false,
+    );
   });
 });

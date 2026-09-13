@@ -157,3 +157,26 @@ it('preserves visitor, visit and entry attribution on an internal reload', async
   expect(second.visitor_id).toBe(first.visitor_id);
   expect(second.attribution).toEqual(first.attribution);
 });
+
+it.each([
+  'https://www.reddit.com/r/macapps/comments/private?secret=value',
+  'https://t.co/private',
+  'https://x.com/user/status/private',
+])('preserves automatic referral attribution without UTMs from %s', async (referrer) => {
+  tracker().stop();
+  globalThis.localStorage?.clear();
+  globalThis.sessionStorage?.clear();
+  history.replaceState({}, '', '/landing');
+  vi.spyOn(document, 'referrer', 'get').mockReturnValue(referrer);
+  await install();
+  await tracker().flush();
+  vi.spyOn(document, 'referrer', 'get').mockReturnValue(`${location.origin}/landing`);
+  history.pushState({}, '', '/download');
+  await tracker().flush();
+  const batches = validPayloads();
+  expect(batches[0].attribution?.source).toBe(new URL(referrer).hostname);
+  expect(batches[1].attribution?.source).toBe(batches[0].attribution?.source);
+  expect(batches[1].session_id).toBe(batches[0].session_id);
+  expect(JSON.stringify(batches)).not.toContain('secret=value');
+  expect(JSON.stringify(batches)).not.toContain('/user/status/private');
+});

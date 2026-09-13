@@ -3,7 +3,8 @@ import { Card, CardContent, CardHeader } from './components/ui/card.js';
 export function AnalyticsRanking(props: {
   title: string;
   label: string;
-  rows: { name: string; count: number }[];
+  rows: { name: string; count: number; value?: string }[];
+  onSelect?: (value: string) => void;
   total?: number;
 }): JSX.Element {
   const { title, label, rows, total } = props;
@@ -31,7 +32,18 @@ export function AnalyticsRanking(props: {
                   className="relative min-w-0 flex-1 break-all font-mono text-xs"
                   title={row.name}
                 >
-                  {row.name}
+                  {props.onSelect ? (
+                    <button
+                      type="button"
+                      className="min-h-6 w-full text-left underline-offset-4 hover:text-primary hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+                      aria-label={`Filter ${title} by ${row.name}`}
+                      onClick={() => props.onSelect?.(row.value ?? row.name)}
+                    >
+                      {row.name}
+                    </button>
+                  ) : (
+                    row.name
+                  )}
                 </span>
                 <strong className="relative text-xs font-medium tabular-nums">
                   {row.count.toLocaleString()}

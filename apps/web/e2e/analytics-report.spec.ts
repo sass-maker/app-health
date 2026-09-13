@@ -7,7 +7,10 @@ test('public breakdowns require owner opt-in and render a responsive report', as
   request,
   baseURL,
 }) => {
-  const evidence = resolve(import.meta.dirname, '../../../.fleet/evidence/analytics-report');
+  const evidence = resolve(
+    import.meta.dirname,
+    '../../../.fleet/evidence/analytics-country-public',
+  );
   await mkdir(evidence, { recursive: true });
   const created = await (
     await request.post('/v1/apps', {
@@ -58,6 +61,7 @@ test('public breakdowns require owner opt-in and render a responsive report', as
   expect(report.breakdowns.sessions).toBe(4);
   expect(report.breakdowns.events).toBe(12);
   expect(report.traffic.pageviews).toBe(36);
+  expect(report.breakdowns.countries).toEqual([{ name: 'Unknown', count: 36 }]);
   expect(JSON.stringify(report)).not.toContain('signal.opened');
 
   let release!: () => void;
@@ -80,6 +84,7 @@ test('public breakdowns require owner opt-in and render a responsive report', as
       await page.setViewportSize({ width, height: 1000 });
       await page.goto(`/live?theme=${theme}#token=${share.token}`);
       await expect(page.getByRole('heading', { name: 'Top sources' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Countries' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
