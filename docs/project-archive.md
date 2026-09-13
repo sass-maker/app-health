@@ -18,3 +18,9 @@ Archive state filters account permissions and all inventory modes. Historical wo
 Source normalization now shares one hostname/alias registry between collection and historical report SQL, including social short links, Hacker News, Product Hunt, regional Google domains and AI assistants. Unknown referrers are not guessed. Expanded labels apply to historical source rows; previously stored channel values are not rewritten.
 
 Recent reports are reused in dashboard memory for one minute (at most 12 entries), scoped by owner, project, environment, date range and filters. Sign-out unmounts the cache. Explicit refresh bypasses it. Live connections start independently of historical summary queries, and summary/presence reads run concurrently. These remove avoidable waits but do not establish a production cold-load latency benchmark.
+
+## Production verification, 2026-09-14
+
+Migration 0013 and the cleanup were applied with owner approval. Six projects are archived, and all five key/share families have zero active records for them. The 36 project records and their ownership metadata match the pre-cleanup snapshot; 30 projects remain active globally. The signed-in owner picker shows StorageDaddy, Highsignal, App Health, and Polaris.
+
+Production checking caught an overly deep attribution expression that passed SQLite tests. Splitting its branches further restored the live StorageDaddy report; the SQL regression now requires depth at most eight as well as the existing query-size bound. Real page counts, Reddit attribution, countries and live presence rendered after the correction.

@@ -53,7 +53,8 @@ describe('analytics source SQL', () => {
       if (character === '(') maximumDepth = Math.max(maximumDepth, ++depth);
       if (character === ')') depth--;
     }
-    expect(maximumDepth).toBeLessThanOrEqual(12);
+    // Production AE rejects deeper expressions even when SQLite accepts them.
+    expect(maximumDepth).toBeLessThanOrEqual(8);
     const rows = db.prepare(sql).all() as Array<{
       value: string;
       normalized: string;
