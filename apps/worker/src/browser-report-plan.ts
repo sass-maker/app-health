@@ -1,5 +1,9 @@
 import { normalizeAnalyticsSource, type BrowserReportFilter } from '@app-health/contracts';
-import { analyticsSourceFrom } from './browser-source-sql.js';
+import {
+  analyticsSourceFrom,
+  analyticsSourceSql,
+  analyticsSourceFilter,
+} from './browser-source-sql.js';
 
 const totals =
   "SUM(IF(blob3 = 'pageview', _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', _sample_interval, 0)) AS events";
@@ -71,10 +75,10 @@ function scopedSource(workspace: string, filter: BrowserReportFilter, from: numb
   if (filter.content) clauses.push(`blob18 = ${sqlLiteral(filter.content)}`);
   if (filter.term) clauses.push(`blob19 = ${sqlLiteral(filter.term)}`);
   const source = `FROM app_health_browser_v1 WHERE ${clauses.join(' AND ')}`;
-  // Project this long expression once: repeating it in SELECT and WHERE can
-  // exceed Analytics Engine's 10,000-character limit for an entire query.
+  // Share source fields and filter with only the selected category's predicate.
+  // AE permits one subquery level and limits each complete query to 10,000 bytes.
   return filter.source
-    ? `${analyticsSourceFrom(source)} WHERE normalized_source = ${sqlLiteral(canonicalSource(filter.source))}`
+    ? `${analyticsSourceFrom(source)} WHERE ${analyticsSourceFilter(canonicalSource(filter.source))}`
     : source;
 }
 function sqlLiteral(value: string) {
@@ -104,7 +108,7 @@ export function browserReportPlan(
   const sql = [
     `SELECT FLOOR((double2 - ${from}) / ${step}) AS bucket, ${totals}, ${sample} ${source} GROUP BY bucket ORDER BY bucket LIMIT 24`,
     ranking('blob4', pageSource),
-    ranking('normalized_source', filter.source ? pageSource : analyticsSourceFrom(pageSource)),
+    ranking(analyticsSourceSql(), filter.source ? pageSource : analyticsSourceFrom(pageSource)),
     `SELECT blob5 AS name, SUM(_sample_interval) AS count, MAX(double2) AS last_seen, ${sample} ${source} AND blob3 = 'event' GROUP BY name ORDER BY count DESC LIMIT 100`,
     `SELECT ${identities}, ${visits}, ${sample} ${source}`,
     ...dimensionBlobs.map(([key, blob]) => {

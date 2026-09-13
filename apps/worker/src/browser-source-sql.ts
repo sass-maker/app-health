@@ -5,10 +5,19 @@ export function analyticsSourceFrom(source: string): string {
   const dot = `position('.' IN ${raw})`;
   const prefixes = "'www.','m.','mobile.','old.','l.','out.','news.','search.'";
   const host = `IF(substring(${value},1,${dot}) IN (${prefixes}),substring(${value},${dot}+1),${value})`;
-  return `FROM (SELECT *, ${sourceClassification()} AS normalized_source FROM (SELECT *, ${value} AS source_value, ${host} AS source_host ${source}))`;
+  return `FROM (SELECT *, ${value} AS source_value, ${host} AS source_host ${source})`;
 }
 
-function sourceClassification(): string {
+export function analyticsSourceSql(): string {
+  return conditionalTree(sourceClauses());
+}
+
+export function analyticsSourceFilter(source: string): string {
+  const condition = sourceClauses().find(([, label]) => label === source)?.[0];
+  return condition ? `(${condition})` : `source_value = '${source.replaceAll("'", "''")}'`;
+}
+
+function sourceClauses(): Array<[string, string]> {
   const aliases: Record<string, string> = {
     Reddit: 'reddit, redd.it',
     X: 'x, twitter, x-twitter',
@@ -48,7 +57,7 @@ function sourceClassification(): string {
       .join(',');
     clauses.push([`source_value IN (${names}) OR source_host IN (${checks.join(',')})`, label]);
   }
-  return conditionalTree(clauses);
+  return clauses;
 }
 
 function conditionalTree(clauses: Array<[string, string]>): string {
