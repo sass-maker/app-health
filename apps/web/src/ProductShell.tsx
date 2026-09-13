@@ -12,7 +12,6 @@ import {
   Zap,
   type LucideIcon,
 } from 'lucide-react';
-import type { CapabilityId } from '@app-health/contracts';
 import {
   Sidebar,
   SidebarContent,
@@ -42,6 +41,7 @@ interface Project {
 interface Props {
   children: ReactNode;
   view: string;
+  eyebrow: string;
   title: string;
   description: string;
   project: Project;
@@ -53,30 +53,26 @@ interface Props {
   onAdd: () => void;
   onLock: () => void;
   accountSession: boolean;
-  enabledCapabilities?: CapabilityId[];
 }
 const productViews = [
   {
     id: 'analytics' as const,
     label: 'Web analytics',
     icon: BarChart3,
-    capability: 'analytics' as const,
   },
-  { id: 'events' as const, label: 'Events', icon: Zap, capability: 'analytics' as const },
+  { id: 'events' as const, label: 'Product events', icon: Zap },
 ];
 const healthViews = [
   {
     id: 'endpoints' as const,
-    label: 'App health',
+    label: 'API monitoring',
     icon: Activity,
-    capability: 'endpoints' as const,
   },
-  { id: 'logs' as const, label: 'Logs', icon: ListFilter, capability: 'logs' as const },
+  { id: 'logs' as const, label: 'Logs', icon: ListFilter },
   {
     id: 'data' as const,
     label: 'Data received',
     icon: Database,
-    capability: 'endpoints' as const,
   },
 ];
 const manageViews = [{ id: 'settings' as const, label: 'Project settings', icon: Settings2 }];
@@ -84,7 +80,6 @@ type NavigationItem = {
   id: 'analytics' | 'events' | 'endpoints' | 'logs' | 'data' | 'projects' | 'settings';
   label: string;
   icon: LucideIcon;
-  capability?: CapabilityId;
 };
 export function ProductBrand(): JSX.Element {
   return (
@@ -93,7 +88,7 @@ export function ProductBrand(): JSX.Element {
       className="flex items-center gap-2.5 text-sm font-semibold tracking-tight"
       aria-label="App Health home"
     >
-      <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+      <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
         <BarChart3 className="size-4" />
       </span>
       App Health
@@ -104,21 +99,11 @@ function WorkspaceSidebar({
   view,
   onView,
   onAdd,
-  enabledCapabilities,
-}: Pick<Props, 'view' | 'onView' | 'onAdd' | 'enabledCapabilities'>): JSX.Element {
+}: Pick<Props, 'view' | 'onView' | 'onAdd'>): JSX.Element {
   return (
-    <Sidebar collapsible="offcanvas" className="border-r">
-      <SidebarHeader className="px-5 py-6">
+    <Sidebar collapsible="offcanvas" variant="inset">
+      <SidebarHeader className="px-4 py-5">
         <ProductBrand />
-        <div className="mt-6 flex items-center gap-3 rounded-lg border bg-background p-3">
-          <div className="flex size-8 items-center justify-center rounded-md bg-muted">
-            <Layers3 className="size-4 text-muted-foreground" />
-          </div>
-          <div>
-            <p className="text-xs font-medium">Your workspace</p>
-            <p className="text-xs text-muted-foreground">All your products, together</p>
-          </div>
-        </div>
       </SidebarHeader>
       <SidebarContent>
         <NavigationGroup
@@ -129,20 +114,8 @@ function WorkspaceSidebar({
         />
         {view !== 'projects' ? (
           <>
-            <NavigationGroup
-              label="Product"
-              items={productViews}
-              view={view}
-              onView={onView}
-              enabledCapabilities={enabledCapabilities}
-            />
-            <NavigationGroup
-              label="Monitor"
-              items={healthViews}
-              view={view}
-              onView={onView}
-              enabledCapabilities={enabledCapabilities}
-            />
+            <NavigationGroup label="Product" items={productViews} view={view} onView={onView} />
+            <NavigationGroup label="Backend" items={healthViews} view={view} onView={onView} />
             <NavigationGroup label="Manage" items={manageViews} view={view} onView={onView} />
           </>
         ) : null}
@@ -177,28 +150,22 @@ function NavigationGroup({
   items,
   view,
   onView,
-  enabledCapabilities,
 }: {
   label: string;
   items: readonly NavigationItem[];
   view: string;
   onView: Props['onView'];
-  enabledCapabilities?: CapabilityId[];
 }): JSX.Element {
   const { setOpenMobile } = useSidebar();
-  const visibleItems = items.filter(
-    (item) => !item.capability || enabledCapabilities?.includes(item.capability) !== false,
-  );
-  if (!visibleItems.length) return <></>;
   return (
     <SidebarGroup className="px-3">
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
-          {visibleItems.map((item) => (
+          {items.map((item) => (
             <SidebarMenuItem key={item.id}>
               <SidebarMenuButton
-                className="h-11 px-3"
+                className="h-10 px-3 data-[active=true]:bg-background data-[active=true]:shadow-sm data-[active=true]:[&>svg]:text-primary"
                 isActive={view === item.id}
                 onClick={() => {
                   onView(item.id);
@@ -281,22 +248,19 @@ function MobileFocusReturn({ triggerId }: { triggerId: string }) {
 }
 export function ProductShell(props: Props): JSX.Element {
   const triggerId = 'workspace-navigation-trigger';
+  const presentation = viewPresentation[props.view] ?? viewPresentation.projects;
+  const ViewIcon = presentation.icon;
   return (
     <SidebarProvider>
       <MobileFocusReturn triggerId={triggerId} />
-      <WorkspaceSidebar
-        view={props.view}
-        onView={props.onView}
-        onAdd={props.onAdd}
-        enabledCapabilities={props.enabledCapabilities}
-      />
-      <SidebarInset className="min-w-0 bg-background">
-        <header className="flex min-h-18 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-4 py-2 lg:px-8">
+      <WorkspaceSidebar view={props.view} onView={props.onView} onAdd={props.onAdd} />
+      <SidebarInset className="min-w-0 overflow-hidden bg-background">
+        <header className="sticky top-0 z-20 flex min-h-16 flex-wrap items-center gap-x-3 gap-y-2 border-b bg-background/90 px-4 py-2 backdrop-blur lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <SidebarTrigger id={triggerId} className="size-11" />
             <Separator orientation="vertical" className="!h-5" />
           </div>
-          <div className="order-last w-full min-w-0 sm:order-none sm:w-auto">
+          <div className="order-last w-full min-w-0 sm:order-none sm:mr-auto sm:w-auto">
             <ProjectPicker
               project={props.project}
               projects={props.projects}
@@ -316,13 +280,28 @@ export function ProductShell(props: Props): JSX.Element {
             </Button>
           </div>
         </header>
-        <div className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
-          <div className="mb-6 flex items-start justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-semibold tracking-tight">{props.title}</h1>
-              <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                {props.description}
-              </p>
+        <div className="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 lg:px-8 lg:py-8">
+          <div className="mb-7 flex items-start justify-between gap-4">
+            <div className="flex min-w-0 items-start gap-3.5">
+              <span
+                className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl border"
+                style={{
+                  color: presentation.tone,
+                  background: `color-mix(in srgb, ${presentation.tone} 10%, transparent)`,
+                  borderColor: `color-mix(in srgb, ${presentation.tone} 22%, transparent)`,
+                }}
+              >
+                <ViewIcon className="size-5" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  {props.eyebrow}
+                </p>
+                <h1 className="mt-1 text-2xl font-semibold tracking-tight">{props.title}</h1>
+                <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                  {props.description}
+                </p>
+              </div>
             </div>
             {import.meta.env.DEV ? (
               <Badge variant="outline" className="mt-1 shrink-0 text-xs font-normal">
@@ -336,3 +315,13 @@ export function ProductShell(props: Props): JSX.Element {
     </SidebarProvider>
   );
 }
+
+const viewPresentation: Record<string, { icon: LucideIcon; tone: string }> = {
+  analytics: { icon: BarChart3, tone: 'var(--chart-1)' },
+  events: { icon: Zap, tone: 'var(--chart-4)' },
+  endpoints: { icon: Activity, tone: 'var(--chart-2)' },
+  logs: { icon: ListFilter, tone: 'var(--chart-3)' },
+  data: { icon: Database, tone: 'var(--chart-5)' },
+  settings: { icon: Settings2, tone: 'var(--primary)' },
+  projects: { icon: Layers3, tone: 'var(--primary)' },
+};

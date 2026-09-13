@@ -21,10 +21,12 @@ export function AnalyticsSegments({
   filters,
   onRemove,
   onClear,
+  emptyHint,
 }: {
   filters: BrowserSegmentFilter;
   onRemove: (key: keyof BrowserSegmentFilter) => void;
   onClear: () => void;
+  emptyHint?: string;
 }): JSX.Element {
   const entries = Object.entries(filters) as [keyof BrowserSegmentFilter, string][];
   return (
@@ -59,7 +61,7 @@ export function AnalyticsSegments({
         </>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Click a country, source, page, or audience value to filter this report.
+          {emptyHint ?? 'Click a country, source, page, or audience value to filter this report.'}
         </p>
       )}
     </section>

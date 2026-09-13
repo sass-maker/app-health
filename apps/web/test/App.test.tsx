@@ -473,6 +473,16 @@ describe('App Health V0 UI', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 
+  it('serves the private app from an empty, theme-stable HTML document', () => {
+    const html = readFileSync(resolve(process.cwd(), 'app.html'), 'utf8');
+
+    expect(html).toContain('<div id="root"></div>');
+    expect(html).toContain('name="robots" content="noindex, nofollow"');
+    expect(html).toContain("localStorage.getItem('app-health-theme')");
+    expect(html).not.toContain('data-initial-landing-shell');
+    expect(html).not.toContain('See what people do. Know what to improve.');
+  });
+
   it.each(PUBLIC_ENTRYPOINTS)('gives $path an exact self-canonical', (entry) => {
     const indexHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
     const html = renderPublicEntrypoint(indexHtml, entry);
@@ -982,6 +992,26 @@ describe('App Health V0 UI', () => {
     expect(location.hash).toBe('#analytics');
   });
 
+  it('keeps every product tool visible when capabilities are disabled', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch({
+      capabilityRows: (['analytics', 'endpoints', 'logs'] as const).map((id) => ({
+        id,
+        enabled: false,
+        first_received_at: null,
+        last_received_at: null,
+      })),
+    });
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Web analytics' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Product events' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'API monitoring' }));
+    expect(await screen.findByText('API monitoring is not selected')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Enable API monitoring' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeTruthy();
+  });
+
   it('keeps capability settings open and explains a failed enable request', async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     window.history.replaceState({}, '', '/app#settings');
@@ -1293,7 +1323,7 @@ describe('Logs view', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
     expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'App health' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'API monitoring' })).toBeTruthy();
   });
 
   it('rejects malformed log responses instead of showing an empty feed', async () => {
@@ -1326,7 +1356,7 @@ describe('Logs view', () => {
 
     expect(await screen.findByText('Send browser logs')).toBeTruthy();
     expect(screen.getByText(/Cloudflare Worker · Hono/i)).toBeTruthy();
-    expect(screen.getByText(/appHealth\.log\('signup\.completed'/)).toBeTruthy();
+    expect(screen.getByText(/appHealth\.log\('worker\.request_failed'/)).toBeTruthy();
     expect(screen.getByText(/ctx\.waitUntil\(appHealth\.flush\(\)\)/)).toBeTruthy();
     fireEvent.change(screen.getByRole('textbox', { name: 'Allowed origins' }), {
       target: { value: 'https://product.example' },
@@ -1335,6 +1365,22 @@ describe('Logs view', () => {
     expect(await screen.findByText(/createWebLogger/)).toBeTruthy();
     expect(screen.getByText(new RegExp(`${window.location.origin}/v1/logs`))).toBeTruthy();
     expect(screen.queryByText(/window\.appHealth\.track/)).toBeNull();
+  });
+
+  it('uses product-event language when the shared browser tracker has no data yet', async () => {
+    window.history.replaceState({}, '', '/app#events');
+    installFetch({
+      capabilityRows: [
+        { id: 'analytics', enabled: true, first_received_at: null, last_received_at: null },
+        { id: 'endpoints', enabled: false, first_received_at: null, last_received_at: null },
+        { id: 'logs', enabled: false, first_received_at: null, last_received_at: null },
+      ],
+    });
+    render(<App />);
+
+    expect(await screen.findByText('Install product events')).toBeTruthy();
+    expect(screen.getByText(/Waiting for the first valid product events event/)).toBeTruthy();
+    expect(screen.queryByText('Install web analytics')).toBeNull();
   });
 });
 

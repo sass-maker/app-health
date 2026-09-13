@@ -2,7 +2,7 @@ import { AnalyticsComparison } from './AnalyticsComparison.js';
 import { AnalyticsEngagement } from './AnalyticsEngagement.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
 import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
-import { ArrowRight, BarChart3, Clock3, MousePointer2, Radio } from 'lucide-react';
+import { ArrowRight, BarChart3, Clock3, ListFilter, MousePointer2, Radio } from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
@@ -91,7 +91,7 @@ function EventTable(props: {
         <div>
           <h2 className="text-sm font-semibold">Tracked events</h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Open an event to see its trend, pages, and sources.
+            Select an event to inspect its trend and context.
           </p>
         </div>
         <Badge variant="secondary" className="font-normal">
@@ -190,10 +190,12 @@ export interface AnalyticsReportProps {
 }
 
 function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
-  const { selected, totals, active } = props;
+  const { mode, report, selected, totals, active } = props;
+  const showPageViews = mode === 'web' && !selected;
+  const showEventNames = mode === 'events' && !selected;
   return (
     <div className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
-      {!selected ? (
+      {showPageViews ? (
         <MetricCard
           tone="var(--chart-1)"
           label="Page views"
@@ -202,6 +204,15 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
           value={totals.pageviews}
           note="Pages opened in this period"
           icon={BarChart3}
+        />
+      ) : null}
+      {showEventNames ? (
+        <MetricCard
+          tone="var(--chart-1)"
+          label="Event types"
+          value={report.events.length}
+          note="Distinct names received in this period"
+          icon={ListFilter}
         />
       ) : null}
       <MetricCard
@@ -242,36 +253,45 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
 }
 
 function ReportChart(props: AnalyticsReportProps): JSX.Element {
-  const { report, selected, metric, range, sourceNote, totals, onMetric } = props;
+  const { report, mode, selected, metric, range, sourceNote, totals, onMetric } = props;
+  const showMetricPicker = mode === 'web' && !selected;
   return (
     <Card className="shadow-none">
       <Tabs value={metric} onValueChange={(value) => onMetric(value as typeof metric)}>
         <CardHeader className="flex flex-col gap-4 border-b sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold">
-              {selected || (metric === 'events' ? 'Event activity' : 'Traffic over time')}
+              {selected
+                ? 'Event activity'
+                : mode === 'events'
+                  ? 'Product events over time'
+                  : metric === 'events'
+                    ? 'Product events over time'
+                    : 'Traffic over time'}
             </h2>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock3 className="size-3" /> {periodLabels[range]} · {sourceNote}
             </p>
           </div>
-          <TabsList aria-label="Chart metric">
-            {!selected ? (
+          {showMetricPicker ? (
+            <TabsList aria-label="Chart metric">
               <TabsTrigger value="pageviews" onClick={() => onMetric('pageviews')}>
                 Page views
               </TabsTrigger>
-            ) : null}
-            <TabsTrigger value="events" onClick={() => onMetric('events')}>
-              Product events
-            </TabsTrigger>
-          </TabsList>
+              <TabsTrigger value="events" onClick={() => onMetric('events')}>
+                Product events
+              </TabsTrigger>
+            </TabsList>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-5">
-          <TabsContent value="pageviews">
-            <AnalyticsChart series={report.series} metric="pageviews" />
-          </TabsContent>
+          {showMetricPicker ? (
+            <TabsContent value="pageviews">
+              <AnalyticsChart series={report.series} metric="pageviews" />
+            </TabsContent>
+          ) : null}
           <TabsContent value="events">
-            <AnalyticsChart series={report.series} metric="events" />
+            <AnalyticsChart series={report.series} metric="events" onlyMetric={!showMetricPicker} />
           </TabsContent>
           {totals.pageviews === 0 && totals.events === 0 ? (
             <p className="mt-3 text-center text-xs text-muted-foreground">
@@ -328,25 +348,27 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
       ) : null}
       <ReportMetrics {...props} />
       <ReportChart {...props} />
-      <ReportRankings {...props} />
+      {mode === 'web' || selected ? <ReportRankings {...props} /> : null}
       {!selected && mode === 'web' && !props.segmented ? (
         <AnalyticsEngagement report={report} />
       ) : null}
-      <Tabs value={breakdown} onValueChange={(value) => onBreakdown(value as typeof breakdown)}>
-        <TabsList aria-label="Analytics breakdown">
-          <TabsTrigger value="audience">Audience</TabsTrigger>
-          <TabsTrigger value="acquisition">Acquisition</TabsTrigger>
-          <TabsTrigger value="technology">Technology</TabsTrigger>
-        </TabsList>
-        <TabsContent value={breakdown}>
-          <AnalyticsAudience
-            report={report}
-            breakdown={breakdown}
-            onFilter={props.onFilter}
-            metric={selected ? 'events' : 'pageviews'}
-          />
-        </TabsContent>
-      </Tabs>
+      {mode === 'web' || selected ? (
+        <Tabs value={breakdown} onValueChange={(value) => onBreakdown(value as typeof breakdown)}>
+          <TabsList aria-label="Analytics breakdown">
+            <TabsTrigger value="audience">Audience</TabsTrigger>
+            <TabsTrigger value="acquisition">Acquisition</TabsTrigger>
+            <TabsTrigger value="technology">Technology</TabsTrigger>
+          </TabsList>
+          <TabsContent value={breakdown}>
+            <AnalyticsAudience
+              report={report}
+              breakdown={breakdown}
+              onFilter={props.onFilter}
+              metric={selected ? 'events' : 'pageviews'}
+            />
+          </TabsContent>
+        </Tabs>
+      ) : null}
       {mode === 'web' ? (
         <EventTable
           rows={report.events}

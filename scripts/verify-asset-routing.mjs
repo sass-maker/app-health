@@ -108,11 +108,18 @@ try {
   assert(liveAsset, 'live page must reference the live bundle');
   assert.equal(liveHtml.includes('/assets/main-'), false);
   assert.equal((await globalThis.fetch(`${origin}${liveAsset}`)).status, 200);
+  const app = await globalThis.fetch(`${origin}/app`, navigate);
+  assert.equal(app.status, 200);
+  const appHtml = await app.text();
+  assert.match(appHtml, /<div id="root"><\/div>/);
+  assert.match(appHtml, /\/assets\/main-[^"']+\.js/);
+  assert.equal(appHtml.includes('data-initial-landing-shell'), false);
+  assert.equal(appHtml.includes('See what people do. Know what to improve.'), false);
   const spa = await globalThis.fetch(`${origin}/projects/unknown`, navigate);
   assert.equal(spa.status, 200);
   assert.equal(spa.headers.get('content-type')?.split(';')[0], 'text/html');
   assert.match(await spa.text(), /<div id="root">/);
-  log('Asset routing: callback, /live, and ordinary SPA navigation verified.');
+  log('Asset routing: callback, /live, /app, and ordinary SPA navigation verified.');
 } finally {
   if (child.exitCode === null) {
     child.kill('SIGTERM');

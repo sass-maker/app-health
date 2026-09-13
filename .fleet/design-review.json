@@ -2,7 +2,7 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Workspace overview, left project selection and analytics report hierarchy",
+  "target": "Distinct product events, visible API monitoring, and stable private-shell loading",
   "surfaceMode": "operate",
   "mode": "preserve",
   "register": "product",
@@ -16,9 +16,9 @@
       "Evil Charts Recharts area chart, pinned MIT source"
     ],
     "probes": [],
-    "selected": "existing-shadcn-workspace",
+    "selected": "existing-shadcn-product-workspace",
     "approval": "agent-selected",
-    "before": ".fleet/evidence/dashboard-polish/before-audience-dark-1440.png",
+    "before": ".fleet/evidence/app-health-redesign/final/events-dark-1440.png",
     "library": {
       "strategy": "upstream-first",
       "primary": "shadcn/ui new-york-v4",
@@ -50,11 +50,11 @@
       "purposeAlignment": "match",
       "driftNote": "",
       "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
-      "job": "Compare projects, then investigate traffic for one environment.",
-      "thesis": "A focused shadcn workspace with colorful, legible traffic charts and acquisition close to the trend.",
-      "system": "Existing shadcn graphite/light surfaces and system sans. Indigo page views, pink product events, amber sessions/country, emerald live activity and sources. Compact metric cards and a single scope selector; no dashboard footer.",
-      "signature": "Live session signal beside project traffic, with a distinct all-project overview.",
-      "risk": "Use more chart color without turning status or missing data into decoration."
+      "job": "Move between traffic, intentional product actions, backend API health, and logs without confusing their roles.",
+      "thesis": "One shadcn workspace with four legible tools: web acquisition, product actions, API reliability, and logs.",
+      "system": "Preserve the existing shadcn graphite/light shell. Web analytics uses indigo traffic signals; Product events uses pink action signals; API monitoring retains method and health status colors; Logs retain severity. Every tool remains reachable and owns its setup or connected state.",
+      "signature": "A product-event workspace that begins with named actions and progressively reveals the selected action's pages and sources.",
+      "risk": "Keep the shared analytics query contract without allowing the Product events page to inherit the web analytics information hierarchy."
     }
   },
   "evidence": {
@@ -62,128 +62,92 @@
       {
         "width": 390,
         "theme": "dark",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-dark-390.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-dark-768.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-dark-1440.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-dark-1440.png"
       },
       {
         "width": 390,
         "theme": "light",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-light-390.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-light-390.png"
       },
       {
         "width": 768,
         "theme": "light",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-light-768.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-light-768.png"
       },
       {
         "width": 1440,
         "theme": "light",
-        "surface": "audience",
-        "path": ".fleet/evidence/dashboard-polish/audience-light-1440.png"
+        "surface": "product-events",
+        "path": ".fleet/evidence/product-separation/events-light-1440.png"
       },
       {
         "width": 390,
         "theme": "dark",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-390.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-dark-390.png"
       },
       {
         "width": 768,
         "theme": "dark",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-768.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-dark-768.png"
       },
       {
         "width": 1440,
         "theme": "dark",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-dark-1440.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-dark-1440.png"
       },
       {
         "width": 390,
         "theme": "light",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-light-390.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-light-390.png"
       },
       {
         "width": 768,
         "theme": "light",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-light-768.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-light-768.png"
       },
       {
         "width": 1440,
         "theme": "light",
-        "surface": "acquisition",
-        "path": ".fleet/evidence/dashboard-polish/acquisition-light-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "dark",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-dark-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "dark",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-dark-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "dark",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-dark-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "light",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-light-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "light",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-light-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "light",
-        "surface": "overview",
-        "path": ".fleet/evidence/dashboard-polish/overview-light-1440.png"
+        "surface": "api-monitoring",
+        "path": ".fleet/evidence/product-separation/endpoints-light-1440.png"
       }
     ],
     "projectCheck": {
-      "command": "mise exec node@24.20.0 -- pnpm run check; final chart: web tsc, build, focused tests and analytics-audience Playwright",
+      "command": "pnpm run check; final copy-only change also passed App tests and web typecheck",
       "status": "pass"
     },
     "critique": {
-      "score": 36,
+      "score": 38,
       "maximum": 40
     },
     "audit": {
-      "score": 18,
+      "score": 19,
       "maximum": 20
     },
     "unresolved": {
       "p0": 0,
       "p1": 0,
-      "p2": 1
+      "p2": 0
     },
     "detector": {
       "posture": "advisory",
@@ -211,10 +175,10 @@
       },
       "mismatches": []
     },
-    "notes": "Preserve lane: shadcn composition and selective Evil Charts GradientPattern adaptation and area-chart point treatment, MIT license retained; no dependency added. Root inspected desktop dark and mobile light, Luna independently reviewed both with no P0/P1. Project/environment selectors moved left; Overview aggregates existing workspace response with no extra analytics queries; project report drops duplicate selectors/roster and places top pages/sources after trend. Mobile remains a long report (P2). Browser fixture names are explicit test content, not product data. Missing country/source retained and explained. Bootstrap repeat inventory fetch removed; report query waves concurrent with unchanged counts and optional-failure degradation. Full gate passed with 108 browser cases, all coverage and code-health gates, SDK and account canaries. Final isolated chart-pattern refinement separately passed web types/build/lint and focused unit/browser checks. No production latency measurement or deployment in this turn."
+    "notes": "Preserve lane: existing shadcn composition and Evil Charts area treatment retained; no dependency added. Product events now leads with named actions, action counts, sessions, and an event-only trend; page, source, and audience detail appears only after selecting an event. Web analytics retains traffic, acquisition, audience, and engagement. API monitoring and Logs are permanently visible under Backend and route to setup when disabled or empty. The app frame uses the shadcn inset sidebar, section-specific icon treatment, sticky scope controls, and responsive endpoint cards before the table becomes cramped. Root inspected both surfaces at 390, 768, and 1440 pixels in dark and light; no P0, P1, or P2 findings. The private app uses a dedicated 1.32 kB theme-stable HTML document, while the public 9.88 kB SEO document remains exclusive to the landing page. Local Cloudflare asset routing verified the exact app entry. Full pnpm run check passed with 120 browser scenarios; final capability copy also passed 59 App tests and web typecheck. No production measurement or deployment in this turn."
   },
   "ownerFeedback": {
     "decision": "agent-selected",
-    "note": "Owner requested left scope selection, all-project overview, more color using Evil Charts, speed and honest attribution improvements. Implemented locally; no release requested for this turn."
+    "note": "Owner identified Web analytics and Events as visually conflated and could not find the backend product. Product events and API monitoring are now distinct, visible surfaces. Implemented locally; no release requested for this turn."
   }
 }

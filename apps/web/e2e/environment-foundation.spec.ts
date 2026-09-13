@@ -60,7 +60,7 @@ for (const theme of ['dark', 'light']) {
     await page.goto('/app#analytics');
     await expect(page.getByText('Install web analytics', { exact: true })).toBeVisible();
     await page.goto('/app#endpoints');
-    await expect(page.getByText('Waiting for the first valid endpoint health event')).toBeVisible();
+    await expect(page.getByText('Waiting for the first valid api monitoring event')).toBeVisible();
     const endpoint = {
       schema_version: 'v1',
       batch_id: crypto.randomUUID(),

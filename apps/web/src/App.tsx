@@ -1076,7 +1076,7 @@ function EndpointHealth({
           ) : null}
           {endpoints.length > 0 ? (
             <>
-              <div className="hidden md:block">
+              <div className="hidden xl:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -1111,7 +1111,7 @@ function EndpointHealth({
                   </TableBody>
                 </Table>
               </div>
-              <div className="grid gap-3 p-4 md:hidden">
+              <div className="grid gap-3 p-4 lg:grid-cols-2 xl:hidden">
                 {endpoints.map((endpoint) => (
                   <EndpointCard key={`${endpoint.method}|${endpoint.route}`} endpoint={endpoint} />
                 ))}
@@ -2036,7 +2036,7 @@ function PublicKeyReveal({
   purpose: BrowserKeyPurpose;
 }): JSX.Element {
   const [identityMode, setIdentityMode] = useState('persistent');
-  const logsSnippet = `import { createWebLogger } from '@saas-maker/app-health/web';\n\nconst logs = createWebLogger({\n  publicKey: '${created.key}',\n  environment: ${JSON.stringify(environment)},\n  endpoint: '${INGEST_ORIGIN}/v1/logs',\n});\n\nlogs.log('pricing.viewed', { props: { plan: 'pro' } });`;
+  const logsSnippet = `import { createWebLogger } from '@saas-maker/app-health/web';\n\nconst logs = createWebLogger({\n  publicKey: '${created.key}',\n  environment: ${JSON.stringify(environment)},\n  endpoint: '${INGEST_ORIGIN}/v1/logs',\n});\n\nlogs.warn('network.retry_scheduled', { props: { attempt: 2 } });`;
   const analyticsSnippet = `<script defer src="${location.origin}/tracker.js" data-key="${created.key}" data-project="${created.record.app_id}" data-identity="${identityMode}" data-endpoint="${INGEST_ORIGIN}/v1/browser"></script>\n\n<!-- After the tracker loads: window.appHealth.track('signup.completed') -->`;
   return (
     <div className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
@@ -2173,13 +2173,13 @@ const CAPABILITY_COPY: Record<
     icon: BarChart3,
   },
   endpoints: {
-    title: 'Endpoint health',
+    title: 'API monitoring',
     description: 'Request volume, error rate, and latency from your application routes.',
     icon: Activity,
   },
   logs: {
     title: 'Logs',
-    description: 'Explicit browser and server events with the details your application provides.',
+    description: 'Structured diagnostic records from browsers and servers, organized by level.',
     icon: SlidersHorizontal,
   },
 };
@@ -2224,7 +2224,7 @@ function CapabilityStatus({ state }: { state: EnvironmentCapabilities['capabilit
     );
   return (
     <Badge variant="outline" className="font-normal text-muted-foreground">
-      Hidden
+      Not enabled
     </Badge>
   );
 }
@@ -2258,8 +2258,8 @@ function CapabilitySettings({
       <CardHeader className="border-b">
         <CardTitle className="text-base">Capabilities in this environment</CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
-          Choose what appears in navigation. Incoming valid data remains accepted and activates its
-          capability automatically.
+          Choose which tools collect data for this environment. Every tool stays reachable with
+          setup guidance, and incoming valid data activates its capability automatically.
         </p>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
@@ -2312,7 +2312,7 @@ function CapabilitySettings({
                         )
                       }
                     >
-                      {state.enabled ? 'Hide' : 'Show'}
+                      {state.enabled ? 'Disable' : 'Enable'}
                     </Button>
                   </div>
                 </CardContent>
@@ -2670,6 +2670,7 @@ const ProjectSettings = (props: ProjectSettingsProps): JSX.Element => {
 
 interface CapabilityBoundaryProps {
   id: CapabilityId;
+  displayTitle?: string;
   project: SavedProject;
   ownerToken: string;
   controller: CapabilityController;
@@ -2678,7 +2679,8 @@ interface CapabilityBoundaryProps {
 }
 
 function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
-  const { id, project, ownerToken, controller, onManage, children } = props;
+  const { id, displayTitle, project, ownerToken, controller, onManage, children } = props;
+  const capabilityTitle = displayTitle ?? CAPABILITY_COPY[id].title;
   if (controller.loading && !controller.data)
     return <Skeleton className="h-64 w-full" aria-label="Loading capability status" />;
   if (!controller.data)
@@ -2706,11 +2708,11 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
         ) : null}
         <Card className="shadow-none">
           <CardContent className="flex flex-col items-start gap-4 p-6">
-            <Badge variant="outline">Hidden from navigation</Badge>
+            <Badge variant="outline">Not enabled</Badge>
             <div>
-              <h2 className="text-lg font-semibold">{CAPABILITY_COPY[id].title} is not selected</h2>
+              <h2 className="text-lg font-semibold">{capabilityTitle} is not selected</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                Show it for {project.environment} to open setup or view previously received data.
+                Enable it for {project.environment} to open setup or view previously received data.
                 Disabling this preference never rejects incoming data.
               </p>
             </div>
@@ -2725,7 +2727,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
                 ])
               }
             >
-              Show {CAPABILITY_COPY[id].title}
+              Enable {capabilityTitle}
             </Button>
           </CardContent>
         </Card>
@@ -2739,6 +2741,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
         ) : null}
         <CapabilitySetup
           id={id}
+          displayTitle={displayTitle}
           project={project}
           ownerToken={ownerToken}
           privateKey={controller.data.private_key}
@@ -2777,7 +2780,7 @@ function ServerCapabilitySetup({
   const snippet =
     id === 'endpoints'
       ? `import { createAppHealthClient } from '@saas-maker/app-health';\nimport { honoMiddleware } from '@saas-maker/app-health/hono';\n\napp.use('*', honoMiddleware({\n  client: (c) => createAppHealthClient({\n    key: c.env.APP_HEALTH_INGEST_KEY,\n    environment: ${JSON.stringify(project.environment)},\n    endpoint: '${INGEST_ORIGIN}/v1/ingest',\n    runtime: 'worker',\n    disableTimer: true,\n  }),\n}));`
-      : `import { createAppHealthClient } from '@saas-maker/app-health';\n\ninterface Env { APP_HEALTH_INGEST_KEY: string }\n\nexport default {\n  fetch(_request: Request, env: Env, ctx: ExecutionContext) {\n    const appHealth = createAppHealthClient({\n      key: env.APP_HEALTH_INGEST_KEY,\n      environment: ${JSON.stringify(project.environment)},\n      endpoint: '${INGEST_ORIGIN}/v1/ingest',\n      runtime: 'worker',\n      disableTimer: true,\n    });\n    appHealth.log('signup.completed', { title: 'New signup' });\n    ctx.waitUntil(appHealth.flush());\n    return new Response('ok');\n  },\n};`;
+      : `import { createAppHealthClient } from '@saas-maker/app-health';\n\ninterface Env { APP_HEALTH_INGEST_KEY: string }\n\nexport default {\n  fetch(_request: Request, env: Env, ctx: ExecutionContext) {\n    const appHealth = createAppHealthClient({\n      key: env.APP_HEALTH_INGEST_KEY,\n      environment: ${JSON.stringify(project.environment)},\n      endpoint: '${INGEST_ORIGIN}/v1/ingest',\n      runtime: 'worker',\n      disableTimer: true,\n    });\n    appHealth.log('worker.request_failed', { title: 'Upstream request failed' });\n    ctx.waitUntil(appHealth.flush());\n    return new Response('ok');\n  },\n};`;
   return (
     <Card className="shadow-none">
       <CardHeader className="border-b">
@@ -2785,7 +2788,7 @@ function ServerCapabilitySetup({
           Cloudflare Worker · Hono
         </p>
         <CardTitle className="text-base">
-          {id === 'endpoints' ? 'Connect endpoint health' : 'Send a server log'}
+          {id === 'endpoints' ? 'Connect API monitoring' : 'Send a server log'}
         </CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
           {privateKey
@@ -2809,20 +2812,19 @@ function ServerCapabilitySetup({
   );
 }
 
-function CapabilitySetup({
-  id,
-  project,
-  ownerToken,
-  privateKey,
-  onManage,
-}: {
+function CapabilitySetup(props: {
   id: CapabilityId;
+  displayTitle?: string;
   project: SavedProject;
   ownerToken: string;
   privateKey: EnvironmentCapabilities['private_key'];
   onManage: () => void;
 }): JSX.Element {
-  const copy = CAPABILITY_COPY[id];
+  const { id, displayTitle, project, ownerToken, privateKey, onManage } = props;
+  const copy = {
+    ...CAPABILITY_COPY[id],
+    title: displayTitle ?? CAPABILITY_COPY[id].title,
+  };
   return (
     <div className="space-y-5">
       <Alert>
@@ -2840,7 +2842,7 @@ function CapabilitySetup({
           ownerToken={ownerToken}
           installMode
           eyebrow={id === 'analytics' ? 'Public browser key' : 'Browser log key'}
-          title={id === 'analytics' ? 'Install web analytics' : 'Send browser logs'}
+          title={id === 'analytics' ? `Install ${copy.title.toLowerCase()}` : 'Send browser logs'}
           purpose={id === 'logs' ? 'logs' : 'analytics'}
         />
       ) : null}
@@ -2858,29 +2860,29 @@ function CapabilitySetup({
 
 const VIEW_HEADINGS: Record<DashboardView, [string, string, string]> = {
   analytics: [
-    'Workspace',
+    'Product analytics',
     'Web analytics',
-    'Explore visitors, sources, and product activity over time.',
+    'Explore visitors, acquisition sources, entry pages, and traffic over time.',
   ],
   events: [
-    'Product behavior',
-    'Events',
-    'See what people do, where it happens, and how activity changes over time.',
+    'Product analytics',
+    'Product events',
+    'Measure the intentional actions that show activation, conversion, and retention.',
   ],
   endpoints: [
-    'Observed routes',
-    'Endpoint health',
-    'Traffic, errors, and latency from requests your service actually handled.',
+    'Backend health',
+    'API monitoring',
+    'Track request volume, errors, and latency for every backend route.',
   ],
   data: [
-    'Collection transparency',
+    'Backend health',
     'Data received',
     'The exact telemetry App Health accepts and retains for this environment.',
   ],
   logs: [
-    'Application events',
+    'Backend health',
     'Logs',
-    'Signups, waitlist joins, failed payments: whatever your app chose to send, by level.',
+    'Debug application behavior with structured records by severity, source, and time.',
   ],
   install: [
     'Browser analytics',
@@ -3159,6 +3161,7 @@ function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
   return (
     <CapabilityBoundary
       id="analytics"
+      displayTitle={view === 'events' ? 'Product events' : undefined}
       project={project}
       ownerToken={ownerToken}
       controller={capabilities}
@@ -3257,6 +3260,7 @@ function Dashboard({
   return (
     <ProductShell
       view={view}
+      eyebrow={VIEW_HEADINGS[view][0]}
       title={VIEW_HEADINGS[view][1]}
       description={VIEW_HEADINGS[view][2]}
       project={project}
@@ -3266,9 +3270,6 @@ function Dashboard({
       onAdd={handlers.onReset}
       onLock={handlers.onLock}
       accountSession={handlers.accountSession}
-      enabledCapabilities={capabilities.data?.capabilities
-        .filter((item) => item.enabled)
-        .map((item) => item.id)}
     >
       <DashboardContent
         view={view}

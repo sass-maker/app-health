@@ -66,7 +66,7 @@ it('shows focused project traffic, sources and events without a duplicate projec
   expect(setup).toHaveBeenCalledOnce();
   expect(fetch).toHaveBeenCalledTimes(2);
   fireEvent.click(screen.getByRole('tab', { name: /Product events/ }));
-  expect(await screen.findByRole('heading', { name: 'Event activity' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Product events over time' })).toBeTruthy();
 });
 it('queries an event drill-down, project and time filters, and clears the selected event', async () => {
   const mock = install();
@@ -79,11 +79,18 @@ it('queries an event drill-down, project and time filters, and clears the select
       mode="events"
     />,
   );
+  expect(await screen.findByText('Event types')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Product events over time' })).toBeTruthy();
+  expect(screen.queryByText('Page views')).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'Top pages' })).toBeNull();
+  expect(screen.queryByRole('tab', { name: 'Audience' })).toBeNull();
   fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
   await waitFor(() =>
     expect(mock.mock.calls.some(([url]) => url.includes('event=signup.completed'))).toBe(true),
   );
   expect(await screen.findByRole('heading', { name: 'Where this event happens' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'Event referral sources' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'Audience' })).toBeTruthy();
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });

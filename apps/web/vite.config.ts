@@ -63,12 +63,39 @@ function localWorkerApi(): Plugin {
   };
 }
 
+/** Give the private app its own HTML document instead of flashing the public landing shell. */
+function dashboardHtmlEntry(): Plugin {
+  const rewrite = (request: { url?: string }) => {
+    if (!request.url) return;
+    const url = new URL(request.url, 'http://app-health.local');
+    if (url.pathname === '/app' || url.pathname === '/app/') {
+      request.url = `/app.html${url.search}`;
+    }
+  };
+  return {
+    name: 'app-health-dashboard-html-entry',
+    configureServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        rewrite(request);
+        next();
+      });
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use((request, _response, next) => {
+        rewrite(request);
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), localWorkerApi()],
+  plugins: [dashboardHtmlEntry(), react(), tailwindcss(), localWorkerApi()],
   build: {
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
+        app: resolve(import.meta.dirname, 'app.html'),
         live: resolve(import.meta.dirname, 'live.html'),
         changelog: resolve(import.meta.dirname, 'changelog.html'),
       },

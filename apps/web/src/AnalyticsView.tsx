@@ -43,6 +43,7 @@ interface AnalyticsViewProps {
 }
 
 interface ReportFiltersProps {
+  mode: 'web' | 'events';
   range: string;
   selected: string;
   onRange: (value: string) => void;
@@ -51,7 +52,7 @@ interface ReportFiltersProps {
 }
 
 function ReportFilters(props: ReportFiltersProps): JSX.Element {
-  const { range, selected, onRange, onClearEvent, onInstall } = props;
+  const { mode, range, selected, onRange, onClearEvent, onInstall } = props;
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
       <div className="flex flex-1 flex-col gap-2 sm:flex-row">
@@ -77,7 +78,7 @@ function ReportFilters(props: ReportFiltersProps): JSX.Element {
         </Badge>
       ) : null}
       <Button variant="outline" className="h-10 w-full lg:w-auto" onClick={onInstall}>
-        Install tracker <ArrowRight />
+        {mode === 'events' ? 'Install event tracking' : 'Install tracker'} <ArrowRight />
       </Button>
     </div>
   );
@@ -207,6 +208,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   return (
     <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
+        mode={mode}
         range={range}
         selected={selected}
         onRange={setRange}
@@ -219,6 +221,11 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
 
       <AnalyticsSegments
         filters={segments}
+        emptyHint={
+          mode === 'events' && !selected
+            ? 'Open a named event to reveal its page, source, and audience breakdowns.'
+            : undefined
+        }
         onClear={() => {
           setSegments({});
           setSelected('');
