@@ -1,4 +1,4 @@
-/** Use Analytics Engine's documented IF function for historical source grouping. */
+/** Keep source grouping compact and shallow for Analytics Engine's SQL parser. */
 export function analyticsSourceSql(
   expression: 'blob6' | 'blob10' | "IF(blob10 != '', blob10, blob6)",
 ): string {
@@ -46,8 +46,5 @@ export function analyticsSourceSql(
       .join(',');
     clauses.push([`${value} IN (${names}) OR ${host} IN (${checks.join(',')})`, label]);
   }
-  return clauses.reduceRight(
-    (otherwise, [condition, label]) => `IF(${condition}, '${label}', ${otherwise})`,
-    value,
-  );
+  return `CASE ${clauses.map(([condition, label]) => `WHEN ${condition} THEN '${label}'`).join(' ')} ELSE ${value} END`;
 }
