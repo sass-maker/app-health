@@ -1,12 +1,14 @@
-/** Keep source grouping compact and shallow for Analytics Engine's SQL parser. */
-export function analyticsSourceSql(
-  expression: 'blob6' | 'blob10' | "IF(blob10 != '', blob10, blob6)",
-): string {
-  const compact = expression.replaceAll(' ', '');
-  const value = `substring(lower(${compact}),1,100)`;
-  const dot = `position('.' IN ${compact})`;
+/** Project source fields once, then use a shallow tree within AE parser/size limits. */
+export function analyticsSourceFrom(source: string): string {
+  const raw = "IF(blob10!='',blob10,blob6)";
+  const value = `substring(lower(${raw}),1,100)`;
+  const dot = `position('.' IN ${raw})`;
   const prefixes = "'www.','m.','mobile.','old.','l.','out.','news.','search.'";
   const host = `IF(substring(${value},1,${dot}) IN (${prefixes}),substring(${value},${dot}+1),${value})`;
+  return `FROM (SELECT *, ${sourceClassification()} AS normalized_source FROM (SELECT *, ${value} AS source_value, ${host} AS source_host ${source}))`;
+}
+
+function sourceClassification(): string {
   const aliases: Record<string, string> = {
     Reddit: 'reddit, redd.it',
     X: 'x, twitter, x-twitter',
@@ -37,14 +39,26 @@ export function analyticsSourceSql(
     Baidu: ['baidu.com'],
     Yandex: ['yandex.ru', 'yandex.com'],
   };
-  const clauses: Array<[string, string]> = [[`${value} = ''`, 'Unknown']];
+  const clauses: Array<[string, string]> = [["source_value = ''", 'Unknown']];
   for (const [label, hosts] of Object.entries(domains)) {
     const checks = hosts.flatMap((domain) => [`'${domain}'`, `'${domain}.'`]);
     const names = aliases[label]
       .split(', ')
       .map((item) => `'${item}'`)
       .join(',');
-    clauses.push([`${value} IN (${names}) OR ${host} IN (${checks.join(',')})`, label]);
+    clauses.push([`source_value IN (${names}) OR source_host IN (${checks.join(',')})`, label]);
   }
-  return `CASE ${clauses.map(([condition, label]) => `WHEN ${condition} THEN '${label}'`).join(' ')} ELSE ${value} END`;
+  return conditionalTree(clauses);
+}
+
+function conditionalTree(clauses: Array<[string, string]>): string {
+  if (clauses.length === 1) {
+    const [condition, label] = clauses[0];
+    return `IF(${condition},'${label}',source_value)`;
+  }
+  const middle = Math.ceil(clauses.length / 2);
+  const left = clauses.slice(0, middle);
+  const right = clauses.slice(middle);
+  const condition = left.map(([check]) => `(${check})`).join(' OR ');
+  return `IF(${condition},${conditionalTree(left)},${conditionalTree(right)})`;
 }

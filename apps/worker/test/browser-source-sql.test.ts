@@ -1,12 +1,13 @@
+import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
 import { normalizeAnalyticsSource } from '@app-health/contracts';
-import { analyticsSourceSql } from '../src/browser-source-sql.js';
+import { analyticsSourceFrom } from '../src/browser-source-sql.js';
 
 describe('analytics source SQL', () => {
   it('matches pure normalization for historical hostname and spoof fixtures', () => {
     const db = new DatabaseSync(':memory:');
-    db.exec('CREATE TABLE sources (value TEXT)');
+    db.exec("CREATE TABLE sources (blob6 TEXT, blob10 TEXT DEFAULT '')");
     const values = [
       ' reddit.com ',
       'mobile.twitter.com',
@@ -33,12 +34,20 @@ describe('analytics source SQL', () => {
         ),
       ),
     ];
-    const insert = db.prepare('INSERT INTO sources VALUES (?)');
+    const insert = db.prepare('INSERT INTO sources (blob6) VALUES (?)');
     for (const value of values) insert.run(value);
-    const sql = analyticsSourceSql('blob6')
-      .replaceAll('blob6', 'value')
-      .replaceAll("position('.' IN value)", "instr(value, '.')");
-    const rows = db.prepare(`SELECT value, ${sql} AS normalized FROM sources`).all() as Array<{
+    const sql = sqliteAnalyticsSql(analyticsSourceFrom('FROM sources'));
+    expect(sql).not.toMatch(/\bCASE\b/);
+    let depth = 0;
+    let maximumDepth = 0;
+    for (const character of sql) {
+      if (character === '(') maximumDepth = Math.max(maximumDepth, ++depth);
+      if (character === ')') depth--;
+    }
+    expect(maximumDepth).toBeLessThanOrEqual(12);
+    const rows = db
+      .prepare(`SELECT blob6 AS value, normalized_source AS normalized ${sql}`)
+      .all() as Array<{
       value: string;
       normalized: string;
     }>;

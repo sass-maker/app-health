@@ -1,4 +1,4 @@
-import { analyticsSourceSql } from './browser-source-sql.js';
+import { analyticsSourceFrom } from './browser-source-sql.js';
 import { browserQuery } from './browser-query.js';
 import { BrowserReportFilter, type SharedAnalytics } from '@app-health/contracts';
 
@@ -64,7 +64,7 @@ export async function queryPublicBrowserBreakdowns(
       options,
     ),
     rows(
-      `SELECT ${analyticsSourceSql("IF(blob10 != '', blob10, blob6)")} AS name, SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval ${source} AND blob3 = 'pageview' GROUP BY name ORDER BY count DESC LIMIT 20`,
+      `SELECT normalized_source AS name, SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval ${analyticsSourceFrom(source + " AND blob3 = 'pageview'")} GROUP BY name ORDER BY count DESC LIMIT 20`,
       options,
     ),
     rows(

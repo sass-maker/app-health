@@ -1,5 +1,5 @@
 import { normalizeAnalyticsSource, type BrowserReportFilter } from '@app-health/contracts';
-import { analyticsSourceSql } from './browser-source-sql.js';
+import { analyticsSourceFrom } from './browser-source-sql.js';
 
 const totals =
   "SUM(IF(blob3 = 'pageview', _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', _sample_interval, 0)) AS events";
@@ -74,7 +74,7 @@ function scopedSource(workspace: string, filter: BrowserReportFilter, from: numb
   // Project this long expression once: repeating it in SELECT and WHERE can
   // exceed Analytics Engine's 10,000-character limit for an entire query.
   return filter.source
-    ? `FROM (SELECT *, ${analyticsSourceSql("IF(blob10 != '', blob10, blob6)")} AS normalized_source ${source}) WHERE normalized_source = ${sqlLiteral(canonicalSource(filter.source))}`
+    ? `${analyticsSourceFrom(source)} WHERE normalized_source = ${sqlLiteral(canonicalSource(filter.source))}`
     : source;
 }
 function sqlLiteral(value: string) {
@@ -104,10 +104,7 @@ export function browserReportPlan(
   const sql = [
     `SELECT FLOOR((double2 - ${from}) / ${step}) AS bucket, ${totals}, ${sample} ${source} GROUP BY bucket ORDER BY bucket LIMIT 24`,
     ranking('blob4', pageSource),
-    ranking(
-      filter.source ? 'normalized_source' : analyticsSourceSql("IF(blob10 != '', blob10, blob6)"),
-      pageSource,
-    ),
+    ranking('normalized_source', filter.source ? pageSource : analyticsSourceFrom(pageSource)),
     `SELECT blob5 AS name, SUM(_sample_interval) AS count, MAX(double2) AS last_seen, ${sample} ${source} AND blob3 = 'event' GROUP BY name ORDER BY count DESC LIMIT 100`,
     `SELECT ${identities}, ${visits}, ${sample} ${source}`,
     ...dimensionBlobs.map(([key, blob]) => {
