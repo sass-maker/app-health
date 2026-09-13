@@ -1,4 +1,4 @@
-/** Analytics Engine CASE expression for historical source grouping. */
+/** Use Analytics Engine's documented IF function for historical source grouping. */
 export function analyticsSourceSql(
   expression: 'blob6' | 'blob10' | "IF(blob10 != '', blob10, blob6)",
 ): string {
@@ -33,14 +33,15 @@ export function analyticsSourceSql(
     Baidu: ['baidu.com'],
     Yandex: ['yandex.ru', 'yandex.com'],
   };
-  const clauses = [`WHEN ${value} = '' THEN 'Unknown'`];
+  const clauses: Array<[string, string]> = [[`${value} = ''`, 'Unknown']];
   for (const [label, values] of Object.entries(aliases))
-    clauses.push(
-      `WHEN ${value} IN (${values
+    clauses.push([
+      `${value} IN (${values
         .split(', ')
         .map((item) => `'${item}'`)
-        .join(', ')}) THEN '${label}'`,
-    );
+        .join(', ')})`,
+      label,
+    ]);
   for (const [label, hosts] of Object.entries(domains)) {
     const checks = hosts.flatMap((host) =>
       ['', 'www.', 'm.', 'mobile.', 'old.', 'l.', 'out.', 'news.', 'search.'].flatMap((prefix) => [
@@ -48,7 +49,10 @@ export function analyticsSourceSql(
         `'${prefix}${host}.'`,
       ]),
     );
-    clauses.push(`WHEN ${value} IN (${checks.join(', ')}) THEN '${label}'`);
+    clauses.push([`${value} IN (${checks.join(', ')})`, label]);
   }
-  return `CASE ${clauses.join(' ')} ELSE ${value} END`;
+  return clauses.reduceRight(
+    (otherwise, [condition, label]) => `IF(${condition}, '${label}', ${otherwise})`,
+    value,
+  );
 }

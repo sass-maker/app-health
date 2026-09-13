@@ -28,6 +28,8 @@ describe('analytics source SQL', () => {
     const insert = db.prepare('INSERT INTO sources VALUES (?)');
     for (const value of values) insert.run(value);
     const sql = analyticsSourceSql('blob6').replaceAll('blob6', 'value');
+    // SQLite accepts CASE, but Analytics Engine's supported conditional is IF.
+    expect(sql).not.toMatch(/\bCASE\b/);
     const rows = db.prepare(`SELECT value, ${sql} AS normalized FROM sources`).all() as Array<{
       value: string;
       normalized: string;
