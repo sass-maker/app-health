@@ -86,6 +86,8 @@ it('bounds queued events and never retries permanent collector rejection', async
   expect(api().diagnostics()).toMatchObject({ queued: 75, dropped: 31, retries: 0 });
 });
 it('survives disabled storage and malformed or oversized paths, and stores only referrer host', async () => {
+  api().stop();
+  vi.resetModules();
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
     throw new Error('disabled');
   });
@@ -93,6 +95,7 @@ it('survives disabled storage and malformed or oversized paths, and stores only 
     throw new Error('disabled');
   });
   vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://search.example/path?q=private');
+  await import('../public/tracker.js');
   api().page('/%ZZ');
   api().page('/' + 'abcd/'.repeat(100));
   api().page('/alice%40example.com');
