@@ -60,3 +60,20 @@ The Worker enables `global_fetch_strictly_public` so its own ingest hostname
 re-enters Cloudflare's public routing instead of bypassing the Worker. This is
 required for self-dogfooding; the ingestion exclusion prevents recursion. See
 [Cloudflare compatibility behavior](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public).
+
+## Production receipt — 2026-09-14
+
+A dedicated environment-scoped key is installed as a Worker secret. The existing
+App Health production environment now receives `/v1/apps`, `/v1/capabilities`,
+`/v1/endpoints`, `/v1/health` and `/v1/installation/status` summaries. D1 confirmed
+route inventory and endpoint capability timestamps. The signed-in Backend view
+confirmed actual request counts, error rates and p50/p95 histogram values.
+Initial values included 500 ms for `/v1/endpoints` and 100 ms for installation
+status; sample counts are too small for a performance assessment. Metrics can
+appear after the durable receipt because Analytics Engine ingestion is async.
+
+The first rollout exposed missing same-Worker public routing; enabling the
+compatibility flag restored delivery. Clean-checkout CI also exposed that the
+Worker needs the SDK artifact before type checking; its typecheck command now
+builds that workspace dependency first. No schema migration or SDK publication
+was needed.

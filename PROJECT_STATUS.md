@@ -1,6 +1,6 @@
 # app-health — PROJECT STATUS
 
-Last updated: 2026-09-12
+Last updated: 2026-09-14
 
 ## Why / What
 
@@ -34,6 +34,16 @@ canary totals matched all expected counts without retry inflation; see
 Local checks cover workerd/D1, browser setup flows, public-share revocation, SDK
 runtime compatibility, Swift delivery, retention, and milestone deduplication.
 
+## Backend dogfooding — 2026-09-14
+
+App Health now instruments its own dashboard APIs with the existing SDK and a
+dedicated environment-scoped private key. Delivery uses the public collector in
+`waitUntil`; ingestion and WebSocket routes are excluded to prevent recursion.
+Production D1 receipts and the signed-in Backend view confirm request counts,
+error rates and histogram-based p50/p95 latency. Cloudflare public fetch routing
+is explicitly enabled for same-Worker delivery. See
+[activation and verification](docs/backend-dogfooding.md) and issue #63.
+
 ## Dependencies
 
 ### External
@@ -46,6 +56,9 @@ runtime compatibility, Swift delivery, retention, and milestone deduplication.
 - None.
 
 ## Timeline
+
+- 2026-09-14 — released backend self-monitoring and verified persisted route
+  receipts plus live latency metrics in App Health’s own production project.
 
 - 2026-08-11 — moved the public unlock shell into the initial HTML response so
   its existing text LCP no longer waits for React to boot; retained the same

@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @saas-maker/app-health build && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "tsc --noEmit",
