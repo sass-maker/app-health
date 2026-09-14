@@ -1,6 +1,11 @@
 import { browserMetadata } from './browser-metadata.js';
 import { readPublicJson } from './public-body.js';
-import { BrowserReportFilter, BrowserBatchV1, type BrowserSummary } from '@app-health/contracts';
+import {
+  BrowserReportFilter,
+  BrowserBatchV1,
+  PRESENCE_TTL_MS,
+  type BrowserSummary,
+} from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 import type { AppHealthRepositories } from './repository.js';
@@ -126,11 +131,16 @@ export async function acceptBrowser(
         session_hash: await browserSessionScope(batch.app_id, batch.environment_id, session),
       }
     : batch;
+  const activeSession =
+    !batch.events.length ||
+    batch.events.some((event) => event.timestamp > batch.received_at - PRESENCE_TTL_MS)
+      ? session
+      : undefined;
   let response: Response;
   if (local) {
-    localAnalytics.ingest(durableBatch, session);
-    response = json(202, { accepted: batch.events.length, presence: true });
-  } else response = await enqueueBrowser(durableBatch, session, env);
+    localAnalytics.ingest(durableBatch, activeSession);
+    response = json(202, { accepted: batch.events.length, presence: !!activeSession });
+  } else response = await enqueueBrowser(durableBatch, activeSession, env);
   if (response.status === 202 && durableBatch.events.length) {
     await repos.capabilities?.recordCapability(
       durableBatch.app_id,

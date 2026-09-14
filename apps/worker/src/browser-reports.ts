@@ -42,7 +42,7 @@ function matchesSegment(
   const actual = {
     path: event.path,
     country: batch.metadata?.country || 'Unknown',
-    source: normalizeAnalyticsSource(batch.attribution?.source || event.referrer),
+    source: normalizeAnalyticsSource(batch.attribution?.source ?? event.referrer),
     device: batch.metadata?.device || 'Unknown',
     browser: batch.metadata?.browser || 'Unknown',
     channel: batch.metadata?.channel || 'Unknown',
@@ -112,7 +112,7 @@ export function localBrowserReport(
       else bucket.events++;
       if (event.type === 'pageview' || filter.event) {
         pages.set(event.path, (pages.get(event.path) ?? 0) + 1);
-        const source = normalizeAnalyticsSource(batch.attribution?.source || event.referrer);
+        const source = normalizeAnalyticsSource(batch.attribution?.source ?? event.referrer);
         sources.set(source, (sources.get(source) ?? 0) + 1);
       }
       if (event.name) {

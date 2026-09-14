@@ -134,6 +134,56 @@ describe('browser analytical data', () => {
     expect(sent[0].session_hash).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(sent[0])).not.toContain('raw-session-secret');
   });
+  it('stores delayed events without reviving presence and preserves explicit missing sources', async () => {
+    const old = batch();
+    old.events = [
+      { ...old.events[0], timestamp: old.received_at - 46_000, referrer: 'reddit.com' },
+    ];
+    old.attribution = {
+      source: '',
+      medium: '',
+      campaign: '',
+      content: '',
+      term: '',
+      entry_path: '/pricing',
+    };
+    const send = vi.fn();
+    const heartbeat = vi.fn();
+    const env = {
+      BROWSER_EVENTS: { send },
+      BROWSER_HISTORY: {} as NonNullable<
+        import('../src/browser-analytics.js').BrowserBindings['BROWSER_HISTORY']
+      >,
+      BROWSER_ARCHIVE: {} as NonNullable<
+        import('../src/browser-analytics.js').BrowserBindings['BROWSER_ARCHIVE']
+      >,
+      BROWSER_ANALYTICS: { writeDataPoint: vi.fn() },
+      WORKSPACE_PRESENCE: { getByName: () => ({ heartbeat, snapshot: vi.fn(), fetch: vi.fn() }) },
+    };
+    const response = await acceptBrowser(old, 'session', env, {} as AppHealthRepositories, false);
+    expect(await response.json()).toEqual({ accepted: 1, presence: false });
+    expect(heartbeat).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0].session_hash).toMatch(/^[a-f0-9]{64}$/);
+    projectBrowserBatch(old, env);
+    expect(env.BROWSER_ANALYTICS.writeDataPoint.mock.calls[0][0].blobs[9]).toBe('');
+    expect(localBrowserReport([old], { range: '24h' }, Date.now()).sources).toEqual([
+      { name: 'Unknown', count: 1 },
+    ]);
+    for (const events of [[], batch().events]) {
+      const fresh = await acceptBrowser(
+        { ...old, events },
+        'session',
+        env,
+        {} as AppHealthRepositories,
+        false,
+      );
+      expect(await fresh.json()).toMatchObject({ presence: true });
+    }
+    expect(heartbeat).toHaveBeenCalledTimes(2);
+    const local = await acceptBrowser(old, 'session', {}, {} as AppHealthRepositories, true);
+    expect(await local.json()).toMatchObject({ presence: false });
+  });
   it('keeps summary and reports in the same half-open event-time window', () => {
     vi.useFakeTimers();
     const store = new LocalBrowserAnalytics();

@@ -24,7 +24,7 @@ export function projectBrowserBatch(batch: CollectedBrowserBatch, env: BrowserBi
         batch.session_hash || '',
         batch.visitor_hash || '',
         batch.visit_type || '',
-        attribution.source || event.referrer,
+        batch.attribution?.source ?? event.referrer,
         attribution.medium,
         attribution.campaign,
         metadata.channel,

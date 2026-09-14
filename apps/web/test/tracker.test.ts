@@ -26,9 +26,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('ships under 3KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
-  // Identity, attribution and storage-failure handling remain within a 3 KB compressed budget.
-  expect(gzipSync(source).length).toBeLessThanOrEqual(3000);
+it('ships under 3.2KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
+  // Cross-tab locking, identity and attribution remain within a 3.2 KB compressed budget.
+  expect(gzipSync(source).length).toBeLessThanOrEqual(3200);
   api().page('/users/123?email=private@example.com#token');
   api().track('signup.completed');
   await api().flush();
@@ -128,16 +128,6 @@ it('supports strict session identity without persistent visitor fields', async (
   expect(BrowserBatchV1.safeParse(body).success).toBe(true);
   expect(body).not.toHaveProperty('visitor_id');
   expect(body).not.toHaveProperty('visit_type');
-});
-it('keeps a persistent visit across a day and emits empty heartbeats without inventing events', async () => {
-  await api().flush();
-  const first = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
-  vi.setSystemTime(Date.now() + 86400000);
-  await api().flush();
-  const second = JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body));
-  expect(second.session_id).toBe(first.session_id);
-  expect(second.visitor_id).toBe(first.visitor_id);
-  expect(second.events).toEqual([]);
 });
 
 it('shares an anonymous visitor across reloads, rotates visits after inactivity, and persists attribution', async () => {

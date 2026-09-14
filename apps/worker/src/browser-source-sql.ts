@@ -2,7 +2,7 @@ import { ANALYTICS_SOURCE_HOSTS, ANALYTICS_SOURCE_ALIASES } from '@app-health/co
 
 /** Project source fields once, then use a shallow tree within AE parser/size limits. */
 export function analyticsSourceFrom(source: string): string {
-  const raw = "IF(blob10!='',blob10,blob6)";
+  const raw = "IF(blob17!='' OR blob10!='',blob10,blob6)";
   const value = `substring(lower(${raw}),1,100)`;
   const dot = `position('.' IN ${raw})`;
   const prefixes = "'www.','m.','mobile.','old.','l.','out.','news.','search.'";

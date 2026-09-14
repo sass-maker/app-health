@@ -46,8 +46,12 @@ To publish aggregate live counts on a product website, use
 
 - Persistent anonymous visitors are the default for new installations. IDs stay in
   first-party local storage for up to 90 days, scoped by `data-project`; visits
-  expire after 30 minutes without meaningful activity. Same-origin tabs share
-  the visit. Heartbeats do not prolong inactivity or create historical events.
+  expire after 30 minutes without a pageview or explicit product event. Same-origin
+  tabs share the visit. Web Locks serialize identity changes where supported, so
+  simultaneous tabs do not create separate visitors. Without Web Locks, storage
+  sharing is best-effort and simultaneous creation can race. Heartbeats do not
+  prolong inactivity or create historical events; expired visits stop sending
+  idle heartbeats. Scrolls and pointer movement alone do not extend a visit.
 - `data-identity="session"` omits persistent visitor IDs. Blocked storage falls
   back to an in-memory session. Raw session and visitor IDs are hashed with the
   app/environment scope before queueing or archival. Legacy identity remains
@@ -57,7 +61,10 @@ To publish aggregate live counts on a product website, use
   visitors and sessions, never extrapolated as unique people.
 - Active means a heartbeat within 45 seconds. The Durable Object prunes on
   ten-second alarms; a connected dashboard can observe expiry up to ten seconds
-  later. Disconnected production counters display a dash until reconnection.
+  later. Delayed event batches older than this presence window are still stored,
+  but do not revive an old online session. A fresh empty heartbeat can update
+  presence without adding historical events. Disconnected production counters
+  display a dash until reconnection.
 - Automatic paths omit query strings and fragments and redact segments with
   digits, email delimiters, whitespace, or long values. Referrers contain only
   the hostname. Bounded campaign tags and coarse country/device/browser categories
@@ -172,6 +179,28 @@ without requiring UTMs and retains it across internal navigation in the session.
 Explicit UTM attribution still takes precedence. Missing referral evidence is
 reported as Unknown; apps that strip referrers cannot be reliably reconstructed.
 Arbitrary campaign source labels are preserved apart from case normalization.
+An expired visit resumed in the same document, reloaded, or restored from history
+must not inherit the document's old external referrer or campaign. A fresh external
+navigation can establish a new source. An explicit empty session source takes
+precedence over event referrers in both local and production reports; historical
+rows without session attribution retain their legacy fallback.
+
+`apps/web/e2e/tracker-sessions.spec.ts` exercises normal anchor clicks from
+controlled Reddit, X-shortener and Google source documents, a real HTTP 302,
+no-referrer policy, internal navigation, reloads, simultaneous tabs and returning
+visits against the local collector and reports. These are browser behavior tests,
+not proof that every social platform or mobile app supplies a referrer. The tested
+redirect preserves the browser source without extra landing-request cookies;
+there is no demonstrated need for an edge fallback in this change. A stripped
+referrer cannot be recovered by reading the destination request's Referer header.
+
+The tracker remains dependency-free and below a 3.2 KB gzip budget (raised from
+3 KB for cross-tab coordination and expiry correctness). Delivery is bounded to
+100 queued/waiting events, 25 per batch and three fetch attempts; retries keep
+stable batch/event IDs. Storage restrictions prevent reliable cross-tab or
+returning-visitor recognition, and browser termination can prevent final delivery.
+Identity is first-party and origin-scoped; it does not join people across devices
+or different domains.
 
 Countries appear in the default audience view and optionally in public reports.
 They come from Cloudflare request metadata already projected at ingestion, never

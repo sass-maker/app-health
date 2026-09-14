@@ -16,10 +16,16 @@
   let storage;
   let visitor;
   let visit;
+  let entered = ['reload', 'back_forward'].includes(
+    globalThis.performance.getEntriesByType?.('navigation')[0]?.type,
+  );
+  let documentVisit;
+  let recording;
+  let waiting = 0;
   try {
     storage = sessionOnly ? globalThis.sessionStorage : globalThis.localStorage;
   } catch {
-    /* Storage is optional. */
+    storage = undefined;
   }
   const uuid = (value) =>
     typeof value === 'string' &&
@@ -27,9 +33,8 @@
   const diagnostics = { accepted: 0, dropped: 0, retries: 0 };
 
   function readStored(key) {
-    if (!storage) return null;
     try {
-      return JSON.parse(storage.getItem(key) || 'null');
+      return JSON.parse(storage?.getItem(key) || 'null');
     } catch {
       storage = undefined;
       return null;
@@ -47,19 +52,21 @@
   }
   function attribution(path) {
     const url = new URL(path || location.href, location.href);
-    const clean = (value) =>
-      String(value || '')
+    const value = (name) =>
+      String(
+        (!entered && (url.searchParams.get(`utm_${name}`) || (name === 'source' && referrer()))) ||
+          '',
+      )
         .replace(/[^a-zA-Z0-9 _.,:+/-]/g, '')
         .slice(0, 100);
     return {
-      source: clean(url.searchParams.get('utm_source') || referrer()),
-      medium: clean(url.searchParams.get('utm_medium')),
-      campaign: clean(url.searchParams.get('utm_campaign')),
-      content: clean(url.searchParams.get('utm_content')),
-      term: clean(url.searchParams.get('utm_term')),
+      ...Object.fromEntries(
+        ['source', 'medium', 'campaign', 'content', 'term'].map((name) => [name, value(name)]),
+      ),
       entry_path: safePath(url.pathname),
     };
   }
+
   function recognizedVisitor(now) {
     if (sessionOnly || !storage) return undefined;
     const saved = readStored(visitorKey);
@@ -81,13 +88,15 @@
     );
   }
   function visitContext(meaningful = false, path = location.href) {
-    // Idle heartbeats reuse the last visit and never prolong its activity or identity.
-    if (!meaningful && visit) return contextOf(visit);
     const now = Date.now();
-    const freshVisitor = recognizedVisitor(now);
-    const visitorId = freshVisitor === undefined ? undefined : visitor.id;
     const saved = readStored(visitKey);
     if (validVisit(saved)) visit = saved;
+    if (!meaningful)
+      return validVisit(visit) && now >= visit.last && now - visit.last < 1800000
+        ? contextOf(visit)
+        : null;
+    const freshVisitor = recognizedVisitor(now);
+    const visitorId = freshVisitor === undefined ? undefined : visitor.id;
     if (
       !validVisit(visit) ||
       visit.visitor_id !== visitorId ||
@@ -102,9 +111,9 @@
         attribution: attribution(path),
       };
     }
-    if (meaningful) visit = { ...visit, last: now };
+    entered = true;
+    visit = { ...visit, last: now };
     if (storage && !writeStored(visitKey, visit)) {
-      // A failed write must not claim durable recognition.
       visit = { ...visit, visitor_id: undefined, type: undefined };
     }
     return contextOf(visit);
@@ -153,8 +162,15 @@
   }
 
   function payload() {
+    if (
+      pending &&
+      !pending.events.length &&
+      pending.context.session_id !== visitContext()?.session_id
+    )
+      pending = null;
     if (!pending) {
       const context = queue[0]?.context || visitContext();
+      if (!context) return null;
       const events = [];
       while (events.length < 25 && queue[0]?.context.session_id === context.session_id) {
         const { context: _context, ...event } = queue.shift();
@@ -172,10 +188,12 @@
   }
 
   async function flush() {
+    if (waiting) await recording;
     if (stopped || sending || document.visibilityState === 'hidden') return;
     clearTimeout(timer);
     timer = null;
     const body = payload();
+    if (!body) return;
     sending = true;
     const attempt = pending;
     const controller = new AbortController();
@@ -209,18 +227,34 @@
     }
   }
 
-  function emit(type, name, path) {
-    if (stopped || queue.length >= 100) {
+  function emit(...args) {
+    if (stopped || waiting + queue.length >= 100) {
       diagnostics.dropped++;
       return;
     }
+    if (!storage || sessionOnly || !navigator.locks) return record(...args);
+    waiting++;
+    recording = navigator.locks
+      .request(visitKey, () => record(...args))
+      .catch(() => {
+        storage = undefined;
+        record(...args);
+      })
+      .finally(() => {
+        waiting--;
+      });
+  }
+  function record(type, name, path) {
+    if (stopped) return;
+    const context = visitContext(true, path);
+    documentVisit ||= context.session_id;
     queue.push({
       event_id: crypto.randomUUID(),
       timestamp: Date.now(),
-      context: visitContext(true, path),
+      context,
       type,
       path: safePath(path),
-      referrer: referrer(),
+      referrer: context.session_id === documentVisit ? referrer() : '',
       ...(name ? { name } : {}),
     });
     schedule();
@@ -239,12 +273,17 @@
   function navigation() {
     if (location.pathname !== lastPath) page();
   }
-  function beacon() {
+  function restore({ persisted }) {
+    if (persisted) page();
+  }
+  async function beacon() {
+    if (waiting) await recording;
     if (pending || queue.length) {
       try {
-        navigator.sendBeacon(endpoint, new Blob([payload()], { type: 'text/plain' }));
+        const body = payload();
+        if (body) navigator.sendBeacon(endpoint, new Blob([body], { type: 'text/plain' }));
       } catch {
-        /* Not acknowledged. */
+        return;
       }
     }
   }
@@ -266,6 +305,7 @@
   history.replaceState = replace;
   window.addEventListener('popstate', navigation);
   window.addEventListener('pagehide', beacon);
+  window.addEventListener('pageshow', restore);
   document.addEventListener('visibilitychange', visibility);
   const heartbeat = setInterval(() => {
     if (document.visibilityState !== 'hidden') void flush();
@@ -274,7 +314,10 @@
     page,
     track,
     flush,
-    diagnostics: () => ({ ...diagnostics, queued: queue.length + (pending?.events.length || 0) }),
+    diagnostics: () => ({
+      ...diagnostics,
+      queued: waiting + queue.length + (pending?.events.length || 0),
+    }),
     stop() {
       stopped = true;
       request?.abort();
@@ -282,6 +325,7 @@
       clearInterval(heartbeat);
       window.removeEventListener('popstate', navigation);
       window.removeEventListener('pagehide', beacon);
+      window.removeEventListener('pageshow', restore);
       document.removeEventListener('visibilitychange', visibility);
       if (history.pushState === push) history.pushState = originalPush;
       if (history.replaceState === replace) history.replaceState = originalReplace;

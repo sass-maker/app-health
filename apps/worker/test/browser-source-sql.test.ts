@@ -10,9 +10,25 @@ import {
 import { analyticsSourceFrom, analyticsSourceSql } from '../src/browser-source-sql.js';
 
 describe('analytics source SQL', () => {
+  it('uses explicit session attribution even when empty and falls back only for historical rows', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec('CREATE TABLE sources (blob6 TEXT, blob10 TEXT, blob17 TEXT)');
+    db.exec(
+      "INSERT INTO sources VALUES ('reddit.com','','/entry'),('reddit.com','',''),('reddit.com','t.co','/entry')",
+    );
+    const rows = db
+      .prepare(
+        sqliteAnalyticsSql(
+          `SELECT ${analyticsSourceSql()} AS source ${analyticsSourceFrom('FROM sources')}`,
+        ),
+      )
+      .all();
+    expect(rows).toEqual([{ source: 'Unknown' }, { source: 'Reddit' }, { source: 'X' }]);
+    db.close();
+  });
   it('matches pure normalization for historical hostname and spoof fixtures', () => {
     const db = new DatabaseSync(':memory:');
-    db.exec("CREATE TABLE sources (blob6 TEXT, blob10 TEXT DEFAULT '')");
+    db.exec("CREATE TABLE sources (blob6 TEXT, blob10 TEXT DEFAULT '', blob17 TEXT DEFAULT '')");
     const values = [
       ' reddit.com ',
       'mobile.twitter.com',

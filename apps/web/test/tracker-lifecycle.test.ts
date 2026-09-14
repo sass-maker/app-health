@@ -180,3 +180,134 @@ it.each([
   expect(JSON.stringify(batches)).not.toContain('secret=value');
   expect(JSON.stringify(batches)).not.toContain('/user/status/private');
 });
+
+it('does not reuse the original document referrer after a visit expires', async () => {
+  tracker().stop();
+  history.replaceState({}, '', '/landing');
+  vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://www.reddit.com/r/example');
+  await install();
+  await tracker().flush();
+  const first = validPayloads()[0];
+  vi.setSystemTime(Date.now() + 1_800_001);
+  tracker().track('resumed');
+  await tracker().flush();
+  const second = validPayloads().at(-1)!;
+  expect(second.session_id).not.toBe(first.session_id);
+  expect(second.attribution?.source).toBe('');
+  expect(second.events[0].referrer).toBe('');
+});
+
+it('stops idle presence after the visit expires without inventing another session', async () => {
+  await tracker().flush();
+  vi.mocked(fetch).mockClear();
+  vi.setSystemTime(Date.now() + 1_800_001);
+  await tracker().flush();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it('adopts another tab’s current session for heartbeats without reviving its old session', async () => {
+  tracker().stop();
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+  await install();
+  await tracker().flush();
+  const original = validPayloads()[0];
+  const key = 'h:ahk_pub_lifecycle:w';
+  const next = { ...JSON.parse(values.get(key)!), id: crypto.randomUUID(), last: Date.now() };
+  values.set(key, JSON.stringify(next));
+  await tracker().flush();
+  const heartbeat = validPayloads().at(-1)!;
+  expect(heartbeat.session_id).not.toBe(original.session_id);
+  expect(heartbeat.session_id).toBe(next.id);
+  expect(heartbeat.events).toEqual([]);
+});
+
+it('does not replay an expired empty heartbeat after a delivery failure', async () => {
+  await tracker().flush();
+  vi.mocked(fetch).mockResolvedValue({ ok: false, status: 503 } as Response);
+  await tracker().flush();
+  vi.mocked(fetch).mockClear();
+  vi.setSystemTime(Date.now() + 1_800_001);
+  await tracker().flush();
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(['reload', 'back_forward'])('does not reuse an expired source on %s', async (type) => {
+  tracker().stop();
+  vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://reddit.com/old');
+  vi.stubGlobal('performance', { getEntriesByType: () => [{ type }] });
+  await install();
+  await tracker().flush();
+  expect(validPayloads()[0].attribution?.source).toBe('');
+});
+
+it('waits for cross-tab coordination before flushing and bounds waiting records', async () => {
+  tracker().stop();
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const request = vi.fn((_key: string, record: () => void) => gate.then(record));
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+  try {
+    await install();
+    for (let i = 0; i < 150; i++) tracker().track('queued');
+    expect(tracker().diagnostics()).toMatchObject({ queued: 100, dropped: 51 });
+    const flush = tracker().flush();
+    expect(fetch).not.toHaveBeenCalled();
+    release();
+    await flush;
+    expect(validPayloads()[0].events).toHaveLength(25);
+    expect(request).toHaveBeenCalledTimes(100);
+  } finally {
+    Reflect.deleteProperty(navigator, 'locks');
+  }
+});
+
+it('falls back to a stable unidentified session if browser locks are denied', async () => {
+  tracker().stop();
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: vi.fn().mockRejectedValue(new Error('SecurityError')) },
+  });
+  try {
+    await install();
+    await tracker().flush();
+    tracker().track('next');
+    await tracker().flush();
+    const [first, second] = validPayloads();
+    expect(first.session_id).toBe(second.session_id);
+    expect(first.visitor_id).toBeUndefined();
+    expect(second.visitor_id).toBeUndefined();
+    expect(tracker().diagnostics().accepted).toBe(2);
+  } finally {
+    Reflect.deleteProperty(navigator, 'locks');
+  }
+});
+
+it('records restored back-forward cache visits without duplicating the initial pageshow', async () => {
+  await tracker().flush();
+  const first = validPayloads()[0];
+  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: false }));
+  expect(tracker().diagnostics().queued).toBe(0);
+  vi.setSystemTime(Date.now() + 1_800_001);
+  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  await tracker().flush();
+  const restored = validPayloads().at(-1)!;
+  expect(restored.session_id).not.toBe(first.session_id);
+  expect(restored.events.map((event) => event.type)).toEqual(['pageview']);
+  expect(restored.attribution?.source).toBe('');
+});
