@@ -1,3 +1,4 @@
+import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
 import {
   selfAnalyticsConfig,
@@ -58,7 +59,8 @@ import {
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_OTLP_BODY_BYTES = 1024 * 1024;
 
-export interface Env extends AccountBindings, BrowserEnvironment, SelfAnalyticsBindings {
+export interface Env
+  extends AccountBindings, BrowserEnvironment, SelfAnalyticsBindings, SelfBackendBindings {
   APP_HEALTH_MODE?: string;
   APP_HEALTH_DASHBOARD_HOST?: string;
   APP_HEALTH_INGEST_HOST?: string;
@@ -779,7 +781,7 @@ async function publicAnalyticsPage(
   return response;
 }
 
-const worker = {
+const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
     const earlyResponse = handleEarlyRoutes(request, env, url);
@@ -823,6 +825,13 @@ const worker = {
       const accounts = await cleanupExpiredAccountRecords(env.DB);
       if (!accounts.ok) console.warn(JSON.stringify({ event: 'account_cleanup_failed' }));
     }
+  },
+};
+
+const worker = {
+  ...unmonitoredWorker,
+  fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
+    return monitorSelfRequest(request, env, ctx, () => unmonitoredWorker.fetch(request, env, ctx));
   },
 };
 

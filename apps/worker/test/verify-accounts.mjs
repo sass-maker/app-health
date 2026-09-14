@@ -49,9 +49,22 @@ if (bundle.status !== 0) throw new Error(bundle.stderr || bundle.stdout);
 const secret = 'synthetic-local-runtime-secret-at-least-32-characters';
 const selfAppId = 'self-analytics-canary';
 const selfEnvironmentId = 'self-analytics-production';
+const selfBackendKey = 'ahk_local_self_backend_runtime_only';
+const selfBatches = [];
+const selfReceipts = [];
 const mf = new Miniflare({
   cf: false,
   outboundService: async (request) => {
+    if (request.url === 'https://ingest.example.com/v1/ingest') {
+      selfBatches.push(await request.clone().json());
+      const response = await mf.dispatchFetch(request.url, {
+        method: request.method,
+        headers: request.headers,
+        body: await request.text(),
+      });
+      selfReceipts.push(response.status);
+      return response;
+    }
     if (request.url.endsWith('/analytics_engine/sql')) return Response.json({ data: [] });
     throw new Error('External providers are disabled in this test');
   },
@@ -84,6 +97,7 @@ const mf = new Miniflare({
   bindings: {
     APP_HEALTH_ACCOUNTS: 'enabled',
     APP_HEALTH_SELF_APP_ID: selfAppId,
+    APP_HEALTH_SELF_BACKEND_KEY: selfBackendKey,
     APP_HEALTH_SELF_ENVIRONMENT_ID: selfEnvironmentId,
     APP_HEALTH_DASHBOARD_HOST: 'dashboard.example.com',
     APP_HEALTH_INGEST_HOST: 'ingest.example.com',
@@ -118,6 +132,44 @@ try {
     .prepare('INSERT INTO environments (id, app_id, name, created_at) VALUES (?, ?, ?, ?)')
     .bind(selfEnvironmentId, selfAppId, 'production', Date.now())
     .run();
+  await db
+    .prepare(
+      'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+    )
+    .bind(
+      'self-backend-key',
+      selfAppId,
+      selfEnvironmentId,
+      createHash('sha256').update(selfBackendKey).digest('hex'),
+      Date.now(),
+    )
+    .run();
+  const selfResponse = await mf.dispatchFetch(
+    'https://dashboard.example.com/v1/health?private=excluded',
+  );
+  assert.equal(selfResponse.status, 200);
+  for (let attempt = 0; attempt < 50 && selfReceipts.length === 0; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.deepEqual(selfReceipts, [202], 'one collector request, no recursive monitoring');
+  assert.equal(selfBatches[0].events[0].route, '/v1/health');
+  assert.equal(JSON.stringify(selfBatches).includes('excluded'), false);
+  const observed = await db
+    .prepare('SELECT method, route FROM observed_endpoints WHERE app_id = ? AND environment_id = ?')
+    .bind(selfAppId, selfEnvironmentId)
+    .all();
+  assert.deepEqual(observed.results, [{ method: 'GET', route: '/v1/health' }]);
+  const installation = await db
+    .prepare(
+      'SELECT runtime, last_seen FROM installation_status WHERE app_id = ? AND environment_id = ?',
+    )
+    .bind(selfAppId, selfEnvironmentId)
+    .first();
+  assert.equal(installation.runtime, 'worker');
+  assert.ok(installation.last_seen > 0);
+  log(
+    'Self backend runtime: actual SDK HTTP ingestion, persisted project/environment route, no recursion verified.',
+  );
   await db
     .prepare(
       'INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, ?, ?)',
