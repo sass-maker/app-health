@@ -55,3 +55,8 @@ fail-open behavior, response identity, privacy, concurrency and exclusions.
 actual workerd SDK transport and collector with a synthetic scoped key, and
 checks the persisted D1 route and installation receipt. Its outbound network is
 local-only; it does not provision or contact production.
+
+The Worker enables `global_fetch_strictly_public` so its own ingest hostname
+re-enters Cloudflare's public routing instead of bypassing the Worker. This is
+required for self-dogfooding; the ingestion exclusion prevents recursion. See
+[Cloudflare compatibility behavior](https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public).

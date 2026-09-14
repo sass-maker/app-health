@@ -24,7 +24,7 @@ await writeFile(
     name: 'app-health-local-accounts-check',
     main: join(root, 'src/analytics-entry.ts'),
     compatibility_date: '2026-07-22',
-    compatibility_flags: ['nodejs_compat'],
+    compatibility_flags: ['nodejs_compat', 'global_fetch_strictly_public'],
   }),
 );
 const bundle = spawnSync(
@@ -71,7 +71,7 @@ const mf = new Miniflare({
   modulesRoot: join(scratch, 'bundle'),
   modules: [{ type: 'ESModule', path: join(scratch, 'bundle/analytics-entry.js') }],
   compatibilityDate: '2026-07-22',
-  compatibilityFlags: ['nodejs_compat'],
+  compatibilityFlags: ['nodejs_compat', 'global_fetch_strictly_public'],
   d1Databases: ['DB'],
   serviceBindings: {
     ASSETS: async () =>
