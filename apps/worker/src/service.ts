@@ -171,6 +171,16 @@ export class AppHealthService {
     if (!resolution.ok) return resolution;
     const scope = resolution.scope;
     const batchId = batch.batch_id ?? (await legacyBatchID(batch));
+    if (this.repos.durableEndpoints) {
+      return this.persistDurableEvents(
+        scope,
+        batch.runtime,
+        batch.release,
+        batch.events,
+        now,
+        batchId,
+      );
+    }
     const seen = await this.repos.dedupe.markSeen(scope.app_id, scope.environment_id, batchId, now);
     if (!seen) return { ok: true, accepted: 0, duplicates: batch.events.length };
     try {
@@ -219,6 +229,20 @@ export class AppHealthService {
     let accepted = 0;
     let duplicates = 0;
     for (const group of resolvedGroups) {
+      if (this.repos.durableEndpoints) {
+        const result = await this.persistDurableEvents(
+          group.scope,
+          runtime,
+          release,
+          group.events,
+          now,
+        );
+        if (result.ok) {
+          accepted += result.accepted;
+          duplicates += result.duplicates;
+        }
+        continue;
+      }
       const acceptedEvents: EndpointEvent[] = [];
       const acceptedEventIds: string[] = [];
       for (const event of group.events) {
@@ -297,14 +321,55 @@ export class AppHealthService {
     };
   }
 
-  private async persistEvents(
+  private async persistDurableEvents(
     scope: ResolvedScope,
     runtime: Runtime,
     release: string | undefined,
-    acceptedEvents: readonly EndpointEvent[],
-    duplicates: number,
+    events: readonly EndpointEvent[],
     now: number,
+    batchId?: string,
   ): Promise<IngestResult> {
+    // Auxiliary records are idempotent and run before canonical acceptance. A
+    // failure can then be retried without losing a measurement or its receipt.
+    await this.recordEndpointMetadata(scope, runtime, events, now);
+    const accepted = await this.repos.durableEndpoints!.accept(
+      scope.app_id,
+      scope.environment_id,
+      runtime,
+      release,
+      events,
+      { now: now, batchId: batchId },
+    );
+    if (accepted.length && this.repos.buckets.upsertEvents) {
+      try {
+        await this.repos.buckets.upsertEvents(
+          scope.app_id,
+          scope.environment_id,
+          runtime,
+          release,
+          accepted,
+        );
+      } catch {
+        // The canonical transaction already committed. Retrying it must not
+        // increment counters again. AE remains a best-effort projection.
+        console.warn(
+          JSON.stringify({
+            event: 'endpoint_projection_failed',
+            app_id: scope.app_id,
+            environment_id: scope.environment_id,
+          }),
+        );
+      }
+    }
+    return { ok: true, accepted: accepted.length, duplicates: events.length - accepted.length };
+  }
+
+  private async recordEndpointMetadata(
+    scope: ResolvedScope,
+    runtime: Runtime,
+    acceptedEvents: readonly EndpointEvent[],
+    now: number,
+  ): Promise<void> {
     await this.repos.inventory?.recordObserved(scope.app_id, scope.environment_id, acceptedEvents);
     await this.repos.failures?.recordFailures(scope.app_id, scope.environment_id, acceptedEvents);
     if (acceptedEvents.length > 0) {
@@ -316,6 +381,17 @@ export class AppHealthService {
         now,
       );
     }
+  }
+
+  private async persistEvents(
+    scope: ResolvedScope,
+    runtime: Runtime,
+    release: string | undefined,
+    acceptedEvents: readonly EndpointEvent[],
+    duplicates: number,
+    now: number,
+  ): Promise<IngestResult> {
+    await this.recordEndpointMetadata(scope, runtime, acceptedEvents, now);
     if (this.repos.buckets.upsertEvents) {
       await this.repos.buckets.upsertEvents(
         scope.app_id,
@@ -342,6 +418,7 @@ export class AppHealthService {
       durationMs: event.duration_ms,
       timestamp: event.timestamp,
       upstreamSampled: event.upstream_sampled,
+      responseBytes: event.response_bytes,
     });
   }
 
@@ -362,8 +439,11 @@ export class AppHealthService {
     window: Window,
     now: number,
   ): Promise<EndpointQueryResponseV1> {
-    const from = now - WINDOW_MS[window];
-    const buckets = await this.repos.buckets.queryBuckets(appId, envId, from, now);
+    // Durable summaries cannot select fractions of a minute. Use a stable,
+    // completed UTC window instead of including events outside the requested range.
+    const queryNow = this.repos.durableEndpoints ? Math.floor(now / BUCKET_MS) * BUCKET_MS : now;
+    const from = queryNow - WINDOW_MS[window];
+    const buckets = await this.repos.buckets.queryBuckets(appId, envId, from, queryNow);
     // For the seeded demo app, include seeded buckets so the dashboard renders
     // a populated table even before any real ingest traffic.
     if (appId === SEED_APP_ID && envId === SEED_ENV_ID) {
@@ -375,7 +455,7 @@ export class AppHealthService {
         }
       }
     }
-    const endpoints = mergeBuckets(buckets, window, now);
+    const endpoints = mergeBuckets(buckets, window, queryNow);
     const measured = new Set(
       endpoints.map((endpoint) => `${endpoint.method}\u0000${endpoint.route}`),
     );
@@ -396,6 +476,7 @@ export class AppHealthService {
     }
     return {
       refreshed_at: now,
+      ...(this.repos.durableEndpoints ? { window_end: queryNow } : {}),
       window,
       endpoints,
     };

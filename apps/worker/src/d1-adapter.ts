@@ -32,6 +32,7 @@ import type {
 import { MAX_ENVIRONMENTS_PER_APP } from './repository.js';
 
 export interface D1RunResult {
+  results?: Record<string, unknown>[];
   success: boolean;
   meta: { changes?: number };
 }

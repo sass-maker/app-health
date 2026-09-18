@@ -241,6 +241,11 @@ class ProductionStatement implements D1PreparedStatement {
     return { results: [] as T[] };
   }
   async run(): Promise<D1RunResult> {
+    // Routing-only fixture; transactional storage behavior uses real workerd/D1.
+    if (this.sql.includes("SELECT DISTINCT json_extract(event, '$.id') AS id FROM unseen")) {
+      const events = JSON.parse(String(this.values[0])) as { id: string }[];
+      return { success: true, meta: { changes: 0 }, results: events.map(({ id }) => ({ id })) };
+    }
     return { success: true, meta: { changes: 1 } };
   }
 }
@@ -250,7 +255,7 @@ class ProductionDatabase implements D1DatabaseLike {
     return new ProductionStatement(query);
   }
   async batch(statements: D1PreparedStatement[]) {
-    return statements.map(() => ({ success: true, meta: { changes: 1 } }));
+    return Promise.all(statements.map((statement) => statement.run()));
   }
 }
 

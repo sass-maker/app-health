@@ -43,6 +43,12 @@ export class AnalyticsEngineBuckets implements BucketRepository {
   constructor(
     private readonly dataset: AnalyticsEngineDatasetLike,
     private readonly query: (sql: string) => Promise<QueryRow[]>,
+    private readonly durableQuery?: (
+      appId: string,
+      envId: string,
+      from: number,
+      to: number,
+    ) => Promise<BucketV1[]>,
   ) {}
 
   validateEvents(
@@ -125,6 +131,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
           runtime,
           point.release,
           point.upstreamSampled ? 'sampled' : '',
+          ...(this.durableQuery ? ['durable-v1'] : []),
         ],
         doubles: [point.count, point.errors, point.duration, point.lastSeen],
       });
@@ -132,12 +139,25 @@ export class AnalyticsEngineBuckets implements BucketRepository {
   }
 
   async queryBuckets(appId: string, envId: string, from: number, to: number): Promise<BucketV1[]> {
+    const results = await Promise.all([
+      this.queryLegacyBuckets(appId, envId, from, to),
+      this.durableQuery?.(appId, envId, from, to) ?? Promise.resolve([]),
+    ]);
+    return results.flat();
+  }
+
+  private async queryLegacyBuckets(
+    appId: string,
+    envId: string,
+    from: number,
+    to: number,
+  ): Promise<BucketV1[]> {
     windowFor(to - from);
     const scope = await telemetryScope(appId, envId);
     // Analytics Engine is append-only. This exact release was a manually
     // injected connectivity check, not application traffic, so query-tombstone
     // it after its durable D1 inventory and installation state are removed.
-    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
+    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' ${this.durableQuery ? "AND blob7 != 'durable-v1'" : ''} AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
     const rows = await this.query(sql);
     if (rows.length > MAX_QUERY_ROWS)
       throw new Error('Analytics Engine query returned too many rows');
