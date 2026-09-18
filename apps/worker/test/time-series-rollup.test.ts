@@ -22,8 +22,21 @@ describe('time-series rollup primitives', () => {
   });
 
   it('merges histogram counts before percentile calculation', () => {
-    expect(mergeHistograms([1, 2, 0], [3, 0, 4])).toEqual([4, 2, 4]);
-    expect(() => mergeHistograms([1], [1, 2])).toThrow('incompatible');
+    expect(
+      mergeHistograms(
+        { schema: 'latency-v1', bins: [1, 2, 0] },
+        { schema: 'latency-v1', bins: [3, 0, 4] },
+      ),
+    ).toEqual([4, 2, 4]);
+    expect(() =>
+      mergeHistograms(
+        { schema: 'latency-v1', bins: [1, 2] },
+        { schema: 'latency-v2', bins: [1, 2] },
+      ),
+    ).toThrow('incompatible');
+    expect(() =>
+      mergeHistograms({ schema: 'latency-v1', bins: [1] }, { schema: 'latency-v1', bins: [1, 2] }),
+    ).toThrow('incompatible');
   });
 
   it('canonicalizes dimension order without allowing a Cartesian cube key', () => {

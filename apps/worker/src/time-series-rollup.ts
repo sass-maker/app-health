@@ -27,11 +27,22 @@ export function timeSeriesBucketStart(timestamp: number, resolution: TimeSeriesR
   return Math.floor(timestamp / width) * width;
 }
 
-export function mergeHistograms(left: readonly number[], right: readonly number[]): number[] {
-  if (left.length !== right.length || left.length === 0 || left.length > 64)
+export type HistogramState = {
+  schema: string;
+  bins: readonly number[];
+};
+
+export function mergeHistograms(left: HistogramState, right: HistogramState): number[] {
+  if (
+    !left.schema ||
+    left.schema !== right.schema ||
+    left.bins.length !== right.bins.length ||
+    left.bins.length === 0 ||
+    left.bins.length > 64
+  )
     throw new Error('incompatible histograms');
-  return left.map((value, index) => {
-    const other = right[index];
+  return left.bins.map((value, index) => {
+    const other = right.bins[index];
     if (!Number.isSafeInteger(value) || value < 0 || !Number.isSafeInteger(other) || other < 0)
       throw new Error('invalid histogram count');
     const merged = value + other;

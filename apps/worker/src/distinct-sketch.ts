@@ -20,8 +20,12 @@ function denseDecode(value: string, precision: number): Uint8Array {
   const binary = atob(value);
   const registers = registersFor(precision);
   if (binary.length !== registers.length) throw new Error('invalid dense distinct sketch');
-  for (let index = 0; index < binary.length; index += 1)
-    registers[index] = binary.charCodeAt(index);
+  const maxRank = 64 - precision + 1;
+  for (let index = 0; index < binary.length; index += 1) {
+    const register = binary.charCodeAt(index);
+    if (register > maxRank) throw new Error('invalid dense distinct sketch register');
+    registers[index] = register;
+  }
   return registers;
 }
 

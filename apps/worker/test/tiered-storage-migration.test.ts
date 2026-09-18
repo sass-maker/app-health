@@ -3,12 +3,12 @@ import { DatabaseSync } from 'node:sqlite';
 import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-function migratedDb() {
+function migratedDb(upTo = '0016') {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   const migrations = new URL('../migrations/', import.meta.url);
   for (const file of readdirSync(migrations)
-    .filter((file) => file.endsWith('.sql'))
+    .filter((file) => file.endsWith('.sql') && file.slice(0, 4) <= upTo)
     .sort())
     db.exec(readFileSync(new URL(file, migrations), 'utf8'));
   return db;
@@ -23,13 +23,13 @@ function seedScope(db: DatabaseSync) {
 
 describe('tiered analytics storage migration (0017)', () => {
   it('applies after all prior migrations and remains replayable', () => {
-    const db = migratedDb();
-    db.exec(
-      readFileSync(
-        new URL('../migrations/0017_tiered_analytics_storage.sql', import.meta.url),
-        'utf8',
-      ),
+    const db = migratedDb('0016');
+    const migration = readFileSync(
+      new URL('../migrations/0017_tiered_analytics_storage.sql', import.meta.url),
+      'utf8',
     );
+    db.exec(migration);
+    db.exec(migration);
     expect(
       db
         .prepare(
@@ -47,7 +47,13 @@ describe('tiered analytics storage migration (0017)', () => {
   });
 
   it('enforces verified lineage and exactly-once source-bucket receipts', () => {
-    const db = migratedDb();
+    const db = migratedDb('0016');
+    db.exec(
+      readFileSync(
+        new URL('../migrations/0017_tiered_analytics_storage.sql', import.meta.url),
+        'utf8',
+      ),
+    );
     seedScope(db);
     const source = 'browser-v2/2026/09/18/source.jsonl.gz';
     db.prepare(
@@ -71,6 +77,7 @@ describe('tiered analytics storage migration (0017)', () => {
     );
     receipt.run(source, 'a'.repeat(64));
     expect(() => receipt.run(source, 'a'.repeat(64))).toThrow();
+    expect(() => receipt.run(source, 'b'.repeat(64))).toThrow('source hash mismatch');
     expect(() =>
       db
         .prepare(

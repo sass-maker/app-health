@@ -151,6 +151,7 @@ export const TimeSeriesRollupV1 = z
     dimensions: z.array(RollupDimensionV1).max(2),
     count: z.number().int().nonnegative(),
     sum: z.number().finite().nonnegative().optional(),
+    histogram_schema: z.string().min(1).max(100).optional(),
     histogram: z.array(z.number().int().nonnegative()).max(64).optional(),
     distinct: SparseDistinctSketchV1.optional(),
   })
@@ -159,6 +160,11 @@ export const TimeSeriesRollupV1 = z
     const names = rollup.dimensions.map((dimension) => dimension.name);
     if (new Set(names).size !== names.length)
       context.addIssue({ code: z.ZodIssueCode.custom, message: 'dimension names must be unique' });
+    if (rollup.histogram !== undefined && rollup.histogram_schema === undefined)
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'histogram schema is required when histogram bins are present',
+      });
   });
 export type TimeSeriesRollup = z.infer<typeof TimeSeriesRollupV1>;
 

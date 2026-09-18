@@ -47,4 +47,19 @@ describe('mergeable distinct sketches', () => {
       new DistinctSketchAccumulator(12).merge(new DistinctSketchAccumulator(13).snapshot()),
     ).toThrow('different precision');
   });
+
+  it('rejects dense sketches with impossible register ranks', () => {
+    const dense = new DistinctSketchAccumulator(10);
+    for (let index = 0; index <= 256; index += 1) dense.addDigest(digest(`dense-${index}`));
+    const snapshot = dense.snapshot();
+    const bytes = atob(snapshot.registers);
+    const corrupted = btoa(String.fromCharCode(255) + bytes.slice(1));
+    expect(
+      () =>
+        new DistinctSketchAccumulator(10, {
+          ...snapshot,
+          registers: corrupted,
+        }),
+    ).toThrow('register');
+  });
 });

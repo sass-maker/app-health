@@ -111,6 +111,26 @@ describe('time-series storage contracts', () => {
     ).toBe(false);
   });
 
+  it('requires histogram schema identity whenever bins are persisted', () => {
+    const base = {
+      schema_version: 1,
+      workspace_id: 'workspace',
+      app_id: 'app',
+      environment_id: 'production',
+      product: 'api',
+      resolution: '1h',
+      bucket_start: 0,
+      metric: 'latency',
+      dimensions: [],
+      count: 3,
+      histogram: [1, 2],
+    } as const;
+    expect(TimeSeriesRollupV1.safeParse(base).success).toBe(false);
+    expect(TimeSeriesRollupV1.safeParse({ ...base, histogram_schema: 'latency-v1' }).success).toBe(
+      true,
+    );
+  });
+
   it('retains session facts needed for duration, bounce and exit metrics', () => {
     expect(
       SessionSummaryV1.safeParse({

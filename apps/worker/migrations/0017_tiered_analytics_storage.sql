@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS analytics_rollups (
   dimensions TEXT NOT NULL,
   count INTEGER NOT NULL CHECK (count >= 0),
   sum REAL,
+  histogram_schema TEXT,
   histogram BLOB,
   distinct_sketch BLOB,
   rollup_version INTEGER NOT NULL,
@@ -47,7 +48,8 @@ CREATE TABLE IF NOT EXISTS analytics_rollups (
     workspace_id, app_id, environment_id, product, resolution,
     bucket_start, metric, dimension_key
   ),
-  FOREIGN KEY (environment_id, app_id) REFERENCES environments (id, app_id)
+  FOREIGN KEY (environment_id, app_id) REFERENCES environments (id, app_id),
+  CHECK (histogram IS NULL OR histogram_schema IS NOT NULL)
 );
 
 CREATE INDEX IF NOT EXISTS idx_analytics_rollups_range
@@ -71,6 +73,17 @@ CREATE TABLE IF NOT EXISTS analytics_compaction_receipts (
 
 CREATE INDEX IF NOT EXISTS idx_analytics_compaction_receipts_bucket
   ON analytics_compaction_receipts (resolution, bucket_start, applied_at);
+
+CREATE TRIGGER IF NOT EXISTS analytics_compaction_receipts_source_hash
+BEFORE INSERT ON analytics_compaction_receipts
+FOR EACH ROW
+WHEN (SELECT content_sha256 FROM analytics_archive_segments WHERE object_key = NEW.source_key)
+  IS NULL
+  OR (SELECT content_sha256 FROM analytics_archive_segments WHERE object_key = NEW.source_key)
+    <> NEW.source_sha256
+BEGIN
+  SELECT RAISE(ABORT, 'compaction receipt source hash mismatch');
+END;
 
 CREATE TABLE IF NOT EXISTS analytics_rollup_repairs (
   workspace_id TEXT NOT NULL,

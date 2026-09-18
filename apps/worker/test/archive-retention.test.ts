@@ -25,14 +25,14 @@ describe('browser archive retention guard', () => {
     ).toEqual([]);
   });
 
-  it('returns only sources with a distinct, verified and count-equivalent successor', () => {
+  it('does not authorize deletion from fabricated equal-count replacement proof', () => {
     expect(
       supersededArchiveSources([
         { ...proof, state: 'verified' },
         { ...proof, state: 'verified', source_key: proof.replacement_key },
         { ...proof, state: 'verified', source_rows: 13 },
       ]),
-    ).toEqual([proof.source_key]);
+    ).toEqual([]);
   });
 
   it('fails closed for malformed proof records', () => {

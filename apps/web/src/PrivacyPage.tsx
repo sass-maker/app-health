@@ -17,7 +17,7 @@ const sections = [
   ],
   [
     'Storage and retention',
-    'Cloudflare hosts the service, its database, aggregate analytics, and archive storage. Compressed analytics facts have no application-level age expiry; physical files may be merged only after a verified replacement preserves their logical rows and event counts. Application logs retain their full details for 30 days, while long-term log rollups can retain aggregate counts without message properties. Endpoint failure details retain 24 hours; endpoint counters and latency histograms use separate aggregate storage. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained.',
+    'Cloudflare hosts the service, its database, aggregate analytics, and archive storage. The application currently authorizes no age-based deletion of compressed analytics facts, but the deployed R2 provider lifecycle may still expire older physical archive objects until that lifecycle is removed and independently verified. Future physical replacement requires cryptographic and content-equivalence verification; equal counts alone are not sufficient. Application logs retain their full details for 30 days, while long-term log rollups can retain aggregate counts without message properties. Endpoint failure details retain 24 hours; endpoint counters and latency histograms use separate aggregate storage. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained.',
   ],
   [
     'Sharing and service providers',

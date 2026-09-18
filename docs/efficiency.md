@@ -23,15 +23,15 @@ alarms. R2 objects are immutable and retried; the batch dedupe ledger retains
 identities for 31 days. SQLite bounds pending batches, pending bytes, stage
 batch size, and ledger rows so backlog growth fails closed and can drain.
 
-Browser archive objects are durable facts, not a cache. Application archive
-expiry is suspended: the existing gzip archive has no verified compacted
-successor, so age alone cannot authorize deleting it. Physical source objects
-may eventually be superseded by larger Parquet/Iceberg files, but only after a
-versioned proof verifies distinct source and replacement keys plus equal row and
-event counts. **Release prerequisite:** remove the independent production R2
-30-day lifecycle rule and verify it with the provider. Changing application code
-does not disable that rule. Raw application logs retain their separate 30-day
-hot retention; durable log rollups are tracked separately.
+Browser archive objects are durable facts, not a cache. No application path
+currently authorizes archive-source deletion: counts and metadata alone do not
+prove cryptographic or content equivalence. Physical source objects may
+eventually be superseded by larger Parquet/Iceberg files, but only after a
+compactor verifies the actual source and replacement contents. **Release
+prerequisite:** remove the independent production R2 30-day lifecycle rule and
+verify it with the provider. Changing application code does not disable that
+rule. Raw application logs retain their separate 30-day hot retention; durable
+log rollups are tracked separately.
 
 ### Endpoint correctness foundation (prepared, not released)
 
