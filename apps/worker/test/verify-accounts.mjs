@@ -165,6 +165,60 @@ try {
     )
     .bind(selfAppId, selfEnvironmentId)
     .first();
+  const durable = await db
+    .prepare(
+      `SELECT resolution_ms, request_count FROM endpoint_rollups
+    WHERE app_id = ? AND environment_id = ? AND route = '/v1/health' ORDER BY resolution_ms`,
+    )
+    .bind(selfAppId, selfEnvironmentId)
+    .all();
+  assert.deepEqual(
+    durable.results,
+    [60000, 3600000, 86400000].map((resolution_ms) => ({ resolution_ms, request_count: 1 })),
+  );
+  const retry = await mf.dispatchFetch('https://ingest.example.com/v1/ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${selfBackendKey}` },
+    body: JSON.stringify(selfBatches[0]),
+  });
+  assert.equal(retry.status, 202);
+  assert.deepEqual(await retry.json(), { accepted: 0, duplicates: 1 });
+  const afterRetry = await db
+    .prepare('SELECT SUM(request_count) AS total FROM endpoint_rollups WHERE app_id = ?')
+    .bind(selfAppId)
+    .first();
+  assert.equal(afterRetry.total, 3, 'one measurement in each resolution, no retry inflation');
+  const completedBatch = {
+    ...selfBatches[0],
+    batch_id: randomUUID(),
+    events: selfBatches[0].events.map((event) => ({
+      ...event,
+      event_id: randomUUID(),
+      route: '/durable-read-proof',
+      timestamp: Date.now() - 120000,
+    })),
+  };
+  const completedIngest = await mf.dispatchFetch('https://ingest.example.com/v1/ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${selfBackendKey}` },
+    body: JSON.stringify(completedBatch),
+  });
+  assert.equal(completedIngest.status, 202);
+  const endpointReport = await mf.dispatchFetch(
+    `https://dashboard.example.com/v1/endpoints?app_id=${selfAppId}&environment_id=${selfEnvironmentId}&window=15m`,
+    {
+      headers: { authorization: 'Bearer synthetic-owner' },
+    },
+  );
+  assert.equal(endpointReport.status, 200, await endpointReport.clone().text());
+  const durableReport = await endpointReport.json();
+  assert.equal(durableReport.window_end % 60000, 0);
+  assert.equal(
+    durableReport.endpoints.find((endpoint) => endpoint.route === '/durable-read-proof')
+      ?.request_count,
+    1,
+    'the actual backend report reads durable data even with an empty AE projection',
+  );
   assert.equal(installation.runtime, 'worker');
   assert.ok(installation.last_seen > 0);
   log(

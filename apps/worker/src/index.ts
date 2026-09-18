@@ -1,3 +1,5 @@
+import { readEndpointBuckets } from './endpoint-read.js';
+import { D1EndpointWriter } from './endpoint-durable.js';
 import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
 import {
@@ -125,15 +127,18 @@ async function resolveAdapter(env: Env): Promise<AdapterBundle | null> {
     !env.APP_HEALTH_INGEST_ORIGIN
   )
     return null;
+  const db = env.DB;
   const buckets = new AnalyticsEngineBuckets(
     env.TELEMETRY,
     createAnalyticsQuery({
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       token: env.ANALYTICS_ENGINE_QUERY_TOKEN,
     }),
+    (appId, envId, from, to) => readEndpointBuckets(db, appId, envId, from, to),
   );
   const control = new D1ControlPlane(env.DB);
   const repos = control.asRepositories(buckets);
+  repos.durableEndpoints = new D1EndpointWriter(env.DB);
   return {
     repos,
     service: new AppHealthService(repos),
@@ -730,6 +735,7 @@ function workspaceBundle(
   workspaceId: string | null,
 ): AdapterBundle {
   const repos = new D1ControlPlane(db, workspaceId).asRepositories(bundle.repos.buckets);
+  repos.durableEndpoints = bundle.repos.durableEndpoints;
   return { ...bundle, repos, service: new AppHealthService(repos) };
 }
 
@@ -818,6 +824,7 @@ const unmonitoredWorker = {
     if (!env.DB) return;
     const control = new D1ControlPlane(env.DB);
     await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);
+    await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());
     await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupLogsExpired(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupBrowserQuotaExpired(Date.now() - 60 * 60 * 1000);

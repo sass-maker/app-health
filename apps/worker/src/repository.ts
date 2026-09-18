@@ -6,6 +6,8 @@
 // Every operation is scoped to an app and environment. Raw request events are
 // never persisted: ingest updates one-minute aggregate buckets only.
 
+import type { DurableEndpointWriter } from './endpoint-durable.js';
+
 import type {
   CapabilityId,
   CapabilityState,
@@ -237,6 +239,7 @@ export const MAX_ENVIRONMENTS_PER_APP = 20;
 
 /** Aggregate of all V0 repositories. The in-memory adapter implements this. */
 export interface AppHealthRepositories {
+  durableEndpoints?: DurableEndpointWriter;
   capabilities?: CapabilityRepository;
   apps: AppRepository;
   environments: EnvironmentRepository;
