@@ -482,7 +482,6 @@ export class AppHealthService {
     };
   }
 
-
   /** Query the latest retained 4xx/5xx details for one app environment. */
   /** Server ingest of owner-authored application logs, authenticated with a product ingest key. */
   async ingestLogs(
