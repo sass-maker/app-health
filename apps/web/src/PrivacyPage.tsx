@@ -17,7 +17,7 @@ const sections = [
   ],
   [
     'Storage and retention',
-    'Cloudflare hosts the service, its database, aggregate analytics, and archive storage. Application logs and compressed browser archives have a 30-day retention policy. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained. Aggregate analytics use a separate storage lifecycle; they are not covered by the raw archive expiry promise.',
+    'Cloudflare hosts the service, its database, aggregate analytics, and archive storage. Compressed analytics facts have no application-level age expiry; physical files may be merged only after a verified replacement preserves their logical rows and event counts. Application logs retain their full details for 30 days, while long-term log rollups can retain aggregate counts without message properties. Endpoint failure details retain 24 hours; endpoint counters and latency histograms use separate aggregate storage. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained.',
   ],
   [
     'Sharing and service providers',
@@ -44,7 +44,7 @@ export function PrivacyPage(): JSX.Element {
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <p className="text-sm text-muted-foreground">Updated September 12, 2026</p>
+        <p className="text-sm text-muted-foreground">Updated September 13, 2026</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">Privacy at App Health</h1>
         <p className="mt-4 leading-7 text-muted-foreground">
           App Health is a Fleet product operated by Sarthak Agrawal. This notice explains the

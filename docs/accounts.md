@@ -59,12 +59,16 @@ account. Browser UI fixtures are not proof of a successful Google callback.
 
 ## Production readiness — released 2026-09-12
 
-The unified Worker, analytics Queue/DLQ, R2 bucket with a 30-day lifecycle,
+The unified Worker, analytics Queue/DLQ, R2 bucket, older 30-day lifecycle,
 SQLite Durable Objects, dedicated Google client, Worker secrets, and additive
 migrations `0007_accounts.sql` through `0011_account_retention.sql` are deployed.
 The applied migrations have a private backup. A real Google callback created
 the owner's workspace, and project creation and server milestone logs were
 verified in production. Existing unrelated legacy projects remain unclaimed.
+The Worker no longer treats archive age as deletion evidence. Removing the
+older provider lifecycle is a separate production-config change tracked in
+issue #62; until that change is approved and verified, production still has the
+old physical expiry.
 
 Two-account isolation, invalid callbacks, and retention cleanup are verified by
 the real local workerd/D1 suite; no second production person's account was used
