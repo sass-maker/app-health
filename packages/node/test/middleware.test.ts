@@ -38,6 +38,11 @@ function setup() {
   app.get('/orders/:id/items/:itemId', (req, res) =>
     res.status(200).json({ id: req.params.id, itemId: req.params.itemId }),
   );
+  app.get('/stream', (_req, res) => {
+    res.write('part-');
+    res.write('one');
+    res.end();
+  });
   app.get('/boom', () => {
     throw new Error('boom');
   });
@@ -119,6 +124,13 @@ describe('expressMiddleware behavior', () => {
     const expected = Buffer.byteLength(JSON.stringify({ ok: true }));
     expect(recorded[0].response_bytes).toBe(expected);
     expect(JSON.stringify(recorded[0])).not.toContain('ok');
+  });
+
+  it('counts bytes written through res.write chunks', async () => {
+    const { app, client, recorded } = setup();
+    await request(app).get('/stream');
+    await client.flush();
+    expect(recorded[0].response_bytes).toBe(Buffer.byteLength('part-one'));
   });
 
   it('records POST with a body without capturing the body', async () => {
