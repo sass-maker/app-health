@@ -19,3 +19,4 @@ export * from './capabilities.js';
 export * from './sharing.js';
 export * from './native.js';
 export * from './analytics-source.js';
+export * from './product-event.js';
