@@ -1,0 +1,65 @@
+
+> @saas-maker/app-health@0.3.0 pack:verify /Users/sarthak/Desktop/fleet/app-health/packages/node
+> pnpm run build && node ../../scripts/verify-node-package.mjs
+
+
+> @saas-maker/app-health@0.3.0 build /Users/sarthak/Desktop/fleet/app-health/packages/node
+> tsup src/index.ts src/express.ts src/hono.ts src/pages.ts src/web.ts src/viewer.ts --format esm,cjs --dts --clean --external express --external hono --external hono/route
+
+CLI Building entry: src/express.ts, src/hono.ts, src/index.ts, src/pages.ts, src/viewer.ts, src/web.ts
+CLI Using tsconfig: tsconfig.json
+CLI tsup v8.5.1
+CLI Target: es2022
+CLI Cleaning output folder
+ESM Build start
+CJS Build start
+CJS dist/pages.cjs   4.62 KB
+CJS dist/express.cjs 4.41 KB
+CJS dist/hono.cjs    4.70 KB
+CJS dist/web.cjs     13.50 KB
+CJS dist/viewer.cjs  8.53 KB
+CJS dist/index.cjs   18.03 KB
+CJS ⚡️ Build success in 15ms
+ESM dist/express.js        1.38 KB
+ESM dist/index.js          11.53 KB
+ESM dist/chunk-MEQIT2E6.js 2.65 KB
+ESM dist/chunk-WXNDX3WM.js 2.41 KB
+ESM dist/hono.js           1.67 KB
+ESM dist/web.js            10.17 KB
+ESM dist/viewer.js         7.46 KB
+ESM dist/pages.js          1.58 KB
+ESM dist/chunk-K2EFPIZW.js 885.00 B
+ESM ⚡️ Build success in 15ms
+DTS Build start
+DTS ⚡️ Build success in 625ms
+DTS dist/express.d.ts          972.00 B
+DTS dist/hono.d.ts             1015.00 B
+DTS dist/index.d.ts            2.24 KB
+DTS dist/pages.d.ts            2.47 KB
+DTS dist/viewer.d.ts           2.60 KB
+DTS dist/web.d.ts              1.30 KB
+DTS dist/client-BocWzqhf.d.ts  4.56 KB
+DTS dist/log-Byw2nZai.d.ts     2.28 KB
+DTS dist/express.d.cts         974.00 B
+DTS dist/hono.d.cts            1017.00 B
+DTS dist/index.d.cts           2.25 KB
+DTS dist/pages.d.cts           2.47 KB
+DTS dist/viewer.d.cts          2.60 KB
+DTS dist/web.d.cts             1.30 KB
+DTS dist/client-3m3e64Dt.d.cts 4.56 KB
+DTS dist/log-Byw2nZai.d.cts    2.28 KB
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "recursive". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "store-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown global config "store-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "npm-globalconfig". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "recursive". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "verify-deps-before-run". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "_jsr-registry". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown env config "store-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown global config "store-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+added 2 packages in 375ms
+verified saas-maker-app-health-0.3.0.tgz from an external ESM and CommonJS consumer

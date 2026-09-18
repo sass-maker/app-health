@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>psi-swarm report · https://health.sassmaker.com/</title>
+<meta name="psi-url" content="https://health.sassmaker.com/">
+<meta name="psi-generated" content="2026-08-28T09:41:00.602Z">
+<style>
+  :root { --bg:#0b0f17; --panel:#131826; --border:#1f2738; --text:#e6e9f2; --dim:#8089a4;
+          --cyan:#38bdf8; --good:#22c55e; --warn:#facc15; --poor:#ef4444; }
+  *,*::before,*::after { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "tnum" on; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { font-size: 28px; margin: 0; letter-spacing: -0.02em; }
+  h1 .cyan { color: var(--cyan); }
+  h2 { font-size: 18px; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .sub { color: var(--dim); font-size: 14px; margin-top: 4px; word-break: break-all; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 20px; margin-bottom: 20px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; font-weight: 500; }
+  th { color: var(--dim); font-weight: 500; text-transform: uppercase;
+    font-size: 11px; letter-spacing: 0.05em; }
+  tr:last-child td { border-bottom: none; }
+  .good { color: var(--good); } .warn { color: var(--warn); }
+  .poor { color: var(--poor); } .dim { color: var(--dim); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 4px;
+    background: rgba(56,189,248,0.1); color: var(--cyan); font-size: 12px;
+    font-weight: 500; margin-right: 8px; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600; }
+  .badge.good { background: rgba(34,197,94,0.15); color: var(--good); }
+  .badge.warn { background: rgba(250,204,21,0.15); color: var(--warn); }
+  .badge.poor { background: rgba(239,68,68,0.15); color: var(--poor); }
+  .preset-head { display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 12px; }
+  .preset-head .label { color: var(--dim); font-size: 13px; }
+  .reasoning { background: var(--bg); border-left: 3px solid var(--cyan);
+    padding: 16px 20px; border-radius: 0 6px 6px 0; line-height: 1.6;
+    font-size: 15px; white-space: pre-wrap; }
+  .footer { color: var(--dim); font-size: 12px; margin-top: 32px; text-align: center; }
+  .gap-line { font-size: 14px; margin: 4px 0; }
+  .lcp-element { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; }
+  .lcp-element .label { color: var(--warn); font-weight: 500; margin-bottom: 4px; }
+  .lcp-element .snippet { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--dim); word-break: break-all; }
+  .phases { display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0; font-size: 13px; }
+  .header-meta { margin-top:14px; display:flex; gap:24px; font-size:13px;
+    color:var(--dim); flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  
+    <section>
+      <h1><span class="cyan">psi</span>-swarm report</h1>
+      <div class="sub">https://health.sassmaker.com/</div>
+      <div class="header-meta">
+        <div><span class="dim">Runs:</span> 20 (20 ok)</div>
+        <div><span class="dim">Presets:</span> mobile-slow, mobile-mid, mobile-fast, desktop</div>
+        <div><span class="dim">Elapsed:</span> 182.0s</div>
+        <div><span class="dim">Generated:</span> <span class="mono">2026-08-28T09:41:00.602Z</span></div>
+      </div>
+    </section>
+  
+  
+      <section>
+        <div class="preset-head">
+          <div>
+            <span class="pill">mobile-slow</span>
+            <span class="label">Mobile · Slow 3G · low-end Android (6× CPU)</span>
+          </div>
+          <span class="dim mono" style="font-size:12px;">n = 5</span>
+        </div>
+        <table>
+          <thead><tr><th>Metric</th><th>p50</th><th>p75</th><th>p90</th><th>p99</th><th>min</th><th>max</th><th>σ</th></tr></thead>
+          <tbody><tr>
+        <td>Perf Score</td>
+        <td class="warn mono">84</td>
+        <td class="warn mono">85</td>
+        <td class="warn mono">86</td>
+        <td class="warn mono">86</td>
+        <td class="dim mono">71</td>
+        <td class="dim mono">86</td>
+        <td class="dim mono">6</td>
+      </tr><tr>
+        <td>LCP</td>
+        <td class="warn mono">3.32s</td>
+        <td class="warn mono">3.91s</td>
+        <td class="poor mono">4.06s</td>
+        <td class="poor mono">4.14s</td>
+        <td class="dim mono">3.23s</td>
+        <td class="dim mono">4.15s</td>
+        <td class="dim mono">381ms</td>
+      </tr><tr>
+        <td>CLS</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+      </tr><tr>
+        <td>TBT</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+      </tr><tr>
+        <td>FCP</td>
+        <td class="poor mono">3.28s</td>
+        <td class="poor mono">3.32s</td>
+        <td class="poor mono">3.46s</td>
+        <td class="poor mono">3.55s</td>
+        <td class="dim mono">3.23s</td>
+        <td class="dim mono">3.55s</td>
+        <td class="dim mono">115ms</td>
+      </tr><tr>
+        <td>TTFB</td>
+        <td class="good mono">254ms</td>
+        <td class="good mono">638ms</td>
+        <td class="warn mono">946ms</td>
+        <td class="warn mono">1.13s</td>
+        <td class="dim mono">174ms</td>
+        <td class="dim mono">1.15s</td>
+        <td class="dim mono">371ms</td>
+      </tr><tr>
+        <td>SI</td>
+        <td class="warn mono">4.37s</td>
+        <td class="poor mono">5.81s</td>
+        <td class="poor mono">7.42s</td>
+        <td class="poor mono">8.38s</td>
+        <td class="dim mono">3.23s</td>
+        <td class="dim mono">8.49s</td>
+        <td class="dim mono">1.96s</td>
+      </tr></tbody>
+        </table>
+      </section>
+    
+      <section>
+        <div class="preset-head">
+          <div>
+            <span class="pill">mobile-mid</span>
+            <span class="label">Mobile · Slow 4G · mid Android (4× CPU)</span>
+          </div>
+          <span class="dim mono" style="font-size:12px;">n = 5</span>
+        </div>
+        <table>
+          <thead><tr><th>Metric</th><th>p50</th><th>p75</th><th>p90</th><th>p99</th><th>min</th><th>max</th><th>σ</th></tr></thead>
+          <tbody><tr>
+        <td>Perf Score</td>
+        <td class="good mono">99</td>
+        <td class="good mono">99</td>
+        <td class="good mono">99</td>
+        <td class="good mono">99</td>
+        <td class="dim mono">96</td>
+        <td class="dim mono">99</td>
+        <td class="dim mono">1</td>
+      </tr><tr>
+        <td>LCP</td>
+        <td class="good mono">1.76s</td>
+        <td class="good mono">2.30s</td>
+        <td class="good mono">2.36s</td>
+        <td class="good mono">2.39s</td>
+        <td class="dim mono">1.69s</td>
+        <td class="dim mono">2.40s</td>
+        <td class="dim mono">305ms</td>
+      </tr><tr>
+        <td>CLS</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+      </tr><tr>
+        <td>TBT</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+      </tr><tr>
+        <td>FCP</td>
+        <td class="good mono">1.74s</td>
+        <td class="good mono">1.76s</td>
+        <td class="warn mono">1.87s</td>
+        <td class="warn mono">1.93s</td>
+        <td class="dim mono">1.69s</td>
+        <td class="dim mono">1.94s</td>
+        <td class="dim mono">86ms</td>
+      </tr><tr>
+        <td>TTFB</td>
+        <td class="good mono">202ms</td>
+        <td class="good mono">634ms</td>
+        <td class="warn mono">814ms</td>
+        <td class="warn mono">922ms</td>
+        <td class="dim mono">126ms</td>
+        <td class="dim mono">934ms</td>
+        <td class="dim mono">315ms</td>
+      </tr><tr>
+        <td>SI</td>
+        <td class="good mono">1.81s</td>
+        <td class="good mono">2.59s</td>
+        <td class="good mono">2.90s</td>
+        <td class="good mono">3.09s</td>
+        <td class="dim mono">1.79s</td>
+        <td class="dim mono">3.11s</td>
+        <td class="dim mono">542ms</td>
+      </tr></tbody>
+        </table>
+      </section>
+    
+      <section>
+        <div class="preset-head">
+          <div>
+            <span class="pill">mobile-fast</span>
+            <span class="label">Mobile · Fast 4G · iPhone-class (2× CPU)</span>
+          </div>
+          <span class="dim mono" style="font-size:12px;">n = 5</span>
+        </div>
+        <table>
+          <thead><tr><th>Metric</th><th>p50</th><th>p75</th><th>p90</th><th>p99</th><th>min</th><th>max</th><th>σ</th></tr></thead>
+          <tbody><tr>
+        <td>Perf Score</td>
+        <td class="good mono">100</td>
+        <td class="good mono">100</td>
+        <td class="good mono">100</td>
+        <td class="good mono">100</td>
+        <td class="dim mono">100</td>
+        <td class="dim mono">100</td>
+        <td class="dim mono">0</td>
+      </tr><tr>
+        <td>LCP</td>
+        <td class="good mono">1.29s</td>
+        <td class="good mono">1.40s</td>
+        <td class="good mono">1.41s</td>
+        <td class="good mono">1.42s</td>
+        <td class="dim mono">998ms</td>
+        <td class="dim mono">1.42s</td>
+        <td class="dim mono">154ms</td>
+      </tr><tr>
+        <td>CLS</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+      </tr><tr>
+        <td>TBT</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+      </tr><tr>
+        <td>FCP</td>
+        <td class="good mono">998ms</td>
+        <td class="good mono">999ms</td>
+        <td class="good mono">1.01s</td>
+        <td class="good mono">1.02s</td>
+        <td class="dim mono">990ms</td>
+        <td class="dim mono">1.02s</td>
+        <td class="dim mono">9ms</td>
+      </tr><tr>
+        <td>TTFB</td>
+        <td class="good mono">191ms</td>
+        <td class="good mono">210ms</td>
+        <td class="good mono">292ms</td>
+        <td class="good mono">341ms</td>
+        <td class="dim mono">177ms</td>
+        <td class="dim mono">346ms</td>
+        <td class="dim mono">63ms</td>
+      </tr><tr>
+        <td>SI</td>
+        <td class="good mono">1.27s</td>
+        <td class="good mono">1.80s</td>
+        <td class="good mono">2.45s</td>
+        <td class="good mono">2.83s</td>
+        <td class="dim mono">1.13s</td>
+        <td class="dim mono">2.88s</td>
+        <td class="dim mono">660ms</td>
+      </tr></tbody>
+        </table>
+      </section>
+    
+      <section>
+        <div class="preset-head">
+          <div>
+            <span class="pill">desktop</span>
+            <span class="label">Desktop · Cable (1× CPU)</span>
+          </div>
+          <span class="dim mono" style="font-size:12px;">n = 5</span>
+        </div>
+        <table>
+          <thead><tr><th>Metric</th><th>p50</th><th>p75</th><th>p90</th><th>p99</th><th>min</th><th>max</th><th>σ</th></tr></thead>
+          <tbody><tr>
+        <td>Perf Score</td>
+        <td class="good mono">99</td>
+        <td class="good mono">99</td>
+        <td class="good mono">100</td>
+        <td class="good mono">100</td>
+        <td class="dim mono">96</td>
+        <td class="dim mono">100</td>
+        <td class="dim mono">1</td>
+      </tr><tr>
+        <td>LCP</td>
+        <td class="good mono">648ms</td>
+        <td class="good mono">938ms</td>
+        <td class="good mono">994ms</td>
+        <td class="good mono">1.03s</td>
+        <td class="dim mono">637ms</td>
+        <td class="dim mono">1.03s</td>
+        <td class="dim mono">171ms</td>
+      </tr><tr>
+        <td>CLS</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="good mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+        <td class="dim mono">0.000</td>
+      </tr><tr>
+        <td>TBT</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="good mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+        <td class="dim mono">0ms</td>
+      </tr><tr>
+        <td>FCP</td>
+        <td class="good mono">639ms</td>
+        <td class="good mono">648ms</td>
+        <td class="good mono">656ms</td>
+        <td class="good mono">660ms</td>
+        <td class="dim mono">631ms</td>
+        <td class="dim mono">661ms</td>
+        <td class="dim mono">10ms</td>
+      </tr><tr>
+        <td>TTFB</td>
+        <td class="good mono">185ms</td>
+        <td class="good mono">193ms</td>
+        <td class="good mono">201ms</td>
+        <td class="good mono">205ms</td>
+        <td class="dim mono">179ms</td>
+        <td class="dim mono">206ms</td>
+        <td class="dim mono">10ms</td>
+      </tr><tr>
+        <td>SI</td>
+        <td class="good mono">743ms</td>
+        <td class="good mono">755ms</td>
+        <td class="good mono">1.27s</td>
+        <td class="good mono">1.58s</td>
+        <td class="dim mono">734ms</td>
+        <td class="dim mono">1.61s</td>
+        <td class="dim mono">347ms</td>
+      </tr></tbody>
+        </table>
+      </section>
+    
+  
+  
+  
+  
+  
+  
+  <div class="footer">Generated by <a href="https://github.com/sass-maker/psi-swarm" style="color:var(--cyan);">psi-swarm</a> · lab data is emulated network + CPU · for honest p99 use a RUM tool</div>
+</main>
+</body>
+</html>

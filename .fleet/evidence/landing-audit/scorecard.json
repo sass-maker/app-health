@@ -1,0 +1,46 @@
+{
+  "$schema": "fleet.landing-audit.v1",
+  "project": "app-health",
+  "priority": "P2",
+  "qualificationScope": "local production candidate",
+  "productionStatus": "unchanged; deployment was not authorized",
+  "threshold": 90,
+  "gates": {
+    "contentPurposeSynergy": {
+      "score": 97,
+      "status": "pass",
+      "evidence": "Independent fresh-visitor review after one failed 84/100 iteration; canonical purpose, production state, machine-readable surfaces, and next actions now agree."
+    },
+    "designQuality": {
+      "score": 93,
+      "status": "pass",
+      "evidence": "Preserved project-native system; visual QA at 390, 768, and 1440; tablet reflow corrected; critique 37/40; audit 19/20; zero unresolved P0/P1."
+    },
+    "seo": {
+      "score": 100,
+      "status": "pass",
+      "evidence": "17 critical checks passed and zero failed. The sole local warning is expected because the production canonical sitemap does not list the localhost preview URL."
+    },
+    "geo": {
+      "score": 100,
+      "status": "pass",
+      "evidence": "Live Worker audit is S-tier 100%; source llms, full brief, homepage Markdown, and agent catalog were aligned. Vite preview cannot emulate the Worker's /api/ai rewrite."
+    },
+    "performance": {
+      "score": 92,
+      "status": "pass",
+      "evidence": "Final candidate: 20/20 psi-swarm coverage runs succeeded; weighted LCP 911ms, CLS 0.000, TBT 0ms; conservative slow-mobile p75 performance score 92."
+    }
+  },
+  "evidence": {
+    "designReview": ".fleet/design-review.json",
+    "projectCheck": "pnpm run check (pass)",
+    "performanceLocal": ".fleet/evidence/landing-audit/performance-local.html",
+    "performanceLiveBaseline": ".fleet/evidence/landing-audit/performance-live-baseline.html",
+    "screenshots": [
+      ".fleet/evidence/landing-audit/after-390.png",
+      ".fleet/evidence/landing-audit/after-768.png",
+      ".fleet/evidence/landing-audit/after-1440.png"
+    ]
+  }
+}

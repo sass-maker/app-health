@@ -1,0 +1,248 @@
+
+> app-health@0.0.0 check /Users/sarthak/Desktop/fleet/app-health
+> pnpm run quality
+
+
+> app-health@0.0.0 quality /Users/sarthak/Desktop/fleet/app-health
+> pnpm --silent run format:check && pnpm --silent run quality:go-format && pnpm --silent run lint && pnpm --silent run typecheck && pnpm --silent run quality:go-vet && pnpm --silent run build && node scripts/verify-local-sdk.mjs && pnpm --silent run verify:cloudflare-sample && pnpm --filter @app-health/worker run verify:accounts-runtime && pnpm --silent run verify:public-viewer && pnpm --silent run quality:coverage && pnpm --silent run quality:unused && pnpm --silent run quality:complexity && pnpm --silent run quality:duplication && pnpm --silent run quality:cycles && pnpm --silent run quality:dependencies && pnpm --silent run quality:suppressions && pnpm --silent run quality:hygiene && pnpm --filter @app-health/web run test:browser
+
+Checking formatting...
+All matched files use Prettier code style!
+Go format: clean.
+Go vet: clean.
+{
+  "mode": "local-synthetic-sdk",
+  "installation": "connected",
+  "aggregate": {
+    "method": "GET",
+    "route": "/synthetic/:id",
+    "request_count": 3,
+    "error_count": 1,
+    "error_rate": 0.3333333333333333,
+    "p50_ms": 1,
+    "p95_ms": 1,
+    "last_seen": 1789203664451,
+    "health_state": "insufficient-data"
+  }
+}
+{
+  "mode": "local-cloudflare-sample",
+  "production": {
+    "pageviews": 1,
+    "events": 1,
+    "endpoints": 3,
+    "logs": 2,
+    "failures": 1
+  },
+  "staging": {
+    "pageviews": 1,
+    "events": 1,
+    "endpoints": 3,
+    "logs": 2,
+    "failures": 1
+  },
+  "browserNetworkRequests": {
+    "production": 8,
+    "staging": 8
+  },
+  "telemetryTransport": {
+    "requests": 12,
+    "payloadBytes": 4732,
+    "byPath": {
+      "/v1/ingest": {
+        "requests": 6,
+        "payloadBytes": 2253
+      },
+      "/v1/logs": {
+        "requests": 4,
+        "payloadBytes": 1484
+      },
+      "/v1/browser": {
+        "requests": 2,
+        "payloadBytes": 995
+      }
+    }
+  },
+  "assetSizes": {
+    "browserBundleBytes": 8786,
+    "browserBundleGzipBytes": 3341,
+    "trackerBytes": 6081,
+    "trackerGzipBytes": 2043
+  },
+  "failureProof": {
+    "route": "/api/checkout/unavailable",
+    "status": 503,
+    "errorRate": 1
+  },
+  "unavailableCollectorResponses": {
+    "product": 200,
+    "checkout": 201
+  },
+  "compatibilityDate": "2026-07-29",
+  "capabilities": [
+    "analytics",
+    "endpoints",
+    "logs"
+  ],
+  "privateKeysExposedToBrowser": false,
+  "environmentIsolation": true,
+  "productResponsesSurviveCollectorFailure": true
+}
+
+> @app-health/worker@0.0.0 verify:accounts-runtime /Users/sarthak/Desktop/fleet/app-health/apps/worker
+> node test/verify-accounts.mjs
+
+Account runtime: schema and synthetic session ready.
+Account runtime: health responded.
+Account runtime: config responded.
+Endpoint runtime: oversized measurement expansion rejected before installation side effects.
+Logs runtime: levels, properties, source isolation, replay and timestamp rejection verified.
+Public sharing runtime: scoped reads, immediate revocation and public-only embed policy verified.
+Native runtime: hashed scoped key, ingestion, replay, native logs, opt-in presence and revocation verified.
+Browser runtime: queue, immutable archive, scoped live stream, and origin rejection verified.
+{
+  "mode": "local-workerd-d1",
+  "workspace": "verified",
+  "projectOwnership": "verified",
+  "oauthInitiation": "verified",
+  "signOut": "verified",
+  "googleCallback": "requires real provider configuration"
+}
+Public viewer browser: real cross-origin preflight/read, aggregate-only data, no cookies, and immediate revoked-state clearing verified.
+Web coverage: 94.34% lines, 88.72% branches, 89.21% functions, 94.34% statements.
+Web coverage improved; raise the checked-in baseline in the next intentional update.
+Worker coverage: 96.1% lines, 88.88% branches, 98.07% functions, 96.1% statements.
+Worker coverage improved; raise the checked-in baseline in the next intentional update.
+Contracts coverage: 99.66% lines, 96.4% branches, 100% functions, 99.66% statements.
+Contracts coverage improved; raise the checked-in baseline in the next intentional update.
+Node SDK coverage: 95.33% lines, 91.02% branches, 100% functions, 95.33% statements.
+Node SDK coverage improved; raise the checked-in baseline in the next intentional update.
+Go SDK coverage: 87.6% statements.
+Go SDK coverage improved; raise the checked-in baseline in the next intentional update.
+Complexity: 1105 functions, 10543 NLOC, 0 violations; max CCN 15, max length 91, max params 6.
+Duplication: 75/18217 lines (0.4117%), 5 groups across 92 files.
+Duplication improved; lower the checked-in baseline in the next intentional update.
+Dependencies: 0 critical, 0 high advisories.
+Suppressions: 0 inline directives.
+Repository hygiene: clean.
+
+> @app-health/web@0.0.0 test:browser /Users/sarthak/Desktop/fleet/app-health/apps/web
+> playwright test
+
+[WebServer] (node:17378) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:17395) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 102 tests using 3 workers
+
+(node:17403) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17402) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:17404) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓    3 e2e/dashboard-themes.spec.ts:9:9 › endpoints error dark 390px (1.1s)
+  ✓    2 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty dark 390px (1.1s)
+  ✓    1 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated dark 390px (1.1s)
+  ✓    4 e2e/dashboard-themes.spec.ts:9:9 › logs populated dark 390px (998ms)
+  ✓    6 e2e/dashboard-themes.spec.ts:9:9 › logs error dark 390px (1.0s)
+  ✓    5 e2e/dashboard-themes.spec.ts:9:9 › logs empty dark 390px (1.0s)
+  ✓    7 e2e/dashboard-themes.spec.ts:9:9 › data populated dark 390px (973ms)
+  ✓    9 e2e/dashboard-themes.spec.ts:9:9 › data error dark 390px (996ms)
+  ✓    8 e2e/dashboard-themes.spec.ts:9:9 › data empty dark 390px (1.2s)
+  ✓   10 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated dark 768px (980ms)
+  ✓   11 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty dark 768px (1.0s)
+  ✓   12 e2e/dashboard-themes.spec.ts:9:9 › endpoints error dark 768px (971ms)
+  ✓   13 e2e/dashboard-themes.spec.ts:9:9 › logs populated dark 768px (984ms)
+  ✓   14 e2e/dashboard-themes.spec.ts:9:9 › logs empty dark 768px (1.2s)
+  ✓   15 e2e/dashboard-themes.spec.ts:9:9 › logs error dark 768px (1.2s)
+  ✓   16 e2e/dashboard-themes.spec.ts:9:9 › data populated dark 768px (1.0s)
+  ✓   17 e2e/dashboard-themes.spec.ts:9:9 › data empty dark 768px (1.0s)
+  ✓   18 e2e/dashboard-themes.spec.ts:9:9 › data error dark 768px (1.0s)
+  ✓   19 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated dark 1440px (983ms)
+  ✓   20 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty dark 1440px (973ms)
+  ✓   21 e2e/dashboard-themes.spec.ts:9:9 › endpoints error dark 1440px (995ms)
+  ✓   22 e2e/dashboard-themes.spec.ts:9:9 › logs populated dark 1440px (963ms)
+  ✓   23 e2e/dashboard-themes.spec.ts:9:9 › logs empty dark 1440px (951ms)
+  ✓   24 e2e/dashboard-themes.spec.ts:9:9 › logs error dark 1440px (1.1s)
+  ✓   25 e2e/dashboard-themes.spec.ts:9:9 › data populated dark 1440px (1.0s)
+  ✓   26 e2e/dashboard-themes.spec.ts:9:9 › data empty dark 1440px (1.0s)
+  ✓   27 e2e/dashboard-themes.spec.ts:9:9 › data error dark 1440px (1.0s)
+  ✓   28 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated light 390px (972ms)
+  ✓   29 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty light 390px (946ms)
+  ✓   30 e2e/dashboard-themes.spec.ts:9:9 › endpoints error light 390px (939ms)
+  ✓   31 e2e/dashboard-themes.spec.ts:9:9 › logs populated light 390px (976ms)
+  ✓   32 e2e/dashboard-themes.spec.ts:9:9 › logs empty light 390px (942ms)
+  ✓   33 e2e/dashboard-themes.spec.ts:9:9 › logs error light 390px (965ms)
+  ✓   34 e2e/dashboard-themes.spec.ts:9:9 › data populated light 390px (961ms)
+  ✓   35 e2e/dashboard-themes.spec.ts:9:9 › data empty light 390px (995ms)
+  ✓   36 e2e/dashboard-themes.spec.ts:9:9 › data error light 390px (985ms)
+  ✓   37 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated light 768px (980ms)
+  ✓   38 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty light 768px (898ms)
+  ✓   39 e2e/dashboard-themes.spec.ts:9:9 › endpoints error light 768px (954ms)
+  ✓   40 e2e/dashboard-themes.spec.ts:9:9 › logs populated light 768px (963ms)
+  ✓   41 e2e/dashboard-themes.spec.ts:9:9 › logs empty light 768px (934ms)
+  ✓   42 e2e/dashboard-themes.spec.ts:9:9 › logs error light 768px (935ms)
+  ✓   43 e2e/dashboard-themes.spec.ts:9:9 › data populated light 768px (1.1s)
+  ✓   44 e2e/dashboard-themes.spec.ts:9:9 › data empty light 768px (1.0s)
+  ✓   45 e2e/dashboard-themes.spec.ts:9:9 › data error light 768px (999ms)
+  ✓   46 e2e/dashboard-themes.spec.ts:9:9 › endpoints populated light 1440px (938ms)
+  ✓   47 e2e/dashboard-themes.spec.ts:9:9 › endpoints empty light 1440px (991ms)
+  ✓   48 e2e/dashboard-themes.spec.ts:9:9 › endpoints error light 1440px (939ms)
+  ✓   49 e2e/dashboard-themes.spec.ts:9:9 › logs populated light 1440px (1.0s)
+  ✓   50 e2e/dashboard-themes.spec.ts:9:9 › logs empty light 1440px (979ms)
+  ✓   51 e2e/dashboard-themes.spec.ts:9:9 › logs error light 1440px (990ms)
+  ✓   52 e2e/dashboard-themes.spec.ts:9:9 › data populated light 1440px (1.0s)
+  ✓   53 e2e/dashboard-themes.spec.ts:9:9 › data empty light 1440px (1.0s)
+  ✓   54 e2e/dashboard-themes.spec.ts:9:9 › data error light 1440px (1.0s)
+  ✓   57 e2e/installation.spec.ts:6:5 › project, tracker and revoke confirmation dark 390px (12.6s)
+  ✓   55 e2e/environment-foundation.spec.ts:5:3 › independent capability receipt and environment isolation dark (21.1s)
+  ✓   56 e2e/environment-foundation.spec.ts:5:3 › independent capability receipt and environment isolation light (21.2s)
+  ✓   58 e2e/installation.spec.ts:6:5 › project, tracker and revoke confirmation dark 1440px (13.1s)
+  ✓   61 e2e/native-keys.spec.ts:5:1 › native setup creates and revokes a usable scoped public key in both themes (1.8s)
+  ✓   62 e2e/product-surfaces.spec.ts:8:7 › landing rendered dark 390px (956ms)
+  ✓   63 e2e/product-surfaces.spec.ts:8:7 › changelog rendered dark 390px (1.0s)
+  ✓   64 e2e/product-surfaces.spec.ts:8:7 › analytics rendered dark 390px (941ms)
+  ✓   65 e2e/product-surfaces.spec.ts:8:7 › events rendered dark 390px (1.0s)
+  ✓   66 e2e/product-surfaces.spec.ts:8:7 › landing rendered dark 1440px (991ms)
+  ✓   67 e2e/product-surfaces.spec.ts:8:7 › changelog rendered dark 1440px (983ms)
+  ✓   59 e2e/installation.spec.ts:6:5 › project, tracker and revoke confirmation light 390px (13.1s)
+  ✓   60 e2e/installation.spec.ts:6:5 › project, tracker and revoke confirmation light 1440px (13.0s)
+  ✓   68 e2e/product-surfaces.spec.ts:8:7 › analytics rendered dark 1440px (984ms)
+  ✓   69 e2e/product-surfaces.spec.ts:8:7 › events rendered dark 1440px (1.0s)
+  ✓   70 e2e/product-surfaces.spec.ts:8:7 › landing rendered light 390px (986ms)
+  ✓   71 e2e/product-surfaces.spec.ts:8:7 › changelog rendered light 390px (924ms)
+  ✓   72 e2e/product-surfaces.spec.ts:8:7 › analytics rendered light 390px (972ms)
+  ✓   73 e2e/product-surfaces.spec.ts:8:7 › events rendered light 390px (984ms)
+  ✓   74 e2e/product-surfaces.spec.ts:8:7 › landing rendered light 1440px (995ms)
+  ✓   75 e2e/product-surfaces.spec.ts:8:7 › changelog rendered light 1440px (966ms)
+  ✓   76 e2e/product-surfaces.spec.ts:8:7 › analytics rendered light 1440px (1.0s)
+  ✓   77 e2e/product-surfaces.spec.ts:8:7 › events rendered light 1440px (1.0s)
+  ✓   79 e2e/setup-themes.spec.ts:7:7 › capability setup settings dark 390px (941ms)
+  ✓   80 e2e/setup-themes.spec.ts:7:7 › capability setup analytics dark 390px (906ms)
+  ✓   81 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints dark 390px (1.0s)
+  ✓   82 e2e/setup-themes.spec.ts:7:7 › capability setup logs dark 390px (967ms)
+  ✓   83 e2e/setup-themes.spec.ts:7:7 › capability setup settings dark 768px (979ms)
+  ✓   84 e2e/setup-themes.spec.ts:7:7 › capability setup analytics dark 768px (948ms)
+  ✓   85 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints dark 768px (965ms)
+  ✓   86 e2e/setup-themes.spec.ts:7:7 › capability setup logs dark 768px (933ms)
+  ✓   87 e2e/setup-themes.spec.ts:7:7 › capability setup settings dark 1440px (986ms)
+  ✓   88 e2e/setup-themes.spec.ts:7:7 › capability setup analytics dark 1440px (955ms)
+  ✓   89 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints dark 1440px (903ms)
+  ✓   90 e2e/setup-themes.spec.ts:7:7 › capability setup logs dark 1440px (991ms)
+  ✓   91 e2e/setup-themes.spec.ts:7:7 › capability setup settings light 390px (925ms)
+  ✓   92 e2e/setup-themes.spec.ts:7:7 › capability setup analytics light 390px (927ms)
+  ✓   93 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints light 390px (934ms)
+  ✓   94 e2e/setup-themes.spec.ts:7:7 › capability setup logs light 390px (893ms)
+  ✓   95 e2e/setup-themes.spec.ts:7:7 › capability setup settings light 768px (996ms)
+  ✓   96 e2e/setup-themes.spec.ts:7:7 › capability setup analytics light 768px (962ms)
+  ✓   97 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints light 768px (928ms)
+  ✓   98 e2e/setup-themes.spec.ts:7:7 › capability setup logs light 768px (982ms)
+  ✓   99 e2e/setup-themes.spec.ts:7:7 › capability setup settings light 1440px (992ms)
+  ✓  100 e2e/setup-themes.spec.ts:7:7 › capability setup analytics light 1440px (1.0s)
+  ✓  101 e2e/setup-themes.spec.ts:7:7 › capability setup endpoints light 1440px (920ms)
+  ✓  102 e2e/setup-themes.spec.ts:7:7 › capability setup logs light 1440px (966ms)
+  ✓   78 e2e/public-analytics.spec.ts:5:1 › public link and embedded live analytics remain scoped and revoke while open (13.4s)
+
+  102 passed (1.2m)

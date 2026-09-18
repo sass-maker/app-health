@@ -1,0 +1,1 @@
+Swift native HTTP: events, logs, diagnostics, project scope, no fabricated pageviews, and revoked-key rejection verified.

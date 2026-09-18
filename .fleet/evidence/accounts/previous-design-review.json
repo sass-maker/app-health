@@ -1,0 +1,106 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "public landing and private dashboard entry",
+  "surfaceMode": "persuade",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "PROJECT_STATUS.md",
+    "design": "apps/web/src/styles.css"
+  },
+  "direction": {
+    "references": [],
+    "probes": [],
+    "selected": "existing-design",
+    "approval": "not-required",
+    "before": ".fleet/evidence/landing-audit/before-1440.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "Explain App Health as a private endpoint-health product and route evaluators and existing operators to the correct next step.",
+      "purposeSource": "PROJECT_STATUS.md and the canonical App Health dossier",
+      "canonicalPurpose": "Privacy-first endpoint health for developers and service operators using a fail-open SDK or an existing OpenTelemetry feed.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Developers and service operators responsible for Node, Worker, Go, or OpenTelemetry services.",
+      "job": "Establish the product, privacy boundary, shipped proof, and separate evaluator and existing-operator journeys before authentication.",
+      "thesis": "A calm operational briefing: direct language, production-state evidence, and a private access card instead of generic observability marketing.",
+      "system": "Preserve the established off-white, ink, and green palette; rounded operational cards; compact evidence labels; responsive two-column desktop and stacked tablet/mobile layout.",
+      "signature": "A production-capability ledger that turns the product's route-summary and privacy contracts into visible proof.",
+      "risk": "Keep the private owner-key form on the public page because it is the real returning-operator entry point, while preventing it from obscuring the evaluator path with explicit lifecycle copy and primary install/release actions."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "path": ".fleet/evidence/landing-audit/after-390.png"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/landing-audit/after-768.png"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/landing-audit/after-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "pnpm run check",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 37,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 19,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "pass",
+      "reviewer": "Independent fresh-visitor reviewer (Harvey)",
+      "answers": {
+        "product": "A private endpoint-health dashboard for route traffic, latency, errors, and telemetry freshness.",
+        "audience": "Developers and service operators deploying instrumented Node, Worker, Go, or OpenTelemetry services.",
+        "value": "Focused operational visibility without collecting request bodies, parameters, or identities.",
+        "mechanism": "A fail-open SDK or existing OpenTelemetry feed produces aggregate route summaries across four operational time windows.",
+        "proof": "The page identifies a live production V0 surface and provides current-release, changelog, and source verification paths.",
+        "nextAction": "Evaluators read the install guide or verify the release; existing private deployments open the dashboard with an owner key; there is no public signup."
+      },
+      "purposeScore": {
+        "product": 25,
+        "audience": 15,
+        "value": 15,
+        "mechanism": 15,
+        "proof": 13,
+        "nextAction": 14,
+        "total": 97
+      },
+      "mismatches": []
+    }
+  },
+  "ownerFeedback": {
+    "decision": "delegated",
+    "note": "The owner delegated the portfolio landing-page quality pass while requiring priority-aware depth and no drastic redesign without consultation."
+  }
+}
