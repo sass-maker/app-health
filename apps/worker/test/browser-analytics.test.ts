@@ -326,7 +326,10 @@ describe('browser collector boundary', () => {
   });
   it('accepts only valid origin-bound public keys, counts retries once, and honors revocation', async () => {
     const repos = await fixture();
-    const body = input();
+    const body = {
+      ...input(),
+      events: [{ ...batch().events[0], timestamp: Date.now() - 1_000 }],
+    };
     expect(
       (await handleBrowserIngest(request(body, 'https://evil.example'), {}, repos, true))?.status,
     ).toBe(403);

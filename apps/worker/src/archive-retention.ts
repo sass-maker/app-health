@@ -1,9 +1,11 @@
+import type { ArchiveReplacementProof } from '@app-health/contracts';
+
 /**
- * No canonical successor/manifest is available yet. Age alone is not evidence
- * that an archive is safe to delete. Keep the scheduled hook non-destructive
- * until verified compaction can authorize individual source objects (#62).
- * The independent R2 provider lifecycle must also be removed before release.
+ * No source object is currently authorized for deletion. Counts and metadata
+ * are not sufficient to prove cryptographic/content equivalence; keep this
+ * fail-closed until a compactor can verify the actual source and replacement.
  */
-export async function expireBrowserArchives(_bucket: unknown, _now = Date.now()) {
-  return { deleted: 0, backlog: false };
+export function supersededArchiveSources(proofs: readonly ArchiveReplacementProof[]): string[] {
+  void proofs;
+  return [];
 }

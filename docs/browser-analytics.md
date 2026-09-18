@@ -145,9 +145,12 @@ Only an explicitly authorized deployment may activate this slice:
    new-SQLite-class migration. Bind `BROWSER_EVENTS` to its Queue producer and
    consumer, with bounded retries and a dead-letter queue. Configure alerts and
    a replay policy before relying on stored history.
-4. Bind `BROWSER_HISTORY` to R2 and apply a 30-day object lifecycle. Bind
-   `BROWSER_ANALYTICS` to the `app_health_browser_v1` Analytics Engine dataset.
-   Existing account ID and query-token bindings must authorize that dataset.
+4. Bind `BROWSER_HISTORY` to R2 without an age-based object lifecycle. The
+   current application authorizes no source deletion; a future compactor must
+   verify cryptographic and content equivalence before replacing any source.
+   Bind `BROWSER_ANALYTICS` to the `app_health_browser_v1` Analytics Engine
+   dataset. Existing account ID and query-token bindings must authorize that
+   dataset.
 5. Deploy the dashboard assets including tracker.js and run a real Google
    callback, two-account isolation, multi-project tracker, expiry, retry, and
    revocation canary. Check actual event projection latency and resource costs.
