@@ -52,6 +52,36 @@ const selfEnvironmentId = 'self-analytics-production';
 const selfBackendKey = 'ahk_local_self_backend_runtime_only';
 const selfBatches = [];
 const selfReceipts = [];
+
+function splitMigrationSql(sql) {
+  const source = sql.replace(/--[^\n]*/g, '');
+  const statements = [];
+  let start = 0;
+  let trigger = false;
+  let singleQuote = false;
+  let doubleQuote = false;
+  let backtick = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (character === "'" && !doubleQuote && !backtick && source[index - 1] !== '\\')
+      singleQuote = !singleQuote;
+    if (character === '"' && !singleQuote && !backtick && source[index - 1] !== '\\')
+      doubleQuote = !doubleQuote;
+    if (character === '`' && !singleQuote && !doubleQuote) backtick = !backtick;
+    if (character !== ';' || singleQuote || doubleQuote || backtick) continue;
+
+    const statement = source.slice(start, index).trim();
+    if (!trigger && /\bCREATE\s+TRIGGER\b/i.test(statement)) trigger = true;
+    if (trigger && !/\bEND\s*$/i.test(statement)) continue;
+    if (statement) statements.push(statement);
+    start = index + 1;
+    trigger = false;
+  }
+  const tail = source.slice(start).trim();
+  if (tail) statements.push(tail);
+  return statements;
+}
+
 const mf = new Miniflare({
   cf: false,
   outboundService: async (request) => {
@@ -116,11 +146,7 @@ try {
     .filter((name) => name.endsWith('.sql'))
     .sort()) {
     const sql = await readFile(join(root, 'migrations', file), 'utf8');
-    for (const statement of sql
-      .replace(/--[^\n]*/g, '')
-      .split(';')
-      .filter((part) => part.trim()))
-      await db.prepare(statement).run();
+    for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
   }
   const now = new Date().toISOString();
   const expires = new Date(Date.now() + 60_000).toISOString();
