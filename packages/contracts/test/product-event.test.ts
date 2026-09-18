@@ -26,16 +26,22 @@ describe('ProductEventV1 envelope', () => {
       expect(ProductEventV1.safeParse({ ...pageView, channel }).success).toBe(true);
     }
     expect(ProductEventV1.safeParse(named).success).toBe(true);
-    expect(ProductEventV1.safeParse({ ...base, type: 'identify', name: 'user.seen' }).success).toBe(true);
+    expect(ProductEventV1.safeParse({ ...base, type: 'identify', name: 'user.seen' }).success).toBe(
+      true,
+    );
     expect(ProductEventV1.safeParse(revenueEvent).success).toBe(true);
   });
 
   it('enforces the type-shape refinement structurally', () => {
-    expect(ProductEventV1.safeParse({ ...base, type: 'page_view', name: 'x.y', path: '/a' }).success).toBe(false);
+    expect(
+      ProductEventV1.safeParse({ ...base, type: 'page_view', name: 'x.y', path: '/a' }).success,
+    ).toBe(false);
     expect(ProductEventV1.safeParse({ ...base, type: 'page_view' }).success).toBe(false);
     expect(ProductEventV1.safeParse({ ...base, type: 'event' }).success).toBe(false);
     expect(ProductEventV1.safeParse({ ...base, type: 'revenue' }).success).toBe(false);
-    expect(ProductEventV1.safeParse({ ...named, revenue: { amount_cents: 1, currency: 'USD' } }).success).toBe(false);
+    expect(
+      ProductEventV1.safeParse({ ...named, revenue: { amount_cents: 1, currency: 'USD' } }).success,
+    ).toBe(false);
   });
 
   it('rejects paths carrying queries, fragments, or credentials', () => {
@@ -47,9 +53,9 @@ describe('ProductEventV1 envelope', () => {
   it('bounds properties to flat scalars', () => {
     const ok = { ...named, properties: { plan: 'pro', seats: 3, trial: false } };
     expect(ProductEventV1.safeParse(ok).success).toBe(true);
-    expect(
-      ProductEventV1.safeParse({ ...named, properties: { nested: { a: 1 } } }).success,
-    ).toBe(false);
+    expect(ProductEventV1.safeParse({ ...named, properties: { nested: { a: 1 } } }).success).toBe(
+      false,
+    );
     expect(
       ProductEventV1.safeParse({
         ...named,
@@ -58,9 +64,9 @@ describe('ProductEventV1 envelope', () => {
         ),
       }).success,
     ).toBe(false);
-    expect(
-      ProductEventV1.safeParse({ ...named, properties: { 'Not-A-Key': 1 } }).success,
-    ).toBe(false);
+    expect(ProductEventV1.safeParse({ ...named, properties: { 'Not-A-Key': 1 } }).success).toBe(
+      false,
+    );
   });
 
   it('rejects unknown fields and a foreign schema version', () => {
@@ -74,9 +80,9 @@ describe('ProductEventV1 envelope', () => {
     expect(
       ProductEventV1.safeParse({ ...named, visitor_id: 'anon_abc-123', session_id: 's_1' }).success,
     ).toBe(true);
-    expect(
-      ProductEventV1.safeParse({ ...named, visitor_id: 'sarthak@example.com' }).success,
-    ).toBe(false);
+    expect(ProductEventV1.safeParse({ ...named, visitor_id: 'sarthak@example.com' }).success).toBe(
+      false,
+    );
   });
 
   it('bounds revenue to integer cents with an ISO currency', () => {

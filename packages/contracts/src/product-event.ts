@@ -40,7 +40,12 @@ const path = z
 // hide inside a container.
 const properties = z
   .record(
-    z.string().trim().min(1).max(MAX_PRODUCT_EVENT_KEY_LENGTH).regex(/^[a-z][a-z0-9_]*$/),
+    z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_PRODUCT_EVENT_KEY_LENGTH)
+      .regex(/^[a-z][a-z0-9_]*$/),
     z.union([
       z.string().trim().max(MAX_PRODUCT_EVENT_VALUE_LENGTH),
       z.number().finite(),
@@ -95,8 +100,7 @@ export const ProductEventV1 = z
           ? event.name !== undefined
           : true,
     {
-      message:
-        'page_view requires path and no name; event and identify require a name',
+      message: 'page_view requires path and no name; event and identify require a name',
     },
   )
   .refine((event) => event.type !== 'revenue' || event.revenue !== undefined, {

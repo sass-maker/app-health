@@ -24,11 +24,11 @@ surface inherits the existing retention and fail-closed rules.
 
 ## Hosted/local boundary
 
-| Runs hosted | Stays local / out of scope |
-|---|---|
-| Collector, dashboard, D1 control plane, AE aggregates, share links | Raw-request replay, long exact history (until Pipelines lands) |
-| Canonical envelope validation at ingest | Session recordings, screenshots, visitor identity beyond opaque hashes |
-| Per-project/environment scoped credentials | Any private server key inside a distributed client |
+| Runs hosted                                                        | Stays local / out of scope                                             |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| Collector, dashboard, D1 control plane, AE aggregates, share links | Raw-request replay, long exact history (until Pipelines lands)         |
+| Canonical envelope validation at ingest                            | Session recordings, screenshots, visitor identity beyond opaque hashes |
+| Per-project/environment scoped credentials                         | Any private server key inside a distributed client                     |
 
 Local development reproduces every hosted surface through Miniflare D1, the
 worker, and the seeded store; no acceptance claim depends on production-only
