@@ -1,12 +1,14 @@
 // Express middleware for @saas-maker/app-health/express.
 //
 // Captures method, framework route template (Express `baseUrl + route.path`
-// after the response completes), status code, integer duration, timestamp,
-// and optional release. If no Express route matched, the event is dropped;
-// concrete request paths are never used as telemetry dimensions.
+// after the response completes), status code, integer duration, response
+// payload byte count, timestamp, and optional release. If no Express route
+// matched, the event is dropped; concrete request paths are never used as
+// telemetry dimensions.
 //
 // Privacy: the middleware reads only `req.method`, `req.route.path`, and
-// `res.statusCode`. It never reads a concrete path, headers,
+// `res.statusCode`, and counts bytes passed to `res.write`/`res.end` without
+// retaining any content. It never reads a concrete path, headers,
 // cookies, query values, route parameter values, request or response bodies,
 // user identity, logs, stacks, or spans.
 //
@@ -35,6 +37,7 @@ export interface ExpressMiddlewareOptions {
     route: string;
     status_code: number;
     duration_ms: number;
+    response_bytes?: number;
   }) => void;
 }
 
@@ -48,6 +51,7 @@ export function expressMiddleware(options: ExpressMiddlewareOptions): RequestHan
   const release = normalizeRelease(options.release);
   return (req: Request, res: Response, next: NextFunction): void => {
     const start = nowMs();
+    const responseBytes = countWrittenBytes(res);
     // `finish` fires after the response has been sent to the OS socket.
     res.on('finish', () =>
       observe(() => {
@@ -56,18 +60,55 @@ export function expressMiddleware(options: ExpressMiddlewareOptions): RequestHan
         const method = normalizeMethod(req.method);
         const status = normalizeStatus(res.statusCode);
         if (method === null || route === null || status === null) return;
-        onRecord?.({ method, route, status_code: status, duration_ms: durationMs });
+        onRecord?.({
+          method,
+          route,
+          status_code: status,
+          duration_ms: durationMs,
+          response_bytes: responseBytes(),
+        });
         client.record({
           method,
           route,
           status_code: status,
           duration_ms: durationMs,
+          response_bytes: responseBytes(),
           ...(release !== undefined ? { release } : {}),
         });
       }),
     );
     next();
   };
+}
+
+type ByteChunk = string | Uint8Array;
+
+function chunkLength(chunk: ByteChunk, encoding?: BufferEncoding): number {
+  return typeof chunk === 'string' ? Buffer.byteLength(chunk, encoding) : chunk.byteLength;
+}
+
+/**
+ * Count response body bytes written through `res.write`/`res.end` without
+ * retaining content. Returns a getter for the count at observation time.
+ */
+function countWrittenBytes(res: Response): () => number {
+  let bytes = 0;
+  const write = res.write.bind(res) as (...args: unknown[]) => boolean;
+  const end = res.end.bind(res) as (...args: unknown[]) => void;
+  const patchedWrite = (chunk: ByteChunk, ...rest: unknown[]): boolean => {
+    bytes += chunkLength(chunk, rest[0] as BufferEncoding | undefined);
+    return write(chunk, ...rest);
+  };
+  const patchedEnd = (...args: unknown[]): void => {
+    const chunk = args[0];
+    if (typeof chunk === 'string' || chunk instanceof Uint8Array) {
+      bytes += chunkLength(chunk, args[1] as BufferEncoding | undefined);
+    }
+    end(...args);
+  };
+  res.write = patchedWrite as Response['write'];
+  res.end = patchedEnd as Response['end'];
+  return () => bytes;
 }
 
 /**

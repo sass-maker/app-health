@@ -606,6 +606,7 @@ export class InMemoryAdapter
       route: string;
       status_code: number;
       duration_ms: number;
+      response_bytes?: number;
       upstream_sampled?: boolean;
     }[],
   ): Promise<void> {
@@ -620,6 +621,7 @@ export class InMemoryAdapter
         durationMs: event.duration_ms,
         timestamp: event.timestamp,
         upstreamSampled: event.upstream_sampled,
+        responseBytes: event.response_bytes,
       });
     }
   }
@@ -643,6 +645,7 @@ export class InMemoryAdapter
     durationMs: number;
     timestamp: number;
     upstreamSampled?: boolean;
+    responseBytes?: number;
   }): Promise<void> {
     const key = bucketKey(
       input.app_id,
@@ -656,6 +659,10 @@ export class InMemoryAdapter
       existing.request_count += 1;
       if (input.statusIsError) existing.error_count += 1;
       existing.duration_sum_ms += input.durationMs;
+      if (input.responseBytes !== undefined) {
+        existing.response_bytes_sum = (existing.response_bytes_sum ?? 0) + input.responseBytes;
+        existing.response_bytes_measured = (existing.response_bytes_measured ?? 0) + 1;
+      }
       if (existing.last_seen === null || input.timestamp > existing.last_seen) {
         existing.last_seen = input.timestamp;
       }
@@ -674,6 +681,9 @@ export class InMemoryAdapter
       request_count: 1,
       error_count: input.statusIsError ? 1 : 0,
       duration_sum_ms: input.durationMs,
+      ...(input.responseBytes !== undefined
+        ? { response_bytes_sum: input.responseBytes, response_bytes_measured: 1 }
+        : {}),
       last_seen: input.timestamp,
       ...(input.upstreamSampled ? { upstream_sampled: true } : {}),
       histogram,

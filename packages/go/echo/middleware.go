@@ -32,16 +32,28 @@ func Middleware(client *apphealth.Client) echo.MiddlewareFunc {
 				}
 
 				client.Record(apphealth.RecordInput{
-					Method:     context.Request().Method,
-					Route:      context.Path(),
-					StatusCode: responseStatus(context, err),
-					Duration:   time.Since(start),
+					Method:        context.Request().Method,
+					Route:         context.Path(),
+					StatusCode:    responseStatus(context, err),
+					Duration:      time.Since(start),
+					ResponseBytes: responseSize(context),
 				})
 			}()
 			err = next(context)
 			return err
 		}
 	}
+}
+
+// responseSize returns the committed response payload size Echo tracked while
+// writing, or nil when no response was committed. It is a byte count only.
+func responseSize(context echo.Context) *int64 {
+	response := context.Response()
+	if !response.Committed {
+		return nil
+	}
+	size := response.Size
+	return &size
 }
 
 func responseStatus(context echo.Context, err error) int {

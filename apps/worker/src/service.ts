@@ -456,6 +456,17 @@ export class AppHealthService {
       }
     }
     const endpoints = mergeBuckets(buckets, window, queryNow);
+    const byteDeltas = await this.responseBytesDeltas(
+      appId,
+      envId,
+      from,
+      queryNow - from,
+      endpoints,
+    );
+    for (const endpoint of endpoints) {
+      const delta = byteDeltas.get(`${endpoint.method}\u0000${endpoint.route}`);
+      if (delta !== undefined) endpoint.response_bytes_delta_pct = delta;
+    }
     const measured = new Set(
       endpoints.map((endpoint) => `${endpoint.method}\u0000${endpoint.route}`),
     );
@@ -482,6 +493,52 @@ export class AppHealthService {
     };
   }
 
+  /**
+   * Compare each endpoint's average measured payload size against the previous
+   * equal-length window. Returns per-route percent growth for endpoints that
+   * reported a size in both windows.
+   */
+  private async responseBytesDeltas(
+    appId: string,
+    envId: string,
+    windowStart: number,
+    windowMs: number,
+    endpoints: readonly { method: string; route: string; avg_response_bytes?: number | null }[],
+  ): Promise<Map<string, number>> {
+    const deltas = new Map<string, number>();
+    const anyMeasured = endpoints.some(
+      (endpoint) => typeof endpoint.avg_response_bytes === 'number',
+    );
+    if (!anyMeasured) return deltas;
+    const previous = await this.repos.buckets.queryBuckets(
+      appId,
+      envId,
+      windowStart - windowMs,
+      windowStart,
+    );
+    const grouped = new Map<string, { sum: number; measured: number }>();
+    for (const bucket of previous) {
+      const key = `${bucket.method}\u0000${bucket.route}`;
+      const acc = grouped.get(key) ?? { sum: 0, measured: 0 };
+      acc.sum += bucket.response_bytes_sum ?? 0;
+      acc.measured += bucket.response_bytes_measured ?? 0;
+      grouped.set(key, acc);
+    }
+    const previousAvg = new Map<string, number>();
+    for (const [key, acc] of grouped) {
+      if (acc.measured > 0) previousAvg.set(key, acc.sum / acc.measured);
+    }
+    for (const endpoint of endpoints) {
+      const key = `${endpoint.method}\u0000${endpoint.route}`;
+      const current = endpoint.avg_response_bytes;
+      const previousValue = previousAvg.get(key);
+      if (typeof current !== 'number' || previousValue === undefined || previousValue <= 0) {
+        continue;
+      }
+      deltas.set(key, ((current - previousValue) / previousValue) * 100);
+    }
+    return deltas;
+  }
 
   /** Query the latest retained 4xx/5xx details for one app environment. */
   /** Server ingest of owner-authored application logs, authenticated with a product ingest key. */

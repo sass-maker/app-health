@@ -23,6 +23,9 @@ export const MAX_ENVIRONMENT_LENGTH = 64;
 /** Maximum accepted request duration in milliseconds (10 minutes). */
 export const MAX_DURATION_MS = 600_000;
 
+/** Maximum accepted response payload size in bytes (256 MiB). */
+export const MAX_RESPONSE_BYTES = 268_435_456;
+
 /** Maximum clock skew between SDK timestamp and ingest server time, in ms. */
 export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 

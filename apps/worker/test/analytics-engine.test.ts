@@ -14,13 +14,20 @@ describe('Analytics Engine telemetry adapter', () => {
       async () => [],
     );
     await adapter.upsertEvents('app-a', 'env-a', 'node', 'r1', [
-      { timestamp: 100, method: 'GET', route: '/users/:id', status_code: 200, duration_ms: 12 },
+      {
+        timestamp: 100,
+        method: 'GET',
+        route: '/users/:id',
+        status_code: 200,
+        duration_ms: 12,
+        response_bytes: 2048,
+      },
       { timestamp: 101, method: 'GET', route: '/users/:id', status_code: 503, duration_ms: 20 },
     ]);
     expect(points).toHaveLength(1);
     expect(points[0]).toMatchObject({
       blobs: ['GET', '/users/:id', '3', 'node', 'r1', ''],
-      doubles: [2, 1, 32, 101],
+      doubles: [2, 1, 32, 101, 2048, 1],
     });
     expect(JSON.stringify(points[0])).not.toMatch(
       /event_id|header|cookie|body|identity|stack|trace/i,
@@ -75,6 +82,8 @@ describe('Analytics Engine telemetry adapter', () => {
             request_count: 20,
             error_count: 1,
             duration_sum_ms: 200,
+            response_bytes_sum: 8000,
+            response_bytes_measured: 10,
             last_seen: 500,
             sample_interval: 10,
           },
@@ -84,6 +93,8 @@ describe('Analytics Engine telemetry adapter', () => {
     const rows = await adapter.queryBuckets('app-a', 'env-a', 1000 - WINDOW_MS['15m'], 1000);
     expect(rows[0].histogram[2]).toBe(20);
     expect(rows[0].request_count).toBe(20);
+    expect(rows[0].response_bytes_sum).toBe(8000);
+    expect(rows[0].response_bytes_measured).toBe(10);
     expect(rows[0].sampled).toBe(true);
     expect(sql).toContain('app_health_endpoint_v1');
     expect(sql).toContain('_sample_interval');

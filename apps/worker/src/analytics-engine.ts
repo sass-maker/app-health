@@ -23,6 +23,8 @@ interface QueryRow {
   request_count: string | number;
   error_count: string | number;
   duration_sum_ms: string | number;
+  response_bytes_sum?: string | number;
+  response_bytes_measured?: string | number;
   last_seen: string | number | null;
   upstream_sampled?: string | number | null;
   sample_interval?: string | number;
@@ -79,6 +81,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       route: string;
       status_code: number;
       duration_ms: number;
+      response_bytes?: number;
       release?: string;
       upstream_sampled?: boolean;
     }[],
@@ -95,6 +98,8 @@ export class AnalyticsEngineBuckets implements BucketRepository {
         errors: number;
         duration: number;
         lastSeen: number;
+        bytes: number;
+        bytesMeasured: number;
         upstreamSampled: boolean;
       }
     >();
@@ -111,11 +116,17 @@ export class AnalyticsEngineBuckets implements BucketRepository {
         errors: 0,
         duration: 0,
         lastSeen: 0,
+        bytes: 0,
+        bytesMeasured: 0,
         upstreamSampled: false,
       };
       point.count += 1;
       point.errors += event.status_code >= 500 ? 1 : 0;
       point.duration += event.duration_ms;
+      if (event.response_bytes !== undefined) {
+        point.bytes += event.response_bytes;
+        point.bytesMeasured += 1;
+      }
       point.lastSeen = Math.max(point.lastSeen, event.timestamp);
       point.upstreamSampled ||= event.upstream_sampled === true;
       points.set(key, point);
@@ -133,7 +144,14 @@ export class AnalyticsEngineBuckets implements BucketRepository {
           point.upstreamSampled ? 'sampled' : '',
           ...(this.durableQuery ? ['durable-v1'] : []),
         ],
-        doubles: [point.count, point.errors, point.duration, point.lastSeen],
+        doubles: [
+          point.count,
+          point.errors,
+          point.duration,
+          point.lastSeen,
+          point.bytes,
+          point.bytesMeasured,
+        ],
       });
     }
   }
@@ -157,7 +175,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
     // Analytics Engine is append-only. This exact release was a manually
     // injected connectivity check, not application traffic, so query-tombstone
     // it after its durable D1 inventory and installation state are removed.
-    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' ${this.durableQuery ? "AND blob7 != 'durable-v1'" : ''} AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
+    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, SUM(double5 * _sample_interval) AS response_bytes_sum, SUM(double6 * _sample_interval) AS response_bytes_measured, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' ${this.durableQuery ? "AND blob7 != 'durable-v1'" : ''} AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
     const rows = await this.query(sql);
     if (rows.length > MAX_QUERY_ROWS)
       throw new Error('Analytics Engine query returned too many rows');
@@ -190,6 +208,11 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       bucket.request_count += count;
       bucket.error_count += Math.max(0, Math.round(Number(row.error_count)));
       bucket.duration_sum_ms += Math.max(0, Math.round(Number(row.duration_sum_ms)));
+      bucket.response_bytes_sum =
+        (bucket.response_bytes_sum ?? 0) + Math.max(0, Number(row.response_bytes_sum));
+      bucket.response_bytes_measured =
+        (bucket.response_bytes_measured ?? 0) +
+        Math.max(0, Math.round(Number(row.response_bytes_measured)));
       const lastSeen = row.last_seen === null ? null : Number(row.last_seen);
       if (Number.isFinite(lastSeen)) bucket.last_seen = Math.max(bucket.last_seen ?? 0, lastSeen!);
       if (Number(row.upstream_sampled) > 0) bucket.upstream_sampled = true;
@@ -237,20 +260,25 @@ function validateQueryRow(row: QueryRow): void {
   const errors = Number(row.error_count);
   const duration = Number(row.duration_sum_ms);
   const lastSeen = row.last_seen === null ? null : Number(row.last_seen);
+  const metricsOk =
+    [count, errors, duration].every(validMetric) && errors <= count && validByteMetrics(row);
   if (
     !Number.isInteger(bucket) ||
     bucket < 0 ||
     bucket >= LATENCY_HISTOGRAM_BUCKETS ||
-    !validMetric(count) ||
-    !validMetric(errors) ||
-    errors > count ||
-    !validMetric(duration) ||
+    !metricsOk ||
     (lastSeen !== null && (!Number.isFinite(lastSeen) || lastSeen < 0))
   ) {
     throw new Error('Analytics Engine query returned invalid row');
   }
   if (row.method.includes('\u0000') || row.route.includes('\u0000'))
     throw new Error('Analytics Engine query returned invalid row');
+}
+
+/** Optional response-byte metrics are valid when absent or non-negative finite numbers. */
+function validByteMetrics(row: QueryRow): boolean {
+  const fields = [row.response_bytes_sum, row.response_bytes_measured];
+  return fields.every((field) => field === undefined || validMetric(Number(field)));
 }
 
 function isQueryRowShape(row: QueryRow | null | undefined): row is QueryRow {

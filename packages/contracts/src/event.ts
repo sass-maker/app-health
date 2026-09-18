@@ -1,7 +1,8 @@
 // V1 ingest event and batch contracts with runtime validation.
 // SDKs send batches of endpoint performance summaries; ingest validates and
 // aggregates them. No headers, cookies, query values, route parameter values,
-// bodies, identity, logs, stacks, or spans are ever accepted.
+// bodies, identity, logs, stacks, or spans are ever accepted. Response
+// payload size is a bounded byte count, never response content.
 
 import { z } from 'zod';
 import {
@@ -9,6 +10,7 @@ import {
   MAX_DURATION_MS,
   MAX_METHOD_LENGTH,
   MAX_RELEASE_LENGTH,
+  MAX_RESPONSE_BYTES,
   MAX_ROUTE_LENGTH,
   MAX_STATUS_CODE,
   MIN_STATUS_CODE,
@@ -40,6 +42,8 @@ const statusCode = z.number().int().min(MIN_STATUS_CODE).max(MAX_STATUS_CODE);
 
 const durationMs = z.number().int().min(0).max(MAX_DURATION_MS);
 
+const responseBytes = z.number().int().min(0).max(MAX_RESPONSE_BYTES).optional();
+
 const release = z.string().trim().min(1).max(MAX_RELEASE_LENGTH).optional();
 
 const timestamp = z.number().int().min(0);
@@ -53,6 +57,7 @@ export const EventV1 = z
     route,
     status_code: statusCode,
     duration_ms: durationMs,
+    response_bytes: responseBytes,
     release,
   })
   .strict();

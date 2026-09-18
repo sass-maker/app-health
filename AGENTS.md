@@ -44,8 +44,9 @@ separate Go compatibility job that retains the tagged Echo release canary.
   query-token, and hostname configuration are complete. Ingest remains
   separately bearer-key authenticated.
 - Endpoint telemetry collects only method, normalized route, status, duration,
-  timestamp, and optional release. Never add capture of headers, cookies,
-  query values, route parameter values, bodies, identity, stacks, or spans.
+  response payload byte count, timestamp, and optional release. Never add
+  capture of headers, cookies, query values, route parameter values, bodies,
+  identity, stacks, or spans.
 - Application logs (`/v1/logs`, `client.log()`, `createWebLogger`) are the
   deliberate exception: explicit, owner-authored events carrying what the
   caller passes. Never derive a log from request traffic, keep the 30-day

@@ -108,6 +108,9 @@ type RecordInput struct {
 	StatusCode int
 	Duration   time.Duration
 	Timestamp  time.Time
+	// ResponseBytes is the response payload size in bytes, or nil when the
+	// size was not measured. The value is a byte count, never response content.
+	ResponseBytes *int64
 }
 
 // New creates and starts a Client. The background delivery goroutine begins
@@ -203,6 +206,10 @@ func (c *Client) Record(input RecordInput) {
 		Route:      route,
 		StatusCode: input.StatusCode,
 		DurationMs: durationMs,
+	}
+	if input.ResponseBytes != nil && *input.ResponseBytes >= 0 && *input.ResponseBytes <= MaxResponseBytes {
+		bytes := *input.ResponseBytes
+		event.ResponseBytes = &bytes
 	}
 	if release := c.cfg.Release; release != "" {
 		event.Release = &release

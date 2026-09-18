@@ -24,6 +24,10 @@ export const BucketV1 = z.object({
   request_count: z.number().int().min(0),
   error_count: z.number().int().min(0),
   duration_sum_ms: z.number().int().min(0),
+  /** Total response payload bytes across events that reported a size. */
+  response_bytes_sum: z.number().min(0).optional(),
+  /** How many contributing events reported a payload size. */
+  response_bytes_measured: z.number().int().min(0).optional(),
   last_seen: z.number().int().min(0).nullable(),
   /** True when any contribution came from a potentially sampled upstream trace stream. */
   upstream_sampled: z.boolean().optional(),
@@ -44,6 +48,12 @@ export const EndpointAggregateV1 = z.object({
   error_rate: z.number().min(0).max(1),
   p50_ms: z.number().min(0),
   p95_ms: z.number().min(0),
+  /** Mean response payload bytes over events that reported a size; null when none did. */
+  avg_response_bytes: z.number().min(0).nullable().optional(),
+  /** Total response payload bytes observed in the window. */
+  total_response_bytes: z.number().min(0).optional(),
+  /** Percentage growth of average payload size, second half of window vs first half. */
+  response_bytes_delta_pct: z.number().nullable().optional(),
   last_seen: z.number().int().min(0).nullable(),
   health_state: z.enum(HEALTH_STATES) as z.ZodEnum<[HealthState, ...HealthState[]]>,
   /** False when the endpoint inventory survived but WAE sampled out its metrics. */
@@ -74,6 +84,8 @@ export type EndpointQueryRequestV1 = z.infer<typeof EndpointQueryRequestV1>;
 
 /** Query response returned by the endpoint query API. */
 export const EndpointQueryResponseV1 = z.object({
+  /** Exclusive end of the measurement window; production uses completed UTC minutes. */
+  window_end: z.number().int().min(0).optional(),
   refreshed_at: z.number().int().min(0),
   window: z.enum(WINDOWS),
   endpoints: z.array(EndpointAggregateV1),

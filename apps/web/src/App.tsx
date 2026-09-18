@@ -112,7 +112,7 @@ const INGEST_ORIGIN =
   (import.meta.env.VITE_APP_HEALTH_INGEST_ORIGIN as string | undefined) ?? window.location.origin;
 const STORAGE_KEY = 'app-health-v0-project';
 
-type SortKey = 'health' | 'requests' | 'error_rate' | 'p95' | 'last_seen';
+type SortKey = 'health' | 'requests' | 'error_rate' | 'p95' | 'size' | 'last_seen';
 type SortDirection = 'asc' | 'desc';
 
 const WINDOW_LABELS: Record<Window, string> = {
@@ -325,6 +325,7 @@ function sortValue(endpoint: EndpointAggregateV1, key: SortKey): number {
   if (key === 'health') return healthWeight[endpoint.health_state];
   if (key === 'requests') return endpoint.request_count;
   if (key === 'p95') return endpoint.p95_ms;
+  if (key === 'size') return endpoint.avg_response_bytes ?? -1;
   if (key === 'error_rate') return endpoint.error_rate;
   return endpoint.last_seen ?? 0;
 }
@@ -346,6 +347,15 @@ export function sortEndpoints(
       return av === bv ? a.index - b.index : (av - bv) * factor;
     })
     .map(({ endpoint }) => endpoint);
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  const kib = bytes / 1024;
+  if (kib < 1024) return `${kib < 10 ? kib.toFixed(1) : Math.round(kib)} KiB`;
+  const mib = kib / 1024;
+  return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MiB`;
 }
 
 function formatAge(timestamp: number | null): string {
@@ -904,6 +914,25 @@ function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.
       </TableCell>
       <TableCell className="tabular-nums">{hasMetrics ? `${endpoint.p50_ms} ms` : '—'}</TableCell>
       <TableCell className="tabular-nums">{hasMetrics ? `${endpoint.p95_ms} ms` : '—'}</TableCell>
+      <TableCell className="tabular-nums">
+        {hasMetrics ? (
+          <span className="inline-flex items-center gap-1.5">
+            {formatBytes(endpoint.avg_response_bytes)}
+            {endpoint.response_bytes_delta_pct !== null &&
+            endpoint.response_bytes_delta_pct !== undefined ? (
+              <span
+                className={`text-xs ${endpoint.response_bytes_delta_pct > 5 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+                title="Average payload size vs the previous window"
+              >
+                {endpoint.response_bytes_delta_pct > 0 ? '+' : ''}
+                {endpoint.response_bytes_delta_pct.toFixed(0)}%
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          '—'
+        )}
+      </TableCell>
       <TableCell className="text-muted-foreground">{formatAge(endpoint.last_seen)}</TableCell>
       <TableCell>
         <Badge variant="outline" className={healthClass(endpoint.health_state)}>
@@ -944,6 +973,13 @@ function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Elem
             ['Error rate', hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'],
             ['p50', hasMetrics ? `${endpoint.p50_ms} ms` : '—'],
             ['p95', hasMetrics ? `${endpoint.p95_ms} ms` : '—'],
+            ['Avg size', hasMetrics ? formatBytes(endpoint.avg_response_bytes) : '—'],
+            [
+              'Size growth',
+              hasMetrics && endpoint.response_bytes_delta_pct != null
+                ? `${endpoint.response_bytes_delta_pct > 0 ? '+' : ''}${endpoint.response_bytes_delta_pct.toFixed(0)}% vs prev window`
+                : '—',
+            ],
           ].map(([label, value]) => (
             <div key={label}>
               <dt className="text-xs text-muted-foreground">{label}</dt>
@@ -987,16 +1023,7 @@ function TimeWindowControl({
   );
 }
 
-function EndpointHealth({
-  project,
-  status,
-  error,
-  loading,
-  endpoints,
-  sortKey,
-  sortDirection,
-  onSort,
-}: {
+function EndpointHealth(props: {
   project: SavedProject;
   status: InstallationStatusV1 | null;
   error: string | null;
@@ -1006,11 +1033,13 @@ function EndpointHealth({
   sortDirection: SortDirection;
   onSort: (key: SortKey) => void;
 }): JSX.Element {
+  const { project, status, error, loading, endpoints, sortKey, sortDirection, onSort } = props;
   const columns = [
     ['requests', 'Requests'],
     ['error_rate', 'Error rate'],
     ['p95', 'p50'],
     ['p95', 'p95'],
+    ['size', 'Avg size'],
     ['last_seen', 'Last seen'],
     ['health', 'Health'],
   ] as [SortKey, string][];
@@ -1038,7 +1067,9 @@ function EndpointHealth({
         <CardHeader className="flex flex-row items-end justify-between gap-4 border-b">
           <div>
             <CardTitle className="text-base">Observed endpoints</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">{endpoints.length} observed</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {endpoints.length} observed · Measurements update after each complete minute
+            </p>
           </div>
           <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
             <span>Sort by</span>
@@ -1070,8 +1101,8 @@ function EndpointHealth({
               <AlertTitle>No endpoints observed yet</AlertTitle>
               <AlertDescription>
                 <p>
-                  Start {project.name}, then make a request to any route. It will appear here within
-                  a few seconds.
+                  Start {project.name}, then make a request to any route. Measurements appear after
+                  the minute completes.
                 </p>
                 <code className="mt-3 inline-block rounded-md bg-muted px-3 py-2 text-xs text-foreground">
                   curl http://localhost:3000/health

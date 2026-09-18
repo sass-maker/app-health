@@ -14,6 +14,7 @@ const ALLOWED_EVENT_KEYS = [
   'event_id',
   'method',
   'release',
+  'response_bytes',
   'route',
   'status_code',
   'timestamp',

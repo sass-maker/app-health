@@ -1,7 +1,8 @@
 // Hono adapter for @saas-maker/app-health/hono.
 //
 // The adapter reads only Hono's matched route template, the request method,
-// and final response status. It never reads the concrete URL, headers, cookies,
+// the final response status, and the declared response content-length as a
+// byte-count scalar. It never reads the concrete URL, header values, cookies,
 // query values, params, bodies, identity, logs, stacks, or spans.
 
 import type { Context, Env, MiddlewareHandler } from 'hono';
@@ -29,6 +30,7 @@ export interface HonoMiddlewareOptions<E extends Env = Env> {
     route: string;
     status_code: number;
     duration_ms: number;
+    response_bytes?: number;
   }) => void;
 }
 
@@ -69,11 +71,16 @@ function recordHono<E extends Env>(
   }
   if (client === null) return;
 
+  const contentLength = context.res.headers.get('content-length');
+  const declaredBytes = contentLength === null ? undefined : Number(contentLength);
   const event = {
     method,
     route,
     status_code: status,
     duration_ms: Math.max(0, Math.round(nowMs() - start)),
+    ...(declaredBytes !== undefined && Number.isInteger(declaredBytes) && declaredBytes >= 0
+      ? { response_bytes: declaredBytes }
+      : {}),
   };
   options.onRecord?.(event);
   client.record({

@@ -84,6 +84,25 @@ func TestMiddleware_CustomStatusAndBody(t *testing.T) {
 	}
 }
 
+// Response payload byte count is recorded as a scalar without retaining content.
+func TestMiddleware_RecordsResponseBytes(t *testing.T) {
+	rs := newRecordingServer()
+	c := newTestClient(t, rs, Config{RouteResolver: func(*http.Request) string { return "/sized" }})
+
+	h := c.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("hello world"))
+	}))
+	doRequest(t, h, "GET", "/sized", nil, nil)
+
+	if !waitFor(t, 2*time.Second, func() bool { return len(rs.events()) == 1 }) {
+		t.Fatalf("expected 1 event")
+	}
+	e := rs.events()[0]
+	if e.ResponseBytes == nil || *e.ResponseBytes != 11 {
+		t.Fatalf("expected response_bytes 11, got %v", e.ResponseBytes)
+	}
+}
+
 // 4.3: default 200 is recorded when the handler never calls WriteHeader.
 func TestMiddleware_DefaultStatusOK(t *testing.T) {
 	rs := newRecordingServer()

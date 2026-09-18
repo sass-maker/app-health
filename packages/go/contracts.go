@@ -25,6 +25,7 @@ const (
 	MaxReleaseLength     = 128
 	MaxEnvironmentLength = 64
 	MaxDurationMs        = 600_000
+	MaxResponseBytes     = 268_435_456
 	MaxClockSkewMs       = 5 * 60 * 1000
 	MinStatusCode        = 100
 	MaxStatusCode        = 599
@@ -81,13 +82,14 @@ const (
 
 // EventV1 is a single endpoint performance summary.
 type EventV1 struct {
-	EventID    string  `json:"event_id"`
-	Timestamp  int64   `json:"timestamp"`
-	Method     string  `json:"method"`
-	Route      string  `json:"route"`
-	StatusCode int     `json:"status_code"`
-	DurationMs int     `json:"duration_ms"`
-	Release    *string `json:"release,omitempty"`
+	EventID       string  `json:"event_id"`
+	Timestamp     int64   `json:"timestamp"`
+	Method        string  `json:"method"`
+	Route         string  `json:"route"`
+	StatusCode    int     `json:"status_code"`
+	DurationMs    int     `json:"duration_ms"`
+	ResponseBytes *int64  `json:"response_bytes,omitempty"`
+	Release       *string `json:"release,omitempty"`
 }
 
 // EventBatchV1 is the V1 ingest batch.
@@ -102,15 +104,18 @@ type EventBatchV1 struct {
 
 // EndpointAggregateV1 is a windowed endpoint aggregate returned by the query API.
 type EndpointAggregateV1 struct {
-	Method       string      `json:"method"`
-	Route        string      `json:"route"`
-	RequestCount int         `json:"request_count"`
-	ErrorCount   int         `json:"error_count"`
-	ErrorRate    float64     `json:"error_rate"`
-	P50Ms        int         `json:"p50_ms"`
-	P95Ms        int         `json:"p95_ms"`
-	LastSeen     *int64      `json:"last_seen"`
-	HealthState  HealthState `json:"health_state"`
+	Method                string      `json:"method"`
+	Route                 string      `json:"route"`
+	RequestCount          int         `json:"request_count"`
+	ErrorCount            int         `json:"error_count"`
+	ErrorRate             float64     `json:"error_rate"`
+	P50Ms                 int         `json:"p50_ms"`
+	P95Ms                 int         `json:"p95_ms"`
+	AvgResponseBytes      *float64    `json:"avg_response_bytes"`
+	TotalResponseBytes    *float64    `json:"total_response_bytes"`
+	ResponseBytesDeltaPct *float64    `json:"response_bytes_delta_pct"`
+	LastSeen              *int64      `json:"last_seen"`
+	HealthState           HealthState `json:"health_state"`
 }
 
 // AppV1, EnvironmentV1, KeyRecordV1, KeyDisplayV1 mirror the TypeScript setup contract.
@@ -185,6 +190,18 @@ var (
 	environmentPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
+// validateResponseBytes bounds the optional response payload byte count.
+// A nil value means the size was not measured and is always valid.
+func validateResponseBytes(bytes *int64) error {
+	if bytes == nil {
+		return nil
+	}
+	if *bytes < 0 || *bytes > MaxResponseBytes {
+		return fmt.Errorf("response_bytes: must be 0..%d", MaxResponseBytes)
+	}
+	return nil
+}
+
 func validateRelease(release *string) error {
 	if release == nil {
 		return nil
@@ -215,6 +232,9 @@ func ValidateEvent(e EventV1) error {
 	}
 	if e.DurationMs < 0 || e.DurationMs > MaxDurationMs {
 		return fmt.Errorf("duration_ms: must be 0..%d", MaxDurationMs)
+	}
+	if err := validateResponseBytes(e.ResponseBytes); err != nil {
+		return err
 	}
 	return validateRelease(e.Release)
 }

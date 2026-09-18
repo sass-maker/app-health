@@ -30,10 +30,13 @@ let db: Awaited<ReturnType<typeof mf.getD1Database>>;
 let writer: D1EndpointWriter;
 beforeAll(async () => {
   db = await mf.getD1Database('DB');
-  const schema = await readFile(
-    new URL('../migrations/0014_endpoint_rollups.sql', import.meta.url),
-    'utf8',
-  );
+  const schema = (
+    await Promise.all(
+      ['0014_endpoint_rollups.sql', '0015_response_payload_bytes.sql'].map((file) =>
+        readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8'),
+      ),
+    )
+  ).join('\n');
   for (const sql of schema
     .replace(/--[^\n]*/g, '')
     .split(';')
@@ -277,7 +280,8 @@ it('combines old AE data with durable counts exactly once and keeps source error
     .prepare(
       `CREATE TABLE IF NOT EXISTS app_health_endpoint_v1 (
     index1 TEXT, blob1 TEXT, blob2 TEXT, blob3 TEXT, blob5 TEXT, blob6 TEXT, blob7 TEXT,
-    double1 REAL, double2 REAL, double3 REAL, double4 REAL, _sample_interval INTEGER, timestamp INTEGER
+    double1 REAL, double2 REAL, double3 REAL, double4 REAL, double5 REAL, double6 REAL,
+    _sample_interval INTEGER, timestamp INTEGER
   )`,
     )
     .run();
@@ -285,7 +289,7 @@ it('combines old AE data with durable counts exactly once and keeps source error
   for (const tag of ['', 'durable-v1']) {
     await db
       .prepare(
-        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, 1, 0, 10, ?, 1, ?)`,
+        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, 1, 0, 10, ?, 512, 1, 1, ?)`,
       )
       .bind(scope, tag, now - 60_000, Math.floor((now - 60_000) / 1000))
       .run();

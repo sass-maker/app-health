@@ -43,7 +43,7 @@ export async function readEndpointBuckets(
     const offset = values.length;
     values.push(range.from, range.to);
     return `SELECT method, route, histogram_bounds_ms, request_count, error_count,
-      duration_sum_ms, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
+      duration_sum_ms, response_bytes_sum, response_bytes_measured, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
       FROM endpoint_rollups WHERE app_id = ?1 AND environment_id = ?2
       AND resolution_ms = ${range.resolution} AND bucket_start >= ?${offset + 1}
       AND bucket_start < ?${offset + 2}`;
@@ -52,7 +52,10 @@ export async function readEndpointBuckets(
     .prepare(
       `SELECT method, route, histogram_bounds_ms,
     SUM(request_count) AS request_count, SUM(error_count) AS error_count,
-    SUM(duration_sum_ms) AS duration_sum_ms, MAX(last_seen) AS last_seen,
+    SUM(duration_sum_ms) AS duration_sum_ms,
+    SUM(response_bytes_sum) AS response_bytes_sum,
+    SUM(response_bytes_measured) AS response_bytes_measured,
+    MAX(last_seen) AS last_seen,
     MAX(upstream_sampled) AS upstream_sampled,
     ${HISTOGRAM.map((name) => `SUM(${name}) AS ${name}`).join(',')}
     FROM (${sources.join(' UNION ALL ')})
@@ -76,6 +79,8 @@ function decodeEndpointBucket(
   const count = Number(row.request_count);
   const errors = Number(row.error_count);
   const duration = Number(row.duration_sum_ms);
+  const bytesSum = Number(row.response_bytes_sum);
+  const bytesMeasured = Number(row.response_bytes_measured);
   const lastSeen = Number(row.last_seen);
   if (
     typeof row.method !== 'string' ||
@@ -85,6 +90,10 @@ function decodeEndpointBucket(
     histogram.reduce((sum, value) => sum + value, 0) !== count ||
     !Number.isFinite(duration) ||
     duration < 0 ||
+    !Number.isFinite(bytesSum) ||
+    bytesSum < 0 ||
+    !Number.isSafeInteger(bytesMeasured) ||
+    bytesMeasured < 0 ||
     !Number.isFinite(lastSeen)
   )
     throw new Error('Invalid durable endpoint aggregate');
@@ -97,6 +106,8 @@ function decodeEndpointBucket(
     request_count: count,
     error_count: errors,
     duration_sum_ms: duration,
+    response_bytes_sum: bytesSum,
+    response_bytes_measured: bytesMeasured,
     last_seen: lastSeen,
     histogram,
     ...(Number(row.upstream_sampled) > 0 ? { upstream_sampled: true } : {}),

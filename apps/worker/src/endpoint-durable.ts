@@ -37,18 +37,25 @@ const UNSEEN = `WITH input AS (
 
 function rollupSql(resolution: number): string {
   const histograms = HISTOGRAM.map((_, i) => `SUM(json_extract(event, '$.histogram') = ${i})`);
-  const updates = ['request_count', 'error_count', 'duration_sum_ms', ...HISTOGRAM].map(
-    (name) => `${name} = endpoint_rollups.${name} + excluded.${name}`,
-  );
+  const updates = [
+    'request_count',
+    'error_count',
+    'duration_sum_ms',
+    'response_bytes_sum',
+    'response_bytes_measured',
+    ...HISTOGRAM,
+  ].map((name) => `${name} = endpoint_rollups.${name} + excluded.${name}`);
   return `${UNSEEN}
     INSERT INTO endpoint_rollups (
       app_id, environment_id, resolution_ms, bucket_start, method, route, runtime, release, histogram_bounds_ms,
-      request_count, error_count, duration_sum_ms, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
+      request_count, error_count, duration_sum_ms, response_bytes_sum, response_bytes_measured, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
     ) SELECT ?2, ?3, ${resolution},
       CAST(json_extract(event, '$.timestamp') / ${resolution} AS INTEGER) * ${resolution},
       json_extract(event, '$.method'), json_extract(event, '$.route'),
       json_extract(event, '$.runtime'), json_extract(event, '$.release'), '${JSON.stringify(LATENCY_BUCKET_BOUNDS_MS)}',
       COUNT(*), SUM(json_extract(event, '$.error')), SUM(json_extract(event, '$.duration')),
+      SUM(COALESCE(json_extract(event, '$.bytes'), 0)),
+      SUM(json_extract(event, '$.bytes') IS NOT NULL),
       MAX(json_extract(event, '$.timestamp')), MAX(json_extract(event, '$.sampled')),
       ${histograms.join(',')}
     FROM unseen WHERE 1 GROUP BY 4, 5, 6, 7, 8
@@ -89,6 +96,7 @@ export class D1EndpointWriter implements DurableEndpointWriter {
         release: event.release ?? release ?? '',
         error: Number(event.status_code >= 500),
         duration: event.duration_ms,
+        bytes: event.response_bytes ?? null,
         histogram: histogramIndex(event.duration_ms),
         sampled: Number(event.upstream_sampled === true),
       })),

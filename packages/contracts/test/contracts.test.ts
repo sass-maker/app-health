@@ -17,6 +17,7 @@ import {
   MAX_BATCH_EVENTS,
   MAX_ROUTE_LENGTH,
   MAX_DURATION_MS,
+  MAX_RESPONSE_BYTES,
   SCHEMA_VERSION,
   FailureEventV1,
   FailureQueryRequestV1,
@@ -126,6 +127,21 @@ describe('event batch validation', () => {
     batch.events[0].duration_ms = -1;
     const result = validateBatch(batch);
     expect(result.ok).toBe(false);
+  });
+
+  it('accepts a bounded response payload byte count', () => {
+    const batch = nodeBatchFixture();
+    batch.events[0].response_bytes = 42_000;
+    const result = validateBatch(batch);
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects negative or oversized response byte counts', () => {
+    const batch = nodeBatchFixture();
+    batch.events[0].response_bytes = -1;
+    expect(validateBatch(batch).ok).toBe(false);
+    batch.events[0].response_bytes = MAX_RESPONSE_BYTES + 1;
+    expect(validateBatch(batch).ok).toBe(false);
   });
 
   it('rejects a method with non-letter characters', () => {
@@ -272,6 +288,23 @@ describe('seeded endpoint metrics', () => {
     expect(keys.size).toBe(merged.length);
     expect(keys.has('GET|/users/:id')).toBe(true);
     expect(keys.has('POST|/orders')).toBe(true);
+  });
+
+  it('merges response byte sums into average and total payload fields', () => {
+    const base = SEED_BUCKETS[0];
+    const buckets = [
+      { ...base, response_bytes_sum: 1000, response_bytes_measured: 2 },
+      { ...base, response_bytes_sum: 3000, response_bytes_measured: 2 },
+    ];
+    const merged = mergeBuckets(buckets, '24h', base.bucket_start + 1000);
+    expect(merged[0].avg_response_bytes).toBe(1000);
+    expect(merged[0].total_response_bytes).toBe(4000);
+  });
+
+  it('reports a null average when no event measured a payload size', () => {
+    const merged = mergeBuckets([SEED_BUCKETS[0]], '24h', SEED_BUCKETS[0].bucket_start + 1000);
+    expect(merged[0].avg_response_bytes).toBeNull();
+    expect(merged[0].total_response_bytes).toBe(0);
   });
 
   it('propagates upstream sampling provenance into endpoint aggregates', () => {

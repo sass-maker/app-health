@@ -263,6 +263,29 @@ describe('ingest idempotent batch handling', () => {
     expect(endpoint!.request_count).toBe(1);
   });
 
+  it('reports average payload size and growth versus the previous window', async () => {
+    const { service, adapter } = await freshService();
+    await adapter.asRepositories().buckets.upsertBucket({
+      app_id: SEED_APP_ID,
+      environment_id: SEED_ENV_ID,
+      bucket_start: NOW - 1_500_000,
+      method: 'GET',
+      route: '/test',
+      statusIsError: false,
+      durationMs: 10,
+      timestamp: NOW - 1_500_000,
+      responseBytes: 100,
+    });
+    const event = makeEvent({ event_id: uuid(70), route: '/test', response_bytes: 200 });
+    const ingested = await service.ingest(SEED_KEY, makeBatch([event]), NOW);
+    expect(ingested.ok).toBe(true);
+    const response = await service.queryEndpoints(SEED_APP_ID, SEED_ENV_ID, '15m', NOW);
+    const endpoint = response.endpoints.find((e) => e.route === '/test');
+    expect(endpoint?.avg_response_bytes).toBe(200);
+    expect(endpoint?.total_response_bytes).toBe(200);
+    expect(endpoint?.response_bytes_delta_pct).toBeCloseTo(100);
+  });
+
   it('accepts repeated event IDs when they belong to distinct batches', async () => {
     const { service } = await freshService();
     const eventA = makeEvent({ event_id: uuid(20), timestamp: NOW, route: '/mix' });

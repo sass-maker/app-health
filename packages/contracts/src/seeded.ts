@@ -170,6 +170,8 @@ export function mergeBuckets(
     const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
     const { p50_ms, p95_ms } = approximatePercentiles(mergedHistogram);
     const error_rate = request_count > 0 ? error_count / request_count : 0;
+    const bytes_sum = list.reduce((sum, b) => sum + (b.response_bytes_sum ?? 0), 0);
+    const bytes_measured = list.reduce((sum, b) => sum + (b.response_bytes_measured ?? 0), 0);
     const { method, route } = list[0];
     aggregates.push({
       method,
@@ -179,6 +181,8 @@ export function mergeBuckets(
       error_rate,
       p50_ms,
       p95_ms,
+      avg_response_bytes: bytes_measured > 0 ? bytes_sum / bytes_measured : null,
+      total_response_bytes: bytes_sum,
       last_seen,
       health_state: healthState({ request_count, error_rate, p95_ms }),
       ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),

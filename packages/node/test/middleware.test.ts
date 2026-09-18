@@ -7,8 +7,13 @@ import { createFetchController } from './helpers.js';
 
 function setup() {
   const controller = createFetchController();
-  const recorded: { method: string; route: string; status_code: number; duration_ms: number }[] =
-    [];
+  const recorded: {
+    method: string;
+    route: string;
+    status_code: number;
+    duration_ms: number;
+    response_bytes?: number;
+  }[] = [];
   const client = createAppHealthClient({
     key: 'ahk_test',
     endpoint: 'http://localhost:8787/v1/ingest',
@@ -107,6 +112,15 @@ describe('expressMiddleware behavior', () => {
     expect(recorded.map((event) => event.route)).toContain('/orders/:orderId');
   });
 
+  it('records response payload byte count without retaining content', async () => {
+    const { app, client, recorded } = setup();
+    await request(app).get('/health');
+    await client.flush();
+    const expected = Buffer.byteLength(JSON.stringify({ ok: true }));
+    expect(recorded[0].response_bytes).toBe(expected);
+    expect(JSON.stringify(recorded[0])).not.toContain('ok');
+  });
+
   it('records POST with a body without capturing the body', async () => {
     const { app, client, controller, recorded } = setup();
     await request(app).post('/orders').send({ secret: 'value', token: 'abc' });
@@ -115,7 +129,15 @@ describe('expressMiddleware behavior', () => {
     expect(recorded[0].route).toBe('/orders');
     expect(controller.requests).toHaveLength(1);
     const body = JSON.parse(controller.requests[0].body);
-    const allowed = ['duration_ms', 'event_id', 'method', 'route', 'status_code', 'timestamp'];
+    const allowed = [
+      'duration_ms',
+      'event_id',
+      'method',
+      'response_bytes',
+      'route',
+      'status_code',
+      'timestamp',
+    ];
     for (const event of body.events) {
       const keys = Object.keys(event).sort();
       for (const k of keys) expect([...allowed, 'release']).toContain(k);

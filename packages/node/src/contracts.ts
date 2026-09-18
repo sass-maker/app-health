@@ -10,6 +10,7 @@ export const MAX_METHOD_LENGTH = 16;
 export const MAX_ROUTE_LENGTH = 256;
 export const MAX_RELEASE_LENGTH = 128;
 export const MAX_DURATION_MS = 600_000;
+export const MAX_RESPONSE_BYTES = 268_435_456;
 export const MIN_STATUS_CODE = 100;
 export const MAX_STATUS_CODE = 599;
 
@@ -22,6 +23,7 @@ export interface EventV1 {
   route: string;
   status_code: number;
   duration_ms: number;
+  response_bytes?: number;
   release?: string;
 }
 

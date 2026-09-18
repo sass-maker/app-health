@@ -22,6 +22,7 @@ import {
   normalizeDuration,
   normalizeMethod,
   normalizeRelease,
+  normalizeResponseBytes,
   normalizeRoutePath,
   normalizeStatus,
   normalizeTimestamp,
@@ -42,6 +43,8 @@ export interface EventInput {
   route: unknown;
   status_code: unknown;
   duration_ms: unknown;
+  /** Optional response payload byte count; a size scalar, never content. */
+  response_bytes?: unknown;
   /** Optional; defaults to the client's configured release. */
   release?: unknown;
   /** Optional; defaults to the current time. */
@@ -286,6 +289,7 @@ function buildEventV1(
   }
   const release = normalizeRelease(event.release) ?? ctx.defaultRelease;
   const timestamp = normalizeTimestamp(event.timestamp) ?? ctx.now();
+  const responseBytes = normalizeResponseBytes(event.response_bytes);
   return {
     event_id: ctx.uuid(),
     timestamp,
@@ -293,6 +297,7 @@ function buildEventV1(
     route,
     status_code: status,
     duration_ms: duration,
+    ...(responseBytes !== undefined ? { response_bytes: responseBytes } : {}),
     ...(release !== undefined ? { release } : {}),
   };
 }

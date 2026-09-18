@@ -1,7 +1,7 @@
 // Conservative field and route normalization for the V1 contract.
 //
 // The V1 event only carries method, route template, status_code, duration_ms,
-// timestamp, and optional release. This module normalizes framework-provided
+// response payload byte count, timestamp, and optional release. This module normalizes framework-provided
 // values into the bounded, uppercase, slash-prefixed shape the contract
 // requires. Official adapters call this only with framework route templates;
 // they drop requests when no trusted template exists. It never reads headers,
@@ -13,6 +13,7 @@ import {
   MAX_ROUTE_LENGTH,
   MAX_STATUS_CODE,
   MAX_DURATION_MS,
+  MAX_RESPONSE_BYTES,
   MIN_STATUS_CODE,
 } from './contracts.js';
 
@@ -77,6 +78,15 @@ export function normalizeDuration(durationMs: unknown): number | null {
   const rounded = Math.round(durationMs);
   if (!Number.isInteger(rounded)) return null;
   if (rounded < 0 || rounded > MAX_DURATION_MS) return null;
+  return rounded;
+}
+
+/** Bound a response payload byte count. Returns undefined when unmeasured. */
+export function normalizeResponseBytes(bytes: unknown): number | undefined {
+  if (bytes === undefined || bytes === null) return undefined;
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return undefined;
+  const rounded = Math.round(bytes);
+  if (!Number.isInteger(rounded) || rounded < 0 || rounded > MAX_RESPONSE_BYTES) return undefined;
   return rounded;
 }
 

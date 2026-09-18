@@ -21,8 +21,9 @@ var responseWriterPool = sync.Pool{
 type RouteResolver func(*http.Request) string
 
 // Middleware returns net/http middleware that records method, normalized
-// route, status code, duration, timestamp, and optional release for each
-// completed request, then enqueues the summary for asynchronous delivery.
+// route, status code, duration, response payload byte count, timestamp, and
+// optional release for each completed request, then enqueues the summary for
+// asynchronous delivery.
 //
 // The middleware preserves handler response behavior (status, headers, body),
 // the http.Flusher, http.Hijacker, http.Pusher, and io.ReaderFrom optional
@@ -45,6 +46,7 @@ func (c *Client) Middleware(next http.Handler) http.Handler {
 		rw.ResponseWriter = w
 		rw.status = 0
 		rw.wroteHeader = false
+		rw.bytes = 0
 		defer func() {
 			rw.ResponseWriter = nil
 			responseWriterPool.Put(rw)
@@ -95,11 +97,12 @@ func (c *Client) record(rw *responseWriter, r *http.Request, muxPattern string, 
 		elapsed = 0
 	}
 	c.Record(RecordInput{
-		Method:     method,
-		Route:      route,
-		StatusCode: status,
-		Duration:   elapsed,
-		Timestamp:  start,
+		Method:        method,
+		Route:         route,
+		StatusCode:    status,
+		Duration:      elapsed,
+		Timestamp:     start,
+		ResponseBytes: &rw.bytes,
 	})
 }
 
@@ -130,6 +133,7 @@ type responseWriter struct {
 	http.ResponseWriter
 	status      int
 	wroteHeader bool
+	bytes       int64
 }
 
 func (w *responseWriter) WriteHeader(code int) {
@@ -146,7 +150,9 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 		w.status = http.StatusOK
 		w.wroteHeader = true
 	}
-	return w.ResponseWriter.Write(b)
+	n, err := w.ResponseWriter.Write(b)
+	w.bytes += int64(n)
+	return n, err
 }
 
 // finish finalizes the status if the handler never called WriteHeader or Write.
@@ -186,8 +192,13 @@ func (w *responseWriter) Push(target string, opts *http.PushOptions) error {
 // the ResponseWriter keep their zero-copy fast path. The signature matches
 // io.ReaderFrom.
 func (w *responseWriter) ReadFrom(src io.Reader) (int64, error) {
+	var n int64
+	var err error
 	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
-		return rf.ReadFrom(src)
+		n, err = rf.ReadFrom(src)
+	} else {
+		n, err = io.Copy(w.ResponseWriter, src)
 	}
-	return io.Copy(w.ResponseWriter, src)
+	w.bytes += n
+	return n, err
 }

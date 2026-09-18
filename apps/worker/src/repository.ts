@@ -186,6 +186,8 @@ export interface BucketRepository {
       | 'request_count'
       | 'error_count'
       | 'duration_sum_ms'
+      | 'response_bytes_sum'
+      | 'response_bytes_measured'
       | 'last_seen'
       | 'histogram'
       | 'upstream_sampled'
@@ -194,6 +196,8 @@ export interface BucketRepository {
       durationMs: number;
       timestamp: number;
       upstreamSampled?: boolean;
+      /** Response payload byte count when the SDK measured it. */
+      responseBytes?: number;
     },
   ): Promise<void>;
   /** Return all buckets for the (app, environment) pair within [from, to]. */
@@ -209,6 +213,7 @@ export interface BucketRepository {
       route: string;
       status_code: number;
       duration_ms: number;
+      response_bytes?: number;
       release?: string;
       upstream_sampled?: boolean;
     }[],
