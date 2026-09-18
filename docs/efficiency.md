@@ -23,11 +23,15 @@ alarms. R2 objects are immutable and retried; the batch dedupe ledger retains
 identities for 31 days. SQLite bounds pending batches, pending bytes, stage
 batch size, and ledger rows so backlog growth fails closed and can drain.
 
-Application archive expiry is suspended: the existing gzip archive has no
-verified compacted successor, so age alone cannot authorize deleting it.
-**Release prerequisite:** remove the independent production R2 30-day lifecycle
-rule and verify it with the provider. Changing application code does not disable
-that rule. Raw application logs retain their separate 30-day hot retention.
+Browser archive objects are durable facts, not a cache. Application archive
+expiry is suspended: the existing gzip archive has no verified compacted
+successor, so age alone cannot authorize deleting it. Physical source objects
+may eventually be superseded by larger Parquet/Iceberg files, but only after a
+versioned proof verifies distinct source and replacement keys plus equal row and
+event counts. **Release prerequisite:** remove the independent production R2
+30-day lifecycle rule and verify it with the provider. Changing application code
+does not disable that rule. Raw application logs retain their separate 30-day
+hot retention; durable log rollups are tracked separately.
 
 ### Endpoint correctness foundation (prepared, not released)
 
@@ -105,11 +109,12 @@ Google, ingestion, analytics, and public-sharing receipts.
 
 ## Operational boundaries
 
-Queue retries, immutable archive staging, and retention cleanup have real local
-workerd tests. Production has bounded Queue retention and a 30-day R2 lifecycle;
-full retention expiry and sustained-load billing have not been observed over a
-month. Analytics Engine is a best-effort projection and historical reports can
-lag ingestion; archive replay is not implemented. Keep these limitations visible.
+Queue retries and immutable archive staging have real local workerd tests. The
+code no longer deletes browser archives by age, while production still has the
+older 30-day R2 lifecycle until an explicitly approved provider change removes
+it. Analytics Engine is a best-effort projection and historical reports can lag
+ingestion; archive replay and long-range rollup queries are tracked in
+[issue #62](https://github.com/sass-maker/app-health/issues/62).
 
 ## Native integration boundary
 
