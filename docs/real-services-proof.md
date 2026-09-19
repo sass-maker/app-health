@@ -132,11 +132,12 @@ On `origin/main` `1e7427c` (post-#73 merge), real workerd D1/SQLite/R2 and
 - `endpoint-durable`, `ingest` — retry-stable batch dedupe keeps accepted
   counts correct under duplicates and redelivery.
 
-Rollback is proven in isolation by migration replay plus Worker-version
-rollback leaving additive tables inert. **Not proven in isolation:**
-ownership proof beyond `declared` (domain verification is unimplemented by
-design), and any production behavior. Those stay open until the activation
-below runs.
+These suites prove migration replay, transactional rollback, and archive
+recovery. They do not exercise a previous Worker version against the migrated
+schema or prove Worker-version rollback; that compatibility check remains
+required in isolation before production approval. **Also not proven:**
+ownership beyond `declared` (domain verification is unimplemented by design),
+and any production behavior. These remain explicit acceptance gaps.
 
 ## Production activation — approval-gated
 
