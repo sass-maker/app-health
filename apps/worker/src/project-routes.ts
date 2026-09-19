@@ -1,10 +1,12 @@
 import {
   CapabilitySelection,
+  CapabilityLedgerV1,
   CreateEnvironmentRequest,
   type EnvironmentV1,
 } from '@app-health/contracts';
 import type { AppHealthRepositories } from './repository.js';
 import type { OwnerIdentity } from './identity.js';
+import { capabilityLedger } from './capability-ledger.js';
 
 const json = (status: number, body: unknown) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -67,6 +69,11 @@ async function capabilities(
   if (!(await scopedEnvironment(repos, app, env)))
     return json(404, { error: 'Environment not found' });
   if (!repos.capabilities) return json(503, { error: 'Capability state is unavailable' });
+  if (url.pathname === '/v1/capabilities/ledger') {
+    if (request.method !== 'GET') return json(405, { error: 'Method not allowed' });
+    const collection = await repos.capabilities.getCapabilities(app, env);
+    return json(200, CapabilityLedgerV1.parse(capabilityLedger(app, env, collection)));
+  }
   if (request.method === 'PUT') {
     const parsed = CapabilitySelection.safeParse(await body(request));
     if (!parsed.success) return json(400, { error: 'Invalid capability selection' });
@@ -114,7 +121,8 @@ export async function handleProjectRoutes(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/v1\/apps\/([^/]+)\/environments(?:\/([^/]+)\/keys)?$/);
-  if (url.pathname !== '/v1/capabilities' && !match) return null;
+  if (!['/v1/capabilities', '/v1/capabilities/ledger'].includes(url.pathname) && !match)
+    return null;
   try {
     if (!match) return await capabilities(request, repos, owner, url);
     if (!canManage(owner, match[1])) return json(403, { error: 'Project access denied' });
