@@ -3,7 +3,11 @@ import { InMemoryAdapter, AppHealthService } from '../src/index.js';
 import { handleProjectRoutes } from '../src/project-routes.js';
 import { handleBrowserIngest } from '../src/browser-routes.js';
 import { BearerOwnerIdentityAdapter } from '../src/identity.js';
-import { EnvironmentCapabilities, EnvironmentKeyResponse } from '@app-health/contracts';
+import {
+  CapabilityLedgerV1,
+  EnvironmentCapabilities,
+  EnvironmentKeyResponse,
+} from '@app-health/contracts';
 
 async function fixture() {
   const repos = (await InMemoryAdapter.create()).asRepositories();
@@ -43,6 +47,48 @@ const endpointBatch = (environment = 'production') => ({
 });
 
 describe('independent environment capability foundation', () => {
+  it('separates implementation from scoped quiet and disabled collection without exposing keys', async () => {
+    const f = await fixture();
+    const path = f.path.replace('/v1/capabilities?', '/v1/capabilities/ledger?');
+    const initial = CapabilityLedgerV1.parse(await (await f.call(path))!.json());
+    expect(initial.collection.every((row) => row.first_received_at === null)).toBe(true);
+    expect(initial.features.find((feature) => feature.id === 'browser_analytics')?.status).toBe(
+      'available',
+    );
+    expect(initial.features.find((feature) => feature.id === 'bot_analytics')?.status).toBe(
+      'planned',
+    );
+    expect(initial.features.find((feature) => feature.id === 'replay')?.status).toBe('deferred');
+    expect(new Set(initial.features.map((feature) => feature.id)).size).toBe(
+      initial.features.length,
+    );
+    await f.repos.capabilities!.recordCapability(
+      f.created.app.id,
+      f.created.environment.id,
+      'analytics',
+      100,
+    );
+    await f.repos.capabilities!.setCapabilities(f.created.app.id, f.created.environment.id, []);
+    const response = (await f.call(path))!;
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    const ledger = CapabilityLedgerV1.parse(await response.json());
+    expect(ledger.features).toEqual(initial.features);
+    expect(ledger.collection[0]).toMatchObject({
+      enabled: false,
+      first_received_at: 100,
+      last_received_at: 100,
+    });
+    expect(JSON.stringify(ledger)).not.toContain(f.created.key.key);
+    expect(ledger).not.toHaveProperty('private_key');
+    expect((await f.call(path, 'PUT', { enabled: ['logs'] }))?.status).toBe(405);
+    expect(
+      (await f.call(path, 'GET', undefined, { id: 'bob', label: 'Bob', appIds: [] }))?.status,
+    ).toBe(403);
+    const missing = path.replace(f.created.environment.id, 'not-owned-environment');
+    expect((await f.call(missing))?.status).toBe(404);
+    f.repos.capabilities = undefined;
+    expect((await f.call(path))?.status).toBe(503);
+  });
   it('keeps simultaneous independent receipts and preference updates without lost state', async () => {
     const f = await fixture();
     await Promise.all([
