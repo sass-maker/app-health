@@ -10,6 +10,7 @@ import {
 import { handleAnalyticsShareOwner, handlePublicAnalytics } from './analytics-share-routes.js';
 import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
+import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
 import {
@@ -19,6 +20,7 @@ import {
 } from './browser-routes.js';
 import {
   CreateAppRequestV1,
+  CatalogImportRequestV1,
   DEFAULT_FAILURE_QUERY_LIMIT,
   EndpointQueryRequestV1,
   FailureQueryRequestV1,
@@ -647,6 +649,7 @@ async function handleOwnerRoutes(
   env: Env,
   ctx?: WorkerContext,
 ): Promise<Response> {
+  if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const shareResponse = await handleAnalyticsShareOwner(
     request,
     env,
@@ -681,6 +684,32 @@ async function handleOwnerRoutes(
     if (response) return response;
   }
   return json(404, { error: 'not found' });
+}
+
+async function handleCatalogImportRoute(request: Request, owner: OwnerIdentity, env: Env) {
+  if (request.method !== 'POST') return json(405, { error: 'method not allowed' }, true);
+  if (!owner.workspaceId || owner.appId) return productScopeForbidden();
+  if (!env.DB) return json(503, { error: 'Catalog import storage is unavailable' }, true);
+  try {
+    const bytes = await readStreamBounded(request.body, 32 * 1024);
+    const parsed = CatalogImportRequestV1.safeParse(JSON.parse(new TextDecoder().decode(bytes)));
+    if (!parsed.success) return json(400, { error: 'Invalid catalog import' }, true);
+    return json(
+      200,
+      await importCatalogProjects(env.DB, owner.workspaceId, parsed.data, Date.now()),
+      true,
+    );
+  } catch (error) {
+    if (error instanceof BodyTooLargeError)
+      return json(413, { error: 'Import exceeds 32 KiB' }, true);
+    if (error instanceof SyntaxError) return json(400, { error: 'Invalid JSON' }, true);
+    if (error instanceof CatalogImportConflict) return json(409, { error: error.message }, true);
+    return json(
+      503,
+      { error: 'Catalog import is unavailable; no successful import is claimed' },
+      true,
+    );
+  }
 }
 
 async function handleAccountEntry(request: Request, env: Env, url: URL): Promise<Response | null> {

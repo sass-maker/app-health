@@ -37,6 +37,15 @@ describe('Google account boundary with real D1 SQL', () => {
         .filter((s) => s.trim()))
         await db.prepare(statement).run();
     }
+    const catalogMigration = await readFile(
+      new URL('../migrations/0018_catalog_imports.sql', import.meta.url),
+      'utf8',
+    );
+    for (const statement of catalogMigration
+      .replace(/--[^\n]*/g, '')
+      .trim()
+      .split(/\n(?=CREATE )/))
+      await db.prepare(statement).run();
     env = {
       DB: db,
       APP_HEALTH_ACCOUNTS: 'enabled',
@@ -410,6 +419,125 @@ describe('Google account boundary with real D1 SQL', () => {
       `/v1/capabilities?app_id=${created.app.id}&environment_id=${aliceApp.environment.id}`,
     );
     expect(invalidScope.status).toBe(404);
+  });
+
+  it('imports declared catalog identities atomically and idempotently without keys or cross-account claims', async () => {
+    const project = {
+      catalog_id: 'catalog-canary',
+      name: 'Catalog canary',
+      lifecycle: 'active',
+      hostname: 'example.com',
+      repository: 'https://github.com/example/project',
+    };
+    const input = { schema_version: 1, projects: [project] };
+    const path = '/v1/catalog/import';
+    expect((await request(path, 'garbage', input)).status).toBe(401);
+    const before = await env
+      .DB!.prepare('SELECT COUNT(*) AS total FROM keys')
+      .first<{ total: number }>();
+    const [one, two] = await Promise.all([
+      request(path, aliceCookie, input),
+      request(path, aliceCookie, input),
+    ]);
+    expect(one.status).toBe(200);
+    expect(two.status).toBe(200);
+    const imported = (await one.json()) as {
+      projects: { app_id: string; verification_state: string }[];
+    };
+    expect(await two.json()).toEqual(imported);
+    expect(imported.projects[0].verification_state).toBe('declared');
+    expect(await env.DB!.prepare('SELECT COUNT(*) AS total FROM keys').first()).toEqual(before);
+    const mapping = await env
+      .DB!.prepare('SELECT * FROM catalog_project_imports WHERE app_id = ?')
+      .bind(imported.projects[0].app_id)
+      .first();
+    expect(mapping).toMatchObject({
+      catalog_id: project.catalog_id,
+      hostname: project.hostname,
+      repository: project.repository,
+      lifecycle: 'active',
+      verification_state: 'declared',
+    });
+    const foreign = await request(path, bobCookie, {
+      schema_version: 1,
+      projects: [{ ...project, existing_app_id: aliceApp.app.id }],
+    });
+    expect(foreign.status).toBe(409);
+    const other = await request(path, bobCookie, input);
+    expect(other.status).toBe(200);
+    expect(await other.json()).not.toEqual(imported);
+    const appsBefore = await env.DB!.prepare('SELECT COUNT(*) AS total FROM apps').first();
+    const conflict = await request(path, aliceCookie, {
+      schema_version: 1,
+      projects: [
+        { ...project, catalog_id: 'rollback-new' },
+        { ...project, name: 'Conflicting rename' },
+      ],
+    });
+    expect(conflict.status).toBe(409);
+    expect(await env.DB!.prepare('SELECT COUNT(*) AS total FROM apps').first()).toEqual(appsBefore);
+    expect(
+      await env
+        .DB!.prepare(
+          "SELECT COUNT(*) AS total FROM catalog_project_imports WHERE catalog_id = 'rollback-new'",
+        )
+        .first(),
+    ).toMatchObject({ total: 0 });
+    const explicit = await request(path, aliceCookie, {
+      schema_version: 1,
+      projects: [{ ...project, catalog_id: 'existing-owned', existing_app_id: aliceApp.app.id }],
+    });
+    expect(explicit.status).toBe(200);
+    expect(await env.DB!.prepare('SELECT COUNT(*) AS total FROM apps').first()).toEqual(appsBefore);
+  });
+
+  it('bounds and validates catalog imports and requires an account workspace', async () => {
+    const path = '/v1/catalog/import';
+    const project = { catalog_id: 'invalid', name: 'Invalid', lifecycle: 'active' };
+    expect(
+      (await request(path, aliceCookie, { schema_version: 1, projects: [project, project] }))
+        .status,
+    ).toBe(400);
+    expect(
+      (
+        await request(path, aliceCookie, {
+          schema_version: 1,
+          projects: [{ ...project, repository: 'https://token@github.com/owner/repo' }],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(path, aliceCookie, {
+          schema_version: 1,
+          projects: [{ ...project, secret: 'must-reject' }],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(path, aliceCookie, {
+          schema_version: 1,
+          projects: Array.from({ length: 11 }, (_, i) => ({
+            ...project,
+            catalog_id: `project-${i}`,
+          })),
+        })
+      ).status,
+    ).toBe(400);
+    expect((await request(path, aliceCookie, { oversized: 'x'.repeat(33 * 1024) })).status).toBe(
+      413,
+    );
+    expect((await request(path, aliceCookie)).status).toBe(405);
+    const owner = await worker.fetch(
+      new Request(`https://dashboard.example.com${path}`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer synthetic-owner' },
+        body: JSON.stringify({ schema_version: 1, projects: [project] }),
+      }),
+      env,
+    );
+    expect(owner.status).toBe(403);
   });
 
   it('requires a valid owning account for capability ledger reads', async () => {

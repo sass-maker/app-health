@@ -21,3 +21,4 @@ export * from './native.js';
 export * from './analytics-source.js';
 export * from './product-event.js';
 export * from './timeseries.js';
+export * from './catalog-import.js';
