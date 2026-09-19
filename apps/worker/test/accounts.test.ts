@@ -540,6 +540,23 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(owner.status).toBe(403);
   });
 
+  it('requires a valid owning account for capability ledger reads', async () => {
+    const path = `/v1/capabilities/ledger?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`;
+    expect((await request(path, 'garbage')).status).toBe(401);
+    expect((await request(path, bobCookie)).status).toBe(403);
+    const response = await request(path, aliceCookie);
+    expect(response.status).toBe(200);
+    const ledger = (await response.json()) as {
+      app_id: string;
+      environment_id: string;
+      collection: unknown[];
+    };
+    expect(ledger.app_id).toBe(aliceApp.app.id);
+    expect(ledger.environment_id).toBe(aliceApp.environment.id);
+    expect(ledger.collection).toHaveLength(3);
+    expect(JSON.stringify(ledger)).not.toContain(aliceCookie);
+  });
+
   it('backfills legacy receipt history idempotently without resetting capability choices', async () => {
     const control = new D1ControlPlane(env.DB!);
     const created = await control.createAppEnvironmentKey(
