@@ -98,12 +98,27 @@ Each shard durably stages accepted batches in SQLite before the Queue message is
 acknowledged. It seals JSONL into gzip-compressed segments at 1 MiB or after a
 time alarm, then retries an immutable R2 object. Batch identity is deduplicated
 for 31 days; pending batches, bytes, stage size, and ledger rows are bounded.
-Duplicate deliveries do not project the batch again. R2 is authoritative;
+Duplicate deliveries do not project the batch again. R2 uploads supply a SHA-256
+checksum. If a conditional upload finds an existing object after a lost response,
+the archiver verifies its length and hashes the stored bytes before releasing
+staged facts. Missing, unreadable, or conflicting objects retain staging and retry;
+they cannot silently become successful archival receipts. Verification reads at
+most one bounded segment and does not authorize source deletion or compaction.
+R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
 queried with `_sample_interval` weighting. A durable bounded outbox retries failed
 projections independently of archival. A crash after append but before clearing
 the outbox can still duplicate an analytical projection. Replay/export and reconciliation tools are not implemented yet. This is
 not exactly-once end-to-end analytics.
+
+New segments also carry the versioned archive manifest in R2 custom metadata,
+committed atomically with the gzip bytes. It records the compressed-content
+SHA-256, batch and event counts, actual UTF-8/compressed byte lengths, workspace,
+and minimum/maximum event timestamps. These are event-time bounds, including
+late events, rather than the upload partition date. The manifest remains
+`active`; writing it does not claim compaction, reconciliation, or D1 indexing.
+Existing immutable segments without this metadata remain readable and are not
+rewritten by retries. Their inventory/backfill is a separate operation.
 
 One SQLite-backed Durable Object coordinates each workspace. It stores only
 active opaque session hashes and app/environment IDs, with a 20,000-session

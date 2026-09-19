@@ -1,4 +1,5 @@
 import { projectBrowserBatch } from './browser-projection.js';
+import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 
@@ -14,7 +15,7 @@ const PROJECTION_BATCHES = 50;
 const PROJECTION_MAX_BACKOFF = 60 * 60_000;
 
 export interface BrowserArchiveEnvironment {
-  BROWSER_HISTORY: Pick<R2Bucket, 'put' | 'list' | 'delete'>;
+  BROWSER_HISTORY: Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>;
   BROWSER_ANALYTICS?: Pick<AnalyticsEngineDataset, 'writeDataPoint'>;
 }
 type BatchIdentity = Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>;
@@ -327,11 +328,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       const gzip = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
       // R2 requires known-length bodies; the sealed segment is capped at 1 MiB.
       const compressed = await new Response(gzip).arrayBuffer();
-      await this.env.BROWSER_HISTORY.put(segment.object_key, compressed, {
-        onlyIf: { etagDoesNotMatch: '*' },
-        httpMetadata: { contentType: 'application/x-ndjson', contentEncoding: 'gzip' },
-      });
-      // Null means our immutable segment already exists after a lost response/restart.
+      await persistArchiveSegment(this.env.BROWSER_HISTORY, segment.object_key, body, compressed);
       this.ctx.storage.transactionSync(() => this.complete(segment.id));
     } catch (error) {
       this.ctx.storage.sql.exec(

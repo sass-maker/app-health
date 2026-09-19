@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
     "test": "pnpm --silent -r run test",
     "verify:local-sdk": "pnpm --filter @saas-maker/app-health build && node scripts/verify-local-sdk.mjs",
     "verify:js-runtimes": "pnpm --filter @saas-maker/app-health build && node scripts/verify-js-runtimes.mjs",
