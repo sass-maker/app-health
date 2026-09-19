@@ -63,9 +63,9 @@ const FEATURES: CapabilityLedger['features'] = [
   },
   {
     id: 'catalog_import',
-    status: 'planned',
+    status: 'partial',
     explanation:
-      'Bounded catalog import and ownership/verification semantics remain incomplete. Manual project creation is available.',
+      'Bounded account-scoped declaration import is implemented and requires its additive schema. Domain ownership proof, provider-binding transfer and the import UI remain incomplete; declarations do not enable collection.',
   },
   {
     id: 'provider_evidence',
