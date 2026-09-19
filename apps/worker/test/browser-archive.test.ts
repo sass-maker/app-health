@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { URL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
+import { ArchiveSegmentManifestV1 } from '@app-health/contracts';
 import { DatabaseSync } from 'node:sqlite';
 import { Miniflare } from 'miniflare';
 import ts from 'typescript';
@@ -67,7 +69,7 @@ function batch(id: string, extra = '') {
     environment_id: 'production',
     batch_id: id,
     received_at: 123,
-    events: [{ type: 'pageview', url: 'https://sample.test/', extra }],
+    events: [{ type: 'pageview', timestamp: 123, url: 'https://sample.test/', extra }],
   };
 }
 
@@ -78,11 +80,14 @@ async function harness() {
     new URL('../src/browser-projection.ts', import.meta.url),
     'utf8',
   );
-  const archiveSource = source.replace(
-    "import { projectBrowserBatch } from './browser-projection.js';",
-    '',
-  );
+  const segment = await readFile(new URL('../src/archive-segment.ts', import.meta.url), 'utf8');
+  const archiveSource = source
+    .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
+    .replace("import { persistArchiveSegment } from './archive-segment.js';", '');
   const script =
+    ts.transpileModule(segment, {
+      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    }).outputText +
     ts.transpileModule(projection, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
     }).outputText +
@@ -319,6 +324,35 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     expect(await app.call('flush')).toEqual({ status: 200, body: null });
     expect((await app.call('inspect')).body.pending_batches).toBe(0);
   }, 30_000);
+
+  it('atomically archives a contract-valid manifest with event-time bounds, counts and a verifiable checksum', async () => {
+    app = await harness();
+    const first = batch('one', 'unicode-雪');
+    const second = batch('two');
+    second.events[0].timestamp = 50;
+    second.events.push({ ...second.events[0], timestamp: 200 });
+    await app.call('stage', [first, second]);
+    expect(await app.call('flush')).toEqual({ status: 200, body: null });
+    const bucket = await app.bucket();
+    const key = (await bucket.list()).objects[0].key;
+    const object = (await bucket.get(key))!;
+    const bytes = Buffer.from(await object.arrayBuffer());
+    const manifest = ArchiveSegmentManifestV1.parse(JSON.parse(object.customMetadata!.manifest));
+    expect(manifest).toMatchObject({
+      object_key: key,
+      workspace_id: 'workspace-one',
+      row_count: 2,
+      event_count: 3,
+      min_event_at: 50,
+      max_event_at: 200,
+      state: 'active',
+      content_sha256: createHash('sha256').update(bytes).digest('hex'),
+      compressed_bytes: bytes.byteLength,
+      uncompressed_bytes: gunzipSync(bytes).byteLength,
+    });
+    expect(manifest.created_at).toBeLessThanOrEqual(Date.now());
+    expect((await app.call('inspect')).body.pending_batches).toBe(0);
+  });
 
   it.each(['get-missing', 'get-unavailable'])(
     'keeps staging when an existing object cannot be verified: %s',

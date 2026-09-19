@@ -1,4 +1,5 @@
 import { projectBrowserBatch } from './browser-projection.js';
+import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 
@@ -327,7 +328,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       const gzip = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
       // R2 requires known-length bodies; the sealed segment is capped at 1 MiB.
       const compressed = await new Response(gzip).arrayBuffer();
-      await this.persistSegment(segment.object_key, compressed);
+      await persistArchiveSegment(this.env.BROWSER_HISTORY, segment.object_key, body, compressed);
       this.ctx.storage.transactionSync(() => this.complete(segment.id));
     } catch (error) {
       this.ctx.storage.sql.exec(
@@ -339,29 +340,6 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     } finally {
       await this.schedule();
     }
-  }
-
-  private async persistSegment(key: string, compressed: ArrayBuffer): Promise<void> {
-    const digest = await crypto.subtle.digest('SHA-256', compressed);
-    const created = await this.env.BROWSER_HISTORY.put(key, compressed, {
-      onlyIf: { etagDoesNotMatch: '*' },
-      sha256: digest,
-      httpMetadata: { contentType: 'application/x-ndjson', contentEncoding: 'gzip' },
-    });
-    if (created) return;
-    // A lost PUT response can leave the object behind. Existence alone is not
-    // proof of successful archival: verify its bytes before releasing staging.
-    const existing = await this.env.BROWSER_HISTORY.get(key);
-    if (!existing || existing.size !== compressed.byteLength) {
-      await existing?.body.cancel();
-      throw new Error('Archive object missing or size mismatch; staging retained');
-    }
-    const actual = new Uint8Array(
-      await crypto.subtle.digest('SHA-256', await existing.arrayBuffer()),
-    );
-    const expected = new Uint8Array(digest);
-    if (!actual.every((byte, index) => byte === expected[index]))
-      throw new Error('Archive object checksum mismatch; staging retained');
   }
 
   private complete(segment: string): void {
