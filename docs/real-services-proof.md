@@ -19,6 +19,9 @@ proven.
 
 - Live Worker `free-ai-gateway` at `ai-gateway.sassmaker.com`; catalog id
   `free-ai`; P4 toolbox, `required-service` auth.
+- Runs entirely on free tiers across ~11 providers and 80+ models, so it is a
+  real always-on service whose provider-fallback traffic produces genuine
+  endpoint signal — and onboarding it adds zero consumer-side cost.
 - Already carries `@saas-maker/app-health` 0.2.1 with the `hono` adapter wired
   through `getAppHealthClient`, gated on the runtime-only
   `APP_HEALTH_INGEST_KEY` binding. Activation is a secret set plus Free AI's
