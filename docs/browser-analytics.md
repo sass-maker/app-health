@@ -98,7 +98,13 @@ Each shard durably stages accepted batches in SQLite before the Queue message is
 acknowledged. It seals JSONL into gzip-compressed segments at 1 MiB or after a
 time alarm, then retries an immutable R2 object. Batch identity is deduplicated
 for 31 days; pending batches, bytes, stage size, and ledger rows are bounded.
-Duplicate deliveries do not project the batch again. R2 is authoritative;
+Duplicate deliveries do not project the batch again. R2 uploads supply a SHA-256
+checksum. If a conditional upload finds an existing object after a lost response,
+the archiver verifies its length and hashes the stored bytes before releasing
+staged facts. Missing, unreadable, or conflicting objects retain staging and retry;
+they cannot silently become successful archival receipts. Verification reads at
+most one bounded segment and does not authorize source deletion or compaction.
+R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
 queried with `_sample_interval` weighting. A durable bounded outbox retries failed
 projections independently of archival. A crash after append but before clearing

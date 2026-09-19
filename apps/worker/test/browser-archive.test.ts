@@ -23,7 +23,12 @@ import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
 const wrapper = `
 export class TestArchive extends BrowserArchive {
   constructor(ctx, env) {
-    super(ctx, { BROWSER_HISTORY: { put: async (...args) => {
+    super(ctx, { BROWSER_HISTORY: { get: async (...args) => {
+      const fault = await ctx.storage.get('fault');
+      if (fault === 'get-missing') return null;
+      if (fault === 'get-unavailable') throw new Error('R2 read unavailable');
+      return env.BUCKET.get(...args);
+    }, put: async (...args) => {
       const fault = await ctx.storage.get('fault');
       if (fault === 'before') throw new Error('R2 unavailable');
       const result = await env.BUCKET.put(...args);
@@ -289,6 +294,47 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     expect((await app.call('inspect')).body).toEqual(before);
     expect((await app.call('stage', [batch('0')])).body.duplicates).toBe(1);
   }, 30_000);
+
+  it('retains staged facts after a conflicting immutable object and recovers only with matching bytes', async () => {
+    app = await harness();
+    await app.call('stage', [batch('one')]);
+    await app.call('fault', 'after');
+    expect((await app.call('flush')).status).toBe(503);
+    let bucket = await app.bucket();
+    const key = (await bucket.list()).objects[0].key;
+    const original = await (await bucket.get(key))!.arrayBuffer();
+    const corrupted = new Uint8Array(original.slice(0));
+    corrupted[corrupted.length - 1] ^= 1;
+    await bucket.put(key, corrupted);
+    await app.restart();
+    bucket = await app.bucket();
+    await app.call('fault', 'none');
+    expect((await app.call('flush')).body.error).toContain('checksum mismatch');
+    expect((await app.call('inspect')).body).toMatchObject({ pending_batches: 1, expiry: null });
+    expect((await app.call('stage', [batch('one')])).body.duplicates).toBe(1);
+    await bucket.put(key, 'wrong-size');
+    expect((await app.call('flush')).body.error).toContain('size mismatch');
+    expect((await app.call('inspect')).body.pending_batches).toBe(1);
+    await bucket.put(key, original);
+    expect(await app.call('flush')).toEqual({ status: 200, body: null });
+    expect((await app.call('inspect')).body.pending_batches).toBe(0);
+  }, 30_000);
+
+  it.each(['get-missing', 'get-unavailable'])(
+    'keeps staging when an existing object cannot be verified: %s',
+    async (fault) => {
+      app = await harness();
+      await app.call('stage', [batch('one')]);
+      await app.call('fault', 'after');
+      expect((await app.call('flush')).status).toBe(503);
+      await app.call('fault', fault);
+      expect((await app.call('flush')).status).toBe(503);
+      expect((await app.call('inspect')).body).toMatchObject({ pending_batches: 1, expiry: null });
+      await app.call('fault', 'none');
+      expect(await app.call('flush')).toEqual({ status: 200, body: null });
+      expect((await app.call('inspect')).body.pending_batches).toBe(0);
+    },
+  );
 });
 
 function unitArchive(withAnalytics = false) {
@@ -341,7 +387,7 @@ function unitArchive(withAnalytics = false) {
   };
   const create = () =>
     new BrowserArchive(ctx as unknown as DurableObjectState, {
-      BROWSER_HISTORY: { put } as unknown as Pick<R2Bucket, 'put' | 'list' | 'delete'>,
+      BROWSER_HISTORY: { put } as unknown as Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>,
       ...(withAnalytics ? { BROWSER_ANALYTICS: { writeDataPoint } } : {}),
     });
   const archive = create();
