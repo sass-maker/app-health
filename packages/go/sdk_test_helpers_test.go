@@ -17,6 +17,7 @@ import (
 type recordingServer struct {
 	mu        sync.Mutex
 	bodies    [][]byte
+	attempts  [][]byte
 	status    int
 	blockCh   chan struct{}
 	delay     time.Duration
@@ -40,6 +41,7 @@ func (s *recordingServer) handler() http.Handler {
 		s.mu.Lock()
 		s.seen++
 		cur := s.seen
+		s.attempts = append(s.attempts, body)
 		status := s.status
 		if s.failFirst > 0 && cur <= s.failFirst {
 			status = 500
@@ -71,6 +73,16 @@ func (s *recordingServer) batchBodies() [][]byte {
 	defer s.mu.Unlock()
 	cp := make([][]byte, len(s.bodies))
 	copy(cp, s.bodies)
+	return cp
+}
+
+// attemptBodies returns every delivered payload including ones the server
+// rejected, so tests can inspect retry replays.
+func (s *recordingServer) attemptBodies() [][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([][]byte, len(s.attempts))
+	copy(cp, s.attempts)
 	return cp
 }
 

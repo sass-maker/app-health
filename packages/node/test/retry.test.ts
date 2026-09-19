@@ -70,6 +70,38 @@ describe('client retry and outage behavior', () => {
     expect(client.diagnostics().sentBatches).toBe(1);
   });
 
+  it('replays retries with one stable batch_id so collector dedupe absorbs them', async () => {
+    const controller = createFetchController();
+    controller.setResponses([
+      { status: 503 },
+      { ok: true, status: 202 },
+      { status: 503 },
+      { ok: true, status: 202 },
+    ]);
+    const client = createAppHealthClient({
+      key: 'ahk_test',
+      endpoint: 'http://localhost:8787/v1/ingest',
+      fetch: controller.fetch,
+      disableTimer: true,
+      maxRetries: 2,
+      retryBackoffMs: 1,
+    });
+    client.record({ method: 'GET', route: '/health', status_code: 200, duration_ms: 1 });
+    client.log('synthetic.event', { title: 'synthetic' });
+    await client.flush();
+    expect(controller.callCount()).toBe(4);
+    const batchIds = controller.requests.map((r) => JSON.parse(r.body).batch_id as string);
+    // Requests 0-1 are the endpoint batch attempts; 2-3 the log batch attempts.
+    expect(new Set(batchIds.slice(0, 2)).size).toBe(1);
+    expect(new Set(batchIds.slice(2)).size).toBe(1);
+    expect(batchIds[0]).not.toBe(batchIds[2]);
+    // The replayed body is byte-identical, not just id-stable.
+    expect(controller.requests[0].body).toBe(controller.requests[1].body);
+    expect(controller.requests[2].body).toBe(controller.requests[3].body);
+    expect(controller.requests[0].url).toBe('http://localhost:8787/v1/ingest');
+    expect(controller.requests[2].url).toBe('http://localhost:8787/v1/logs');
+  });
+
   it('retries network errors (fetch throws) and eventually fails closed', async () => {
     const controller = createFetchController();
     controller.setResponses([{ throw: 'connect ECONNREFUSED' }, { throw: 'timeout' }]);

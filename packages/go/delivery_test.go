@@ -1,7 +1,9 @@
 package apphealth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -59,6 +61,45 @@ func TestDelivery_RetryThenSuccess(t *testing.T) {
 	}
 	if len(rs.events()) != 1 {
 		t.Fatalf("expected 1 event delivered, got %d", len(rs.events()))
+	}
+}
+
+// 4.3: retried deliveries replay the identical batch so collector dedupe keyed
+// on batch_id absorbs a retry whose earlier attempt actually landed, instead
+// of double-counting the events.
+func TestDelivery_RetryStableBatchID(t *testing.T) {
+	rs := newRecordingServer()
+	rs.failFirst = 2 // first two attempts 500, then 202
+	c := newTestClient(t, rs, Config{MaxRetries: 3, BaseBackoff: time.Millisecond})
+
+	c.enqueue(EventV1{
+		EventID: newEventID(), Timestamp: c.nowMs(), Method: "GET",
+		Route: "/retry", StatusCode: 200, DurationMs: 1,
+	})
+
+	if !waitFor(t, 3*time.Second, func() bool { return c.Stats().Sent > 0 }) {
+		t.Fatalf("expected eventual success, stats=%+v", c.Stats())
+	}
+	attempts := rs.attemptBodies()
+	if len(attempts) != 3 {
+		t.Fatalf("expected 3 delivery attempts, got %d", len(attempts))
+	}
+	ids := make(map[string]bool, len(attempts))
+	for _, body := range attempts {
+		var batch EventBatchV1
+		if err := json.Unmarshal(body, &batch); err != nil {
+			t.Fatalf("invalid attempt body: %v", err)
+		}
+		if batch.BatchID == "" {
+			t.Fatal("retry batch must have a nonempty deduplication ID")
+		}
+		if !bytes.Equal(body, attempts[0]) {
+			t.Fatal("retry must preserve the complete batch payload")
+		}
+		ids[batch.BatchID] = true
+	}
+	if len(ids) != 1 {
+		t.Fatalf("expected one stable batch_id across retries, got %d", len(ids))
 	}
 }
 
