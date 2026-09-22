@@ -25,6 +25,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @app-health/web exec playwright install --with-deps chromium
       - run: pnpm run check
+      - run: node --test scripts/verify-local-sdk.mjs
 
   go:
     name: Go (test, vet)
