@@ -33,6 +33,7 @@ import {
   type PublicLogKeyV1,
   type Runtime,
   type StoredLogV1,
+  type WorkspaceHealthSummaryV1,
   logLevelAtLeast,
 } from '@app-health/contracts';
 import { MemoryCapabilities } from './capability-store.js';
@@ -49,8 +50,10 @@ import type {
   LogListQuery,
   LogRepository,
   PublicLogKeyRepository,
+  WorkspaceHealthRepository,
 } from './repository.js';
 import { MAX_ENVIRONMENTS_PER_APP } from './repository.js';
+import { buildWorkspaceHealthSummary, memoryEnvironmentMetadata } from './workspace-health.js';
 
 /** Bounded deduplication window for event IDs. */
 export const DEDUPE_WINDOW_MS = 60 * 60 * 1000;
@@ -106,7 +109,8 @@ export class InMemoryAdapter
     EndpointInventoryRepository,
     LogRepository,
     PublicLogKeyRepository,
-    BucketRepository
+    BucketRepository,
+    WorkspaceHealthRepository
 {
   private readonly capabilities = new MemoryCapabilities();
   private readonly apps = new Map<string, AppV1>();
@@ -149,7 +153,40 @@ export class InMemoryAdapter
       logs: this,
       publicKeys: this,
       buckets: this,
+      workspaceHealth: this,
     };
+  }
+
+  async queryWorkspaceHealth(now: number): Promise<WorkspaceHealthSummaryV1> {
+    const windowEnd = Math.floor(now / BUCKET_MS) * BUCKET_MS;
+    const from = windowEnd - 24 * 60 * 60 * 1000;
+    const metadata = await Promise.all(
+      [...this.environments.values()].map(async (environment) => {
+        const app = this.apps.get(environment.app_id)!;
+        const installation = this.installation.get(`${app.id}|${environment.id}`);
+        return memoryEnvironmentMetadata({
+          appId: app.id,
+          appName: app.name,
+          environmentId: environment.id,
+          environmentName: environment.name,
+          runtime: installation?.runtime ?? null,
+          hasActiveKey: Boolean(await this.getActiveKeyForEnvironment(app.id, environment.id)),
+          capabilities: await this.capabilities.getCapabilities(app.id, environment.id),
+        });
+      }),
+    );
+    const buckets = [...this.buckets.values()].filter(
+      (bucket) => bucket.bucket_start >= from && bucket.bucket_start < windowEnd,
+    );
+    const withoutSeed = buckets.filter(
+      (bucket) => bucket.app_id !== SEED_APP_ID || bucket.environment_id !== SEED_ENV_ID,
+    );
+    return buildWorkspaceHealthSummary(
+      metadata,
+      [...withoutSeed, ...buildSeedBuckets(windowEnd)],
+      now,
+      windowEnd,
+    );
   }
 
   private async seed(): Promise<void> {

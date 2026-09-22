@@ -594,6 +594,21 @@ describe('worker production boundaries', () => {
     });
   });
 
+  it('forbids product-scoped keys from reading workspace health', async () => {
+    const response = await call(
+      'GET',
+      '/v1/workspace/health',
+      productionEnv(),
+      undefined,
+      bearer('ahk_polaris-product'),
+      'https://health.sassmaker.com',
+    );
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'product scope forbids this operation',
+    });
+  });
+
   it('rejects cross-product reads and owner mutations from a product session', async () => {
     const env = productionEnv();
     const auth = bearer('ahk_polaris-product');

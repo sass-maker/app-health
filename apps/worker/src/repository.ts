@@ -24,6 +24,7 @@ import type {
   LogSource,
   PublicLogKeyV1,
   StoredLogV1,
+  WorkspaceHealthSummaryV1,
 } from '@app-health/contracts';
 
 /** Persisted app records. */
@@ -240,6 +241,11 @@ export interface SetupRepository {
   ): Promise<{ app: AppV1; environment: EnvironmentV1; record: KeyRecordV1; rawKey: string }>;
 }
 
+/** Bounded cross-project rollup for the owner-only Watchtower surface. */
+export interface WorkspaceHealthRepository {
+  queryWorkspaceHealth(now: number): Promise<WorkspaceHealthSummaryV1>;
+}
+
 export const MAX_ENVIRONMENTS_PER_APP = 20;
 
 /** Aggregate of all V0 repositories. The in-memory adapter implements this. */
@@ -257,4 +263,5 @@ export interface AppHealthRepositories {
   publicKeys?: PublicLogKeyRepository;
   buckets: BucketRepository;
   setup?: SetupRepository;
+  workspaceHealth?: WorkspaceHealthRepository;
 }

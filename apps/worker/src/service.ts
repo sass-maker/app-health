@@ -14,6 +14,7 @@ import {
   WINDOW_MS,
   FailureQueryResponseV1,
   InstallationStatusV1,
+  WorkspaceHealthSummaryV1,
   MAX_CLOCK_SKEW_MS,
   buildSeedBuckets,
   mergeBuckets,
@@ -39,6 +40,7 @@ import {
   type StoredLogV1,
   type Runtime,
   type Window,
+  type WorkspaceHealthSummaryV1 as WorkspaceHealthSummary,
 } from '@app-health/contracts';
 import { SEED_APP_ID, SEED_ENV_ID } from '@app-health/contracts';
 import type { AppHealthRepositories } from './repository.js';
@@ -81,6 +83,13 @@ type ScopeResolution =
 /** V0 worker service. Stateless aside from the injected repositories. */
 export class AppHealthService {
   constructor(private readonly repos: AppHealthRepositories) {}
+
+  async queryWorkspaceHealth(now: number): Promise<WorkspaceHealthSummary> {
+    if (!this.repos.workspaceHealth) throw new Error('Workspace health is unavailable');
+    return WorkspaceHealthSummaryV1.parse(
+      await this.repos.workspaceHealth.queryWorkspaceHealth(now),
+    );
+  }
 
   /** Create an app + environment + one-time ingest key. */
   async createApp(request: CreateAppRequest, now: number): Promise<CreateAppResponseV1> {

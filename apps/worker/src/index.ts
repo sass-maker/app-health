@@ -585,6 +585,20 @@ async function handleEndpointsRoute(
   );
 }
 
+async function handleWorkspaceHealthRoute(
+  request: Request,
+  bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/workspace/health') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  if (owner.appId) return productScopeForbidden();
+  if (!bundle.repos.workspaceHealth)
+    return json(503, { error: 'workspace health is unavailable' }, true);
+  return json(200, await bundle.service.queryWorkspaceHealth(Date.now()), true);
+}
+
 async function handleFailuresRoute(
   request: Request,
   bundle: AdapterBundle,
@@ -674,6 +688,7 @@ async function handleOwnerRoutes(
     handleAppsRoute,
     handleRevokeRoute,
     handleInstallationStatusRoute,
+    handleWorkspaceHealthRoute,
     handleEndpointsRoute,
     handleFailuresRoute,
     handleLogsQueryRoute,

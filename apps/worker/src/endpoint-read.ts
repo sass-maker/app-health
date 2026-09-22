@@ -10,7 +10,7 @@ const MAX_ROWS = 10_000;
 
 // Cover the interval with disjoint ranges. Daily/hourly interiors avoid reading
 // every minute; minute edges keep the requested boundaries exact.
-function readRanges(from: number, to: number) {
+export function endpointReadRanges(from: number, to: number) {
   let ranges = [{ from, to, resolution: 60_000 }];
   for (const resolution of [86_400_000, 3_600_000]) {
     ranges = ranges.flatMap((range) => {
@@ -39,7 +39,7 @@ export async function readEndpointBuckets(
   if (from % 60_000 || to % 60_000 || to <= from)
     throw new Error('Endpoint reads require completed minute boundaries');
   const values: unknown[] = [appId, envId];
-  const sources = readRanges(from, to).map((range) => {
+  const sources = endpointReadRanges(from, to).map((range) => {
     const offset = values.length;
     values.push(range.from, range.to);
     return `SELECT method, route, histogram_bounds_ms, request_count, error_count,
