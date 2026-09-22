@@ -4,7 +4,7 @@ App Health's Foundation-only Swift package supports iOS 15+ and macOS 12+ with S
 
 Create a project and environment, then open Project settings → Swift apps → Create native public key. This separate `ahk_native_` key is safe to distribute in an app: it authorizes public claims for that environment only. It cannot read analytics, manage projects or submit trusted server measurements. Keep private server keys out of native apps. Five active keys per environment allow rotation; revocation is checked on every batch. Raw keys are shown once and only their SHA-256 verifiers are stored.
 
-Add `packages/swift` as a local Swift package until a release is published:
+The repository root now exposes the library as a Swift package. After a semantic Swift release is published, consumers will be able to add `https://github.com/sass-maker/app-health` with that exact version. No compatible Swift tag exists yet, so production consumers must not declare a remote version today; use `packages/swift` as a local package while developing against this checkout.
 
 ```swift
 import AppHealth
@@ -25,4 +25,4 @@ The client batches after 2 seconds or 25 items, holds at most 200 items includin
 
 Native keys have a 600-item-per-minute quota, with heartbeats counting as one item. Analytics reuse the bounded Queue → archive pipeline; compressed raw archives have no application-level age expiry and may be physically replaced only after verified compaction. Logs use the existing 30-day store and carry `source: native`; they do not route to legacy Slack webhooks. Analytics Engine projection remains best-effort; archive replay, time-series rollups, and reconciliation are tracked in issue #62.
 
-Local qualification includes Swift actor lifecycle tests, actual Swift executable → collector HTTP, and real workerd/D1/Queue ingestion and revocation tests. Run `scripts/verify-swift-runtime.mjs` after building the Swift package. Provider activation and additive migration `0010_native_keys.sql` have not been applied to production by this work.
+Local qualification includes Swift actor lifecycle tests through both the repository-root distribution manifest and the nested development package, actual Swift executable → collector HTTP, and real workerd/D1/Queue ingestion and revocation tests. Run `pnpm run verify:swift-packages`, then `scripts/verify-swift-runtime.mjs` after building the nested Swift package. Publishing the first semantic Swift tag, creating native keys, and integrating a Fleet consumer all require separate approval. Provider activation and additive migration `0010_native_keys.sql` have not been applied to production by this work.

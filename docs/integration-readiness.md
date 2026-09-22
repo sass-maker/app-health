@@ -43,8 +43,8 @@ can only read a deliberately limited aggregate projection.
 
 ## Remaining activation and capability boundaries
 
-Integration into other Fleet apps still needs its own live receipts. Swift remains a local-package
-integration until a separately installable release is published. Self account milestones are server-side, scoped to the
+Integration into other Fleet apps still needs its own live receipts. The repository-root Swift package topology is prepared, but Swift remains a local-package
+integration until an approved semantic tag is published and resolved from an external consumer. Self account milestones are server-side, scoped to the
 configured App Health app/environment, and carry no profile, project identifier,
 or credential data. All credentials in local canaries are synthetic.
 
