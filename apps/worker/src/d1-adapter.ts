@@ -28,8 +28,10 @@ import type {
   InstallationRepository,
   KeyRepository,
   SetupRepository,
+  WorkspaceHealthRepository,
 } from './repository.js';
 import { MAX_ENVIRONMENTS_PER_APP } from './repository.js';
+import { D1WorkspaceHealth } from './workspace-health.js';
 
 export interface D1RunResult {
   results?: Record<string, unknown>[];
@@ -79,7 +81,8 @@ export class D1ControlPlane
     FailureRepository,
     LogRepository,
     PublicLogKeyRepository,
-    SetupRepository
+    SetupRepository,
+    WorkspaceHealthRepository
 {
   constructor(
     private readonly db: D1DatabaseLike,
@@ -100,7 +103,12 @@ export class D1ControlPlane
       publicKeys: this,
       buckets,
       setup: this,
+      workspaceHealth: this,
     };
+  }
+
+  queryWorkspaceHealth(now: number) {
+    return new D1WorkspaceHealth(this.db, this.workspaceId).queryWorkspaceHealth(now);
   }
 
   async createAppEnvironmentKey(

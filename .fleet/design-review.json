@@ -2,41 +2,42 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Focused product navigation with canonical routes and shared page definitions",
+  "target": "Cross-project usage and request-health overview",
   "surfaceMode": "operate",
-  "mode": "preserve",
+  "mode": "overhaul",
   "register": "product",
   "context": {
     "product": "PRODUCT.md",
     "design": "DESIGN.md"
   },
   "direction": {
-    "references": [
-      "shadcn/ui new-york-v4 registry",
-      "Evil Charts Recharts area chart, pinned MIT source"
+    "references": ["PRODUCT.md", "DESIGN.md", "apps/web/src/ProjectsView.tsx"],
+    "probes": [
+      {
+        "id": "fleet-ledger",
+        "path": ".fleet/evidence/portfolio-overview-directions/ledger.png"
+      },
+      {
+        "id": "signal-board",
+        "path": ".fleet/evidence/portfolio-overview-directions/signal-board.png"
+      },
+      {
+        "id": "watchtower",
+        "path": ".fleet/evidence/portfolio-overview-directions/watchtower.png"
+      }
     ],
-    "probes": [],
-    "selected": "existing-shadcn-product-workspace",
-    "approval": "agent-selected",
-    "before": ".fleet/evidence/app-health-redesign/final/events-dark-1440.png",
+    "selected": "watchtower",
+    "approval": "approved",
+    "before": ".fleet/evidence/analytics/overview-local-1440.png",
     "library": {
       "strategy": "upstream-first",
-      "primary": "shadcn/ui new-york-v4",
+      "primary": "existing-project-system",
       "sources": [
-        "https://ui.shadcn.com/r/styles/new-york-v4/button.json",
         "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
         "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/table.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/select.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/chart.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/sidebar.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/sheet.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/skeleton.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/alert.json",
-        "https://ui.shadcn.com/r/styles/new-york-v4/alert-dialog.json",
-        "https://github.com/legions-developer/evilcharts/blob/500ecd44c1fdcf319ba83ea68f3771bc76125974/src/registry/charts/recharts-area-chart.tsx"
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json"
       ],
-      "runtime": "selective",
+      "runtime": "existing",
       "customReplacement": {
         "used": false,
         "authorization": "not-required",
@@ -45,109 +46,48 @@
     },
     "contract": {
       "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
-      "purposeSource": "PRODUCT.md and site-health/apps/backend/config/projects.json publicDirectory app-health purposeContract, verified 2026-09-13.",
+      "purposeSource": "PRODUCT.md and SaaS Maker catalog purposeContract, verified 2026-09-22.",
       "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
       "purposeAlignment": "match",
       "driftNote": "",
       "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
-      "job": "Find traffic, named actions, or backend health through three consistent product destinations.",
-      "thesis": "One shadcn workspace: Overview, Analytics, Events, Backend, and Settings. Backend owns local API, logs, and diagnostics tabs.",
-      "system": "Preserve the existing shadcn graphite/light shell. Web analytics uses indigo traffic signals; Product events uses pink action signals; API monitoring retains method and health status colors; Logs retain severity. Every tool remains reachable and owns its setup or connected state.",
-      "signature": "A product-event workspace that begins with named actions and progressively reveals the selected action's pages and sources.",
-      "risk": "Old dashboard hashes intentionally fall back to Analytics; no compatibility aliases."
+      "job": "Compare application use and request safety across the active portfolio without confusing sessions, views, events, and requests.",
+      "thesis": "An exception-first watchtower opens with coverage gaps, stale signals, and unhealthy request behavior, then preserves a complete searchable project inventory beneath it.",
+      "system": "Preserve the existing shadcn graphite workspace. Indigo denotes usage, emerald healthy request state, amber attention, red active failure, and neutral gray unknown or not applicable. Use compact sans labels, monospace technical values, generous operational cards, and explicit timestamps.",
+      "signature": "A reliability field maps error rate against p95 latency while bubble size represents request volume; every visual point has an accessible project-row equivalent.",
+      "risk": "Exception-first composition can hide quiet products, so the complete inventory remains visible, filterable, and independent of alert state."
     }
   },
   "evidence": {
     "screenshots": [
       {
         "width": 390,
-        "theme": "dark",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-dark-390.png"
+        "path": ".fleet/evidence/portfolio-overview-directions/after-390.png"
       },
       {
         "width": 768,
-        "theme": "dark",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-dark-768.png"
+        "path": ".fleet/evidence/portfolio-overview-directions/after-768.png"
       },
       {
         "width": 1440,
-        "theme": "dark",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-dark-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "light",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-light-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "light",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-light-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "light",
-        "surface": "product-events",
-        "path": ".fleet/evidence/product-separation/events-light-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "dark",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-dark-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "dark",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-dark-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "dark",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-dark-1440.png"
-      },
-      {
-        "width": 390,
-        "theme": "light",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-light-390.png"
-      },
-      {
-        "width": 768,
-        "theme": "light",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-light-768.png"
-      },
-      {
-        "width": 1440,
-        "theme": "light",
-        "surface": "api-monitoring",
-        "path": ".fleet/evidence/product-separation/endpoints-light-1440.png"
+        "path": ".fleet/evidence/portfolio-overview-directions/after-1440.png"
       }
     ],
     "projectCheck": {
-      "command": "pnpm run check: quality gates and 119 browser cases passed; stale Analytics heading assertion fixed and affected browser case passed; final App tests 60/60 and web typecheck passed",
+      "command": "pnpm run check",
       "status": "pass"
     },
     "critique": {
-      "score": 36,
+      "score": 37,
       "maximum": 40
     },
     "audit": {
-      "score": 18,
+      "score": 19,
       "maximum": 20
     },
     "unresolved": {
       "p0": 0,
-      "p1": 0,
-      "p2": 0
+      "p1": 0
     },
     "detector": {
       "posture": "advisory",
@@ -174,11 +114,10 @@
         "total": 0
       },
       "mismatches": []
-    },
-    "notes": "Preserve lane. Reviewed current Playwright screenshots for desktop dark Backend, tablet light Backend, and mobile light Events. Clear primary product grouping, selected Backend tab, readable cards and event rows, semantic colors, no clipping in inspected views. Existing dark/light responsive suites validate 390/768/1440 states. Canonical route names and shared page titles replace old route aliases. No additional components or dependencies. Broader dashboard density and polish remain optional follow-up, not a claim of a new visual system."
+    }
   },
   "ownerFeedback": {
-    "decision": "delegated",
-    "note": "Owner explicitly requested the cleanest focused product and waived legacy navigation compatibility."
+    "decision": "keep",
+    "note": "Owner selected Watchtower on 2026-09-22: 'I like the sound of the watchtower. I'm open to anything.' The implementation retains a complete inventory to mitigate the direction's visibility risk."
   }
 }

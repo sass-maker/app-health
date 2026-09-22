@@ -5,8 +5,10 @@ import {
   type BrowserSegmentFilter,
   BrowserSummary,
   PresenceSnapshot,
+  WorkspaceHealthSummaryV1,
   type BrowserSummary as BrowserSummaryData,
   type BrowserReport as BrowserReportData,
+  type WorkspaceHealthSummaryV1 as WorkspaceHealthSummary,
 } from '@app-health/contracts';
 
 const ANALYTICS_TIMEOUT_MS = 8_000;
@@ -197,6 +199,78 @@ export function useWorkspaceAnalytics(ownerToken: string) {
     };
   }, [ownerToken, retry]);
   return { data, live, error, connected, reload: () => setRetry((value) => value + 1) };
+}
+
+export function useWorkspaceHealth(ownerToken: string) {
+  const [{ data, error }, setResult] = useState<{
+    data: WorkspaceHealthSummary | null;
+    error: string;
+  }>({ data: null, error: '' });
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    let hidden = document.hidden;
+    let loading = false;
+    let request: AbortController | undefined;
+    let poll: ReturnType<typeof setInterval> | undefined;
+    setResult({ data: null, error: '' });
+    async function load() {
+      if (cancelled || hidden || loading) return;
+      loading = true;
+      const timeout = timedRequest();
+      request = timeout.controller;
+      try {
+        const response = await fetch('/v1/workspace/health', {
+          signal: timeout.controller.signal,
+          headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
+          cache: 'no-store',
+        });
+        const body: unknown = await response.json();
+        if (!response.ok) throw new Error(responseError(body, 'Workspace health is unavailable.'));
+        const parsed = WorkspaceHealthSummaryV1.safeParse(body);
+        if (!parsed.success) throw new Error('Workspace health is unavailable.');
+        if (!cancelled && !hidden && !timeout.controller.signal.aborted) {
+          setResult({ data: parsed.data, error: '' });
+        }
+      } catch (cause) {
+        if (requestCanUpdate(cancelled, hidden, timeout.controller, timeout.expired()))
+          setResult((current) => ({
+            ...current,
+            error: requestError(cause, timeout.expired(), 'Workspace health'),
+          }));
+      } finally {
+        timeout.clear();
+        if (request === timeout.controller) {
+          request = undefined;
+          loading = false;
+        }
+      }
+    }
+    function onVisibilityChange() {
+      hidden = document.hidden;
+      if (poll) clearInterval(poll);
+      if (hidden) {
+        poll = undefined;
+        request?.abort();
+        loading = false;
+      } else {
+        void load();
+        poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    if (!hidden) {
+      void load();
+      poll = setInterval(() => void load(), import.meta.env.DEV ? 5000 : 60_000);
+    }
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      request?.abort();
+      if (poll) clearInterval(poll);
+    };
+  }, [ownerToken, retry]);
+  return { data, error, reload: () => setRetry((value) => value + 1) };
 }
 
 type ReportOptions =

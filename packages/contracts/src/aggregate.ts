@@ -93,4 +93,55 @@ export const EndpointQueryResponseV1 = z.object({
 
 export type EndpointQueryResponseV1 = z.infer<typeof EndpointQueryResponseV1>;
 
+export const WorkspaceEndpointStateV1 = z.enum([
+  'unconfigured',
+  'waiting',
+  'connected',
+  'stale',
+  'revoked',
+]);
+export type WorkspaceEndpointStateV1 = z.infer<typeof WorkspaceEndpointStateV1>;
+
+const WorkspaceCapabilityFreshnessV1 = z.object({
+  enabled: z.boolean(),
+  first_received_at: z.number().int().min(0).nullable(),
+  last_received_at: z.number().int().min(0).nullable(),
+});
+
+export const WorkspaceRequestMetricsV1 = z.object({
+  request_count: z.number().int().min(0),
+  error_count: z.number().int().min(0),
+  error_rate: z.number().min(0).max(1),
+  p95_ms: z.number().min(0),
+  last_seen: z.number().int().min(0).nullable(),
+  health_state: z.enum(HEALTH_STATES) as z.ZodEnum<[HealthState, ...HealthState[]]>,
+  upstream_sampled: z.boolean().optional(),
+});
+export type WorkspaceRequestMetricsV1 = z.infer<typeof WorkspaceRequestMetricsV1>;
+
+export const WorkspaceHealthEnvironmentV1 = z.object({
+  app_id: z.string().min(1),
+  app_name: z.string().min(1),
+  environment_id: z.string().min(1),
+  environment_name: z.string().min(1),
+  analytics: WorkspaceCapabilityFreshnessV1,
+  endpoints: z.object({
+    state: WorkspaceEndpointStateV1,
+    runtime: z.string().nullable(),
+    first_received_at: z.number().int().min(0).nullable(),
+    last_received_at: z.number().int().min(0).nullable(),
+    metrics: WorkspaceRequestMetricsV1.nullable(),
+  }),
+});
+export type WorkspaceHealthEnvironmentV1 = z.infer<typeof WorkspaceHealthEnvironmentV1>;
+
+/** Bounded 24-hour workspace rollup used by the cross-project Watchtower. */
+export const WorkspaceHealthSummaryV1 = z.object({
+  refreshed_at: z.number().int().min(0),
+  window_end: z.number().int().min(0),
+  window: z.literal('24h'),
+  environments: z.array(WorkspaceHealthEnvironmentV1).max(1000),
+});
+export type WorkspaceHealthSummaryV1 = z.infer<typeof WorkspaceHealthSummaryV1>;
+
 export type WindowKey = Window;
