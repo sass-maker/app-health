@@ -17,3 +17,5 @@ playwright-report/
 /packages/swift/.build/
 /packages/swift/.swiftpm/
 .fleet/evidence/portfolio-overview-directions/*.png
+/.build/
+/.swiftpm/

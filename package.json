@@ -38,6 +38,7 @@
     "verify:cloudflare-sample": "node examples/cloudflare-sample/verify.mjs",
     "verify:asset-routing": "node scripts/verify-asset-routing.mjs",
     "verify:public-viewer": "node scripts/verify-public-viewer.mjs",
+    "verify:swift-packages": "swift test && swift test --package-path packages/swift",
     "verify:swift-runtime": "node scripts/verify-swift-runtime.mjs",
     "build:production": "VITE_APP_HEALTH_INGEST_ORIGIN=https://ingest.sassmaker.com pnpm run build"
   },

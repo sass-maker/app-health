@@ -55,3 +55,11 @@ jobs:
           GONOSUMDB: github.com/sarthakagrawal927/app-health
           GOPROXY: direct
         run: go test ./...
+
+  swift:
+    name: Swift packages
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify distribution and development packages
+        run: swift test && swift test --package-path packages/swift
