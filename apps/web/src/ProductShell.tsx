@@ -30,6 +30,7 @@ import { Button } from './components/ui/button.js';
 import { Badge } from './components/ui/badge.js';
 import { Separator } from './components/ui/separator.js';
 import { LabeledSelect } from './LabeledSelect.js';
+import { ProjectCommandPicker } from './ProjectCommandPicker.js';
 import { ThemeToggle } from './ThemeToggle.js';
 interface Project {
   appId: string;
@@ -184,20 +185,18 @@ function ProjectPicker({
   const environments = projects.filter((candidate) => candidate.appId === project.appId);
   return (
     <div className="grid min-w-0 grid-cols-2 gap-2 sm:flex">
-      <LabeledSelect
-        label="Project"
-        triggerClassName="h-11 w-full min-w-0 text-xs sm:max-w-44"
-        value={view === 'overview' ? 'all' : project.appId}
-        options={[
-          { value: 'all', label: 'All projects' },
-          ...apps.map((candidate) => ({ value: candidate.appId, label: candidate.name })),
-        ]}
-        onValueChange={(value) => {
-          if (value === 'all') {
+      <ProjectCommandPicker
+        projects={apps}
+        selectedId={view === 'overview' ? null : project.appId}
+        onSelect={(appId) => {
+          if (appId === null) {
             onView('overview');
             return;
           }
-          const next = projects.find((candidate) => candidate.appId === value);
+          const next =
+            appId === project.appId
+              ? project
+              : projects.find((candidate) => candidate.appId === appId);
           if (next) {
             onProject(next);
             if (view === 'overview') onView('analytics');
