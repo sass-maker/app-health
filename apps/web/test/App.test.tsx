@@ -682,6 +682,10 @@ describe('App Health V0 UI', () => {
       expect(failureCall).toBeDefined();
     });
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
+    fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'polaris' }));
+    expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('staging');
+    expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
   });
 
   it('replaces a cached project that the authenticated key cannot access', async () => {
