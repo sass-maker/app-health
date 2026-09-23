@@ -16,6 +16,14 @@ interface Props {
   onSelect: (appId: string | null) => void;
 }
 
+interface OptionViewProps {
+  listId: string;
+  selectedId: string | null;
+  activeIndex: number;
+  onActivate: (index: number) => void;
+  onSelect: (appId: string | null) => void;
+}
+
 function readRecentIds(): string[] {
   try {
     const stored: unknown = JSON.parse(window.sessionStorage.getItem(RECENT_KEY) ?? '[]');
@@ -117,31 +125,13 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
     }
   }
 
-  let optionIndex = -1;
-  function renderOption(option: { appId: string | null; name: string }) {
-    optionIndex += 1;
-    const index = optionIndex;
-    const selected = selectedId === option.appId;
-    return (
-      <button
-        key={option.appId ?? 'all'}
-        id={`${listId}-option-${index}`}
-        type="button"
-        role="option"
-        aria-selected={selected}
-        className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
-        data-active={activeIndex === index}
-        onMouseEnter={() => setActiveIndex(index)}
-        onClick={() => select(option.appId)}
-      >
-        {option.appId === null ? (
-          <Layers3 className="size-4 shrink-0 text-muted-foreground" />
-        ) : null}
-        <span className="min-w-0 flex-1 truncate">{option.name}</span>
-        {selected ? <Check className="size-4 shrink-0 text-primary" aria-hidden="true" /> : null}
-      </button>
-    );
-  }
+  const optionView = {
+    listId,
+    selectedId,
+    activeIndex,
+    onActivate: setActiveIndex,
+    onSelect: select,
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={changeOpen}>
@@ -215,24 +205,28 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
           >
             {showOverview ? (
               <div className="border-b pb-2">
-                {renderOption({ appId: null, name: 'All projects' })}
+                <PickerOption
+                  option={{ appId: null, name: 'All projects' }}
+                  index={0}
+                  {...optionView}
+                />
               </div>
             ) : null}
             {recent.length > 0 ? (
-              <div className="pt-2">
-                <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Recent
-                </p>
-                {recent.map(renderOption)}
-              </div>
+              <PickerOptionGroup
+                label="Recent"
+                options={recent}
+                startIndex={showOverview ? 1 : 0}
+                {...optionView}
+              />
             ) : null}
             {alphabetical.length > 0 ? (
-              <div className="pt-2">
-                <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Projects
-                </p>
-                {alphabetical.map(renderOption)}
-              </div>
+              <PickerOptionGroup
+                label="Projects"
+                options={alphabetical}
+                startIndex={(showOverview ? 1 : 0) + recent.length}
+                {...optionView}
+              />
             ) : null}
             {options.length === 0 ? (
               <p className="px-3 py-8 text-center text-sm text-muted-foreground" role="status">
@@ -247,5 +241,63 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function PickerOption({
+  option,
+  index,
+  listId,
+  selectedId,
+  activeIndex,
+  onActivate,
+  onSelect,
+}: OptionViewProps & {
+  option: { appId: string | null; name: string };
+  index: number;
+}): JSX.Element {
+  const selected = selectedId === option.appId;
+  return (
+    <button
+      id={`${listId}-option-${index}`}
+      type="button"
+      role="option"
+      aria-selected={selected}
+      className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm text-foreground outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring data-[active=true]:bg-accent data-[active=true]:text-accent-foreground"
+      data-active={activeIndex === index}
+      onMouseEnter={() => onActivate(index)}
+      onClick={() => onSelect(option.appId)}
+    >
+      {option.appId === null ? <Layers3 className="size-4 shrink-0 text-muted-foreground" /> : null}
+      <span className="min-w-0 flex-1 truncate">{option.name}</span>
+      {selected ? <Check className="size-4 shrink-0 text-primary" aria-hidden="true" /> : null}
+    </button>
+  );
+}
+
+function PickerOptionGroup({
+  label,
+  options,
+  startIndex,
+  ...optionView
+}: OptionViewProps & {
+  label: string;
+  options: ProjectOption[];
+  startIndex: number;
+}): JSX.Element {
+  return (
+    <div className="pt-2">
+      <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+      {options.map((option, index) => (
+        <PickerOption
+          key={option.appId}
+          option={option}
+          index={startIndex + index}
+          {...optionView}
+        />
+      ))}
+    </div>
   );
 }
