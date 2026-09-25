@@ -210,11 +210,11 @@
     <script>
       if (window.location.pathname === '/') {
         for (var widget of [
-          ['project-strip.js', 'project', 'app-health'],
-          ['ai-chat-footer.js', 'name', 'App Health'],
+          ['https://sassmaker.com/project-strip.js', 'project', 'app-health'],
+          ['https://sassmaker.com/ai-chat-footer.js', 'name', 'App Health'],
         ]) {
           var widgetScript = document.createElement('script');
-          widgetScript.src = 'https://sassmaker.com/' + widget[0];
+          widgetScript.src = widget[0];
           widgetScript.dataset[widget[1]] = widget[2];
           document.body.appendChild(widgetScript);
         }
