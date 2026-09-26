@@ -1,0 +1,89 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "Searchable command-style project picker in the product header",
+  "surfaceMode": "operate",
+  "mode": "overhaul",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": ["existing App Health shadcn workspace", "Radix Dialog pattern"],
+    "probes": [
+      { "id": "A", "path": ".fleet/evidence/project-picker-directions.svg" },
+      { "id": "B", "path": ".fleet/evidence/project-picker-directions.svg" },
+      { "id": "C", "path": ".fleet/evidence/project-picker-directions.svg" }
+    ],
+    "selected": "A",
+    "approval": "approved",
+    "before": "",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing shadcn semantic tokens and Radix Dialog",
+      "sources": [
+        "https://www.radix-ui.com/primitives/docs/components/dialog",
+        "https://ui.shadcn.com/docs/components/radix/command"
+      ],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md and the existing App Health Site Health purpose contract, reviewed 2026-09-23.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Founders and product teams operating a portfolio of applications.",
+      "job": "Find and switch to one authorized project quickly from a 20-plus-project portfolio while retaining environment context.",
+      "thesis": "A compact command finder keeps the existing calm App Health header and makes project discovery search-first.",
+      "system": "Use the existing graphite/light shadcn palette, semantic foreground and muted tokens, a single bordered dialog, restrained section labels, 44px touch targets, visible focus rings, and a scroll-bounded result list. Dark and light modes inherit the shell tokens.",
+      "signature": "Pin All projects above session-recent and alphabetized project results, so the entire portfolio stays one keystroke away.",
+      "risk": "Recents introduce transient client state; store IDs only for this session and intersect them with the currently authorized inventory before display."
+    }
+  },
+  "evidence": {
+    "screenshots": [],
+    "projectCheck": {
+      "command": "pnpm run typecheck; pnpm -C apps/web test (195 passed); pnpm -C apps/web build; pnpm run lint; pnpm run format:check; pnpm run quality:unused",
+      "status": "pass"
+    },
+    "critique": { "score": 0, "maximum": 40 },
+    "audit": { "score": 0, "maximum": 20 },
+    "unresolved": { "p0": 0, "p1": 0 },
+    "detector": { "posture": "advisory", "findings": [] },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    },
+    "notes": "Owner selected direction A on 2026-09-23. Tracking issue: https://github.com/sass-maker/app-health/issues/89. Browser visual review and 390/768/1440 screenshots remain pending: the local Playwright server at 5194 and direct Vite preview at 5173 both fail to bind with EPERM in this sandbox. The web coverage portion passed (94.67% lines); the aggregate coverage command was stopped after the next step produced no output for over two minutes. No visual critique or audit score is claimed."
+  },
+  "ownerFeedback": {
+    "decision": "keep",
+    "note": "Owner selected A, the command-style finder, before implementation."
+  }
+}
