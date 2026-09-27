@@ -11,11 +11,7 @@
     "design": "DESIGN.md"
   },
   "direction": {
-    "references": [
-      "PRODUCT.md",
-      "DESIGN.md",
-      ".fleet/design-review.json"
-    ],
+    "references": ["PRODUCT.md", "DESIGN.md", ".fleet/design-review.json"],
     "probes": [],
     "selected": "existing-watchtower",
     "approval": "not-required",

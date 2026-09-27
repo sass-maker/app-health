@@ -28,7 +28,9 @@ const feed = {
 };
 
 it('shows recent workspace alerts and total count without exposing submitted details', async () => {
-  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => Response.json(feed));
+  const fetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+    Response.json(feed),
+  );
   vi.stubGlobal('fetch', fetch);
   render(<OwnerAlertFeed ownerToken="owner-token" />);
   expect(await screen.findByText('New feedback')).toBeTruthy();

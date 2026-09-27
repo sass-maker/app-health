@@ -8,63 +8,63 @@ Live App Health overview check, 2026-09-28 03:48 Asia/Kolkata: the authenticated
 
 The [55-row capability matrix](fleet-engagement-capability-matrix.csv) is the source-level rollout plan: 45 catalog-declared web footer candidates and 10 without an applicable public footer. It proposes feedback placement and a capture mode where evidence supports one, and leaves the second and third CTA names unknown pending each owning UI review. It does not assert that any component or event is deployed.
 
-| Product ID | Product | Platforms | Catalog deployment | Existing Clarity CTA | Source hints | App Health receipt |
-| --- | --- | --- | --- | --- | --- | --- |
-| `codevetter` | CodeVetter | macOS | live | `benchmark_opened` | App Health: 3 source file(s) | Pending live qualification |
-| `pace` | HeyPace | macOS, Web | live | `download_opened` | App Health: 1 source file(s) | Pending live qualification |
-| `posttrainllm` | PostTrainLLM | Web, Local | live | `quickstart_opened` | App Health: 3 source file(s) | Pending live qualification |
-| `site-health` | Site Health | Web, Local | local-only | Not declared | No source hint | Pending live qualification |
-| `live` | Live | Web | live | `hobby_finder_opened` | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `chatgpt-connections` | ChatGPT Connections | API, ChatGPT | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
-| `saas-maker` | SaaS Maker | Web, API | live | `directory_opened` | App Health: 1 source file(s); feedback: 15 source file(s); waitlist/newsletter: 2 source file(s) | Pending live qualification |
-| `gitstat` | GitStat | Web | live | `analysis_started` | App Health: 2 source file(s) | Pending live qualification |
-| `fleet-social` | Fleet Social | Web, API | live | Not declared | App Health: 1 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `email-manager` | Kinetic | Web, API | live | `gmail_connect_opened` | App Health: 4 source file(s); waitlist/newsletter: 8 source file(s) | Pending live qualification |
-| `chatgpt-memory-insights` | Memory Map | Web | live | `capabilities_opened` | App Health: 4 source file(s) | Pending live qualification |
-| `free-ai` | Free AI | API, Web | live | Not declared | App Health: 3 source file(s) | Pending live qualification |
-| `high-signal` | High Signal | Web, API | live | `signals_opened` | App Health: 6 source file(s); waitlist/newsletter: 7 source file(s) | Pending live qualification |
-| `on-record` | High Signal Podcasts | Web, API | live | `claim_search_opened` | App Health: 4 source file(s); waitlist/newsletter: 2 source file(s) | Pending live qualification |
-| `issue-pages` | IssuePages | Web, GitHub | live | `publish_opened` | App Health: 4 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `research-papers` | Research Papers | Web | live | `reading_paths_opened` | App Health: 7 source file(s) | Pending live qualification |
-| `knowledge-base` | Knowledge Base | Web, API | live | `agent_contract_opened` | App Health: 4 source file(s) | Pending live qualification |
-| `significanthobbies` | Significant Hobbies | Web, API, Swift package | live | `private_hub_opened` | App Health: 3 source file(s); feedback: 1 source file(s) | Pending live qualification |
-| `anime-list` | Anime List | Web, API | live | `anime_search_opened` | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `looptv` | LoopTV | Web, TV | live | `watch_started` | App Health: 2 source file(s); feedback: 2 source file(s) | Pending live qualification |
-| `reader` | Reader | Web, API | live | `sample_opened` | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `swe-interview-prep` | SWE Interview Prep | Web | live | `curriculum_opened` | App Health: 2 source file(s); feedback: 2 source file(s) | Pending live qualification |
-| `calorie` | Calorie | iOS, API | live | `testflight_status_opened` | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `setline` | Setline | iOS | live | `testflight_status_opened` | App Health: 2 source file(s) | Pending live qualification |
-| `kith` | Kith | iOS | live | `testflight_status_opened` | No source hint | Pending live qualification |
-| `ios-landings` | iOS landings | Web | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
-| `rolepatch` | RolePatch | Web, API | live | `free_tools_opened` | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `karte` | Karte | Web, API | live | `page_creation_opened` | App Health: 4 source file(s); waitlist/newsletter: 18 source file(s) | Pending live qualification |
-| `starboard` | Starboard | Web, API | live | `catalog_opened` | App Health: 5 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `ai-game` | AliveVille | Web | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
-| `app-health` | App Health | Web, API | live | `release_status_opened` | App Health: 28 source file(s); waitlist/newsletter: 11 source file(s) | Pending live qualification |
-| `mashup` | Mashup | Web, CLI, Local | live | `receipt_opened` | App Health: 4 source file(s) | Pending live qualification |
-| `motion` | Motion | iOS, iPadOS, Web | live | `testflight_status_opened` | No source hint | Pending live qualification |
-| `open-historia` | Open Historia | Web | live | Not declared | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `ph-catalog` | PH Catalog | CLI, Local, Web | live | Not declared | No source hint | Pending live qualification |
-| `web-playables` | Web Playables | Web, YouTube Playables | live | `play_idle_startup` | App Health: 2 source file(s) | Pending live qualification |
-| `what-it-takes-to-win` | Paths | Web | live | `evidence_room_opened` | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `sarthakagrawal-personal` | Sarthak Agrawal | Web | live | `projects_opened` | App Health: 2 source file(s) | Pending live qualification |
-| `field-track` | Field Track | Android, Web, API | live | `manager_dashboard_opened` | App Health: 3 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `reddit-insights` | Reddit Insights | Web, API | live | `source_thread_opened` | App Health: 3 source file(s) | Pending live qualification |
-| `anchor` | Anchor | macOS, iOS, watchOS, Web | live | `mac_beta_downloaded` | waitlist/newsletter: 1 source file(s) | Pending live qualification |
-| `nomad-data-adventure` | Nomad Data Adventure | Web | live | Not declared | No source hint | Pending live qualification |
-| `storagedaddy` | storagedaddy | macOS, Web | live | `source_opened` | App Health: 2 source file(s) | Pending live qualification |
-| `browserdaddy` | BrowserDaddy | macOS, Web | live | `release_status_opened` | No source hint | Pending live qualification |
-| `performancedaddy` | PerformanceDaddy | macOS, Web | live | `source_opened` | No source hint | Pending live qualification |
-| `slow-serp` | Slow SERP | macOS, Local | local-only | Not declared | No source hint | Pending live qualification |
-| `unified-portfolio` | Unified Portfolio | Web | live | Not declared | App Health: 1 source file(s) | Pending live qualification |
-| `meme-lab` | Meme Lab | Web, Local | live | `paired_run_started` | App Health: 6 source file(s) | Pending live qualification |
-| `agent-testing` | Browser Agent Testing | Web, iOS, CLI | live | Not declared | App Health: 5 source file(s) | Pending live qualification |
-| `nutrition-formula-engine` | Formula Composition Engine | Web | live | `formula_checked` | App Health: 1 source file(s) | Pending live qualification |
-| `every-song-is-a-website` | Every Song Is a Website | Web | live | `song_world_opened` | App Health: 1 source file(s) | Pending live qualification |
-| `contextdaddy` | ContextDaddy | macOS, Web | live | `download_opened` | No source hint | Pending live qualification |
-| `war-chest` | War Chest | macOS, Local | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
-| `mentionpilot` | MentionPilot | Web, API | live | `brand_check_opened` | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 3 source file(s) | Pending live qualification |
-| `daddyrad` | DaddyRad | Web | live | `app_card_opened` | App Health: 3 source file(s) | Pending live qualification |
+| Product ID                 | Product                    | Platforms                | Catalog deployment | Existing Clarity CTA       | Source hints                                                                                     | App Health receipt         |
+| -------------------------- | -------------------------- | ------------------------ | ------------------ | -------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------- |
+| `codevetter`               | CodeVetter                 | macOS                    | live               | `benchmark_opened`         | App Health: 3 source file(s)                                                                     | Pending live qualification |
+| `pace`                     | HeyPace                    | macOS, Web               | live               | `download_opened`          | App Health: 1 source file(s)                                                                     | Pending live qualification |
+| `posttrainllm`             | PostTrainLLM               | Web, Local               | live               | `quickstart_opened`        | App Health: 3 source file(s)                                                                     | Pending live qualification |
+| `site-health`              | Site Health                | Web, Local               | local-only         | Not declared               | No source hint                                                                                   | Pending live qualification |
+| `live`                     | Live                       | Web                      | live               | `hobby_finder_opened`      | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `chatgpt-connections`      | ChatGPT Connections        | API, ChatGPT             | live               | Not declared               | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `saas-maker`               | SaaS Maker                 | Web, API                 | live               | `directory_opened`         | App Health: 1 source file(s); feedback: 15 source file(s); waitlist/newsletter: 2 source file(s) | Pending live qualification |
+| `gitstat`                  | GitStat                    | Web                      | live               | `analysis_started`         | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `fleet-social`             | Fleet Social               | Web, API                 | live               | Not declared               | App Health: 1 source file(s); waitlist/newsletter: 1 source file(s)                              | Pending live qualification |
+| `email-manager`            | Kinetic                    | Web, API                 | live               | `gmail_connect_opened`     | App Health: 4 source file(s); waitlist/newsletter: 8 source file(s)                              | Pending live qualification |
+| `chatgpt-memory-insights`  | Memory Map                 | Web                      | live               | `capabilities_opened`      | App Health: 4 source file(s)                                                                     | Pending live qualification |
+| `free-ai`                  | Free AI                    | API, Web                 | live               | Not declared               | App Health: 3 source file(s)                                                                     | Pending live qualification |
+| `high-signal`              | High Signal                | Web, API                 | live               | `signals_opened`           | App Health: 6 source file(s); waitlist/newsletter: 7 source file(s)                              | Pending live qualification |
+| `on-record`                | High Signal Podcasts       | Web, API                 | live               | `claim_search_opened`      | App Health: 4 source file(s); waitlist/newsletter: 2 source file(s)                              | Pending live qualification |
+| `issue-pages`              | IssuePages                 | Web, GitHub              | live               | `publish_opened`           | App Health: 4 source file(s); waitlist/newsletter: 1 source file(s)                              | Pending live qualification |
+| `research-papers`          | Research Papers            | Web                      | live               | `reading_paths_opened`     | App Health: 7 source file(s)                                                                     | Pending live qualification |
+| `knowledge-base`           | Knowledge Base             | Web, API                 | live               | `agent_contract_opened`    | App Health: 4 source file(s)                                                                     | Pending live qualification |
+| `significanthobbies`       | Significant Hobbies        | Web, API, Swift package  | live               | `private_hub_opened`       | App Health: 3 source file(s); feedback: 1 source file(s)                                         | Pending live qualification |
+| `anime-list`               | Anime List                 | Web, API                 | live               | `anime_search_opened`      | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `looptv`                   | LoopTV                     | Web, TV                  | live               | `watch_started`            | App Health: 2 source file(s); feedback: 2 source file(s)                                         | Pending live qualification |
+| `reader`                   | Reader                     | Web, API                 | live               | `sample_opened`            | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `swe-interview-prep`       | SWE Interview Prep         | Web                      | live               | `curriculum_opened`        | App Health: 2 source file(s); feedback: 2 source file(s)                                         | Pending live qualification |
+| `calorie`                  | Calorie                    | iOS, API                 | live               | `testflight_status_opened` | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s)                              | Pending live qualification |
+| `setline`                  | Setline                    | iOS                      | live               | `testflight_status_opened` | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `kith`                     | Kith                       | iOS                      | live               | `testflight_status_opened` | No source hint                                                                                   | Pending live qualification |
+| `ios-landings`             | iOS landings               | Web                      | live               | Not declared               | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `rolepatch`                | RolePatch                  | Web, API                 | live               | `free_tools_opened`        | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `karte`                    | Karte                      | Web, API                 | live               | `page_creation_opened`     | App Health: 4 source file(s); waitlist/newsletter: 18 source file(s)                             | Pending live qualification |
+| `starboard`                | Starboard                  | Web, API                 | live               | `catalog_opened`           | App Health: 5 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `ai-game`                  | AliveVille                 | Web                      | live               | Not declared               | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `app-health`               | App Health                 | Web, API                 | live               | `release_status_opened`    | App Health: 28 source file(s); waitlist/newsletter: 11 source file(s)                            | Pending live qualification |
+| `mashup`                   | Mashup                     | Web, CLI, Local          | live               | `receipt_opened`           | App Health: 4 source file(s)                                                                     | Pending live qualification |
+| `motion`                   | Motion                     | iOS, iPadOS, Web         | live               | `testflight_status_opened` | No source hint                                                                                   | Pending live qualification |
+| `open-historia`            | Open Historia              | Web                      | live               | Not declared               | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s)  | Pending live qualification |
+| `ph-catalog`               | PH Catalog                 | CLI, Local, Web          | live               | Not declared               | No source hint                                                                                   | Pending live qualification |
+| `web-playables`            | Web Playables              | Web, YouTube Playables   | live               | `play_idle_startup`        | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `what-it-takes-to-win`     | Paths                      | Web                      | live               | `evidence_room_opened`     | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s)                              | Pending live qualification |
+| `sarthakagrawal-personal`  | Sarthak Agrawal            | Web                      | live               | `projects_opened`          | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `field-track`              | Field Track                | Android, Web, API        | live               | `manager_dashboard_opened` | App Health: 3 source file(s); waitlist/newsletter: 1 source file(s)                              | Pending live qualification |
+| `reddit-insights`          | Reddit Insights            | Web, API                 | live               | `source_thread_opened`     | App Health: 3 source file(s)                                                                     | Pending live qualification |
+| `anchor`                   | Anchor                     | macOS, iOS, watchOS, Web | live               | `mac_beta_downloaded`      | waitlist/newsletter: 1 source file(s)                                                            | Pending live qualification |
+| `nomad-data-adventure`     | Nomad Data Adventure       | Web                      | live               | Not declared               | No source hint                                                                                   | Pending live qualification |
+| `storagedaddy`             | storagedaddy               | macOS, Web               | live               | `source_opened`            | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `browserdaddy`             | BrowserDaddy               | macOS, Web               | live               | `release_status_opened`    | No source hint                                                                                   | Pending live qualification |
+| `performancedaddy`         | PerformanceDaddy           | macOS, Web               | live               | `source_opened`            | No source hint                                                                                   | Pending live qualification |
+| `slow-serp`                | Slow SERP                  | macOS, Local             | local-only         | Not declared               | No source hint                                                                                   | Pending live qualification |
+| `unified-portfolio`        | Unified Portfolio          | Web                      | live               | Not declared               | App Health: 1 source file(s)                                                                     | Pending live qualification |
+| `meme-lab`                 | Meme Lab                   | Web, Local               | live               | `paired_run_started`       | App Health: 6 source file(s)                                                                     | Pending live qualification |
+| `agent-testing`            | Browser Agent Testing      | Web, iOS, CLI            | live               | Not declared               | App Health: 5 source file(s)                                                                     | Pending live qualification |
+| `nutrition-formula-engine` | Formula Composition Engine | Web                      | live               | `formula_checked`          | App Health: 1 source file(s)                                                                     | Pending live qualification |
+| `every-song-is-a-website`  | Every Song Is a Website    | Web                      | live               | `song_world_opened`        | App Health: 1 source file(s)                                                                     | Pending live qualification |
+| `contextdaddy`             | ContextDaddy               | macOS, Web               | live               | `download_opened`          | No source hint                                                                                   | Pending live qualification |
+| `war-chest`                | War Chest                  | macOS, Local             | live               | Not declared               | App Health: 2 source file(s)                                                                     | Pending live qualification |
+| `mentionpilot`             | MentionPilot               | Web, API                 | live               | `brand_check_opened`       | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 3 source file(s)  | Pending live qualification |
+| `daddyrad`                 | DaddyRad                   | Web                      | live               | `app_card_opened`          | App Health: 3 source file(s)                                                                     | Pending live qualification |
 
 ## Event contract to apply per product
 
