@@ -92,6 +92,8 @@ function installFetch(options?: { healthResponse?: Response }) {
     const path = String(input);
     if (path.includes('/v1/workspace/health'))
       return options?.healthResponse ?? Response.json(health);
+    if (path.includes('/v1/workspace/alerts'))
+      return Response.json({ generated_at: now, total_count: 0, entries: [] });
     return Response.json(summary);
   });
   vi.stubGlobal('fetch', fetch);

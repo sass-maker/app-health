@@ -1,9 +1,9 @@
 import type { D1DatabaseLike } from './d1-adapter.js';
 
-export const ALERT_FEED_LIMIT = 50;
+const ALERT_FEED_LIMIT = 50;
 const RETENTION_MS = 30 * 86_400_000;
 
-export interface OwnerAlert {
+interface OwnerAlert {
   id: string;
   app_id: string;
   catalog_id: string;

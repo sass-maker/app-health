@@ -114,32 +114,54 @@ function sqlLiteral(value: string): string {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
-/**
- * Pure report builder. Aggregates grouped query results onto the declared
- * catalog scope, maps centralized SaaS Maker logs to products, and reports
- * unknown (null) for any unmeasured surface. Fully testable without D1/AE.
- */
-export function buildDailyEngagementReport(input: DailyEngagementInputs): DailyEngagementReportV1 {
+interface ReportIndexes {
+  byCatalogId: Map<string, CatalogProductRow>;
+  byAppId: Map<string, CatalogProductRow>;
+  visitorsByApp: Map<string, BrowserVisitorRow>;
+  browserLastSeen: Map<string, number>;
+  ctaByApp: Map<string, Map<string, number>>;
+  logCounts: Map<string, Partial<Record<MetricKind, number>>>;
+  logLastSeen: Map<string, number>;
+  unmappedLogs: number;
+}
+
+function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   const byCatalogId = new Map(input.catalog.map((row) => [row.catalog_id, row]));
   const byAppId = new Map(input.catalog.map((row) => [row.app_id, row]));
-
   const visitorsByApp = new Map(input.browserVisitors.map((row) => [row.app_id, row]));
   const browserLastSeen = new Map<string, number>();
-  for (const row of input.browserVisitors)
+  input.browserVisitors.forEach((row) => {
     if (row.last_seen !== null) browserLastSeen.set(row.app_id, row.last_seen);
+  });
+  return {
+    byCatalogId,
+    byAppId,
+    visitorsByApp,
+    browserLastSeen,
+    ctaByApp: indexCtaEvents(input.ctaEvents),
+    ...indexLogEvents(input.logs, byCatalogId, byAppId),
+  };
+}
 
-  const ctaByApp = new Map<string, Map<string, number>>();
-  for (const row of input.ctaEvents) {
-    const perApp = ctaByApp.get(row.app_id) ?? new Map<string, number>();
-    perApp.set(row.name, (perApp.get(row.name) ?? 0) + row.count);
-    ctaByApp.set(row.app_id, perApp);
+function indexCtaEvents(rows: readonly CtaEventRow[]): Map<string, Map<string, number>> {
+  const byApp = new Map<string, Map<string, number>>();
+  for (const row of rows) {
+    const events = byApp.get(row.app_id) ?? new Map<string, number>();
+    events.set(row.name, (events.get(row.name) ?? 0) + row.count);
+    byApp.set(row.app_id, events);
   }
+  return byApp;
+}
 
-  // Per-product log counts keyed by catalog_id.
+function indexLogEvents(
+  rows: readonly EngagementLogRow[],
+  byCatalogId: Map<string, CatalogProductRow>,
+  byAppId: Map<string, CatalogProductRow>,
+): Pick<ReportIndexes, 'logCounts' | 'logLastSeen' | 'unmappedLogs'> {
   const logCounts = new Map<string, Partial<Record<MetricKind, number>>>();
   const logLastSeen = new Map<string, number>();
   let unmappedLogs = 0;
-  for (const row of input.logs) {
+  for (const row of rows) {
     const catalogId = resolveCatalogId(row, byCatalogId, byAppId);
     if (!catalogId) {
       unmappedLogs += 1;
@@ -147,15 +169,32 @@ export function buildDailyEngagementReport(input: DailyEngagementInputs): DailyE
     }
     const kind = logMetricKind(row);
     if (!kind) continue;
-    const counts = logCounts.get(catalogId) ?? {};
-    counts[kind] = (counts[kind] ?? 0) + row.count;
-    logCounts.set(catalogId, counts);
+    addLogCount(logCounts, catalogId, kind, row.count);
     logLastSeen.set(catalogId, Math.max(logLastSeen.get(catalogId) ?? 0, row.last_seen));
   }
+  return { logCounts, logLastSeen, unmappedLogs };
+}
 
-  const sampled = [...input.browserVisitors, ...input.ctaEvents].some(
-    (row) => row.sample_interval > 1,
-  );
+function addLogCount(
+  countsByProduct: Map<string, Partial<Record<MetricKind, number>>>,
+  catalogId: string,
+  kind: MetricKind,
+  count: number,
+): void {
+  const counts = countsByProduct.get(catalogId) ?? {};
+  counts[kind] = (counts[kind] ?? 0) + count;
+  countsByProduct.set(catalogId, counts);
+}
+
+function isSampled(input: DailyEngagementInputs): boolean {
+  return [...input.browserVisitors, ...input.ctaEvents].some((row) => row.sample_interval > 1);
+}
+
+function reportNotes(
+  input: DailyEngagementInputs,
+  sampled: boolean,
+  unmappedLogs: number,
+): string[] {
   const notes = [
     ...(input.notes ?? []),
     'native_sessions and api_activity are not yet measurable in a grouped query and are reported as unknown.',
@@ -180,62 +219,95 @@ export function buildDailyEngagementReport(input: DailyEngagementInputs): DailyE
     notes.push(
       'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
     );
+  return notes;
+}
 
-  const products: DailyEngagementProductReportV1[] = input.catalog.map((row) => {
-    const visitorRow = visitorsByApp.get(row.app_id);
-    const browserMeasurable =
-      input.browserMeasured &&
-      row.environment_id !== null &&
-      (visitorRow !== undefined ||
-        (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
-      (visitorRow === undefined || visitorRow.sample_interval <= 1);
-    const browserVisitors = browserMeasurable
-      ? Math.max(0, Math.round(visitorRow?.visitors ?? 0))
-      : null;
+function metricCount(
+  kind: MetricKind,
+  input: DailyEngagementInputs,
+  row: CatalogProductRow,
+  counts: Partial<Record<MetricKind, number>> | undefined,
+): number | null {
+  const confirmed = input.confirmedLogMetricsByCatalogId?.[row.catalog_id] ?? [];
+  return input.logsMeasured && (counts?.[kind] !== undefined || confirmed.includes(kind))
+    ? (counts?.[kind] ?? 0)
+    : null;
+}
 
-    const configuredCtas = input.ctaEventNamesByCatalogId[row.catalog_id] ?? [];
-    const ctaEvents =
-      browserMeasurable && configuredCtas.length > 0
-        ? configuredCtas.slice(0, 3).map((name) => ({
-            name,
-            count: Math.max(0, Math.round(ctaByApp.get(row.app_id)?.get(name) ?? 0)),
-          }))
-        : [];
+function buildProductReport(
+  row: CatalogProductRow,
+  input: DailyEngagementInputs,
+  indexes: ReportIndexes,
+): DailyEngagementProductReportV1 {
+  const visitor = indexes.visitorsByApp.get(row.app_id);
+  const browserMeasured = isProductBrowserMeasured(row, visitor, input);
+  const ctas = productCtas(row, input, indexes.ctaByApp, browserMeasured);
+  const logCounts = indexes.logCounts.get(row.catalog_id);
+  const feedback = metricCount('feedback', input, row, logCounts);
+  const newsletter = metricCount('newsletter', input, row, logCounts);
+  const waitlist = metricCount('waitlist', input, row, logCounts);
+  const logsMeasured = [feedback, newsletter, waitlist].some((count) => count !== null);
+  const measured = Number(browserMeasured) + Number(logsMeasured);
+  return {
+    catalog_id: row.catalog_id,
+    app_id: row.app_id,
+    name: row.catalog_name,
+    browser_visitors: browserMeasured ? Math.max(0, Math.round(visitor?.visitors ?? 0)) : null,
+    cta_events: ctas,
+    feedback_submitted: feedback,
+    newsletter_joins: newsletter,
+    waitlist_joins: waitlist,
+    native_sessions: null,
+    api_activity: null,
+    freshness: {
+      browser_last_seen: indexes.browserLastSeen.get(row.app_id) ?? null,
+      log_last_seen: indexes.logLastSeen.get(row.catalog_id) ?? null,
+    },
+    coverage: measured === 0 ? 'unknown' : 'partial',
+  };
+}
 
-    const logCountsForProduct = logCounts.get(row.catalog_id);
-    const confirmedMetrics = input.confirmedLogMetricsByCatalogId?.[row.catalog_id] ?? [];
-    const metricCount = (kind: MetricKind): number | null =>
-      input.logsMeasured &&
-      (logCountsForProduct?.[kind] !== undefined || confirmedMetrics.includes(kind))
-        ? (logCountsForProduct?.[kind] ?? 0)
-        : null;
-    const feedback = metricCount('feedback');
-    const waitlist = metricCount('waitlist');
-    const newsletter = metricCount('newsletter');
-    const logsMeasurable = [feedback, waitlist, newsletter].some((count) => count !== null);
+function isProductBrowserMeasured(
+  row: CatalogProductRow,
+  visitor: BrowserVisitorRow | undefined,
+  input: DailyEngagementInputs,
+): boolean {
+  return (
+    input.browserMeasured &&
+    row.environment_id !== null &&
+    (visitor !== undefined ||
+      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
+    (visitor === undefined || visitor.sample_interval <= 1)
+  );
+}
 
-    const browserLast = browserLastSeen.get(row.app_id) ?? null;
-    const logLast = logLastSeen.get(row.catalog_id) ?? null;
+function productCtas(
+  row: CatalogProductRow,
+  input: DailyEngagementInputs,
+  ctaByApp: Map<string, Map<string, number>>,
+  browserMeasured: boolean,
+): DailyEngagementProductReportV1['cta_events'] {
+  const configured = input.ctaEventNamesByCatalogId[row.catalog_id] ?? [];
+  if (!browserMeasured || configured.length === 0) return [];
+  return configured.slice(0, 3).map((name) => ({
+    name,
+    count: Math.max(0, Math.round(ctaByApp.get(row.app_id)?.get(name) ?? 0)),
+  }));
+}
 
-    const measured = [browserMeasurable, logsMeasurable].filter(Boolean).length;
-    const coverage: DailyEngagementProductReportV1['coverage'] =
-      measured === 0 ? 'unknown' : 'partial';
-
-    return {
-      catalog_id: row.catalog_id,
-      app_id: row.app_id,
-      name: row.catalog_name,
-      browser_visitors: browserVisitors,
-      cta_events: ctaEvents,
-      feedback_submitted: feedback,
-      newsletter_joins: newsletter,
-      waitlist_joins: waitlist,
-      native_sessions: null,
-      api_activity: null,
-      freshness: { browser_last_seen: browserLast, log_last_seen: logLast },
-      coverage,
-    };
-  });
+/**
+ * Pure report builder. Aggregates grouped query results onto the declared
+ * catalog scope, maps centralized SaaS Maker logs to products, and reports
+ * unknown (null) for any unmeasured surface. Fully testable without D1/AE.
+ */
+export const buildDailyEngagementReport = (
+  input: DailyEngagementInputs,
+): DailyEngagementReportV1 => {
+  const indexes = indexReportInputs(input);
+  const sampled = isSampled(input);
+  const notes = reportNotes(input, sampled, indexes.unmappedLogs);
+  const products: DailyEngagementProductReportV1[] = [];
+  for (const row of input.catalog) products.push(buildProductReport(row, input, indexes));
 
   const report = {
     schema: DAILY_ENGAGEMENT_SCHEMA,
@@ -251,13 +323,12 @@ export function buildDailyEngagementReport(input: DailyEngagementInputs): DailyE
     notes,
   };
   return DailyEngagementReportV1.parse(report);
-}
+};
+
+type DailyEngagementWindow = { date: string; from: number; to: number } | { error: string };
 
 /** India calendar-day bounds. Defaults to the latest completed day. */
-export function dailyEngagementWindow(
-  date: string | null,
-  now: number,
-): { date: string; from: number; to: number } | { error: string } {
+export function dailyEngagementWindow(date: string | null, now: number): DailyEngagementWindow {
   const reference = Math.floor(now);
   const todayStart = Math.floor((reference + INDIA_OFFSET_MS) / DAY_MS) * DAY_MS - INDIA_OFFSET_MS;
   let dayStart: number;
