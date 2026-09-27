@@ -3,19 +3,24 @@
  *
  * The rollout inventory names one existing Clarity CTA candidate for 42
  * products. Clarity is not an App Health event source, so those candidates are
- * useful for product review but cannot be queried as App Health counts. No
- * product currently has accepted-ingest plus dashboard-receipt evidence in
- * this checkout; consequently the reportable map is intentionally empty and
- * the daily report must keep CTA counts unknown.
+ * useful for product review but cannot be queried as App Health counts.
+ * Reportable names enter this map only after a deployed CTA click receives a
+ * successful App Health browser-ingest response for its catalog-bound app.
  */
 
 export interface DailyCtaPolicy {
   /** Existing Clarity action name from the Fleet rollout inventory, if any. */
   clarityCandidate: string | null;
-  /** App Health event names with qualifying receipt evidence; none yet. */
+  /** App Health event names with qualifying production ingest evidence. */
   qualifiedAppHealthEvents: readonly string[];
-  qualification: 'candidate_only' | 'unknown';
+  qualification: 'verified' | 'candidate_only' | 'unknown';
 }
+
+/** Production browser-ingest receipts observed on 2026-09-28. */
+const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
+  codevetter: ['benchmark_opened'],
+  live: ['hobby_finder_opened'],
+};
 
 const candidateNames: Readonly<Record<string, string>> = {
   codevetter: 'benchmark_opened',
@@ -85,8 +90,8 @@ export const DAILY_CTA_POLICY: Readonly<Record<string, DailyCtaPolicy>> = Object
       catalogId,
       {
         clarityCandidate,
-        qualifiedAppHealthEvents: [],
-        qualification: 'candidate_only',
+        qualifiedAppHealthEvents: verifiedAppHealthEvents[catalogId] ?? [],
+        qualification: verifiedAppHealthEvents[catalogId] ? 'verified' : 'candidate_only',
       } satisfies DailyCtaPolicy,
     ]),
     ...productsWithoutCandidate.map((catalogId) => [

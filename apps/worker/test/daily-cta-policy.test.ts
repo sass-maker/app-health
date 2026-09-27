@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { DAILY_CTA_POLICY, DAILY_CTA_REPORT_EVENT_NAMES } from '../src/daily-cta-policy.js';
 
 describe('daily CTA policy', () => {
-  it('covers the 55-product rollout scope while distinguishing candidates from unknown', () => {
+  it('covers the 55-product rollout scope while distinguishing verified events from candidates', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(42);
+    ).toHaveLength(40);
+    expect(
+      Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
+    ).toHaveLength(2);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'unknown'),
     ).toHaveLength(13);
@@ -22,7 +25,10 @@ describe('daily CTA policy', () => {
     });
   });
 
-  it('does not expose Clarity candidates as App Health report event mappings', () => {
-    expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({});
+  it('reports only App Health events with production ingest receipts', () => {
+    expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
+      codevetter: ['benchmark_opened'],
+      live: ['hobby_finder_opened'],
+    });
   });
 });
