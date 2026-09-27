@@ -1,0 +1,78 @@
+# Fleet engagement rollout: 55-product baseline (2026-09-28)
+
+Source: `saas-maker/catalog/projects.json`, filtered to lifecycle `primary` or `active` on 2026-09-28. There are 74 catalog records: 55 in scope and 19 inactive. This is a source inventory, not evidence of installed, configured, live, or accepted App Health traffic. Source hints are counts of matching application-code files only and can include incidental references. A blank hint does not prove absence. Existing Clarity CTA names are catalog policy candidates for one primary action; they are not proof that App Health has received the event, and each product still needs 2–3 reviewed CTA definitions.
+
+The owner explicitly includes all 55, including local, native, API, and completed benchmark products. Each product needs a capability decision, not a forced web widget. For each, record the audience measure that its runtime can actually support; 2–3 named primary CTA events; feedback and newsletter/waitlist placement or a clear not-applicable reason; the successful-write event hook; App Health key/configuration state; fresh accepted event and dashboard receipt; and daily-report row. Use unknown for missing evidence. Never infer people from HTTP requests. See issue #83 for rollout and #91 for the daily report.
+
+Live App Health overview check, 2026-09-28 03:48 Asia/Kolkata: the authenticated dashboard showed **24 projects watched and 25 environments in inventory**. This is a dashboard registration count, not a count of products with accepted engagement events. It leaves at least 31 of the 55 catalog products without a matching visible project on that overview. The overview also showed browser views for some projects; those 24-hour view counts are not the distinct daily visitor measure requested here. Register and qualify the missing projects before claiming full fleet coverage.
+
+The [55-row capability matrix](fleet-engagement-capability-matrix.csv) is the source-level rollout plan: 45 catalog-declared web footer candidates and 10 without an applicable public footer. It proposes feedback placement and a capture mode where evidence supports one, and leaves the second and third CTA names unknown pending each owning UI review. It does not assert that any component or event is deployed.
+
+| Product ID | Product | Platforms | Catalog deployment | Existing Clarity CTA | Source hints | App Health receipt |
+| --- | --- | --- | --- | --- | --- | --- |
+| `codevetter` | CodeVetter | macOS | live | `benchmark_opened` | App Health: 3 source file(s) | Pending live qualification |
+| `pace` | HeyPace | macOS, Web | live | `download_opened` | App Health: 1 source file(s) | Pending live qualification |
+| `posttrainllm` | PostTrainLLM | Web, Local | live | `quickstart_opened` | App Health: 3 source file(s) | Pending live qualification |
+| `site-health` | Site Health | Web, Local | local-only | Not declared | No source hint | Pending live qualification |
+| `live` | Live | Web | live | `hobby_finder_opened` | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `chatgpt-connections` | ChatGPT Connections | API, ChatGPT | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
+| `saas-maker` | SaaS Maker | Web, API | live | `directory_opened` | App Health: 1 source file(s); feedback: 15 source file(s); waitlist/newsletter: 2 source file(s) | Pending live qualification |
+| `gitstat` | GitStat | Web | live | `analysis_started` | App Health: 2 source file(s) | Pending live qualification |
+| `fleet-social` | Fleet Social | Web, API | live | Not declared | App Health: 1 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `email-manager` | Kinetic | Web, API | live | `gmail_connect_opened` | App Health: 4 source file(s); waitlist/newsletter: 8 source file(s) | Pending live qualification |
+| `chatgpt-memory-insights` | Memory Map | Web | live | `capabilities_opened` | App Health: 4 source file(s) | Pending live qualification |
+| `free-ai` | Free AI | API, Web | live | Not declared | App Health: 3 source file(s) | Pending live qualification |
+| `high-signal` | High Signal | Web, API | live | `signals_opened` | App Health: 6 source file(s); waitlist/newsletter: 7 source file(s) | Pending live qualification |
+| `on-record` | High Signal Podcasts | Web, API | live | `claim_search_opened` | App Health: 4 source file(s); waitlist/newsletter: 2 source file(s) | Pending live qualification |
+| `issue-pages` | IssuePages | Web, GitHub | live | `publish_opened` | App Health: 4 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `research-papers` | Research Papers | Web | live | `reading_paths_opened` | App Health: 7 source file(s) | Pending live qualification |
+| `knowledge-base` | Knowledge Base | Web, API | live | `agent_contract_opened` | App Health: 4 source file(s) | Pending live qualification |
+| `significanthobbies` | Significant Hobbies | Web, API, Swift package | live | `private_hub_opened` | App Health: 3 source file(s); feedback: 1 source file(s) | Pending live qualification |
+| `anime-list` | Anime List | Web, API | live | `anime_search_opened` | App Health: 4 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `looptv` | LoopTV | Web, TV | live | `watch_started` | App Health: 2 source file(s); feedback: 2 source file(s) | Pending live qualification |
+| `reader` | Reader | Web, API | live | `sample_opened` | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `swe-interview-prep` | SWE Interview Prep | Web | live | `curriculum_opened` | App Health: 2 source file(s); feedback: 2 source file(s) | Pending live qualification |
+| `calorie` | Calorie | iOS, API | live | `testflight_status_opened` | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `setline` | Setline | iOS | live | `testflight_status_opened` | App Health: 2 source file(s) | Pending live qualification |
+| `kith` | Kith | iOS | live | `testflight_status_opened` | No source hint | Pending live qualification |
+| `ios-landings` | iOS landings | Web | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
+| `rolepatch` | RolePatch | Web, API | live | `free_tools_opened` | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `karte` | Karte | Web, API | live | `page_creation_opened` | App Health: 4 source file(s); waitlist/newsletter: 18 source file(s) | Pending live qualification |
+| `starboard` | Starboard | Web, API | live | `catalog_opened` | App Health: 5 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `ai-game` | AliveVille | Web | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
+| `app-health` | App Health | Web, API | live | `release_status_opened` | App Health: 28 source file(s); waitlist/newsletter: 11 source file(s) | Pending live qualification |
+| `mashup` | Mashup | Web, CLI, Local | live | `receipt_opened` | App Health: 4 source file(s) | Pending live qualification |
+| `motion` | Motion | iOS, iPadOS, Web | live | `testflight_status_opened` | No source hint | Pending live qualification |
+| `open-historia` | Open Historia | Web | live | Not declared | App Health: 1 source file(s); feedback: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `ph-catalog` | PH Catalog | CLI, Local, Web | live | Not declared | No source hint | Pending live qualification |
+| `web-playables` | Web Playables | Web, YouTube Playables | live | `play_idle_startup` | App Health: 2 source file(s) | Pending live qualification |
+| `what-it-takes-to-win` | Paths | Web | live | `evidence_room_opened` | App Health: 2 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `sarthakagrawal-personal` | Sarthak Agrawal | Web | live | `projects_opened` | App Health: 2 source file(s) | Pending live qualification |
+| `field-track` | Field Track | Android, Web, API | live | `manager_dashboard_opened` | App Health: 3 source file(s); waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `reddit-insights` | Reddit Insights | Web, API | live | `source_thread_opened` | App Health: 3 source file(s) | Pending live qualification |
+| `anchor` | Anchor | macOS, iOS, watchOS, Web | live | `mac_beta_downloaded` | waitlist/newsletter: 1 source file(s) | Pending live qualification |
+| `nomad-data-adventure` | Nomad Data Adventure | Web | live | Not declared | No source hint | Pending live qualification |
+| `storagedaddy` | storagedaddy | macOS, Web | live | `source_opened` | App Health: 2 source file(s) | Pending live qualification |
+| `browserdaddy` | BrowserDaddy | macOS, Web | live | `release_status_opened` | No source hint | Pending live qualification |
+| `performancedaddy` | PerformanceDaddy | macOS, Web | live | `source_opened` | No source hint | Pending live qualification |
+| `slow-serp` | Slow SERP | macOS, Local | local-only | Not declared | No source hint | Pending live qualification |
+| `unified-portfolio` | Unified Portfolio | Web | live | Not declared | App Health: 1 source file(s) | Pending live qualification |
+| `meme-lab` | Meme Lab | Web, Local | live | `paired_run_started` | App Health: 6 source file(s) | Pending live qualification |
+| `agent-testing` | Browser Agent Testing | Web, iOS, CLI | live | Not declared | App Health: 5 source file(s) | Pending live qualification |
+| `nutrition-formula-engine` | Formula Composition Engine | Web | live | `formula_checked` | App Health: 1 source file(s) | Pending live qualification |
+| `every-song-is-a-website` | Every Song Is a Website | Web | live | `song_world_opened` | App Health: 1 source file(s) | Pending live qualification |
+| `contextdaddy` | ContextDaddy | macOS, Web | live | `download_opened` | No source hint | Pending live qualification |
+| `war-chest` | War Chest | macOS, Local | live | Not declared | App Health: 2 source file(s) | Pending live qualification |
+| `mentionpilot` | MentionPilot | Web, API | live | `brand_check_opened` | App Health: 3 source file(s); feedback: 2 source file(s); waitlist/newsletter: 3 source file(s) | Pending live qualification |
+| `daddyrad` | DaddyRad | Web | live | `app_card_opened` | App Health: 3 source file(s) | Pending live qualification |
+
+## Event contract to apply per product
+
+- `cta.<product_action>`: named browser/native user action. Select 2–3 actual primary actions from each product's purpose and UI; record a stable action ID and distinguish clicks from successful completion.
+- `feedback.submitted`: server-authored only after durable feedback write. Keep text, email, screenshots, and identity out of App Health.
+- `waitlist.join` and `newsletter.subscribe`: server-authored only after a new durable, consented subscription; deduplicate repeat submissions.
+- Daily reporting uses a completed calendar day in the owner-selected timezone and separately labels browser-scoped visitors, native usage, CTA counts, confirmed submissions, and unknown/unavailable data.
+
+## Qualification ledger
+
+Source hints above need review in the owning checkout. For every product, record exact source path, local check, production activation authorization, timestamped accepted ingest response, and matching authenticated App Health dashboard count. Keep non-live integrations labelled dark. No 55-product completion claim follows from this baseline.

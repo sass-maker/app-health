@@ -1,0 +1,113 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "Workspace daily engagement section in Overview",
+  "surfaceMode": "operate",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": [
+      "PRODUCT.md",
+      "DESIGN.md",
+      ".fleet/design-review.json"
+    ],
+    "probes": [],
+    "selected": "existing-watchtower",
+    "approval": "not-required",
+    "before": ".fleet/evidence/analytics/overview-local-1440.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json"
+      ],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Fleet owner reviewing cross-product use",
+      "job": "Inspect one completed day across 55 imported products without mistaking missing data for zero",
+      "thesis": "Extend the approved Watchtower overview with a searchable daily ledger",
+      "system": "Existing graphite shadcn cards, compact sans labels, semantic amber for incomplete scope and neutral unknown states",
+      "signature": "The 55-product import counter makes measurement coverage visible before reading counts",
+      "risk": "A long portfolio table can overwhelm mobile; mobile rows use compact cards and search."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "path": ".fleet/evidence/daily-engagement/after-390.png"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/daily-engagement/after-768.png"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/daily-engagement/after-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "pnpm --filter @app-health/web run typecheck && pnpm --filter @app-health/web exec vitest run test/DailyEngagement.test.tsx && pnpm --filter @app-health/web exec playwright test e2e/daily-engagement.spec.ts",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 35,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 18,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    }
+  },
+  "ownerFeedback": {
+    "decision": "agent-selected",
+    "note": "Preserved the owner-approved Watchtower visual system for a bounded data section."
+  }
+}

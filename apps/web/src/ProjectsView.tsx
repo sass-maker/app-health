@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
+  CalendarDays,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -30,6 +31,8 @@ import {
   TableRow,
 } from './components/ui/table.js';
 import { useWorkspaceAnalytics, useWorkspaceHealth } from './useAnalytics.js';
+import { DailyEngagement } from './DailyEngagement.js';
+import { OwnerAlertFeed } from './OwnerAlertFeed.js';
 
 interface ProjectsViewProject {
   appId: string;
@@ -479,6 +482,20 @@ function WatchtowerHeader({
         </p>
       </div>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            document.getElementById('daily-engagement')?.scrollIntoView({
+              behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+                ? 'auto'
+                : 'smooth',
+            })
+          }
+        >
+          <CalendarDays className="size-4" /> Daily report
+        </Button>
         {refreshedAt ? (
           <span>
             Refreshed <Freshness timestamp={refreshedAt} now={Date.now()} />
@@ -554,6 +571,8 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           <ReliabilityField rows={rows} />
         </div>
       )}
+      <DailyEngagement ownerToken={ownerToken} />
+      <OwnerAlertFeed ownerToken={ownerToken} />
       <Inventory rows={rows} now={now} onOpen={onOpen} />
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Requests are server or function calls, never a count of

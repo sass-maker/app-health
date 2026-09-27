@@ -11,6 +11,9 @@ import { handleAnalyticsShareOwner, handlePublicAnalytics } from './analytics-sh
 import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
+import { composeDailyEngagementReport } from './daily-engagement-report.js';
+import { DAILY_CTA_REPORT_EVENT_NAMES } from './daily-cta-policy.js';
+import { readOwnerAlertFeed } from './alert-feed.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
 import {
@@ -599,6 +602,72 @@ async function handleWorkspaceHealthRoute(
   return json(200, await bundle.service.queryWorkspaceHealth(Date.now()), true);
 }
 
+async function handleDailyEngagementRoute(
+  request: Request,
+  _bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+  env: Env,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/reports/daily-engagement') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  if (owner.appId) return productScopeForbidden();
+  if (!owner.workspaceId) return productScopeForbidden();
+  if (!env.DB) return json(503, { error: 'daily engagement storage is unavailable' }, true);
+  let query;
+  if (env.CLOUDFLARE_ACCOUNT_ID && env.ANALYTICS_ENGINE_QUERY_TOKEN) {
+    try {
+      query = createAnalyticsQuery({
+        accountId: env.CLOUDFLARE_ACCOUNT_ID,
+        token: env.ANALYTICS_ENGINE_QUERY_TOKEN,
+      });
+    } catch {
+      query = undefined;
+    }
+  }
+  try {
+    const report = await composeDailyEngagementReport({
+      db: env.DB,
+      workspaceId: owner.workspaceId,
+      query,
+      date: url.searchParams.get('date'),
+      now: Date.now(),
+      ctaEventNamesByCatalogId: DAILY_CTA_REPORT_EVENT_NAMES,
+    });
+    return json(200, report, true);
+  } catch (error) {
+    const status =
+      error instanceof Error && 'status' in error && (error as { status: number }).status === 400
+        ? 400
+        : 503;
+    return json(
+      status,
+      {
+        error: status === 400 ? (error as Error).message : 'daily engagement report is unavailable',
+      },
+      true,
+    );
+  }
+}
+
+async function handleOwnerAlertsRoute(
+  request: Request,
+  _bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+  env: Env,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/workspace/alerts') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  if (owner.appId || !owner.workspaceId) return productScopeForbidden();
+  if (!env.DB) return json(503, { error: 'alert storage is unavailable' }, true);
+  try {
+    return json(200, await readOwnerAlertFeed(env.DB, owner.workspaceId), true);
+  } catch {
+    return json(503, { error: 'alerts are unavailable' }, true);
+  }
+}
+
 async function handleFailuresRoute(
   request: Request,
   bundle: AdapterBundle,
@@ -689,6 +758,8 @@ async function handleOwnerRoutes(
     handleRevokeRoute,
     handleInstallationStatusRoute,
     handleWorkspaceHealthRoute,
+    handleDailyEngagementRoute,
+    handleOwnerAlertsRoute,
     handleEndpointsRoute,
     handleFailuresRoute,
     handleLogsQueryRoute,

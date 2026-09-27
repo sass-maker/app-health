@@ -22,3 +22,4 @@ export * from './analytics-source.js';
 export * from './product-event.js';
 export * from './timeseries.js';
 export * from './catalog-import.js';
+export * from './daily-engagement.js';
