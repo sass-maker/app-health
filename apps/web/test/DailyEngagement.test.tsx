@@ -134,8 +134,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(summary).getAllByText('1')).toHaveLength(2);
   expect(within(summary).getByText('product with browser visitor evidence')).toBeTruthy();
   expect(within(summary).getByText('product with measured primary actions')).toBeTruthy();
-  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('0 feedback');
-  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('2 waitlist joins');
+  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('Feedback: 0');
+  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('Waitlist: 2');
   expect(screen.getByText(/cannot show products that have not been imported/)).toBeTruthy();
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('0')).toBeTruthy();

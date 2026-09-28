@@ -158,8 +158,8 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
             {receipts}
           </p>
           <p className="text-xs text-muted-foreground">
-            {feedback} feedback receipts · {newsletter} newsletter joins ·{' '}
-            {waitlistApplies ? `${waitlist} waitlist joins` : 'waitlist not applicable'}
+            Feedback: {feedback} · Newsletter joins: {newsletter} · Waitlist:{' '}
+            {waitlistApplies ? waitlist : 'not applicable'}
           </p>
         </div>
       </div>
