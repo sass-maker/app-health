@@ -162,12 +162,12 @@ describe('Google account boundary with real D1 SQL', () => {
       `/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
     );
     const timingPattern =
-      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}, auth_db;dur=\d+\.\d{2};desc="\d+ ops"$/;
+      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/;
     for (const response of [apps, capabilities]) {
       expect(response.status).toBe(200);
       const header = response.headers.get('server-timing') ?? '';
       expect(header).toMatch(timingPattern);
-      expect(Number(header.match(/auth_db;[^,]*;desc="(\d+) ops"/)?.[1])).toBe(2);
+      expect(header).not.toContain('auth_db');
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
     }

@@ -1,5 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
-import type { D1DatabaseLike, D1PreparedStatement } from './d1-adapter.js';
+import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 
 export interface AccountBindings {
@@ -39,77 +39,8 @@ export function accountsConfigured(env: AccountBindings): env is ConfiguredAccou
   );
 }
 
-async function measureAuthDbOperation<T>(
-  timings: OwnerRequestTimings,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const started = performance.now();
-  try {
-    return await operation();
-  } finally {
-    timings.authDbMs = (timings.authDbMs ?? 0) + performance.now() - started;
-    timings.authDbOps = (timings.authDbOps ?? 0) + 1;
-  }
-}
-
-function instrumentAuthStatement(
-  statement: D1PreparedStatement,
-  timings: OwnerRequestTimings,
-  originals: WeakMap<object, D1PreparedStatement>,
-): D1PreparedStatement {
-  const wrapped = new Proxy(statement, {
-    get(target, key) {
-      const method = Reflect.get(target, key, target);
-      if (typeof method !== 'function') return method;
-      if (key === 'bind')
-        return (...args: unknown[]) =>
-          instrumentAuthStatement(
-            Reflect.apply(method, target, args) as D1PreparedStatement,
-            timings,
-            originals,
-          );
-      if (key === 'first' || key === 'all' || key === 'run')
-        return (...args: unknown[]) =>
-          measureAuthDbOperation(
-            timings,
-            () => Reflect.apply(method, target, args) as Promise<unknown>,
-          );
-      return method.bind(target);
-    },
-  });
-  originals.set(wrapped, statement);
-  return wrapped;
-}
-
-function instrumentAuthDatabase(db: D1Database, timings: OwnerRequestTimings): D1Database {
-  const originals = new WeakMap<object, D1PreparedStatement>();
-  return new Proxy(db, {
-    get(target, key) {
-      const method = Reflect.get(target, key, target);
-      if (typeof method !== 'function') return method;
-      if (key === 'prepare')
-        return (...args: Parameters<D1Database['prepare']>) =>
-          instrumentAuthStatement(
-            Reflect.apply(method, target, args) as D1PreparedStatement,
-            timings,
-            originals,
-          );
-      if (key === 'batch')
-        return (statements: D1PreparedStatement[]) =>
-          measureAuthDbOperation(
-            timings,
-            () =>
-              Reflect.apply(method, target, [
-                statements.map((statement) => originals.get(statement) ?? statement),
-              ]) as Promise<unknown>,
-          );
-      return method.bind(target);
-    },
-  });
-}
-
 /** Auth context initialization uses D1 I/O and must stay within its Worker request. */
-export function createAccountAuth(env: AccountBindings, timings?: OwnerRequestTimings) {
+export function createAccountAuth(env: AccountBindings) {
   if (!accountsConfigured(env)) return null;
   const origin = `https://${env.APP_HEALTH_DASHBOARD_HOST}`;
   const auth = betterAuth<BetterAuthOptions>({
@@ -117,7 +48,7 @@ export function createAccountAuth(env: AccountBindings, timings?: OwnerRequestTi
     baseURL: origin,
     basePath: '/v1/auth',
     secret: env.BETTER_AUTH_SECRET,
-    database: timings ? instrumentAuthDatabase(env.DB, timings) : env.DB,
+    database: env.DB,
     trustedOrigins: [origin],
     socialProviders: {
       google: {
@@ -151,8 +82,6 @@ export interface Workspace {
 }
 
 export interface OwnerRequestTimings {
-  authDbMs?: number;
-  authDbOps?: number;
   authSetupMs?: number;
   sessionLookupMs?: number;
   workspaceScopeMs?: number;
@@ -169,8 +98,6 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)
     .map(([name, milliseconds]) => `${name};dur=${milliseconds.toFixed(2)}`);
-  if (timings.authDbMs !== undefined && timings.authDbOps !== undefined)
-    values.push(`auth_db;dur=${timings.authDbMs.toFixed(2)};desc="${timings.authDbOps} ops"`);
   if (!values.length) return response;
   const headers = new Headers(response.headers);
   headers.set('server-timing', values.join(', '));
@@ -229,7 +156,7 @@ export async function accountIdentity(
   timings?: OwnerRequestTimings,
 ): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
   const authSetupStarted = performance.now();
-  const auth = createAccountAuth(env, timings);
+  const auth = createAccountAuth(env);
   if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
   if (!auth || !env.DB) return null;
   const sessionLookupStarted = performance.now();
