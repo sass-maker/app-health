@@ -20,6 +20,7 @@ export interface DailyCtaPolicy {
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   codevetter: ['benchmark_opened'],
   live: ['hobby_finder_opened'],
+  posttrainllm: ['quickstart_opened'],
 };
 
 const candidateNames: Readonly<Record<string, string>> = {

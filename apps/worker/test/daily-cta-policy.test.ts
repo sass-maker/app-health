@@ -6,10 +6,15 @@ describe('daily CTA policy', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(40);
+    ).toHaveLength(39);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
-    ).toHaveLength(2);
+    ).toHaveLength(3);
+    expect(DAILY_CTA_POLICY.posttrainllm).toMatchObject({
+      clarityCandidate: 'quickstart_opened',
+      qualification: 'verified',
+      qualifiedAppHealthEvents: ['quickstart_opened'],
+    });
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'unknown'),
     ).toHaveLength(13);
@@ -29,6 +34,7 @@ describe('daily CTA policy', () => {
     expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
       codevetter: ['benchmark_opened'],
       live: ['hobby_finder_opened'],
+      posttrainllm: ['quickstart_opened'],
     });
   });
 });
