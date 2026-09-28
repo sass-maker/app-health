@@ -122,7 +122,7 @@ interface ReportIndexes {
   byAppId: Map<string, CatalogProductRow>;
   visitorsByApp: Map<string, BrowserVisitorRow>;
   browserLastSeen: Map<string, number>;
-  ctaByApp: Map<string, Map<string, number>>;
+  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>;
   logCounts: Map<string, Partial<Record<MetricKind, number>>>;
   logLastSeen: Map<string, number>;
   unmappedLogs: number;
@@ -146,11 +146,18 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   };
 }
 
-function indexCtaEvents(rows: readonly CtaEventRow[]): Map<string, Map<string, number>> {
-  const byApp = new Map<string, Map<string, number>>();
+function indexCtaEvents(
+  rows: readonly CtaEventRow[],
+): Map<string, Map<string, { count: number; estimated: boolean }>> {
+  const byApp = new Map<string, Map<string, { count: number; estimated: boolean }>>();
   for (const row of rows) {
-    const events = byApp.get(row.app_id) ?? new Map<string, number>();
-    events.set(row.name, (events.get(row.name) ?? 0) + row.count);
+    const events =
+      byApp.get(row.app_id) ?? new Map<string, { count: number; estimated: boolean }>();
+    const previous = events.get(row.name);
+    events.set(row.name, {
+      count: (previous?.count ?? 0) + row.count,
+      estimated: (previous?.estimated ?? false) || row.sample_interval > 1,
+    });
     byApp.set(row.app_id, events);
   }
   return byApp;
@@ -204,14 +211,10 @@ function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null 
   return null;
 }
 
-function reportNotes(
-  input: DailyEngagementInputs,
-  sampled: boolean,
-  unmappedLogs: number,
-): string[] {
+function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string[] {
   const notes = [
     ...(input.notes ?? []),
-    'native_sessions and api_activity are not yet measurable in a grouped query and are reported as unknown.',
+    'Native sessions and API activity are unknown; this report counts recognized browsers, not people.',
   ];
   if (input.catalog.length !== 55)
     notes.push(
@@ -229,9 +232,13 @@ function reportNotes(
   if (analyticsNote) notes.push(analyticsNote);
   if (!input.logsMeasured)
     notes.push('D1 log_events query was unavailable; feedback and join counts are unknown.');
-  if (sampled)
+  if (input.browserVisitors.some((row) => row.sample_interval > 1))
     notes.push(
       'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
+    );
+  if (input.ctaEvents.some((row) => row.sample_interval > 1))
+    notes.push(
+      'Sampled CTA query days omit unobserved actions; scaled counts are labeled approximate.',
     );
   return notes;
 }
@@ -256,13 +263,13 @@ function buildProductReport(
   const visitor = indexes.visitorsByApp.get(row.app_id);
   const browserMeasured = isProductBrowserMeasured(row, visitor, input);
   const ctaMeasured = isProductCtaMeasured(row, visitor, input, indexes.ctaByApp);
-  const ctas = productCtas(row, input, indexes.ctaByApp, ctaMeasured);
+  const ctas = productCtas(row, input, visitor, indexes.ctaByApp, ctaMeasured);
   const logCounts = indexes.logCounts.get(row.catalog_id);
   const feedback = metricCount('feedback', input, row, logCounts);
   const newsletter = metricCount('newsletter', input, row, logCounts);
   const waitlist = metricCount('waitlist', input, row, logCounts);
   const logsMeasured = [feedback, newsletter, waitlist].some((count) => count !== null);
-  const measured = Number(browserMeasured) + Number(ctaMeasured) + Number(logsMeasured);
+  const measured = Number(browserMeasured) + Number(ctas.length > 0) + Number(logsMeasured);
   return {
     catalog_id: row.catalog_id,
     app_id: row.app_id,
@@ -305,7 +312,7 @@ function isProductCtaMeasured(
   row: CatalogProductRow,
   visitor: BrowserVisitorRow | undefined,
   input: DailyEngagementInputs,
-  ctaByApp: Map<string, Map<string, number>>,
+  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>,
 ): boolean {
   return (
     (input.ctaEventNamesByCatalogId[row.catalog_id]?.length ?? 0) > 0 &&
@@ -313,23 +320,43 @@ function isProductCtaMeasured(
     row.environment_id !== null &&
     (visitor !== undefined ||
       ctaByApp.has(row.app_id) ||
-      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
-    (visitor === undefined || visitor.sample_interval <= 1)
+      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to))
   );
 }
 
 function productCtas(
   row: CatalogProductRow,
   input: DailyEngagementInputs,
-  ctaByApp: Map<string, Map<string, number>>,
+  visitor: BrowserVisitorRow | undefined,
+  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>,
   browserMeasured: boolean,
 ): DailyEngagementProductReportV1['cta_events'] {
   const configured = input.ctaEventNamesByCatalogId[row.catalog_id] ?? [];
   if (!browserMeasured || configured.length === 0) return [];
-  return configured.slice(0, 3).map((name) => ({
-    name,
-    count: Math.max(0, Math.round(ctaByApp.get(row.app_id)?.get(name) ?? 0)),
-  }));
+  const observed = ctaByApp.get(row.app_id);
+  const querySampled = input.ctaEvents.some((event) => event.sample_interval > 1);
+  if (querySampled) {
+    return configured
+      .filter((name) => observed?.has(name))
+      .slice(0, 3)
+      .map((name) => {
+        const event = observed!.get(name)!;
+        return {
+          name,
+          count: Math.max(0, Math.round(event.count)),
+          estimated: event.estimated,
+        };
+      });
+  }
+  if (visitor !== undefined && visitor.sample_interval > 1 && !observed?.size) return [];
+  return configured.slice(0, 3).map((name) => {
+    const event = observed?.get(name);
+    return {
+      name,
+      count: Math.max(0, Math.round(event?.count ?? 0)),
+      estimated: event?.estimated ?? false,
+    };
+  });
 }
 
 /**
@@ -342,7 +369,7 @@ export const buildDailyEngagementReport = (
 ): DailyEngagementReportV1 => {
   const indexes = indexReportInputs(input);
   const sampled = isSampled(input);
-  const notes = reportNotes(input, sampled, indexes.unmappedLogs);
+  const notes = reportNotes(input, indexes.unmappedLogs);
   const products: DailyEngagementProductReportV1[] = [];
   for (const row of input.catalog) products.push(buildProductReport(row, input, indexes));
 

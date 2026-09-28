@@ -2,7 +2,7 @@
 
 ## Current production state (2026-09-28, Asia/Kolkata)
 
-The App Health owner dashboard renders all **55/55** catalog products in the completed-day engagement report. It uses Asia/Kolkata day boundaries and preserves Unknown for data that cannot be measured or predates qualification. The first fully qualified day is 2026-09-28 and becomes a completed-day report after midnight on 2026-09-29. Browser-scoped visitor counts are not people; native and API reach still need their own sources.
+The App Health owner dashboard renders all **55/55** catalog products in the completed-day engagement report. It uses Asia/Kolkata day boundaries and preserves Unknown for data that cannot be measured or predates qualification. The first fully qualified day is 2026-09-28 and becomes a completed-day report after midnight on 2026-09-29. Browser-scoped visitor counts are not people; native and API reach still need their own sources. Sampled CTA counts are labeled approximate per action, and configured actions without an observed row are omitted on sampled CTA query days; sampled distinct visitor counts remain Unknown.
 
 The deployed CTA policy has **2–3 named actions for 48 products** and an explicit Not applicable state for seven. These are policy definitions backed by the production interactions recorded below; the presence of a second or third policy name does not by itself prove a corresponding receipt for every product. The App Health owner Events view confirmed `project_add_started` and `release_status_opened` for App Health. The production worker and current-main CI passed for commit `4a6a6b7`.
 

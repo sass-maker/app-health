@@ -13,15 +13,21 @@ const report = {
   from: Date.UTC(2026, 8, 27),
   to: Date.UTC(2026, 8, 28),
   product_count: 2,
-  sampled: false,
-  notes: ['No qualified primary CTA events are reportable for 2026-09-27; counts are unknown.'],
+  sampled: true,
+  notes: [
+    'No qualified primary CTA events are reportable for 2026-09-27; counts are unknown.',
+    'Native sessions and API activity are unknown; this report counts recognized browsers, not people.',
+  ],
   products: [
     {
       catalog_id: 'atlas',
       app_id: 'app-atlas',
       name: 'Atlas',
       browser_visitors: 12,
-      cta_events: [{ name: 'download_opened', count: 4 }],
+      cta_events: [
+        { name: 'download_opened', count: 4, estimated: false },
+        { name: 'signup_clicked', count: 20, estimated: true },
+      ],
       cta_status: 'measured',
       feedback_submitted: 0,
       newsletter_joins: null,
@@ -59,6 +65,9 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('0')).toBeTruthy();
   expect(within(atlas).getByText('download_opened')).toBeTruthy();
+  expect(within(atlas).getByText('4')).toBeTruthy();
+  expect(screen.getAllByText('Approx. 20')).toHaveLength(2);
+  expect(screen.getByText(/Native sessions and API activity are unknown/)).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
   expect(within(beacon).getByText('Not applicable')).toBeTruthy();

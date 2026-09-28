@@ -52,8 +52,8 @@ function ReportHeader({
           Daily engagement
         </CardTitle>
         <p className="mt-1 text-xs text-muted-foreground">
-          Browser visitors, chosen actions, feedback, and consented joins across the imported
-          portfolio.
+          Recognized browser visitors, chosen actions, feedback, and consented joins across the
+          imported portfolio.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -92,7 +92,7 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
         <Badge variant={missingScope ? 'destructive' : 'secondary'}>
           {report.product_count}/55 imported
         </Badge>
-        <span>{visitors} with visitor evidence</span>
+        <span>{visitors} with browser visitor evidence</span>
         <span aria-hidden="true">·</span>
         <span>{feedback} with submission evidence</span>
         {report.sampled ? <Badge variant="outline">Sampled</Badge> : null}
@@ -118,7 +118,15 @@ function ProductActions({
       {events.map((event) => (
         <li key={event.name} className="flex justify-between gap-3">
           <span className="font-mono">{event.name}</span>
-          <span className="tabular-nums">{event.count}</span>
+          <span
+            className="tabular-nums"
+            aria-label={
+              event.estimated ? `Approximate count ${event.count}` : `Count ${event.count}`
+            }
+          >
+            {event.estimated ? 'Approx. ' : ''}
+            {event.count}
+          </span>
         </li>
       ))}
     </ul>
@@ -131,7 +139,7 @@ function ProductActions({
 
 function MobileProductCard({ product }: { product: Product }): JSX.Element {
   const metrics = [
-    ['Visitors', product.browser_visitors],
+    ['Browser visitors', product.browser_visitors],
     ['Feedback', product.feedback_submitted],
     ['Newsletter', product.newsletter_joins],
     ['Waitlist', product.waitlist_joins],
@@ -175,7 +183,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
         <TableHeader>
           <TableRow>
             <TableHead>Product</TableHead>
-            <TableHead className="text-right">Visitors</TableHead>
+            <TableHead className="text-right">Browser visitors</TableHead>
             <TableHead>Primary actions</TableHead>
             <TableHead className="text-right">Feedback</TableHead>
             <TableHead className="text-right">Newsletter</TableHead>

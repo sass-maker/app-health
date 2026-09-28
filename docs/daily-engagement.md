@@ -22,6 +22,13 @@ is part of this source change.
   that have a production ingest and authenticated Events receipt. Unqualified
   products remain unknown. Dates before the first qualification on 2026-09-28
   stay unknown rather than showing a retrospective zero.
+- Analytics Engine scales sampled CTA event rows into estimates. Each affected
+  action carries `estimated: true` and is labeled “Approx.” in the dashboard;
+  observed unsampled action rows remain exact. If any CTA group is sampled, the
+  report omits configured actions without an observed row because sampling may
+  have hidden them. A sampled visitor row without any CTA rows leaves CTA
+  counts unknown. Sampled distinct visitor counts remain unknown because
+  distinct counts cannot be scaled.
 - `feedback.submitted`, `waitlist.join`, and `newsletter.subscribe` are counted
   from stored production App Health logs. Central SaaS Maker logs are attributed
   only when their project ID or slug resolves to an imported catalog product.
@@ -45,8 +52,8 @@ deployment and live qualification are recorded separately from source checks.
 ## In-app alerts
 
 The owner-selected alert destination is the App Health Overview feed. It reads
-the latest 50 production `feedback.submitted` and `waitlist.join` logs from the
-workspace's 30-day retention window, refreshes every minute and when the tab
-regains focus, and shows only project, event, and time. Central SaaS Maker logs
-are mapped by exact catalog project ID or slug. The feed never returns email,
-submission text, or log properties.
+the latest 50 production `feedback.submitted`, `waitlist.join`, and
+`newsletter.subscribe` logs from the workspace's 30-day retention window,
+refreshes every minute and when the tab regains focus, and shows only project,
+event, and time. Central SaaS Maker logs are mapped by exact catalog project ID
+or slug. The feed never returns email, submission text, or log properties.

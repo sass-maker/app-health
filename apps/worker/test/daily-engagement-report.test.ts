@@ -142,9 +142,9 @@ describe('buildDailyEngagementReport', () => {
     const first = report.products[0];
     expect(first.browser_visitors).toBe(0); // measurable zero, not unknown
     expect(first.cta_events).toEqual([
-      { name: 'cta.click', count: 0 },
-      { name: 'signup', count: 0 },
-      { name: 'get.started', count: 0 },
+      { name: 'cta.click', count: 0, estimated: false },
+      { name: 'signup', count: 0, estimated: false },
+      { name: 'get.started', count: 0, estimated: false },
     ]);
     expect(first.coverage).toBe('partial');
     const second = report.products[1];
@@ -174,7 +174,7 @@ describe('buildDailyEngagementReport', () => {
     });
     expect(report.products[0]).toMatchObject({
       browser_visitors: 0,
-      cta_events: [{ name: 'cta.opened', count: 0 }],
+      cta_events: [{ name: 'cta.opened', count: 0, estimated: false }],
       feedback_submitted: 0,
       waitlist_joins: 0,
       newsletter_joins: 0,
@@ -205,11 +205,75 @@ describe('buildDailyEngagementReport', () => {
     const product = report.products[0];
     expect(product.browser_visitors).toBe(42);
     expect(product.cta_events).toEqual([
-      { name: 'cta.click', count: 10 },
-      { name: 'signup', count: 3 },
-      { name: 'get.started', count: 0 },
+      { name: 'cta.click', count: 10, estimated: false },
+      { name: 'signup', count: 3, estimated: false },
+      { name: 'get.started', count: 0, estimated: false },
     ]);
     expect(product.freshness.browser_last_seen).toBe(FROM + 2000);
+  });
+
+  it('marks scaled CTA counts as estimates even when no visitor row exists', () => {
+    const products = catalog(2);
+    products[1].analytics_first_received_at = FROM - 1000;
+    const report = buildDailyEngagementReport({
+      catalog: products,
+      browserVisitors: [],
+      ctaEvents: [
+        { app_id: 'app-000', name: 'cta.click', count: 20, sample_interval: 10 },
+        { app_id: 'app-000', name: 'signup', count: 2, sample_interval: 1 },
+      ],
+      logs: [],
+      ctaEventNamesByCatalogId: {
+        'product-000': ['cta.click', 'signup', 'get.started'],
+        'product-001': ['open'],
+      },
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    });
+
+    expect(report.products[0].browser_visitors).toBeNull();
+    expect(report.products[0].cta_events).toEqual([
+      { name: 'cta.click', count: 20, estimated: true },
+      { name: 'signup', count: 2, estimated: false },
+    ]);
+    expect(report.products[0].coverage).toBe('partial');
+    expect(report.products[1].cta_events).toEqual([]);
+    expect(report.products[1].cta_status).toBe('unknown');
+    expect(report.products[1].coverage).toBe('partial'); // its unsampled visitor query measured zero
+    expect(report.sampled).toBe(true);
+    expect(report.notes).not.toContain(
+      'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
+    );
+    expect(report.notes).toContain(
+      'Sampled CTA query days omit unobserved actions; scaled counts are labeled approximate.',
+    );
+  });
+
+  it('keeps CTA zeroes unknown when visitors are sampled and no CTA row was observed', () => {
+    const report = buildDailyEngagementReport({
+      catalog: catalog(1),
+      browserVisitors: [
+        { app_id: 'app-000', visitors: 40, last_seen: FROM + 1000, sample_interval: 10 },
+      ],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: { 'product-000': ['cta.click', 'signup'] },
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    });
+
+    expect(report.products[0].browser_visitors).toBeNull();
+    expect(report.products[0].cta_events).toEqual([]);
+    expect(report.products[0].cta_status).toBe('unknown');
+    expect(report.products[0].coverage).toBe('unknown');
   });
 
   it('maps centralized SaaS Maker logs by project_id and discriminates newsletter via type/kind', () => {
@@ -610,7 +674,7 @@ describe('composeDailyEngagementReport', () => {
     });
     expect(report.products[0]).toMatchObject({
       browser_visitors: null,
-      cta_events: [{ name: 'cta.click', count: 3 }],
+      cta_events: [{ name: 'cta.click', count: 3, estimated: false }],
       cta_status: 'measured',
       coverage: 'partial',
     });
@@ -695,7 +759,9 @@ describe('composeDailyEngagementReport', () => {
     expect(queries).toHaveLength(2);
     expect(queries.every((sql) => sql.includes("blob2 IN ('env-000','env-001')"))).toBe(true);
     expect(queries[1]).toContain("blob5 IN ('download_opened')");
-    expect(report.products[0].cta_events).toEqual([{ name: 'download_opened', count: 2 }]);
+    expect(report.products[0].cta_events).toEqual([
+      { name: 'download_opened', count: 2, estimated: false },
+    ]);
     expect(report.products[1].cta_events).toEqual([]);
   });
 

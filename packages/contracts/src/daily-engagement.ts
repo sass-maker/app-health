@@ -37,6 +37,8 @@ export const DailyCtaEvent = z
   .object({
     name: z.string().min(1).max(64),
     count: z.number().int().min(0),
+    /** True when Analytics Engine scaled sampled event rows into an estimate. */
+    estimated: z.boolean(),
   })
   .strict();
 export type DailyCtaEvent = z.infer<typeof DailyCtaEvent>;
