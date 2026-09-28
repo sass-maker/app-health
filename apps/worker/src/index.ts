@@ -70,6 +70,8 @@ import {
   accountMutationAllowed,
   createAccountAuth,
   type AccountBindings,
+  type OwnerRequestTimings,
+  withOwnerServerTiming,
 } from './accounts.js';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -509,11 +511,16 @@ async function handleAppsRoute(
   url: URL,
   env: Env,
   ctx?: WorkerContext,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/apps') return null;
   const { service } = bundle;
-  if (request.method === 'GET')
-    return json(200, ListAppsResponseV1.parse(await service.listApps(owner.appId)), true);
+  if (request.method === 'GET') {
+    const routeReadStarted = performance.now();
+    const listed = await service.listApps(owner.appId);
+    if (timings) timings.routeReadMs = performance.now() - routeReadStarted;
+    return json(200, ListAppsResponseV1.parse(listed), true);
+  }
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   if (owner.appId) return productScopeForbidden();
   try {
@@ -751,6 +758,7 @@ async function handleOwnerRoutes(
   url: URL,
   env: Env,
   ctx?: WorkerContext,
+  timings?: OwnerRequestTimings,
 ): Promise<Response> {
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const shareResponse = await handleAnalyticsShareOwner(
@@ -769,12 +777,13 @@ async function handleOwnerRoutes(
     bundle.local,
   );
   if (nativeResponse) return nativeResponse;
-  const projectResponse = await handleProjectRoutes(request, bundle.repos, owner);
+  const projectResponse = await handleProjectRoutes(request, bundle.repos, owner, timings);
   if (projectResponse) return projectResponse;
   const browserResponse = await handleBrowserOwner(request, env, owner, bundle.local);
   if (browserResponse) return browserResponse;
+  const appsResponse = await handleAppsRoute(request, bundle, owner, url, env, ctx, timings);
+  if (appsResponse) return appsResponse;
   const handlers = [
-    handleAppsRoute,
     handleRevokeRoute,
     handleInstallationStatusRoute,
     handleWorkspaceHealthRoute,
@@ -786,7 +795,7 @@ async function handleOwnerRoutes(
     handlePublicKeysRoute,
   ];
   for (const handler of handlers) {
-    const response = await handler(request, bundle, owner, url, env, ctx);
+    const response = await handler(request, bundle, owner, url, env);
     if (response) return response;
   }
   return json(404, { error: 'not found' });
@@ -846,22 +855,33 @@ async function handleAccountOwner(
 ): Promise<Response> {
   if (!accountMutationAllowed(request))
     return json(403, { error: 'same-origin request required' }, true);
-  const account = await accountIdentity(request, env, (id) => {
-    const delivery = scheduleProductMilestone(env, 'signup.completed', id, ctx);
-    if (ctx) ctx.waitUntil(delivery);
-    else void delivery;
-  });
+  const path = new URL(request.url).pathname;
+  const measureOwnerRead =
+    request.method === 'GET' && ['/v1/apps', '/v1/capabilities'].includes(path);
+  const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
+  const account = await accountIdentity(
+    request,
+    env,
+    (id) => {
+      const delivery = scheduleProductMilestone(env, 'signup.completed', id, ctx);
+      if (ctx) ctx.waitUntil(delivery);
+      else void delivery;
+    },
+    timings,
+  );
   if (!account || !env.DB) return json(401, { error: 'sign in required' }, true);
   if (url.pathname === '/v1/account' && request.method === 'GET')
     return json(200, { user: { name: account.owner.label }, workspace: account.workspace }, true);
-  return handleOwnerRoutes(
+  const response = await handleOwnerRoutes(
     request,
     workspaceBundle(bundle, env.DB, account.workspace.id),
     account.owner,
     url,
     env,
     ctx,
+    timings,
   );
+  return withOwnerServerTiming(response, timings);
 }
 
 function workspaceBundle(

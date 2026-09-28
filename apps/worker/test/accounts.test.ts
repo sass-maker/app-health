@@ -156,6 +156,30 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   });
 
+  it('returns anonymous Server-Timing stages only on authenticated owner read paths', async () => {
+    const apps = await request('/v1/apps');
+    const capabilities = await request(
+      `/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+    );
+    const timingPattern =
+      /^session;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/;
+    for (const response of [apps, capabilities]) {
+      expect(response.status).toBe(200);
+      const header = response.headers.get('server-timing') ?? '';
+      expect(header).toMatch(timingPattern);
+      expect(header).not.toContain(aliceApp.app.id);
+      expect(header).not.toContain(aliceCookie);
+    }
+
+    const unauthenticated = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/apps'),
+      env,
+    );
+    expect(unauthenticated.status).toBe(401);
+    expect(unauthenticated.headers.get('server-timing')).toBeNull();
+    expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
+  });
+
   it('denies cross-account reads, key creation and revocation on every existing route', async () => {
     const query = `app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`;
     for (const route of ['endpoints', 'failures', 'logs', 'public-keys', 'installation/status']) {

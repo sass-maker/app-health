@@ -79,6 +79,31 @@ export interface Workspace {
   name: string;
 }
 
+export interface OwnerRequestTimings {
+  sessionMs?: number;
+  workspaceScopeMs?: number;
+  routeReadMs?: number;
+}
+
+export function withOwnerServerTiming(response: Response, timings?: OwnerRequestTimings): Response {
+  if (!timings) return response;
+  const values = [
+    ['session', timings.sessionMs],
+    ['workspace_scope', timings.workspaceScopeMs],
+    ['route_read', timings.routeReadMs],
+  ]
+    .filter((entry): entry is [string, number] => entry[1] !== undefined)
+    .map(([name, milliseconds]) => `${name};dur=${milliseconds.toFixed(2)}`);
+  if (!values.length) return response;
+  const headers = new Headers(response.headers);
+  headers.set('server-timing', values.join(', '));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 /** UNIQUE(owner_id) makes simultaneous first-session requests idempotent. */
 export async function personalWorkspace(
   db: D1DatabaseLike,
@@ -124,16 +149,21 @@ export async function accountIdentity(
   request: Request,
   env: AccountBindings,
   onSignup?: (id: string) => void,
+  timings?: OwnerRequestTimings,
 ): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
+  const sessionStarted = performance.now();
   const auth = createAccountAuth(env);
   if (!auth || !env.DB) return null;
   const session = await auth.api.getSession({ headers: request.headers });
+  if (timings) timings.sessionMs = performance.now() - sessionStarted;
   if (!session || !session.user.emailVerified) return null;
+  const workspaceScopeStarted = performance.now();
   let rows = await workspaceAndApps(env.DB, session.user.id);
   if (!rows.length) {
     await personalWorkspace(env.DB, session.user.id, () => onSignup?.(session.user.id));
     rows = await workspaceAndApps(env.DB, session.user.id);
   }
+  if (timings) timings.workspaceScopeMs = performance.now() - workspaceScopeStarted;
   const workspaceRow = rows[0];
   if (!workspaceRow) throw new Error('Workspace could not be read');
   return {
