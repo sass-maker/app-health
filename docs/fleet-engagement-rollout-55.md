@@ -18,6 +18,14 @@ Web Playables `source_repository_opened` and Every Song Is a Website `song_liste
 
 Meme Lab `feedback_choice_clicked` appeared in owner Events after a synthetic smoke run using its built-in example and selecting “Yes, that fits” on the result. It records a feedback choice click, not an organic feedback submission. Nomad Data Adventure `shortlist_export_clicked` appeared in owner Events after a real public “Filtered CSV” click; this records export intent, not a completed download. The first Nomad click hit a cached older script and sent `shortlist_exported`; the deployed page now loads a versioned asset, and a fresh click sent the corrected name. The old smoke event remains in the first-day raw Events view but is excluded from daily CTA policy.
 
+Owner Events also confirms Anchor `how_it_works_opened` and `mac_beta_downloaded`, Kith and Motion `testflight_status_opened`, and Mashup `proof.construction.clicked` and `local.run.clicked`. These are public CTA interactions. Anchor’s download-named event records a click, not a completed download or install; Kith and Motion beta-status clicks do not imply public TestFlight enrollment. Mashup’s local-run click opens instructions, not a completed local run.
+
+Anime List `cta_discover` and `cta_stats` also appeared in owner Events after guest clicks on the homepage discovery and statistics links. They record entry into those surfaces, not a completed search or watchlist action.
+
+PH Catalog `newsletter_widget_interacted` appeared in owner Events after a smoke click into the empty newsletter input. It records widget interest only; no address was entered and no subscription was submitted. The first production hook failed because its inline script ran before the custom element existed; the deployed DOM-ready listener at `508f6b5` passed a fresh ingest 202 and owner Events check.
+
+Browser Agent Testing `experiment_results_opened`, Free AI `provider_status.opened`, and Sarthak Agrawal `case_study_opened` appeared in owner Events after real public clicks. These measure opening the experiment records, live status, and a case study respectively. No experiment was run, gateway key used, or application submitted during verification.
+
 The [55-row capability matrix](fleet-engagement-capability-matrix.csv) is the original source-level rollout plan: 45 catalog-declared web footer candidates and 10 without an applicable public footer. Its `UNKNOWN` live-status cells are a historical baseline, not the current deployment state. Current qualified CTA names live in `apps/worker/src/daily-cta-policy.ts` and the authenticated owner dashboard. The matrix's feedback and capture proposals remain plans unless separately verified.
 
 | Product ID                 | Product                    | Platforms                | Catalog deployment | Existing Clarity CTA       | Source hints                                                                                     | App Health receipt  |
