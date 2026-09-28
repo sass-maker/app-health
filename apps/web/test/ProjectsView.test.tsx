@@ -144,7 +144,12 @@ it('keeps slow measured requests separate from unconfigured inventory', async ()
   expect(within(inventory).getByText('Beacon')).toBeTruthy();
   expect(within(inventory).getByText('120')).toBeTruthy();
   expect(within(inventory).getByText('100 requests')).toBeTruthy();
-  expect(within(inventory).getByText(/2 connected · 1 awaiting setup/)).toBeTruthy();
+  expect(
+    within(inventory).getByText(
+      /3 workspace environments · 2 connected · 0 waiting for data · 1 unconfigured/,
+    ),
+  ).toBeTruthy();
+  expect(within(inventory).getByText(/Products without a server endpoint/)).toBeTruthy();
   expect(screen.getByText(/Requests are server or function calls/)).toBeTruthy();
 });
 

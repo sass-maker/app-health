@@ -422,20 +422,21 @@ function InventoryTable({
 }
 
 function coverageLabel(rows: WatchtowerRow[], healthReady: boolean): string {
-  if (!healthReady) return 'Endpoint coverage unavailable · every environment remains listed';
+  if (!healthReady) return `${rows.length} workspace environments · endpoint coverage unavailable`;
   const coverage = rows.reduce(
     (counts, row) => {
       const state = row.health?.endpoints.state;
       if (state === 'connected') counts.connected += 1;
       else if (state === 'stale') counts.stale += 1;
-      else if (state === 'waiting' || state === 'unconfigured') counts.awaiting += 1;
+      else if (state === 'waiting') counts.waiting += 1;
+      else if (state === 'unconfigured') counts.unconfigured += 1;
       else if (state === 'revoked') counts.revoked += 1;
       else if (!state) counts.unavailable += 1;
       return counts;
     },
-    { connected: 0, stale: 0, awaiting: 0, revoked: 0, unavailable: 0 },
+    { connected: 0, stale: 0, waiting: 0, unconfigured: 0, revoked: 0, unavailable: 0 },
   );
-  return `${coverage.connected} connected · ${coverage.awaiting} awaiting setup · ${coverage.stale} stale · ${coverage.revoked} revoked · ${coverage.unavailable} unavailable`;
+  return `${rows.length} workspace environments · ${coverage.connected} connected · ${coverage.waiting} waiting for data · ${coverage.unconfigured} unconfigured · ${coverage.stale} stale · ${coverage.revoked} revoked · ${coverage.unavailable} unavailable`;
 }
 
 function Inventory({
@@ -464,6 +465,10 @@ function Inventory({
         <div>
           <CardTitle className="text-sm">Complete inventory</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Workspace environments include products outside the 55-product daily report. Products
+            without a server endpoint do not need endpoint monitoring.
+          </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="relative min-w-60">
@@ -614,7 +619,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
             Request health
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Measured endpoint traffic and issues across the imported inventory.
+            Measured endpoint traffic and issues across workspace environments.
           </p>
         </div>
         <WatchtowerTotals rows={rows} healthReady={Boolean(health.data)} />
