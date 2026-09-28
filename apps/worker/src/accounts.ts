@@ -80,7 +80,8 @@ export interface Workspace {
 }
 
 export interface OwnerRequestTimings {
-  sessionMs?: number;
+  authSetupMs?: number;
+  sessionLookupMs?: number;
   workspaceScopeMs?: number;
   routeReadMs?: number;
 }
@@ -88,7 +89,8 @@ export interface OwnerRequestTimings {
 export function withOwnerServerTiming(response: Response, timings?: OwnerRequestTimings): Response {
   if (!timings) return response;
   const values = [
-    ['session', timings.sessionMs],
+    ['auth_setup', timings.authSetupMs],
+    ['session_lookup', timings.sessionLookupMs],
     ['workspace_scope', timings.workspaceScopeMs],
     ['route_read', timings.routeReadMs],
   ]
@@ -151,11 +153,13 @@ export async function accountIdentity(
   onSignup?: (id: string) => void,
   timings?: OwnerRequestTimings,
 ): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
-  const sessionStarted = performance.now();
+  const authSetupStarted = performance.now();
   const auth = createAccountAuth(env);
+  if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
   if (!auth || !env.DB) return null;
+  const sessionLookupStarted = performance.now();
   const session = await auth.api.getSession({ headers: request.headers });
-  if (timings) timings.sessionMs = performance.now() - sessionStarted;
+  if (timings) timings.sessionLookupMs = performance.now() - sessionLookupStarted;
   if (!session || !session.user.emailVerified) return null;
   const workspaceScopeStarted = performance.now();
   let rows = await workspaceAndApps(env.DB, session.user.id);
