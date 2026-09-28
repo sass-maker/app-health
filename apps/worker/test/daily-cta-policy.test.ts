@@ -10,10 +10,10 @@ describe('daily CTA policy', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(19);
+    ).toHaveLength(12);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
-    ).toHaveLength(25);
+    ).toHaveLength(32);
     expect(DAILY_CTA_POLICY.posttrainllm).toMatchObject({
       clarityCandidate: 'quickstart_opened',
       qualification: 'verified',
@@ -37,12 +37,15 @@ describe('daily CTA policy', () => {
   it('reports only App Health events with production ingest receipts', () => {
     expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
       anchor: ['testflight_status_opened'],
+      'anime-list': ['cta_search'],
       browserdaddy: ['release_status_opened'],
       codevetter: ['benchmark_opened'],
       contextdaddy: ['how_it_works_opened'],
       daddyrad: ['app.performance.opened'],
       'every-song-is-a-website': ['song_world_opened'],
       'field-track': ['manager_dashboard_opened'],
+      gitstat: ['cta.source_repository_opened'],
+      'issue-pages': ['repository_reader_opened'],
       kith: ['how_it_works_opened'],
       live: ['hobby_finder_opened'],
       mashup: ['proof.play.clicked'],
@@ -52,14 +55,18 @@ describe('daily CTA policy', () => {
       'nutrition-formula-engine': ['formula_checked', 'report_downloaded'],
       'on-record': ['cta.inspect_receipt'],
       'open-historia': ['hero.play.clicked'],
+      pace: ['pace_download_cta_clicked'],
       performancedaddy: ['source_opened'],
       'ph-catalog': ['sample_opened'],
       posttrainllm: ['quickstart_opened'],
       'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
+      reader: ['sample_opened'],
       rolepatch: ['free_tools_opened'],
       'sarthakagrawal-personal': ['projects_opened'],
       setline: ['testflight_status_opened'],
-      significanthobbies: ['apps_explored'],
+      significanthobbies: ['apps_explored', 'kith_opened'],
+      starboard: ['public_catalog_browsed'],
+      storagedaddy: ['download.clicked'],
       'what-it-takes-to-win': ['journey_continued'],
     });
   });
