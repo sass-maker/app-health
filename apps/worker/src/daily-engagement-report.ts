@@ -342,22 +342,27 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
   return notes;
 }
 
+function coveredCaptureCount(
+  kind: MetricKind,
+  input: DailyEngagementInputs,
+  row: CatalogProductRow,
+): number | null {
+  if (!input.captureCountsAvailable) return null;
+  const coverageStart = input.captureCounts?.coverageStart;
+  if (!coverageStart || input.date < coverageStart) return null;
+  return (
+    input.captureCounts?.rows.find((item) => item.catalogId === row.catalog_id)?.[kind] ?? null
+  );
+}
+
 function metricCount(
   kind: MetricKind,
   input: DailyEngagementInputs,
   row: CatalogProductRow,
   counts: Partial<Record<MetricKind, number>> | undefined,
 ): number | null {
-  const exactCounts =
-    input.captureCountsAvailable &&
-    input.captureCounts?.coverageStart !== null &&
-    input.captureCounts?.coverageStart !== undefined &&
-    input.date >= input.captureCounts.coverageStart;
-  const source = exactCounts
-    ? input.captureCounts?.rows.find((item) => item.catalogId === row.catalog_id)
-    : undefined;
-  const sourceCount = source?.[kind];
-  if (sourceCount !== null && sourceCount !== undefined) return sourceCount;
+  const sourceCount = coveredCaptureCount(kind, input, row);
+  if (sourceCount !== null) return sourceCount;
 
   // App Health log delivery is asynchronous, so a positive count is an observed
   // lower bound when the source aggregate is unavailable or does not cover it.
@@ -366,13 +371,9 @@ function metricCount(
 
   // A confirmed hook can establish zero only when the log source itself is the
   // authoritative measured surface. Never use that inference for fallback.
+  if (input.captureCountsRequested || !input.logsMeasured) return null;
   const confirmed = input.confirmedLogMetricsByCatalogId?.[row.catalog_id] ?? [];
-  return !input.captureCountsRequested &&
-    !exactCounts &&
-    input.logsMeasured &&
-    confirmed.includes(kind)
-    ? (counts?.[kind] ?? 0)
-    : null;
+  return confirmed.includes(kind) ? (counts?.[kind] ?? 0) : null;
 }
 
 function buildProductReport(
