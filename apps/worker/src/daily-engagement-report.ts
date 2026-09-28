@@ -205,7 +205,9 @@ function reportNotes(
       `Only ${input.catalog.length} catalog product(s) are imported; 55 active Fleet products are expected. Missing products are outside this report.`,
     );
   if (Object.keys(input.ctaEventNamesByCatalogId).length === 0)
-    notes.push('No per-product primary CTA events are configured; CTA counts are unknown.');
+    notes.push(
+      `No qualified primary CTA events are reportable for ${input.date}; counts are unknown.`,
+    );
   if (unmappedLogs > 0)
     notes.push(
       `${unmappedLogs} centralized log group(s) could not be mapped to a declared catalog product and were excluded.`,

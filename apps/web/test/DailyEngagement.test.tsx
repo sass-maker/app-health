@@ -14,7 +14,7 @@ const report = {
   to: Date.UTC(2026, 8, 28),
   product_count: 2,
   sampled: false,
-  notes: ['No per-product primary CTA events are configured; CTA counts are unknown.'],
+  notes: ['No qualified primary CTA events are reportable for 2026-09-27; counts are unknown.'],
   products: [
     {
       catalog_id: 'atlas',
