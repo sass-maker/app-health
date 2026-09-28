@@ -44,6 +44,28 @@ it('uses the accepted duration ceiling for an overflow percentile bound', () => 
 });
 
 describe('latency histogram threshold boundary', () => {
+  it('keeps a 500–1000ms p95 uncertain unless errors independently prove a problem', () => {
+    const histogram = new Array<number>(16).fill(0);
+    histogram[8] = 20;
+    const bucket = {
+      ...SEED_BUCKETS[0],
+      route: '/degraded-boundary',
+      bucket_start: Date.now(),
+      request_count: 20,
+      error_count: 0,
+      histogram,
+    };
+    const [ambiguous] = mergeBuckets([bucket], '15m', bucket.bucket_start + 1);
+    expect(ambiguous).toMatchObject({
+      request_count: 20,
+      p95_ms: 1000,
+      health_state: 'insufficient-data',
+    });
+
+    const [proven] = mergeBuckets([{ ...bucket, error_count: 1 }], '15m', bucket.bucket_start + 1);
+    expect(proven.health_state).toBe('unhealthy');
+  });
+
   it('separates sub-2000ms integer durations from the unhealthy threshold', () => {
     expect(LATENCY_BUCKET_BOUNDS_MS[9]).toBe(1999);
     const belowThreshold = new Array<number>(16).fill(0);
