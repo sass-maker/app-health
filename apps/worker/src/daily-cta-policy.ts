@@ -56,7 +56,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   posttrainllm: ['quickstart_opened', 'specialist_proof_opened'],
   'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
   reader: ['sample_opened', 'library_opened'],
-  'research-papers': ['reading_paths_opened'],
+  'research-papers': ['reading_paths_opened', 'paper_search_started'],
   rolepatch: ['free_tools_opened', 'workspace_opened'],
   'saas-maker': ['directory_opened', 'spotlight_opened'],
   'sarthakagrawal-personal': ['projects_opened', 'case_study_opened'],
