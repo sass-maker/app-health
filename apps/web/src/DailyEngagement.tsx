@@ -499,15 +499,7 @@ function ReportResults({
   );
 }
 
-function ReportBody({
-  loading,
-  error,
-  report,
-  query,
-  onQueryChange,
-  sourceView,
-  onSourceView,
-}: {
+interface ReportBodyProps {
   loading: boolean;
   error: string;
   report: Report | null;
@@ -515,7 +507,10 @@ function ReportBody({
   onQueryChange: (query: string) => void;
   sourceView: SourceView;
   onSourceView: (sourceView: SourceView) => void;
-}): JSX.Element | null {
+}
+
+function ReportBody(props: ReportBodyProps): JSX.Element | null {
+  const { loading, error, report, query, onQueryChange, sourceView, onSourceView } = props;
   if (loading)
     return (
       <div role="status" aria-label="Loading daily engagement" className="space-y-2">
