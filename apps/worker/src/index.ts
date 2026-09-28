@@ -887,6 +887,12 @@ async function handleBearerOwner(
     ).first());
   if (!accountSchema) return handleOwnerRoutes(request, bundle, owner, url, env, ctx);
   const legacy = workspaceBundle(bundle, env.DB, null);
+  // The legacy inventory query is already scoped to unclaimed apps. Avoid
+  // listing those same apps first just to construct an unused appIds guard.
+  if (url.pathname === '/v1/apps' && request.method === 'GET') {
+    const inventory = await handleAppsRoute(request, legacy, owner, url, env, ctx);
+    if (inventory) return inventory;
+  }
   const apps = await legacy.repos.apps.listApps();
   return handleOwnerRoutes(
     request,

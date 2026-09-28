@@ -148,11 +148,25 @@ describe('Google account boundary with real D1 SQL', () => {
 
   it('keeps legacy owner access limited to unclaimed projects and checks public-key ownership', async () => {
     const headers = { authorization: 'Bearer synthetic-owner' };
+    const inventoryQueries: string[] = [];
+    const db = env.DB!;
+    const countedDb = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            inventoryQueries.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     const listed = await worker.fetch(
       new Request('https://dashboard.example.com/v1/apps', { headers }),
-      env,
+      { ...env, DB: countedDb },
     );
     expect(await listed.json()).toMatchObject({ apps: [{ app: { name: 'legacy private app' } }] });
+    expect(inventoryQueries.filter((sql) => /\bFROM apps\b/.test(sql))).toHaveLength(1);
     expect(
       (
         await worker.fetch(
