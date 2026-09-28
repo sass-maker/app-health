@@ -34,7 +34,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   'field-track': ['manager_dashboard_opened'],
   'free-ai': ['access_requirements.opened'],
   gitstat: ['cta.source_repository_opened'],
-  'high-signal': ['signals.browse_opened'],
+  'high-signal': ['signals.browse_opened', 'track_record.opened'],
   'issue-pages': ['repository_reader_opened'],
   karte: ['page_creation_opened', 'live_profile_opened'],
   kith: ['how_it_works_opened'],
