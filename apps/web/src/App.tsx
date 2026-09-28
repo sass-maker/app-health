@@ -1177,9 +1177,10 @@ function EndpointHealth(props: {
             at least {UNHEALTHY_ERROR_RATE * 100}% errors or {UNHEALTHY_P95_MS / 1000}s p95
           </p>
           <p>
-            <strong className="text-foreground">Low volume</strong>
+            <strong className="text-foreground">Insufficient data</strong>
             <br />
-            under {INSUFFICIENT_DATA_MIN_REQUESTS} requests
+            under {INSUFFICIENT_DATA_MIN_REQUESTS} requests or a legacy latency bin crossing a
+            threshold
           </p>
         </CardContent>
       </Card>

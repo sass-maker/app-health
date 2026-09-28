@@ -27,7 +27,10 @@ function count(value: number | string | null): string {
 
 function captureCount(
   value: number | null,
-  applicability: Product['newsletter_applicability'] | Product['native_sessions_applicability'],
+  applicability:
+    | Product['newsletter_applicability']
+    | Product['native_sessions_applicability']
+    | Product['browser_visitors_applicability'],
 ): string {
   if (value !== null && value > 0) return count(value);
   if (applicability === 'not_applicable') return 'Not applicable';
@@ -165,7 +168,10 @@ function ProductActions({
 
 function MobileProductCard({ product }: { product: Product }): JSX.Element {
   const metrics = [
-    ['Browser visitors', product.browser_visitors],
+    [
+      'Browser visitors',
+      captureCount(product.browser_visitors, product.browser_visitors_applicability),
+    ],
     [
       'Native sessions',
       captureCount(product.native_sessions, product.native_sessions_applicability),
@@ -231,7 +237,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 <span className="block text-xs text-muted-foreground">{product.catalog_id}</span>
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                {count(product.browser_visitors)}
+                {captureCount(product.browser_visitors, product.browser_visitors_applicability)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {captureCount(product.native_sessions, product.native_sessions_applicability)}

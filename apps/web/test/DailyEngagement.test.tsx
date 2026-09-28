@@ -85,6 +85,7 @@ const report = {
       app_id: 'app-atlas',
       name: 'Atlas',
       browser_visitors: 12,
+      browser_visitors_applicability: 'applicable',
       cta_events: [
         { name: 'download_opened', count: 4, unique_browsers: 1, estimated: false },
         { name: 'signup_clicked', count: 20, unique_browsers: null, estimated: true },
@@ -106,6 +107,7 @@ const report = {
       app_id: 'app-beacon',
       name: 'Beacon',
       browser_visitors: null,
+      browser_visitors_applicability: 'not_applicable',
       cta_events: [],
       cta_status: 'not_applicable',
       feedback_submitted: null,
@@ -151,11 +153,14 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlasCard).getByText('Native sessions')).toBeTruthy();
   expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
-  expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
+  expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(1);
   expect(beacon.cells[2].textContent).toBe('Not applicable');
+  expect(beacon.cells[1].textContent).toBe('Not applicable');
   const beaconCard = within(mobile).getByText('Beacon').closest('li')!;
   const nativeMetric = within(beaconCard).getByText('Native sessions').parentElement!;
   expect(nativeMetric.querySelector('dd')?.textContent).toBe('Not applicable');
+  const browserMetric = within(beaconCard).getByText('Browser visitors').parentElement!;
+  expect(browserMetric.querySelector('dd')?.textContent).toBe('Not applicable');
   expect(beacon.cells[6].textContent).toBe('Not applicable');
   expect(beacon.cells[7].textContent).toBe('Not applicable');
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');

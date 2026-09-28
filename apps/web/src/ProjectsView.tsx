@@ -19,6 +19,7 @@ import type {
 import {
   DEGRADED_ERROR_RATE,
   DEGRADED_P95_MS,
+  INSUFFICIENT_DATA_MIN_REQUESTS,
   UNHEALTHY_ERROR_RATE,
   UNHEALTHY_P95_MS,
 } from '@app-health/contracts';
@@ -150,6 +151,8 @@ function statusBadge(row: WatchtowerRow) {
     return (
       <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Healthy</Badge>
     );
+  if (endpoints.metrics && endpoints.metrics.request_count >= INSUFFICIENT_DATA_MIN_REQUESTS)
+    return <Badge variant="secondary">Latency uncertain</Badge>;
   return <Badge variant="secondary">Low volume</Badge>;
 }
 
@@ -161,7 +164,7 @@ function WatchtowerTotals({ rows, healthReady }: { rows: WatchtowerRow[]; health
   const errors = metrics.reduce((sum, item) => sum + item.error_count, 0);
   const cells = [
     {
-      label: 'Projects watched',
+      label: 'Tracked apps',
       value: new Set(rows.map((row) => row.project.appId)).size,
       note: `${rows.length} environments in inventory`,
       color: 'var(--chart-3)',

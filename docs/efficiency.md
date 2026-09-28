@@ -52,8 +52,10 @@ D1 table migration. D1 rows retain the serialized bounds in their series key;
 new Analytics Engine points carry a `latency-v2` marker. Readers recognize both
 formats. A legacy V1 `(1000, 2000]` bin is conservatively placed in V2's
 `>=2000` bin because its individual samples cannot be recovered. Unknown
-histogram identities fail closed. Old ambiguous data may retain an unhealthy
-label until it leaves the selected window; it is never silently made healthy.
+histogram identities fail closed. Aggregators also retain the legacy ambiguous
+count and mark the health state insufficient data when the lower and upper p95
+bounds cross a threshold. Confirmed 5xx or V2 latency evidence can still mark
+the state unhealthy.
 
 A batch uses five SQL statements in one transaction. All three resolutions are
 updated only for active groups; there are no empty bucket writes or periodic

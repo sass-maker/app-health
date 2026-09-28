@@ -33,6 +33,8 @@ export const BucketV1 = z.object({
   upstream_sampled: z.boolean().optional(),
   /** True when the analytics storage sampled contributing measurements. */
   sampled: z.boolean().optional(),
+  /** Count in a legacy V1 bin that straddles the 2000ms unhealthy threshold. */
+  legacy_ambiguous_latency_count: z.number().int().min(0).optional(),
   /** Fixed latency histogram counts aligned with LATENCY_BUCKET_BOUNDS_MS. */
   histogram: z.array(z.number().int().min(0)).length(LATENCY_HISTOGRAM_BUCKETS),
 });

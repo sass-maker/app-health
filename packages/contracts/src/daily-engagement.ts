@@ -68,6 +68,10 @@ export const DailyEngagementProductReportV1 = z
     name: z.string().min(1).max(100),
     /** Browser unique visitors. `null` when browser analytics is unconfigured or unsampled. */
     browser_visitors: z.number().int().min(0).nullable(),
+    /** Browser surface applicability, separate from Analytics Engine coverage. */
+    browser_visitors_applicability: z
+      .enum(['applicable', 'not_applicable', 'unknown'])
+      .default('unknown'),
     /** Up to three configured primary CTA event counts. Empty when none were measurable. */
     cta_events: z.array(DailyCtaEvent).max(3),
     /** Distinguishes a measured action, unsupported product form, and missing evidence. */

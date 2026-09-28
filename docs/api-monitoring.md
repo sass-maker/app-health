@@ -25,8 +25,9 @@ passive request measurement: it does not probe uptime or discover unused routes.
   1% errors or 1 second p95 is degraded; at least 5% errors or 2 seconds p95 is
   unhealthy. New integer-millisecond histograms separate 1999 ms from 2000 ms.
   Legacy V1 data used a `(1000, 2000]` bucket that straddles the threshold; that
-  whole bucket is read conservatively as `>= 2000 ms`, which can overstate old
-  percentiles but never turns ambiguous old latency into healthy status. These
+  whole bucket contributes to the conservative p95 upper bound. When its
+  plausible latency range crosses a health threshold, the state is insufficient
+  data unless the error rate or newer measurements independently prove an issue. These
   are fixed explanatory defaults, not configured alert rules.
 - Sampled storage and sampled upstream trace contributions are labelled. An
   inventory record without report measurements remains visible with unavailable

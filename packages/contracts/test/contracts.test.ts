@@ -59,7 +59,7 @@ describe('latency histogram threshold boundary', () => {
     expect(healthState({ request_count: 20, error_rate: 0, ...atPercentiles })).toBe('unhealthy');
   });
 
-  it('conservatively maps ambiguous legacy V1 threshold bins to unhealthy V2 bins', () => {
+  it('retains ambiguity for legacy V1 threshold bins until independent evidence resolves them', () => {
     expect(latencyHistogramSchemaFromBounds(JSON.stringify(LEGACY_LATENCY_BUCKET_BOUNDS_MS))).toBe(
       'legacy-v1',
     );
@@ -69,7 +69,35 @@ describe('latency histogram threshold boundary', () => {
     expect(normalized[9]).toBe(0);
     expect(normalized[10]).toBe(20);
     const percentiles = approximatePercentiles(normalized);
-    expect(healthState({ request_count: 20, error_rate: 0, ...percentiles })).toBe('unhealthy');
+    const base = {
+      ...SEED_BUCKETS[0],
+      method: 'GET',
+      route: '/legacy',
+      bucket_start: Date.now(),
+      request_count: 20,
+      error_count: 0,
+      histogram: normalized,
+      legacy_ambiguous_latency_count: 20,
+    };
+    const [ambiguous] = mergeBuckets([base], '15m', base.bucket_start + 1);
+    expect(percentiles.p95_ms).toBe(4000);
+    expect(ambiguous.health_state).toBe('insufficient-data');
+    expect(
+      healthState({
+        request_count: 20,
+        error_rate: 0.05,
+        ...percentiles,
+        p95_lower_bound_ms: 1999,
+      }),
+    ).toBe('unhealthy');
+
+    const withV2Proof = {
+      ...base,
+      request_count: 40,
+      histogram: normalized.map((count, index) => (index === 10 ? count + 20 : count)),
+    };
+    const [proven] = mergeBuckets([withV2Proof], '15m', withV2Proof.bucket_start + 1);
+    expect(proven.health_state).toBe('unhealthy');
   });
 
   it('rejects unrecognized persisted histogram bounds', () => {

@@ -73,8 +73,9 @@ export function latencyHistogramSchemaFromBounds(bounds: string): LatencyHistogr
 /**
  * Normalize legacy V1 bins to the current layout conservatively. V1's (1000,
  * 2000] bucket straddles the 2000ms health threshold, so its entire count is
- * placed in V2's >=2000ms bucket. This can retain an old unhealthy warning,
- * but cannot silently convert ambiguous history to healthy.
+ * placed in V2's >=2000ms bucket as a conservative upper bound. Aggregators
+ * carry its count separately and report insufficient data when it changes the
+ * health classification.
  */
 export function normalizeLatencyHistogram(
   histogram: readonly number[],

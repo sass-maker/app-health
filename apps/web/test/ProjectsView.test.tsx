@@ -125,6 +125,25 @@ it('keeps slow measured requests separate from unconfigured inventory', async ()
   expect(screen.getByText(/Requests are server or function calls/)).toBeTruthy();
 });
 
+it('keeps legacy latency uncertainty out of the measured issue queue', async () => {
+  const uncertainHealth = structuredClone(health);
+  uncertainHealth.environments[0].endpoints.metrics!.health_state = 'insufficient-data';
+  installFetch({ healthResponse: Response.json(uncertainHealth) });
+  render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
+  await screen.findByText('No measured request issues in the current inventory.');
+  const queue = screen
+    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(
+    within(queue).getByText('No measured request issues in the current inventory.'),
+  ).toBeTruthy();
+  const inventory = screen
+    .getByText('Complete inventory')
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(within(inventory).getByText('Latency uncertain')).toBeTruthy();
+  expect(within(inventory).getByText('100 requests')).toBeTruthy();
+});
+
 it('shows exact freshness and never turns missing measurements into zero', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="" onOpen={() => {}} />);

@@ -140,6 +140,17 @@ export function approximatePercentiles(histogram: readonly number[]): {
   return { p50_ms: valueAtPercentile(0.5), p95_ms: valueAtPercentile(0.95) };
 }
 
+function legacyP95LowerBound(
+  histogram: readonly number[],
+  ambiguousCount: number,
+): { p95_lower_bound_ms?: number } {
+  if (ambiguousCount === 0) return {};
+  const lowerHistogram = [...histogram];
+  lowerHistogram[10] -= ambiguousCount;
+  lowerHistogram[9] += ambiguousCount;
+  return { p95_lower_bound_ms: approximatePercentiles(lowerHistogram).p95_ms };
+}
+
 /** Merge buckets for the same (method, route) into an EndpointAggregate. */
 export function mergeBuckets(
   buckets: readonly BucketV1[],
@@ -169,6 +180,10 @@ export function mergeBuckets(
     const lastSeenList = list.map((b) => b.last_seen).filter((v): v is number => v != null);
     const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
     const { p50_ms, p95_ms } = approximatePercentiles(mergedHistogram);
+    const ambiguousLatencyCount = list.reduce(
+      (sum, bucket) => sum + (bucket.legacy_ambiguous_latency_count ?? 0),
+      0,
+    );
     const error_rate = request_count > 0 ? error_count / request_count : 0;
     const bytes_sum = list.reduce((sum, b) => sum + (b.response_bytes_sum ?? 0), 0);
     const bytes_measured = list.reduce((sum, b) => sum + (b.response_bytes_measured ?? 0), 0);
@@ -184,7 +199,12 @@ export function mergeBuckets(
       avg_response_bytes: bytes_measured > 0 ? bytes_sum / bytes_measured : null,
       total_response_bytes: bytes_sum,
       last_seen,
-      health_state: healthState({ request_count, error_rate, p95_ms }),
+      health_state: healthState({
+        request_count,
+        error_rate,
+        p95_ms,
+        ...legacyP95LowerBound(mergedHistogram, ambiguousLatencyCount),
+      }),
       ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
       ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),
     });

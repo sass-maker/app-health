@@ -211,6 +211,10 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       ) {
         const normalizedIndex = normalizeLatencyHistogramIndex(bucketIndex, schema);
         bucket.histogram[normalizedIndex] += count;
+        if (schema === 'legacy-v1' && bucketIndex === 9) {
+          bucket.legacy_ambiguous_latency_count =
+            (bucket.legacy_ambiguous_latency_count ?? 0) + count;
+        }
       }
       bucket.request_count += count;
       bucket.error_count += Math.max(0, Math.round(Number(row.error_count)));

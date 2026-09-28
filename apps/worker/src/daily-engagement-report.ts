@@ -92,6 +92,7 @@ interface DailyCaptureCounts {
   /** Catalog policy returned by SaaS Maker; absent on older compatible providers. */
   applicabilityByCatalogId?: Readonly<Record<string, CaptureApplicability>>;
   nativeSessionsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
+  browserVisitorsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
 }
 
 export interface DailyCaptureCountsService {
@@ -185,11 +186,16 @@ function validateDailyCaptureCounts(
     response.nativeSessionsApplicabilityByCatalogId,
     allowedIds,
   );
+  const browserVisitorsApplicabilityByCatalogId = parseMetricApplicability(
+    response.browserVisitorsApplicabilityByCatalogId,
+    allowedIds,
+  );
   return {
     coverageStart: coverageStart as string | null,
     rows,
     applicabilityByCatalogId,
     nativeSessionsApplicabilityByCatalogId,
+    browserVisitorsApplicabilityByCatalogId,
   };
 }
 
@@ -538,6 +544,7 @@ function buildProductReport(
     app_id: row.app_id,
     name: row.catalog_name,
     browser_visitors: browserMeasured ? Math.max(0, Math.round(visitor?.visitors ?? 0)) : null,
+    browser_visitors_applicability: browserVisitorApplicability(input, row.catalog_id),
     cta_events: ctas,
     cta_status: input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)
       ? 'not_applicable'
@@ -571,6 +578,13 @@ function nativeSessionApplicability(
   catalogId: string,
 ): MetricApplicability {
   return input.captureCounts?.nativeSessionsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+}
+
+function browserVisitorApplicability(
+  input: DailyEngagementInputs,
+  catalogId: string,
+): MetricApplicability {
+  return input.captureCounts?.browserVisitorsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
 }
 
 function isProductBrowserMeasured(
@@ -701,6 +715,7 @@ export function dailyEngagementClientPayload(
       delete legacyRow.newsletter_applicability;
       delete legacyRow.waitlist_applicability;
       delete legacyRow.native_sessions_applicability;
+      delete legacyRow.browser_visitors_applicability;
       return legacyRow;
     }),
   };

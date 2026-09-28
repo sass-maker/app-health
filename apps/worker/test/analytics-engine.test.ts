@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  LATENCY_HISTOGRAM_SCHEMA_V2,
-  WINDOW_MS,
-  approximatePercentiles,
-  healthState,
-} from '@app-health/contracts';
+import { LATENCY_HISTOGRAM_SCHEMA_V2, WINDOW_MS, mergeBuckets } from '@app-health/contracts';
 import {
   AnalyticsEngineBuckets,
   createAnalyticsQuery,
@@ -112,13 +107,8 @@ describe('Analytics Engine telemetry adapter', () => {
     const current = buckets.find((bucket) => bucket.route === '/current')!;
     expect(legacy.histogram[9]).toBe(0);
     expect(legacy.histogram[10]).toBe(20);
-    expect(
-      healthState({
-        request_count: legacy.request_count,
-        error_rate: 0,
-        ...approximatePercentiles(legacy.histogram),
-      }),
-    ).toBe('unhealthy');
+    expect(legacy.legacy_ambiguous_latency_count).toBe(20);
+    expect(mergeBuckets([legacy], '15m', 1000)[0].health_state).toBe('insufficient-data');
     expect(current.histogram[9]).toBe(20);
     expect(current.histogram[10]).toBe(0);
   });

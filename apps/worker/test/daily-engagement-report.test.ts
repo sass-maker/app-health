@@ -95,6 +95,7 @@ describe('buildDailyEngagementReport', () => {
       newsletter_applicability: true,
       waitlist_applicability: true,
       native_sessions_applicability: true,
+      browser_visitors_applicability: true,
     });
     expect(legacy.products).toHaveLength(2);
     for (const product of legacy.products) expect(oldRowSchema.parse(product)).toEqual(product);
@@ -884,7 +885,7 @@ describe('composeDailyEngagementReport', () => {
     );
   });
 
-  it('labels native sessions N/A only by catalog form and preserves positive observed counts', async () => {
+  it('applies catalog surface policy independently and preserves positive observed counts', async () => {
     const products = catalog(2).map((row, index) => ({
       ...row,
       catalog_id: index === 0 ? 'site-health' : 'pace',
@@ -894,10 +895,13 @@ describe('composeDailyEngagementReport', () => {
       workspaceId: 'ws-1',
       date: DAY,
       now: NOW,
-      query: async (sql) =>
-        sql.includes('blob20')
-          ? [{ app_id: products[0].app_id, sessions: 2, sample_interval: 1 }]
-          : [],
+      query: async (sql) => {
+        if (sql.includes('blob20'))
+          return [{ app_id: products[0].app_id, sessions: 2, sample_interval: 1 }];
+        if (sql.includes('AS visitors'))
+          return [{ app_id: products[0].app_id, visitors: 3, last_seen: FROM, sample_interval: 1 }];
+        return [];
+      },
       captureCountsService: {
         async getDailyCaptureCounts() {
           return {
@@ -912,6 +916,10 @@ describe('composeDailyEngagementReport', () => {
               'site-health': 'not_applicable',
               pace: 'applicable',
             },
+            browserVisitorsApplicabilityByCatalogId: {
+              'site-health': 'not_applicable',
+              pace: 'applicable',
+            },
           };
         },
       },
@@ -919,10 +927,14 @@ describe('composeDailyEngagementReport', () => {
     expect(report.products[0]).toMatchObject({
       native_sessions: 2,
       native_sessions_applicability: 'not_applicable',
+      browser_visitors: 3,
+      browser_visitors_applicability: 'not_applicable',
     });
     expect(report.products[1]).toMatchObject({
       native_sessions: null,
       native_sessions_applicability: 'applicable',
+      browser_visitors: null,
+      browser_visitors_applicability: 'applicable',
     });
   });
 

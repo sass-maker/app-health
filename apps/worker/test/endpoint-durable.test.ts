@@ -266,7 +266,7 @@ it('reads completed minutes without current/future buckets or other tenant traff
   );
 });
 
-it('reads a legacy ambiguous 2000ms bucket conservatively as unhealthy', async () => {
+it('keeps legacy threshold-straddling latency unknown without losing request counts', async () => {
   const timestamp = now - 60_000;
   const events = Array.from({ length: 20 }, (_, index) => ({
     ...event(`legacy-${index}`, timestamp),
@@ -284,9 +284,14 @@ it('reads a legacy ambiguous 2000ms bucket conservatively as unhealthy', async (
   const [bucket] = await readEndpointBuckets(db, 'legacy-app', 'prod', end - 900_000, end);
   expect(bucket.histogram[9]).toBe(0);
   expect(bucket.histogram[10]).toBe(20);
+  expect(bucket.legacy_ambiguous_latency_count).toBe(20);
   const [aggregate] = mergeBuckets([bucket], '15m', end);
   expect(aggregate.p95_ms).toBe(4000);
-  expect(aggregate.health_state).toBe('unhealthy');
+  expect(aggregate).toMatchObject({
+    request_count: 20,
+    error_count: 0,
+    health_state: 'insufficient-data',
+  });
 });
 
 it('combines old AE data with durable counts exactly once and keeps source errors visible', async () => {

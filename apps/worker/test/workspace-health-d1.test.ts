@@ -116,7 +116,7 @@ describe('workspace health D1 aggregation', () => {
     });
   });
 
-  it('keeps legacy threshold-straddling rollups unhealthy in workspace health', async () => {
+  it('keeps legacy threshold-straddling rollups uncertain in workspace health', async () => {
     const now = Math.floor(Date.now() / 60_000) * 60_000;
     const owner = new D1ControlPlane(db, 'workspace-one');
     const scope = await owner.createAppEnvironmentKey(
@@ -159,8 +159,9 @@ describe('workspace health D1 aggregation', () => {
     const environment = response.environments.find((row) => row.app_id === scope.app.id);
     expect(environment?.endpoints.metrics).toMatchObject({
       request_count: 20,
+      error_count: 0,
       p95_ms: 4000,
-      health_state: 'unhealthy',
+      health_state: 'insufficient-data',
     });
   });
 });

@@ -110,6 +110,9 @@ function decodeEndpointBucket(
     response_bytes_measured: bytesMeasured,
     last_seen: lastSeen,
     histogram: normalizeLatencyHistogram(histogram, schema),
+    ...(schema === 'legacy-v1' && histogram[9] > 0
+      ? { legacy_ambiguous_latency_count: histogram[9] }
+      : {}),
     ...(Number(row.upstream_sampled) > 0 ? { upstream_sampled: true } : {}),
   };
 }

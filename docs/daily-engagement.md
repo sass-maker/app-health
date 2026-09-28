@@ -21,7 +21,11 @@ shape until reloaded, so the API omits those added fields for those clients.
   does not prove an installed SDK, accepted event, or live coverage.
 - Browser visitors are distinct recognized browser hashes in a production
   environment for that day. They are browsers, not people. Sampled visitor
-  groups are shown as unknown because distinct counts cannot be scaled.
+  groups are shown as unknown because distinct counts cannot be scaled. The
+  catalog marks browser visits Not applicable only when the product has no Web
+  platform, no site probe target, no declared visual footer surface, and no
+  browser-oriented form. A public or declared visual site remains applicable
+  even if its product is otherwise native or local.
 - Primary CTA names must be qualified per product before counts appear. The
   checked-in CTA policy keeps Clarity candidates separate from browser events
   that have a production ingest and authenticated Events receipt. Unqualified
