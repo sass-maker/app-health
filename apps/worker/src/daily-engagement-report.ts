@@ -12,7 +12,7 @@
 //
 // Missing bindings, import rows, or telemetry surface as `null` (unknown),
 // never `0`. Native sessions use a separately isolated, best-effort Analytics
-// Engine projection; absent or sampled rows remain unknown. API activity stays unknown.
+// Engine projection; absent or sampled rows remain unknown. API activity counts only durable, unsampled accepted endpoint aggregates.
 
 import {
   DAILY_ENGAGEMENT_SCHEMA,
@@ -21,6 +21,7 @@ import {
   type DailyEngagementProductReportV1,
 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
+import { endpointReadRanges } from './endpoint-read.js';
 
 /** SaaS Maker centralized log events that map to engagement metrics. */
 const FEEDBACK_EVENT = 'feedback.submitted';
@@ -60,6 +61,12 @@ interface NativeSessionRow {
   sample_interval: number;
 }
 
+interface ApiActivityRow {
+  app_id: string;
+  request_count: number;
+  upstream_sampled: number;
+}
+
 export interface EngagementLogRow {
   app_id: string;
   event: string;
@@ -92,6 +99,7 @@ export interface DailyEngagementInputs {
   browserVisitors: readonly BrowserVisitorRow[];
   ctaEvents: readonly CtaEventRow[];
   nativeSessions?: readonly NativeSessionRow[];
+  apiActivity?: readonly ApiActivityRow[];
   logs: readonly EngagementLogRow[];
   ctaEventNamesByCatalogId: Readonly<Record<string, readonly string[]>>;
   ctaNotApplicableCatalogIds?: readonly string[];
@@ -106,6 +114,8 @@ export interface DailyEngagementInputs {
   ctaMeasured?: boolean;
   /** False when the native session query failed; missing rows remain unknown. */
   nativeSessionsMeasured?: boolean;
+  /** False when durable endpoint rollups could not be queried. */
+  apiActivityMeasured?: boolean;
   logsMeasured: boolean;
   /** SaaS Maker source counts are exact only on or after coverageStart. */
   captureCounts?: DailyCaptureCounts;
@@ -202,6 +212,7 @@ interface ReportIndexes {
   byAppId: Map<string, CatalogProductRow>;
   visitorsByApp: Map<string, BrowserVisitorRow>;
   nativeSessionsByApp: Map<string, NativeSessionRow>;
+  apiActivityByApp: Map<string, ApiActivityRow>;
   browserLastSeen: Map<string, number>;
   ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>;
   logCounts: Map<string, Partial<Record<MetricKind, number>>>;
@@ -214,6 +225,7 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   const byAppId = new Map(input.catalog.map((row) => [row.app_id, row]));
   const visitorsByApp = new Map(input.browserVisitors.map((row) => [row.app_id, row]));
   const nativeSessionsByApp = new Map((input.nativeSessions ?? []).map((row) => [row.app_id, row]));
+  const apiActivityByApp = new Map((input.apiActivity ?? []).map((row) => [row.app_id, row]));
   const browserLastSeen = new Map<string, number>();
   input.browserVisitors.forEach((row) => {
     if (row.last_seen !== null) browserLastSeen.set(row.app_id, row.last_seen);
@@ -223,6 +235,7 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
     byAppId,
     visitorsByApp,
     nativeSessionsByApp,
+    apiActivityByApp,
     browserLastSeen,
     ctaByApp: indexCtaEvents(input.ctaEvents),
     ...indexLogEvents(input.logs, byCatalogId, byAppId),
@@ -306,6 +319,12 @@ function samplingNotes(input: DailyEngagementInputs): string[] {
     notes.push(
       'Sampled CTA query days omit unobserved actions; scaled counts are labeled approximate.',
     );
+  if (input.apiActivityMeasured === false)
+    notes.push('Durable endpoint rollup query was unavailable; server request counts are unknown.');
+  if (input.apiActivity?.some((row) => row.upstream_sampled > 0))
+    notes.push(
+      'Sampled endpoint groups are unknown; only unsampled accepted server requests are counted.',
+    );
   if (input.nativeSessionsMeasured === false)
     notes.push(
       'Native session Analytics Engine query was unavailable; native sessions are unknown.',
@@ -320,7 +339,7 @@ function samplingNotes(input: DailyEngagementInputs): string[] {
 function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string[] {
   const notes = [
     ...(input.notes ?? []),
-    'Native sessions count only observed, unsampled native heartbeats; missing or sampled rows are unknown. API activity is unknown. Browser visitors count recognized browsers, not people.',
+    'Native sessions count only observed, unsampled native heartbeats; missing or sampled rows are unknown. Server requests count accepted durable endpoint aggregates and do not represent people. Browser visitors count recognized browsers, not people.',
   ];
   if (input.catalog.length !== 55)
     notes.push(
@@ -423,11 +442,13 @@ function buildProductReport(
     input.nativeSessionsMeasured && nativeSession && nativeSession.sample_interval <= 1
       ? nativeSession.sessions
       : null;
+  const apiActivity = productApiActivity(row, input, indexes);
   const measured =
     Number(browserMeasured) +
     Number(ctas.length > 0) +
     Number(logsMeasured) +
-    Number(nativeSessions !== null);
+    Number(nativeSessions !== null) +
+    Number(apiActivity !== null);
   return {
     catalog_id: row.catalog_id,
     app_id: row.app_id,
@@ -443,7 +464,7 @@ function buildProductReport(
     newsletter_joins: newsletter,
     waitlist_joins: waitlist,
     native_sessions: nativeSessions,
-    api_activity: null,
+    api_activity: apiActivity,
     freshness: {
       browser_last_seen: indexes.browserLastSeen.get(row.app_id) ?? null,
       log_last_seen: indexes.logLastSeen.get(row.catalog_id) ?? null,
@@ -515,6 +536,18 @@ function productCtas(
       estimated: event?.estimated ?? false,
     };
   });
+}
+
+function productApiActivity(
+  row: CatalogProductRow,
+  input: DailyEngagementInputs,
+  indexes: ReportIndexes,
+): number | null {
+  if (!input.apiActivityMeasured || row.environment_id === null) return null;
+  const activity = indexes.apiActivityByApp.get(row.app_id);
+  return activity && activity.request_count > 0 && activity.upstream_sampled === 0
+    ? activity.request_count
+    : null;
 }
 
 /**
@@ -595,6 +628,57 @@ async function readDailyEngagementCatalog(
     .bind(workspaceId)
     .all<CatalogProductRow>();
   return result.results;
+}
+
+/** One workspace-scoped grouped read of durable production endpoint rollups. */
+export async function readDailyApiActivity(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  from: number,
+  to: number,
+  catalog: readonly CatalogProductRow[],
+): Promise<ApiActivityRow[]> {
+  if (catalog.length === 0) return [];
+  const ranges = endpointReadRanges(from, to);
+  const values: unknown[] = ranges.flatMap((range) => [range.resolution, range.from, range.to]);
+  values.push(workspaceId);
+  const rangeValues = ranges.map(
+    (_, index) => `(?${index * 3 + 1}, ?${index * 3 + 2}, ?${index * 3 + 3})`,
+  );
+  const workspaceIndex = values.length;
+  const result = await db
+    .prepare(
+      `WITH ranges(resolution_ms, range_from, range_to) AS (VALUES ${rangeValues.join(',')})
+     SELECT r.app_id, SUM(r.request_count) AS request_count,
+       MAX(r.upstream_sampled) AS upstream_sampled
+     FROM endpoint_rollups r
+     JOIN ranges q ON q.resolution_ms = r.resolution_ms
+       AND r.bucket_start >= q.range_from AND r.bucket_start < q.range_to
+     JOIN environments e ON e.id = r.environment_id AND e.app_id = r.app_id
+       AND lower(e.name) = 'production'
+     JOIN catalog_project_imports c ON c.app_id = r.app_id
+       AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
+     GROUP BY r.app_id LIMIT 56`,
+    )
+    .bind(...values)
+    .all<ApiActivityRow>();
+  if (result.results.length > 55) throw new Error('Daily endpoint query exceeded row limit');
+  const allowedApps = new Set(catalog.flatMap((row) => (row.environment_id ? [row.app_id] : [])));
+  const seen = new Set<string>();
+  return result.results.map((row) => {
+    const count = Number(row.request_count);
+    const sampled = Number(row.upstream_sampled);
+    if (
+      !allowedApps.has(row.app_id) ||
+      seen.has(row.app_id) ||
+      !Number.isSafeInteger(count) ||
+      count <= 0 ||
+      (sampled !== 0 && sampled !== 1)
+    )
+      throw new Error('Invalid daily endpoint aggregate');
+    seen.add(row.app_id);
+    return { app_id: row.app_id, request_count: count, upstream_sampled: sampled };
+  });
 }
 
 /** Grouped D1 log_events query for feedback / waitlist / newsletter joins. */
@@ -810,7 +894,7 @@ export async function composeDailyEngagementReport(args: {
   const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
-  const [browser, nativeSessions, logResult, captureResult] = await Promise.all([
+  const [browser, nativeSessions, apiActivity, logResult, captureResult] = await Promise.all([
     args.query
       ? readDailyEngagementBrowser(
           args.workspaceId,
@@ -835,6 +919,9 @@ export async function composeDailyEngagementReport(args: {
           args.query,
         )
       : Promise.resolve({ rows: [] as NativeSessionRow[], measured: false }),
+    readDailyApiActivity(args.db, args.workspaceId, window.from, window.to, catalog)
+      .then((rows) => ({ rows, measured: true }))
+      .catch(() => ({ rows: [] as ApiActivityRow[], measured: false })),
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
@@ -853,6 +940,7 @@ export async function composeDailyEngagementReport(args: {
     browserVisitors: browser.visitors,
     ctaEvents: browser.cta,
     nativeSessions: nativeSessions.rows,
+    apiActivity: apiActivity.rows,
     logs: logResult.rows,
     ctaEventNamesByCatalogId,
     ctaNotApplicableCatalogIds: args.ctaNotApplicableCatalogIds,
@@ -864,6 +952,7 @@ export async function composeDailyEngagementReport(args: {
     browserMeasured: browser.visitorsMeasured,
     ctaMeasured: browser.ctaMeasured,
     nativeSessionsMeasured: nativeSessions.measured,
+    apiActivityMeasured: apiActivity.measured,
     logsMeasured: logResult.measured,
     captureCounts: captureResult.result,
     captureCountsAvailable: captureResult.available,

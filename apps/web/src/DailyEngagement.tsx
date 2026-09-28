@@ -59,8 +59,8 @@ function ReportHeader({
           Daily engagement
         </CardTitle>
         <p className="mt-1 text-xs text-muted-foreground">
-          Recognized browser visitors, native sessions, chosen actions, feedback, and consented
-          joins across the imported portfolio.
+          Recognized browser visitors, native sessions, server requests, chosen actions, feedback,
+          and consented joins across the imported portfolio. Requests are not people.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -158,6 +158,7 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
   const metrics = [
     ['Browser visitors', product.browser_visitors],
     ['Native sessions', product.native_sessions],
+    ['Server requests', product.api_activity],
     ['Feedback', product.feedback_submitted],
     ['Newsletter', product.newsletter_joins],
     ['Waitlist', product.waitlist_joins],
@@ -203,6 +204,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
             <TableHead>Product</TableHead>
             <TableHead className="text-right">Browser visitors</TableHead>
             <TableHead className="text-right">Native sessions</TableHead>
+            <TableHead className="text-right">Server requests</TableHead>
             <TableHead>Primary actions</TableHead>
             <TableHead className="text-right">Feedback</TableHead>
             <TableHead className="text-right">Newsletter</TableHead>
@@ -221,6 +223,9 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {count(product.native_sessions)}
+              </TableCell>
+              <TableCell className="text-right tabular-nums">
+                {count(product.api_activity)}
               </TableCell>
               <TableCell className="min-w-52">
                 <ProductActions events={product.cta_events} status={product.cta_status} />

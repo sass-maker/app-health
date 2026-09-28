@@ -78,7 +78,7 @@ export const DailyEngagementProductReportV1 = z
     waitlist_joins: z.number().int().min(0).nullable(),
     /** Observed native sessions; null when absent, unavailable, or sampled. */
     native_sessions: z.number().int().min(0).nullable(),
-    /** API activity (endpoint request count). `null`: not yet measurable as engagement. */
+    /** Server request count, not people. `null` when durable unsampled endpoint coverage is unknown. */
     api_activity: z.number().int().min(0).nullable(),
     freshness: DailyFreshness,
     /** How much of this product's row was actually measured. */

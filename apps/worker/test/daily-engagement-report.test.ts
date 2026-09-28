@@ -1,16 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { DailyEngagementReportV1 } from '@app-health/contracts';
 import worker, { type Env } from '../src/index.js';
 import {
   buildDailyEngagementReport,
   dailyEngagementWindow,
   readDailyEngagementLogs,
+  readDailyApiActivity,
   composeDailyEngagementReport,
   type CatalogProductRow,
   type EngagementLogRow,
 } from '../src/daily-engagement-report.js';
 import type { D1DatabaseLike, D1PreparedStatement, D1RunResult } from '../src/d1-adapter.js';
+import { endpointReadRanges } from '../src/endpoint-read.js';
 
 // 2026-09-27 is a completed India day when "now" is 2026-09-28 noon UTC.
 const NOW = Date.UTC(2026, 8, 28, 12, 0, 0);
@@ -492,6 +494,126 @@ describe('buildDailyEngagementReport', () => {
       report.notes.some((n) => n.includes('Browser Analytics Engine query was unavailable')),
     ).toBe(true);
     expect(report.notes.some((n) => n.includes('D1 log_events query was unavailable'))).toBe(true);
+  });
+
+  it('reports only unsampled server requests and never maps them to visitors', () => {
+    const products = catalog(3);
+    const report = buildDailyEngagementReport({
+      catalog: products,
+      browserVisitors: [],
+      ctaEvents: [],
+      apiActivity: [
+        { app_id: 'app-000', request_count: 37, upstream_sampled: 0 },
+        { app_id: 'app-001', request_count: 12, upstream_sampled: 1 },
+      ],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: false,
+      apiActivityMeasured: true,
+      logsMeasured: false,
+    });
+    expect(report.products.map((row) => row.api_activity)).toEqual([37, null, null]);
+    expect(report.products.map((row) => row.browser_visitors)).toEqual([null, null, null]);
+  });
+
+  it('keeps endpoint counts unknown when the grouped D1 query is unavailable', () => {
+    const products = catalog(1);
+    const report = buildDailyEngagementReport({
+      catalog: products,
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: false,
+      apiActivityMeasured: false,
+      logsMeasured: false,
+    });
+    expect(report.products[0].api_activity).toBeNull();
+  });
+});
+
+describe('readDailyApiActivity', () => {
+  it('counts disjoint resolution ranges and enforces workspace, production, and sampling scope', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(`
+      CREATE TABLE endpoint_rollups (
+        app_id TEXT, environment_id TEXT, resolution_ms INTEGER, bucket_start INTEGER,
+        request_count INTEGER, upstream_sampled INTEGER
+      );
+      CREATE TABLE environments (id TEXT PRIMARY KEY, app_id TEXT, name TEXT);
+      CREATE TABLE catalog_project_imports (app_id TEXT, workspace_id TEXT, lifecycle TEXT);
+      INSERT INTO environments VALUES
+        ('env-000','app-000','production'), ('env-001','app-001','production'),
+        ('env-other-env','app-other-env','staging'), ('env-other-ws','app-other-ws','production');
+      INSERT INTO catalog_project_imports VALUES
+        ('app-000','ws-1','active'), ('app-001','ws-1','primary'),
+        ('app-other-env','ws-1','active'), ('app-other-ws','ws-2','active');
+    `);
+    const statement = (sql: string, values: SQLInputValue[] = []) =>
+      sqlite.prepare(sql).all(...values);
+    const add = sqlite.prepare('INSERT INTO endpoint_rollups VALUES (?, ?, ?, ?, ?, ?)');
+    const insert = (
+      app: string,
+      env: string,
+      resolution: number,
+      start: number,
+      count: number,
+      sampled = 0,
+    ) => add.run(app, env, resolution, start, count, sampled);
+    // India-day edges use minute buckets; the complete middle uses hourly buckets.
+    // Equivalent fine/coarse duplicates are present deliberately to catch double counting.
+    insert('app-000', 'env-000', 60_000, FROM, 5);
+    insert('app-000', 'env-000', 3_600_000, Date.UTC(2026, 8, 26, 19), 100);
+    insert('app-000', 'env-000', 60_000, Date.UTC(2026, 8, 26, 19), 100);
+    insert('app-000', 'env-000', 60_000, Date.UTC(2026, 8, 27, 18), 7);
+    insert('app-000', 'env-000', 86_400_000, Date.UTC(2026, 8, 27), 999);
+    insert('app-001', 'env-001', 3_600_000, Date.UTC(2026, 8, 26, 19), 40, 1);
+    insert('app-other-env', 'env-other-env', 3_600_000, Date.UTC(2026, 8, 26, 19), 70);
+    insert('app-other-ws', 'env-other-ws', 3_600_000, Date.UTC(2026, 8, 26, 19), 80);
+    const db: D1DatabaseLike = {
+      prepare(sql: string) {
+        let values: SQLInputValue[] = [];
+        return {
+          bind(...bound: unknown[]) {
+            values = bound as SQLInputValue[];
+            return this;
+          },
+          async first<T>() {
+            return (statement(sql, values)[0] as T | undefined) ?? null;
+          },
+          async all<T>() {
+            return { results: statement(sql, values) as T[] };
+          },
+          async run() {
+            sqlite.prepare(sql).run(...values);
+            return { success: true, meta: { changes: 0 } };
+          },
+        };
+      },
+      async batch() {
+        return [];
+      },
+    };
+    try {
+      const rows = await readDailyApiActivity(db, 'ws-1', FROM, TO, catalog(2));
+      expect(rows).toEqual([
+        { app_id: 'app-000', request_count: 112, upstream_sampled: 0 },
+        { app_id: 'app-001', request_count: 40, upstream_sampled: 1 },
+      ]);
+      expect(endpointReadRanges(FROM, TO).map((range) => range.resolution)).toEqual([
+        60_000, 3_600_000, 60_000,
+      ]);
+    } finally {
+      sqlite.close();
+    }
   });
 });
 

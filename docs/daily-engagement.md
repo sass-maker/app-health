@@ -38,8 +38,14 @@ is part of this source change.
 - Native sessions count distinct, scoped session hashes from accepted native
   active heartbeats in the completed day. Their Analytics Engine projection is
   best-effort; missing or sampled rows remain unknown. Browser visitor slots do
-  not contain these rows. API engagement remains unknown; request totals in
-  Watchtower are not a measure of visitors.
+  not contain these rows. Server requests are counted separately from visitors from durable D1
+  `endpoint_rollups`, scoped to imported active/primary products and their exact
+  production environment. The disjoint minute/hour/day ranges avoid double
+  counting rollup resolutions. Positive unsampled accepted request totals are
+  shown; sampled groups and missing query/source coverage stay unknown. Missing
+  rows remain unknown because endpoint capability receipts predate the
+  durable rollup cutover and cannot establish historical zero. Requests are not
+  people.
 - Unknown means the source was unavailable, unconfigured, or had no qualifying
   receipt. Zero appears only where the source was measured.
 
