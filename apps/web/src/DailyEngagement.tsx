@@ -245,7 +245,7 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
 
 function MobileProducts({ products }: { products: Product[] }): JSX.Element {
   return (
-    <ul className="space-y-3 md:hidden" aria-label="Daily engagement products">
+    <ul className="space-y-3 xl:hidden" aria-label="Daily engagement products">
       {products.map((product) => (
         <MobileProductCard key={product.catalog_id} product={product} />
       ))}
@@ -255,7 +255,7 @@ function MobileProducts({ products }: { products: Product[] }): JSX.Element {
 
 function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
   return (
-    <div className="hidden max-w-full overflow-x-auto rounded-md border md:block">
+    <div className="hidden max-w-full overflow-x-auto rounded-md border xl:block">
       <Table>
         <TableHeader>
           <TableRow>
@@ -312,7 +312,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
 
 function EmptyMobileProducts(): JSX.Element {
   return (
-    <p className="rounded-md border p-6 text-center text-sm text-muted-foreground md:hidden">
+    <p className="rounded-md border p-6 text-center text-sm text-muted-foreground xl:hidden">
       No products match this search.
     </p>
   );
