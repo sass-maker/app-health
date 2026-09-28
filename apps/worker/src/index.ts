@@ -658,7 +658,11 @@ async function handleDailyEngagementRoute(
     });
     return json(
       200,
-      dailyEngagementClientPayload(report, url.searchParams.get('capture_applicability') === '1'),
+      dailyEngagementClientPayload(
+        report,
+        url.searchParams.get('capture_applicability') === '1',
+        url.searchParams.get('browser_visitor_unknown_reason') === '1',
+      ),
       true,
     );
   } catch (error) {

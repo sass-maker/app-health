@@ -185,3 +185,25 @@ it('shows a retryable error when the owner report is unavailable', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Refresh daily engagement' }));
   await waitFor(() => expect(screen.getByText('2/55 imported')).toBeTruthy());
 });
+
+it('shows the opted-in reason under an applicable unknown visitor count', async () => {
+  const diagnosticReport = {
+    ...report,
+    products: report.products.map((product) =>
+      product.catalog_id === 'atlas'
+        ? {
+            ...product,
+            browser_visitors: null,
+            browser_visitors_unknown_reason: 'telemetry_started_partway_through_day',
+          }
+        : product,
+    ),
+  };
+  const fetch = vi.fn(async (_input: RequestInfo | URL) => Response.json(diagnosticReport));
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  const table = await screen.findByRole('table');
+  const atlas = within(table).getByText('atlas').closest('tr')!;
+  expect(within(atlas).getByText('Telemetry began partway through the day')).toBeTruthy();
+  expect(String(fetch.mock.calls[0]?.[0])).toContain('browser_visitor_unknown_reason=1');
+});

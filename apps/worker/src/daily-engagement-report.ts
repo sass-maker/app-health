@@ -566,6 +566,9 @@ function buildProductReport(
     name: row.catalog_name,
     browser_visitors: browserMeasured ? Math.max(0, Math.round(visitor?.visitors ?? 0)) : null,
     browser_visitors_applicability: browserVisitorApplicability(input, row.catalog_id),
+    browser_visitors_unknown_reason: browserMeasured
+      ? undefined
+      : browserVisitorUnknownReason(row, visitor, input),
     cta_events: ctas,
     cta_status: input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)
       ? 'not_applicable'
@@ -607,6 +610,22 @@ function browserVisitorApplicability(
   catalogId: string,
 ): MetricApplicability {
   return input.captureCounts?.browserVisitorsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+}
+
+function browserVisitorUnknownReason(
+  row: CatalogProductRow,
+  visitor: BrowserVisitorRow | undefined,
+  input: DailyEngagementInputs,
+): NonNullable<DailyEngagementProductReportV1['browser_visitors_unknown_reason']> {
+  if (row.environment_id === null) return 'no_production_environment';
+  if (!input.browserMeasured) return 'source_query_unavailable';
+  if (visitor && visitor.sample_interval > 1) return 'sampled_visitor_group';
+  if (row.analytics_first_received_at !== null) {
+    if (row.analytics_first_received_at >= input.to) return 'telemetry_started_after_day';
+    if (row.analytics_first_received_at > input.from)
+      return 'telemetry_started_partway_through_day';
+  }
+  return 'no_qualifying_analytics_receipt';
 }
 
 function serverRequestApplicability(
@@ -738,17 +757,21 @@ export const buildDailyEngagementReport = (
 export function dailyEngagementClientPayload(
   report: DailyEngagementReportV1,
   includeCaptureApplicability: boolean,
+  includeBrowserVisitorUnknownReason = false,
 ) {
-  if (includeCaptureApplicability) return report;
+  if (includeCaptureApplicability && includeBrowserVisitorUnknownReason) return report;
   return {
     ...report,
     products: report.products.map((row) => {
       const legacyRow: Partial<DailyEngagementProductReportV1> = { ...row };
-      delete legacyRow.newsletter_applicability;
-      delete legacyRow.waitlist_applicability;
-      delete legacyRow.native_sessions_applicability;
-      delete legacyRow.browser_visitors_applicability;
-      delete legacyRow.server_requests_applicability;
+      if (!includeCaptureApplicability) {
+        delete legacyRow.newsletter_applicability;
+        delete legacyRow.waitlist_applicability;
+        delete legacyRow.native_sessions_applicability;
+        delete legacyRow.browser_visitors_applicability;
+        delete legacyRow.server_requests_applicability;
+      }
+      if (!includeBrowserVisitorUnknownReason) delete legacyRow.browser_visitors_unknown_reason;
       return legacyRow;
     }),
   };

@@ -10,6 +10,7 @@ import {
   readDailyApiActivity,
   composeDailyEngagementReport,
   type CatalogProductRow,
+  type DailyEngagementInputs,
   type EngagementLogRow,
 } from '../src/daily-engagement-report.js';
 import type { D1DatabaseLike, D1PreparedStatement, D1RunResult } from '../src/d1-adapter.js';
@@ -100,8 +101,49 @@ describe('buildDailyEngagementReport', () => {
     });
     expect(legacy.products).toHaveLength(2);
     for (const product of legacy.products) expect(oldRowSchema.parse(product)).toEqual(product);
-    expect(dailyEngagementClientPayload(report, true)).toEqual(report);
+    expect(dailyEngagementClientPayload(report, true).products[0]).not.toHaveProperty(
+      'browser_visitors_unknown_reason',
+    );
+    expect(legacy.products[0]).not.toHaveProperty('browser_visitors_unknown_reason');
+    expect(dailyEngagementClientPayload(report, true, true)).toEqual(report);
     expect(DailyEngagementReportV1.parse(report)).toEqual(report);
+  });
+
+  it('reports the specific reason an applicable browser visitor count is unknown', () => {
+    const base: DailyEngagementInputs = {
+      catalog: [catalog(1)[0]!],
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    };
+    const reason = (overrides: Partial<DailyEngagementInputs>) =>
+      buildDailyEngagementReport({ ...base, ...overrides }).products[0]!
+        .browser_visitors_unknown_reason;
+    expect(reason({ browserMeasured: false })).toBe('source_query_unavailable');
+    expect(reason({ catalog: [{ ...base.catalog[0]!, environment_id: null }] })).toBe(
+      'no_production_environment',
+    );
+    expect(
+      reason({
+        browserVisitors: [{ app_id: 'app-000', visitors: 1, last_seen: null, sample_interval: 2 }],
+      }),
+    ).toBe('sampled_visitor_group');
+    expect(
+      reason({ catalog: [{ ...base.catalog[0]!, analytics_first_received_at: FROM + 1 }] }),
+    ).toBe('telemetry_started_partway_through_day');
+    expect(reason({ catalog: [{ ...base.catalog[0]!, analytics_first_received_at: TO }] })).toBe(
+      'telemetry_started_after_day',
+    );
+    expect(reason({ catalog: [{ ...base.catalog[0]!, analytics_first_received_at: null }] })).toBe(
+      'no_qualifying_analytics_receipt',
+    );
   });
 
   it('covers 55 catalog products and marks missing rows unknown, never zero', () => {

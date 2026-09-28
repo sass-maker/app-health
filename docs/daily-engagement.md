@@ -11,6 +11,12 @@ is part of this source change.
 The current dashboard requests `capture_applicability=1` to receive catalog
 applicability fields. Existing open dashboard tabs use the original strict row
 shape until reloaded, so the API omits those added fields for those clients.
+The dashboard also opts into `browser_visitor_unknown_reason=1`; clients that
+only request capture applicability continue to receive their existing row
+shape. For applicable products with an unknown visitor count, the dashboard
+shows whether the source query failed, no production environment exists, the
+visitor group was sampled, telemetry began partway through or after the day, or
+no qualifying analytics receipt exists.
 
 ## What a row means
 

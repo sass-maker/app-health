@@ -72,6 +72,17 @@ export const DailyEngagementProductReportV1 = z
     browser_visitors_applicability: z
       .enum(['applicable', 'not_applicable', 'unknown'])
       .default('unknown'),
+    /** Optional diagnostic for unknown visitor counts, returned only on opt-in. */
+    browser_visitors_unknown_reason: z
+      .enum([
+        'source_query_unavailable',
+        'no_production_environment',
+        'sampled_visitor_group',
+        'telemetry_started_partway_through_day',
+        'telemetry_started_after_day',
+        'no_qualifying_analytics_receipt',
+      ])
+      .optional(),
     /** Up to three configured primary CTA event counts. Empty when none were measurable. */
     cta_events: z.array(DailyCtaEvent).max(3),
     /** Distinguishes a measured action, unsupported product form, and missing evidence. */

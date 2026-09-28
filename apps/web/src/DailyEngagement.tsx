@@ -38,6 +38,27 @@ function captureCount(
   return count(value);
 }
 
+function browserVisitorReason(product: Product): string | null {
+  if (product.browser_visitors !== null || product.browser_visitors_applicability !== 'applicable')
+    return null;
+  switch (product.browser_visitors_unknown_reason) {
+    case 'source_query_unavailable':
+      return 'Visitor source query unavailable';
+    case 'no_production_environment':
+      return 'No production environment';
+    case 'sampled_visitor_group':
+      return 'Visitor group was sampled';
+    case 'telemetry_started_partway_through_day':
+      return 'Telemetry began partway through the day';
+    case 'telemetry_started_after_day':
+      return 'Telemetry began after this day';
+    case 'no_qualifying_analytics_receipt':
+      return 'No qualifying analytics receipt';
+    default:
+      return null;
+  }
+}
+
 function previousReportDay(): string {
   return new Date(Date.now() + 330 * 60_000 - 86_400_000).toISOString().slice(0, 10);
 }
@@ -230,6 +251,9 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
           <div key={label}>
             <dt className="text-muted-foreground">{label}</dt>
             <dd className="mt-0.5 font-medium tabular-nums">{count(value)}</dd>
+            {label === 'Browser visitors' && browserVisitorReason(product) ? (
+              <dd className="mt-1 text-muted-foreground">{browserVisitorReason(product)}</dd>
+            ) : null}
           </div>
         ))}
       </dl>
@@ -278,6 +302,11 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {captureCount(product.browser_visitors, product.browser_visitors_applicability)}
+                {browserVisitorReason(product) ? (
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {browserVisitorReason(product)}
+                  </span>
+                ) : null}
               </TableCell>
               <TableCell className="min-w-52">
                 <ProductActions events={product.cta_events} status={product.cta_status} />
@@ -435,7 +464,7 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1`;
+    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1`;
     void fetch(url, {
       signal: controller.signal,
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
