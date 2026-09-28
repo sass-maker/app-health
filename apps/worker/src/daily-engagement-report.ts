@@ -11,8 +11,8 @@
 // cookies, identities, raw URLs, and tokens are never read or returned.
 //
 // Missing bindings, import rows, or telemetry surface as `null` (unknown),
-// never `0`. Native sessions and API activity are not yet measurable in a
-// grouped query and are reported as unknown with an honest note.
+// never `0`. Native sessions use a separately isolated, best-effort Analytics
+// Engine projection; absent or sampled rows remain unknown. API activity stays unknown.
 
 import {
   DAILY_ENGAGEMENT_SCHEMA,
@@ -54,6 +54,12 @@ interface CtaEventRow {
   sample_interval: number;
 }
 
+interface NativeSessionRow {
+  app_id: string;
+  sessions: number;
+  sample_interval: number;
+}
+
 export interface EngagementLogRow {
   app_id: string;
   event: string;
@@ -85,6 +91,7 @@ export interface DailyEngagementInputs {
   catalog: readonly CatalogProductRow[];
   browserVisitors: readonly BrowserVisitorRow[];
   ctaEvents: readonly CtaEventRow[];
+  nativeSessions?: readonly NativeSessionRow[];
   logs: readonly EngagementLogRow[];
   ctaEventNamesByCatalogId: Readonly<Record<string, readonly string[]>>;
   ctaNotApplicableCatalogIds?: readonly string[];
@@ -97,6 +104,8 @@ export interface DailyEngagementInputs {
   browserMeasured: boolean;
   /** False when the CTA query failed; CTA counts are unknown. Defaults to browserMeasured. */
   ctaMeasured?: boolean;
+  /** False when the native session query failed; missing rows remain unknown. */
+  nativeSessionsMeasured?: boolean;
   logsMeasured: boolean;
   /** SaaS Maker source counts are exact only on or after coverageStart. */
   captureCounts?: DailyCaptureCounts;
@@ -192,6 +201,7 @@ interface ReportIndexes {
   byCatalogId: Map<string, CatalogProductRow>;
   byAppId: Map<string, CatalogProductRow>;
   visitorsByApp: Map<string, BrowserVisitorRow>;
+  nativeSessionsByApp: Map<string, NativeSessionRow>;
   browserLastSeen: Map<string, number>;
   ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>;
   logCounts: Map<string, Partial<Record<MetricKind, number>>>;
@@ -203,6 +213,7 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   const byCatalogId = new Map(input.catalog.map((row) => [row.catalog_id, row]));
   const byAppId = new Map(input.catalog.map((row) => [row.app_id, row]));
   const visitorsByApp = new Map(input.browserVisitors.map((row) => [row.app_id, row]));
+  const nativeSessionsByApp = new Map((input.nativeSessions ?? []).map((row) => [row.app_id, row]));
   const browserLastSeen = new Map<string, number>();
   input.browserVisitors.forEach((row) => {
     if (row.last_seen !== null) browserLastSeen.set(row.app_id, row.last_seen);
@@ -211,6 +222,7 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
     byCatalogId,
     byAppId,
     visitorsByApp,
+    nativeSessionsByApp,
     browserLastSeen,
     ctaByApp: indexCtaEvents(input.ctaEvents),
     ...indexLogEvents(input.logs, byCatalogId, byAppId),
@@ -268,7 +280,9 @@ function addLogCount(
 }
 
 function isSampled(input: DailyEngagementInputs): boolean {
-  return [...input.browserVisitors, ...input.ctaEvents].some((row) => row.sample_interval > 1);
+  return [...input.browserVisitors, ...input.ctaEvents, ...(input.nativeSessions ?? [])].some(
+    (row) => row.sample_interval > 1,
+  );
 }
 
 function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null {
@@ -282,10 +296,31 @@ function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null 
   return null;
 }
 
+function samplingNotes(input: DailyEngagementInputs): string[] {
+  const notes: string[] = [];
+  if (input.browserVisitors.some((row) => row.sample_interval > 1))
+    notes.push(
+      'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
+    );
+  if (input.ctaEvents.some((row) => row.sample_interval > 1))
+    notes.push(
+      'Sampled CTA query days omit unobserved actions; scaled counts are labeled approximate.',
+    );
+  if (input.nativeSessionsMeasured === false)
+    notes.push(
+      'Native session Analytics Engine query was unavailable; native sessions are unknown.',
+    );
+  if ((input.nativeSessions ?? []).some((row) => row.sample_interval > 1))
+    notes.push(
+      'Sampled native session groups are unknown because distinct sessions cannot be scaled.',
+    );
+  return notes;
+}
+
 function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string[] {
   const notes = [
     ...(input.notes ?? []),
-    'Native sessions and API activity are unknown; this report counts recognized browsers, not people.',
+    'Native sessions count only observed, unsampled native heartbeats; missing or sampled rows are unknown. API activity is unknown. Browser visitors count recognized browsers, not people.',
   ];
   if (input.catalog.length !== 55)
     notes.push(
@@ -331,14 +366,7 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
       'SaaS Maker source counts are unavailable for one or more product metrics; positive App Health log counts are lower bounds.',
     );
   }
-  if (input.browserVisitors.some((row) => row.sample_interval > 1))
-    notes.push(
-      'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
-    );
-  if (input.ctaEvents.some((row) => row.sample_interval > 1))
-    notes.push(
-      'Sampled CTA query days omit unobserved actions; scaled counts are labeled approximate.',
-    );
+  notes.push(...samplingNotes(input));
   return notes;
 }
 
@@ -382,6 +410,7 @@ function buildProductReport(
   indexes: ReportIndexes,
 ): DailyEngagementProductReportV1 {
   const visitor = indexes.visitorsByApp.get(row.app_id);
+  const nativeSession = indexes.nativeSessionsByApp.get(row.app_id);
   const browserMeasured = isProductBrowserMeasured(row, visitor, input);
   const ctaMeasured = isProductCtaMeasured(row, visitor, input, indexes.ctaByApp);
   const ctas = productCtas(row, input, visitor, indexes.ctaByApp, ctaMeasured);
@@ -390,7 +419,15 @@ function buildProductReport(
   const newsletter = metricCount('newsletter', input, row, logCounts);
   const waitlist = metricCount('waitlist', input, row, logCounts);
   const logsMeasured = [feedback, newsletter, waitlist].some((count) => count !== null);
-  const measured = Number(browserMeasured) + Number(ctas.length > 0) + Number(logsMeasured);
+  const nativeSessions =
+    input.nativeSessionsMeasured && nativeSession && nativeSession.sample_interval <= 1
+      ? nativeSession.sessions
+      : null;
+  const measured =
+    Number(browserMeasured) +
+    Number(ctas.length > 0) +
+    Number(logsMeasured) +
+    Number(nativeSessions !== null);
   return {
     catalog_id: row.catalog_id,
     app_id: row.app_id,
@@ -405,7 +442,7 @@ function buildProductReport(
     feedback_submitted: feedback,
     newsletter_joins: newsletter,
     waitlist_joins: waitlist,
-    native_sessions: null,
+    native_sessions: nativeSessions,
     api_activity: null,
     freshness: {
       browser_last_seen: indexes.browserLastSeen.get(row.app_id) ?? null,
@@ -624,6 +661,11 @@ interface CtaQueryRow {
   count: number | string;
   sample_interval: number | string;
 }
+interface NativeSessionQueryRow {
+  app_id: string;
+  sessions: number | string;
+  sample_interval: number | string;
+}
 
 const num = (value: unknown): number => {
   const n = Number(value);
@@ -706,6 +748,49 @@ async function readDailyEngagementBrowser(
   };
 }
 
+/** Count only observed, unsampled native-session projection rows. */
+async function readDailyEngagementNativeSessions(
+  workspace: string,
+  catalog: readonly CatalogProductRow[],
+  from: number,
+  to: number,
+  query: AnalyticsEngineQuery,
+): Promise<{ rows: NativeSessionRow[]; measured: boolean }> {
+  const appIds = catalog.map((row) => row.app_id);
+  const environmentIds = catalog.flatMap((row) => (row.environment_id ? [row.environment_id] : []));
+  if (appIds.length === 0 || environmentIds.length === 0) return { rows: [], measured: true };
+  const sql = `SELECT blob1 AS app_id,
+    COUNT(DISTINCT blob20) AS sessions,
+    MAX(_sample_interval) AS sample_interval
+    FROM app_health_browser_v1
+    WHERE index1 = ${sqlLiteral(workspace)} AND double2 >= ${from} AND double2 < ${to}
+    AND blob3 = 'native_session' AND blob20 != ''
+    AND blob1 IN (${appIds.map(sqlLiteral).join(',')})
+    AND blob2 IN (${environmentIds.map(sqlLiteral).join(',')})
+    GROUP BY blob1 LIMIT 1000`;
+  try {
+    const rows = (await query(sql)) as NativeSessionQueryRow[];
+    if (!Array.isArray(rows) || rows.length > 1000) throw new Error('invalid native session rows');
+    const allowedApps = new Set(appIds);
+    const seen = new Set<string>();
+    return {
+      rows: rows.map((row) => {
+        if (typeof row.app_id !== 'string' || !allowedApps.has(row.app_id) || seen.has(row.app_id))
+          throw new Error('invalid native session app');
+        seen.add(row.app_id);
+        return {
+          app_id: row.app_id,
+          sessions: Math.max(0, Math.round(num(row.sessions))),
+          sample_interval: Math.max(1, Math.round(num(row.sample_interval))),
+        };
+      }),
+      measured: true,
+    };
+  } catch {
+    return { rows: [], measured: false };
+  }
+}
+
 /** Compose the full report by reading catalog, browser, and log aggregates. */
 export async function composeDailyEngagementReport(args: {
   db: D1DatabaseLike;
@@ -725,7 +810,7 @@ export async function composeDailyEngagementReport(args: {
   const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
-  const [browser, logResult, captureResult] = await Promise.all([
+  const [browser, nativeSessions, logResult, captureResult] = await Promise.all([
     args.query
       ? readDailyEngagementBrowser(
           args.workspaceId,
@@ -741,6 +826,15 @@ export async function composeDailyEngagementReport(args: {
           visitorsMeasured: false,
           ctaMeasured: false,
         }),
+    args.query
+      ? readDailyEngagementNativeSessions(
+          args.workspaceId,
+          catalog,
+          window.from,
+          window.to,
+          args.query,
+        )
+      : Promise.resolve({ rows: [] as NativeSessionRow[], measured: false }),
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
@@ -758,6 +852,7 @@ export async function composeDailyEngagementReport(args: {
     catalog,
     browserVisitors: browser.visitors,
     ctaEvents: browser.cta,
+    nativeSessions: nativeSessions.rows,
     logs: logResult.rows,
     ctaEventNamesByCatalogId,
     ctaNotApplicableCatalogIds: args.ctaNotApplicableCatalogIds,
@@ -768,6 +863,7 @@ export async function composeDailyEngagementReport(args: {
     now: args.now,
     browserMeasured: browser.visitorsMeasured,
     ctaMeasured: browser.ctaMeasured,
+    nativeSessionsMeasured: nativeSessions.measured,
     logsMeasured: logResult.measured,
     captureCounts: captureResult.result,
     captureCountsAvailable: captureResult.available,

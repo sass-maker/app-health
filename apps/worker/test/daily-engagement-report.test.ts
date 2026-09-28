@@ -836,6 +836,51 @@ describe('composeDailyEngagementReport', () => {
     );
   });
 
+  it('counts only observed unsampled native sessions and leaves missing, failed, or sampled results unknown', async () => {
+    const run = (mode: 'observed' | 'missing' | 'failed' | 'sampled') =>
+      composeDailyEngagementReport({
+        db: new MockDatabase(catalog(1), []),
+        workspaceId: 'ws-1',
+        date: DAY,
+        now: NOW,
+        query: async (sql) => {
+          if (sql.includes('blob20')) {
+            expect(sql).toContain("blob3 = 'native_session'");
+            expect(sql).toContain('COUNT(DISTINCT blob20)');
+            if (mode === 'failed') throw new Error('native session query unavailable');
+            if (mode === 'missing') return [];
+            return [
+              {
+                app_id: 'app-000',
+                sessions: 2,
+                sample_interval: mode === 'sampled' ? 10 : 1,
+              },
+            ];
+          }
+          return [];
+        },
+      });
+
+    const observed = await run('observed');
+    expect(observed.products[0].native_sessions).toBe(2);
+    expect(observed.products[0].api_activity).toBeNull();
+
+    const missing = await run('missing');
+    expect(missing.products[0].native_sessions).toBeNull();
+
+    const failed = await run('failed');
+    expect(failed.products[0].native_sessions).toBeNull();
+    expect(
+      failed.notes.some((note) =>
+        note.includes('Native session Analytics Engine query was unavailable'),
+      ),
+    ).toBe(true);
+
+    const sampled = await run('sampled');
+    expect(sampled.products[0].native_sessions).toBeNull();
+    expect(sampled.sampled).toBe(true);
+  });
+
   it('does not claim CTA coverage when no action is configured', () => {
     const report = buildDailyEngagementReport({
       catalog: catalog(1),
@@ -904,17 +949,19 @@ describe('composeDailyEngagementReport', () => {
       ctaEventNamesByCatalogId: { 'product-000': ['download_opened'] },
       query: async (sql) => {
         queries.push(sql);
+        if (sql.includes('blob20')) return [{ app_id: 'app-000', sessions: 1, sample_interval: 1 }];
         return sql.includes('AS visitors')
           ? [{ app_id: 'app-000', visitors: 4, last_seen: FROM, sample_interval: 1 }]
           : [{ app_id: 'app-000', name: 'download_opened', count: 2, sample_interval: 1 }];
       },
     });
-    expect(queries).toHaveLength(2);
+    expect(queries).toHaveLength(3);
     expect(queries.every((sql) => sql.includes("blob2 IN ('env-000','env-001')"))).toBe(true);
-    expect(queries[1]).toContain("blob5 IN ('download_opened')");
+    expect(queries.some((sql) => sql.includes("blob5 IN ('download_opened')"))).toBe(true);
     expect(report.products[0].cta_events).toEqual([
       { name: 'download_opened', count: 2, estimated: false },
     ]);
+    expect(report.products[0].native_sessions).toBe(1);
     expect(report.products[1].cta_events).toEqual([]);
   });
 

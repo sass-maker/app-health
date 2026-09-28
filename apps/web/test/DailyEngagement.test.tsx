@@ -77,7 +77,7 @@ const report = {
   sampled: true,
   notes: [
     'No qualified primary CTA events are reportable for 2026-09-27; counts are unknown.',
-    'Native sessions and API activity are unknown; this report counts recognized browsers, not people.',
+    'Native sessions count only observed, unsampled native heartbeats; missing or sampled rows are unknown. API activity is unknown. Browser visitors count recognized browsers, not people.',
   ],
   products: [
     {
@@ -93,7 +93,7 @@ const report = {
       feedback_submitted: 0,
       newsletter_joins: null,
       waitlist_joins: 2,
-      native_sessions: null,
+      native_sessions: 3,
       api_activity: null,
       freshness: { browser_last_seen: null, log_last_seen: null },
       coverage: 'partial',
@@ -128,7 +128,14 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlas).getByText('download_opened')).toBeTruthy();
   expect(within(atlas).getByText('4')).toBeTruthy();
   expect(screen.getAllByText('Approx. 20')).toHaveLength(2);
-  expect(screen.getByText(/Native sessions and API activity are unknown/)).toBeTruthy();
+  expect(
+    screen.getByText(/Native sessions count only observed, unsampled native heartbeats/),
+  ).toBeTruthy();
+  expect(within(atlas).getByText('3')).toBeTruthy();
+  const mobile = screen.getByRole('list', { name: 'Daily engagement products' });
+  const atlasCard = within(mobile).getByText('Atlas').closest('li')!;
+  expect(within(atlasCard).getByText('Native sessions')).toBeTruthy();
+  expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
   expect(within(beacon).getByText('Not applicable')).toBeTruthy();

@@ -36,6 +36,16 @@ async function fixture() {
       },
     ],
   };
+  const projections: { indexes: string[]; blobs: string[]; doubles: number[] }[] = [];
+  let failProjection = false;
+  const env = {
+    BROWSER_ANALYTICS: {
+      writeDataPoint(point: { indexes: string[]; blobs: string[]; doubles: number[] }) {
+        if (failProjection) throw new Error('Analytics Engine unavailable');
+        projections.push(point);
+      },
+    },
+  };
   const send = (body: unknown = input, headers = {}) =>
     handleNativeIngest(
       new Request('https://ingest.test/v1/native', {
@@ -43,11 +53,25 @@ async function fixture() {
         headers,
         body: JSON.stringify(body),
       }),
-      {},
+      env,
       repos,
       true,
     );
-  return { repos, app, environment, owner, url, manage, created, input, send };
+  return {
+    repos,
+    app,
+    environment,
+    owner,
+    url,
+    manage,
+    created,
+    input,
+    send,
+    projections,
+    setFailProjection: (value: boolean) => {
+      failProjection = value;
+    },
+  };
 }
 describe('native public collection', () => {
   it('receives explicit native events and logs once on replay, without background presence', async () => {
@@ -79,6 +103,14 @@ describe('native public collection', () => {
     const body = (await summary!.json()) as { live: { projects: { app_id: string }[] } };
     expect(body.live.projects.some((row) => row.app_id === f.app.id)).toBe(false);
     expect((await f.send({ ...f.input, active: true, events: [], logs: [] }))?.status).toBe(202);
+    expect(f.projections).toHaveLength(1);
+    const projection = f.projections[0];
+    expect(projection.blobs).toHaveLength(20);
+    expect(projection.blobs.slice(0, 3)).toEqual([f.app.id, f.environment.id, 'native_session']);
+    expect(projection.blobs[6]).toBe(''); // blob7 never enters browser visitor counts
+    expect(projection.blobs[7]).toBe(''); // blob8 never enters browser visitor counts
+    expect(projection.blobs[19]).toMatch(/^[a-f0-9]{64}$/);
+    expect(projection.blobs[19]).not.toBe(f.input.session_id);
     const active = (await (await handleBrowserOwner(
       new Request('https://dashboard.test/v1/analytics'),
       {},
@@ -90,6 +122,11 @@ describe('native public collection', () => {
     );
     expect((await f.manage('DELETE', `&id=${f.created.record.id}`))?.status).toBe(200);
     expect((await f.send())?.status).toBe(403);
+  });
+  it('keeps an accepted native heartbeat accepted when its optional analytics projection fails', async () => {
+    const f = await fixture();
+    f.setFailProjection(true);
+    expect((await f.send({ ...f.input, active: true, events: [], logs: [] }))?.status).toBe(202);
   });
   it('rejects browser origins, invalid or private keys, stale events and oversized bodies', async () => {
     const f = await fixture();

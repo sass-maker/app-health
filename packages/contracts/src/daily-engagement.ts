@@ -76,7 +76,7 @@ export const DailyEngagementProductReportV1 = z
     newsletter_joins: z.number().int().min(0).nullable(),
     /** Waitlist joins, or an observed App Health log lower bound when source data is unavailable. */
     waitlist_joins: z.number().int().min(0).nullable(),
-    /** Native (mobile/desktop SDK) sessions. `null`: not yet measurable in a grouped query. */
+    /** Observed native sessions; null when absent, unavailable, or sampled. */
     native_sessions: z.number().int().min(0).nullable(),
     /** API activity (endpoint request count). `null`: not yet measurable as engagement. */
     api_activity: z.number().int().min(0).nullable(),
@@ -102,7 +102,7 @@ export const DailyEngagementReportV1 = z
     /** Number of declared catalog products in scope. */
     product_count: z.number().int().min(0),
     products: z.array(DailyEngagementProductReportV1),
-    /** Whether any browser aggregate was sampled by Analytics Engine. */
+    /** Whether any browser or native session aggregate was sampled by Analytics Engine. */
     sampled: z.boolean(),
     /** Honest, human-readable caveats for missing coverage. */
     notes: z.array(z.string()),

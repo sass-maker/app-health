@@ -35,7 +35,10 @@ is part of this source change.
   from stored production App Health logs. Central SaaS Maker logs are attributed
   only when their project ID or slug resolves to an imported catalog product.
   Submission text and email are never included in the report.
-- Native sessions and API engagement are currently unknown. Request totals in
+- Native sessions count distinct, scoped session hashes from accepted native
+  active heartbeats in the completed day. Their Analytics Engine projection is
+  best-effort; missing or sampled rows remain unknown. Browser visitor slots do
+  not contain these rows. API engagement remains unknown; request totals in
   Watchtower are not a measure of visitors.
 - Unknown means the source was unavailable, unconfigured, or had no qualifying
   receipt. Zero appears only where the source was measured.

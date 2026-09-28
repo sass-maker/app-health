@@ -6,6 +6,7 @@ import {
   type NativeScope,
 } from './native-key-store.js';
 import { acceptBrowser, type BrowserEnvironment } from './browser-routes.js';
+import { browserSessionScope } from './browser-analytics.js';
 import { readPublicJson } from './public-body.js';
 import type { AppHealthRepositories } from './repository.js';
 import type { OwnerIdentity } from './identity.js';
@@ -141,7 +142,36 @@ async function deliverNative(
     await repos.logs.recordLogs(key.app_id, key.environment_id, input.logs, 'native');
     await repos.capabilities?.recordCapability(key.app_id, key.environment_id, 'logs', Date.now());
   }
-  return json(202, { accepted: input.events.length + input.logs.length, source: 'native' });
+  const response = json(202, {
+    accepted: input.events.length + input.logs.length,
+    source: 'native',
+  });
+  if (input.active) {
+    try {
+      const dataset = env.BROWSER_ANALYTICS;
+      if (dataset) {
+        const sessionHash = await browserSessionScope(
+          key.app_id,
+          key.environment_id,
+          input.session_id,
+        );
+        dataset.writeDataPoint({
+          indexes: [key.workspace_id],
+          blobs: [
+            key.app_id,
+            key.environment_id,
+            'native_session',
+            ...Array<string>(16).fill(''),
+            sessionHash,
+          ],
+          doubles: [1, Date.now()],
+        });
+      }
+    } catch {
+      // Native collection remains accepted when this best-effort report projection fails.
+    }
+  }
+  return response;
 }
 async function collectNative(
   request: Request,
