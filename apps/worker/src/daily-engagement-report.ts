@@ -108,6 +108,8 @@ export interface DailyEngagementInputs {
   apiActivity?: readonly ApiActivityRow[];
   logs: readonly EngagementLogRow[];
   ctaEventNamesByCatalogId: Readonly<Record<string, readonly string[]>>;
+  /** Earliest complete day when absent qualified CTA rows can establish zero. */
+  ctaFullDayStart?: string;
   ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
   date: string;
@@ -436,6 +438,14 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
     notes.push(
       `No qualified primary CTA events are reportable for ${input.date}; counts are unknown.`,
     );
+  if (
+    input.ctaFullDayStart &&
+    input.date < input.ctaFullDayStart &&
+    Object.keys(input.ctaEventNamesByCatalogId).length > 0
+  )
+    notes.push(
+      'CTA hooks were activated during this day; observed actions are lower bounds and unobserved actions remain unknown.',
+    );
   if (unmappedLogs > 0)
     notes.push(
       `${unmappedLogs} centralized log group(s) could not be mapped to a declared catalog product and were excluded.`,
@@ -610,7 +620,8 @@ function isProductBrowserMeasured(
     input.browserMeasured &&
     row.environment_id !== null &&
     (visitor !== undefined ||
-      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
+      (row.analytics_first_received_at !== null &&
+        row.analytics_first_received_at <= input.from)) &&
     (visitor === undefined || visitor.sample_interval <= 1)
   );
 }
@@ -630,7 +641,7 @@ function isProductCtaMeasured(
     row.environment_id !== null &&
     (visitor !== undefined ||
       ctaByApp.has(row.app_id) ||
-      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to))
+      (row.analytics_first_received_at !== null && row.analytics_first_received_at <= input.from))
   );
 }
 
@@ -648,7 +659,9 @@ function productCtas(
   if (!browserMeasured || configured.length === 0) return [];
   const observed = ctaByApp.get(row.app_id);
   const querySampled = input.ctaEvents.some((event) => event.sample_interval > 1);
-  if (querySampled) {
+  const partialQualificationDay =
+    input.ctaFullDayStart !== undefined && input.date < input.ctaFullDayStart;
+  if (querySampled || partialQualificationDay) {
     return configured
       .filter((name) => observed?.has(name))
       .slice(0, 3)
@@ -1042,6 +1055,7 @@ export async function composeDailyEngagementReport(args: {
   date: string | null;
   now: number;
   ctaEventNamesByCatalogId?: Readonly<Record<string, readonly string[]>>;
+  ctaFullDayStart?: string;
   ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
   captureCountsService?: DailyCaptureCountsService;
@@ -1102,6 +1116,7 @@ export async function composeDailyEngagementReport(args: {
     apiActivity: apiActivity.rows,
     logs: logResult.rows,
     ctaEventNamesByCatalogId,
+    ctaFullDayStart: args.ctaFullDayStart,
     ctaNotApplicableCatalogIds: args.ctaNotApplicableCatalogIds,
     confirmedLogMetricsByCatalogId: args.confirmedLogMetricsByCatalogId,
     date: window.date,

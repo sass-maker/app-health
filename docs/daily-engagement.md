@@ -30,7 +30,10 @@ shape until reloaded, so the API omits those added fields for those clients.
   checked-in CTA policy keeps Clarity candidates separate from browser events
   that have a production ingest and authenticated Events receipt. Unqualified
   products remain unknown. Dates before the first qualification on 2026-09-28
-  stay unknown rather than showing a retrospective zero.
+  stay unknown rather than showing a retrospective zero. The hooks were
+  activated during September 28: that partial day shows observed action counts
+  but does not infer zero for an action with no observed row. September 29 is
+  the first full day eligible for inferred CTA zeroes.
 - Analytics Engine scales sampled CTA event rows into estimates. Each affected
   action count carries `estimated: true` and is labeled “Approx.” in the dashboard;
   observed unsampled action rows remain exact. Each action also reports distinct
@@ -74,6 +77,10 @@ shape until reloaded, so the API omits those added fields for those clients.
   server-request policy keeps the applicability Unknown.
 - Unknown means the source was unavailable, unconfigured, or had no qualifying
   receipt. Zero appears only where the source was measured.
+- A browser capability first received partway through a reporting day cannot
+  establish zero visitors or CTA actions for that full day. Its observed
+  counts still appear; an absent row remains Unknown until a complete day is
+  covered.
 
 ## Qualification before a complete report
 

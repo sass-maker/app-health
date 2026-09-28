@@ -18,6 +18,8 @@ export interface DailyCtaPolicy {
 
 /** Production browser-ingest receipts observed on 2026-09-28. */
 const firstQualifiedIndiaDay = '2026-09-28';
+/** Hooks were activated during September 28; silence is measurable from the next full day. */
+export const DAILY_CTA_FULL_DAY_START = '2026-09-29';
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   anchor: ['testflight_status_opened', 'how_it_works_opened', 'mac_beta_downloaded'],
   'agent-testing': ['tools_catalog_opened', 'experiment_results_opened'],

@@ -216,6 +216,72 @@ describe('buildDailyEngagementReport', () => {
     expect(report.products[1].feedback_submitted).toBeNull();
   });
 
+  it('does not infer full-day zero from browser telemetry first received mid-day', () => {
+    const scope = catalog(1);
+    scope[0].analytics_first_received_at = FROM + 1000;
+    const input = {
+      catalog: scope,
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: { 'product-000': ['cta.opened'] },
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    };
+    expect(buildDailyEngagementReport(input).products[0]).toMatchObject({
+      browser_visitors: null,
+      cta_events: [],
+      cta_status: 'unknown',
+    });
+    scope[0].analytics_first_received_at = FROM;
+    expect(buildDailyEngagementReport(input).products[0]).toMatchObject({
+      browser_visitors: 0,
+      cta_events: [{ name: 'cta.opened', count: 0 }],
+      cta_status: 'measured',
+    });
+  });
+
+  it('shows observed actions but no inferred CTA zero on a partial qualification day', () => {
+    const scope = catalog(1);
+    scope[0].analytics_first_received_at = FROM - 1000;
+    const report = buildDailyEngagementReport({
+      catalog: scope,
+      browserVisitors: [
+        { app_id: 'app-000', visitors: 3, last_seen: FROM + 1000, sample_interval: 1 },
+      ],
+      ctaEvents: [
+        {
+          app_id: 'app-000',
+          name: 'cta.opened',
+          count: 2,
+          unique_browsers: 2,
+          sample_interval: 1,
+        },
+      ],
+      logs: [],
+      ctaEventNamesByCatalogId: { 'product-000': ['cta.opened', 'signup.started'] },
+      ctaFullDayStart: '2026-09-28',
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    });
+    expect(report.products[0]).toMatchObject({
+      browser_visitors: 3,
+      cta_events: [{ name: 'cta.opened', count: 2 }],
+      cta_status: 'measured',
+    });
+    expect(report.notes).toContain(
+      'CTA hooks were activated during this day; observed actions are lower bounds and unobserved actions remain unknown.',
+    );
+  });
+
   it('counts CTA events per product from grouped browser rows', () => {
     const report = buildDailyEngagementReport({
       catalog: catalog(1),
