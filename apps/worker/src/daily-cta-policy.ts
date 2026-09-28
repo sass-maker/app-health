@@ -63,7 +63,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   setline: ['testflight_status_opened', 'product_preview_opened'],
   significanthobbies: ['apps_explored', 'kith_opened'],
   starboard: ['public_catalog_browsed', 'project_preview_cta_clicked'],
-  storagedaddy: ['download.clicked'],
+  storagedaddy: ['download.clicked', 'source_opened'],
   'swe-interview-prep': [
     'cta.daily_priority',
     'cta.open_practice_workspace',
