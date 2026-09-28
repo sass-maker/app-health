@@ -571,6 +571,72 @@ describe('composeDailyEngagementReport', () => {
     );
   });
 
+  it('preserves visitor counts and marks only CTA unknown when the CTA query fails', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      ctaEventNamesByCatalogId: { 'product-000': ['cta.click'] },
+      query: async (sql) => {
+        if (sql.includes('AS name')) throw new Error('cta query unavailable');
+        return [{ app_id: 'app-000', visitors: 7, last_seen: FROM + 100, sample_interval: 1 }];
+      },
+    });
+    const product = report.products[0];
+    expect(product.browser_visitors).toBe(7);
+    expect(product.cta_events).toEqual([]);
+    expect(product.cta_status).toBe('unknown');
+    expect(product.coverage).toBe('partial');
+    expect(report.notes.some((n) => n.includes('CTA Analytics Engine query was unavailable'))).toBe(
+      true,
+    );
+    expect(
+      report.notes.some((n) => n.includes('Browser Analytics Engine query was unavailable')),
+    ).toBe(false);
+  });
+
+  it('preserves CTA counts when the visitor query fails', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      ctaEventNamesByCatalogId: { 'product-000': ['cta.click'] },
+      query: async (sql) => {
+        if (sql.includes('AS visitors')) throw new Error('visitor query unavailable');
+        return [{ app_id: 'app-000', name: 'cta.click', count: 3, sample_interval: 1 }];
+      },
+    });
+    expect(report.products[0]).toMatchObject({
+      browser_visitors: null,
+      cta_events: [{ name: 'cta.click', count: 3 }],
+      cta_status: 'measured',
+      coverage: 'partial',
+    });
+    expect(report.notes).toContain(
+      'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.',
+    );
+  });
+
+  it('does not claim CTA coverage when no action is configured', () => {
+    const report = buildDailyEngagementReport({
+      catalog: catalog(1),
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: false,
+      ctaMeasured: true,
+      logsMeasured: true,
+    });
+    expect(report.products[0]).toMatchObject({ cta_status: 'unknown', coverage: 'unknown' });
+  });
+
   it('includes only active and primary catalog imports in real SQLite', async () => {
     const sqlite = new DatabaseSync(':memory:');
     try {

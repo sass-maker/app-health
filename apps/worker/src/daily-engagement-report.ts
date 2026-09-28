@@ -74,8 +74,10 @@ export interface DailyEngagementInputs {
   from: number;
   to: number;
   now: number;
-  /** False when a grouped query failed; every product row reports that surface unknown. */
+  /** False when the browser visitor query failed; visitor counts are unknown. */
   browserMeasured: boolean;
+  /** False when the CTA query failed; CTA counts are unknown. Defaults to browserMeasured. */
+  ctaMeasured?: boolean;
   logsMeasured: boolean;
   notes?: string[];
 }
@@ -212,10 +214,17 @@ function reportNotes(
     notes.push(
       `${unmappedLogs} centralized log group(s) could not be mapped to a declared catalog product and were excluded.`,
     );
-  if (!input.browserMeasured)
+  const ctaMeasured = input.ctaMeasured ?? input.browserMeasured;
+  if (!input.browserMeasured && !ctaMeasured)
     notes.push(
       'Browser Analytics Engine query was unavailable; browser visitors and CTA events are unknown.',
     );
+  if (!input.browserMeasured && ctaMeasured)
+    notes.push(
+      'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.',
+    );
+  if (input.browserMeasured && !ctaMeasured)
+    notes.push('CTA Analytics Engine query was unavailable; CTA event counts are unknown.');
   if (!input.logsMeasured)
     notes.push('D1 log_events query was unavailable; feedback and join counts are unknown.');
   if (sampled)
@@ -244,13 +253,14 @@ function buildProductReport(
 ): DailyEngagementProductReportV1 {
   const visitor = indexes.visitorsByApp.get(row.app_id);
   const browserMeasured = isProductBrowserMeasured(row, visitor, input);
-  const ctas = productCtas(row, input, indexes.ctaByApp, browserMeasured);
+  const ctaMeasured = isProductCtaMeasured(row, visitor, input, indexes.ctaByApp);
+  const ctas = productCtas(row, input, indexes.ctaByApp, ctaMeasured);
   const logCounts = indexes.logCounts.get(row.catalog_id);
   const feedback = metricCount('feedback', input, row, logCounts);
   const newsletter = metricCount('newsletter', input, row, logCounts);
   const waitlist = metricCount('waitlist', input, row, logCounts);
   const logsMeasured = [feedback, newsletter, waitlist].some((count) => count !== null);
-  const measured = Number(browserMeasured) + Number(logsMeasured);
+  const measured = Number(browserMeasured) + Number(ctaMeasured) + Number(logsMeasured);
   return {
     catalog_id: row.catalog_id,
     app_id: row.app_id,
@@ -284,6 +294,23 @@ function isProductBrowserMeasured(
     input.browserMeasured &&
     row.environment_id !== null &&
     (visitor !== undefined ||
+      (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
+    (visitor === undefined || visitor.sample_interval <= 1)
+  );
+}
+
+function isProductCtaMeasured(
+  row: CatalogProductRow,
+  visitor: BrowserVisitorRow | undefined,
+  input: DailyEngagementInputs,
+  ctaByApp: Map<string, Map<string, number>>,
+): boolean {
+  return (
+    (input.ctaEventNamesByCatalogId[row.catalog_id]?.length ?? 0) > 0 &&
+    (input.ctaMeasured ?? input.browserMeasured) &&
+    row.environment_id !== null &&
+    (visitor !== undefined ||
+      ctaByApp.has(row.app_id) ||
       (row.analytics_first_received_at !== null && row.analytics_first_received_at < input.to)) &&
     (visitor === undefined || visitor.sample_interval <= 1)
   );
@@ -462,11 +489,16 @@ async function readDailyEngagementBrowser(
   to: number,
   query: AnalyticsEngineQuery,
   ctaEventNames: readonly string[],
-): Promise<{ visitors: BrowserVisitorRow[]; cta: CtaEventRow[]; measured: boolean }> {
+): Promise<{
+  visitors: BrowserVisitorRow[];
+  cta: CtaEventRow[];
+  visitorsMeasured: boolean;
+  ctaMeasured: boolean;
+}> {
   const appIds = catalog.map((row) => row.app_id);
   const environmentIds = catalog.flatMap((row) => (row.environment_id ? [row.environment_id] : []));
   if (appIds.length === 0 || environmentIds.length === 0)
-    return { visitors: [], cta: [], measured: true };
+    return { visitors: [], cta: [], visitorsMeasured: true, ctaMeasured: true };
   const scope = `blob1 IN (${appIds.map(sqlLiteral).join(',')})`;
   const environments = `blob2 IN (${environmentIds.map(sqlLiteral).join(',')})`;
   const visitorSql = `SELECT blob1 AS app_id,
@@ -485,12 +517,8 @@ async function readDailyEngagementBrowser(
     AND blob3 = 'event' AND blob8 != '' AND blob5 IN (${ctaNames})
     AND ${scope} AND ${environments}
     GROUP BY blob1, blob5 LIMIT 1000`;
-  try {
-    const [visitorRows, ctaRows] = await Promise.all([
-      query(visitorSql) as Promise<unknown[]>,
-      ctaEventNames.length > 0 ? (query(ctaSql) as Promise<unknown[]>) : Promise.resolve([]),
-    ]);
-    const visitors: BrowserVisitorRow[] = (visitorRows as BrowserVisitorQueryRow[]).map((row) => ({
+  const parseVisitor = (rows: unknown[]): BrowserVisitorRow[] =>
+    (rows as BrowserVisitorQueryRow[]).map((row) => ({
       app_id: String(row.app_id),
       visitors: Math.max(0, Math.round(num(row.visitors))),
       last_seen:
@@ -499,16 +527,33 @@ async function readDailyEngagementBrowser(
           : Math.round(num(row.last_seen)),
       sample_interval: Math.max(1, Math.round(num(row.sample_interval))),
     }));
-    const cta: CtaEventRow[] = (ctaRows as CtaQueryRow[]).map((row) => ({
+  const parseCta = (rows: unknown[]): CtaEventRow[] =>
+    (rows as CtaQueryRow[]).map((row) => ({
       app_id: String(row.app_id),
       name: String(row.name),
       count: Math.max(0, Math.round(num(row.count))),
       sample_interval: Math.max(1, Math.round(num(row.sample_interval))),
     }));
-    return { visitors, cta, measured: true };
-  } catch {
-    return { visitors: [], cta: [], measured: false };
-  }
+  // Run the two queries independently so a CTA failure does not discard
+  // a successful visitor query (and vice versa).
+  const visitorPromise = Promise.resolve()
+    .then(() => query(visitorSql))
+    .then(parseVisitor)
+    .catch(() => null);
+  const ctaPromise =
+    ctaEventNames.length > 0
+      ? Promise.resolve()
+          .then(() => query(ctaSql))
+          .then(parseCta)
+          .catch(() => null)
+      : Promise.resolve([]);
+  const [visitorRows, ctaRows] = await Promise.all([visitorPromise, ctaPromise]);
+  return {
+    visitors: visitorRows ?? [],
+    cta: ctaRows ?? [],
+    visitorsMeasured: visitorRows !== null,
+    ctaMeasured: ctaRows !== null,
+  };
 }
 
 /** Compose the full report by reading catalog, browser, and log aggregates. */
@@ -538,7 +583,12 @@ export async function composeDailyEngagementReport(args: {
           args.query,
           ctaEventNames,
         )
-      : Promise.resolve({ visitors: [], cta: [], measured: false }),
+      : Promise.resolve({
+          visitors: [],
+          cta: [],
+          visitorsMeasured: false,
+          ctaMeasured: false,
+        }),
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
@@ -555,7 +605,8 @@ export async function composeDailyEngagementReport(args: {
     from: window.from,
     to: window.to,
     now: args.now,
-    browserMeasured: browser.measured,
+    browserMeasured: browser.visitorsMeasured,
+    ctaMeasured: browser.ctaMeasured,
     logsMeasured: logResult.measured,
   });
 }
