@@ -11,7 +11,11 @@ import { handleAnalyticsShareOwner, handlePublicAnalytics } from './analytics-sh
 import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
-import { composeDailyEngagementReport, dailyEngagementWindow } from './daily-engagement-report.js';
+import {
+  composeDailyEngagementReport,
+  dailyEngagementWindow,
+  type DailyCaptureCountsService,
+} from './daily-engagement-report.js';
 import { DAILY_CTA_NOT_APPLICABLE_IDS, dailyCtaEventNamesForDate } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
@@ -82,6 +86,8 @@ export interface Env
   /** Optional JSON LogRoutesV1 overriding the default routing of logs to sinks. */
   LOG_ROUTES?: string;
   DB?: D1DatabaseLike;
+  /** Private SaaS Maker aggregate RPC; invoked only from owner-authenticated routes. */
+  SAASMAKER_METRICS?: DailyCaptureCountsService;
   TELEMETRY?: AnalyticsEngineDatasetLike;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -636,6 +642,7 @@ async function handleDailyEngagementRoute(
       now,
       ctaEventNamesByCatalogId: 'error' in day ? {} : dailyCtaEventNamesForDate(day.date),
       ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
+      captureCountsService: env.SAASMAKER_METRICS,
     });
     return json(200, report, true);
   } catch (error) {

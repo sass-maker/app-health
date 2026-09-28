@@ -70,11 +70,11 @@ export const DailyEngagementProductReportV1 = z
     cta_events: z.array(DailyCtaEvent).max(3),
     /** Distinguishes a measured action, unsupported product form, and missing evidence. */
     cta_status: z.enum(['measured', 'not_applicable', 'unknown']),
-    /** Successful feedback.submitted log events mapped to this product. */
+    /** Feedback submissions, or an observed App Health log lower bound when source data is unavailable. */
     feedback_submitted: z.number().int().min(0).nullable(),
-    /** Successful newsletter join log events mapped to this product. */
+    /** Newsletter joins, or an observed App Health log lower bound when source data is unavailable. */
     newsletter_joins: z.number().int().min(0).nullable(),
-    /** Successful waitlist.join log events mapped to this product. */
+    /** Waitlist joins, or an observed App Health log lower bound when source data is unavailable. */
     waitlist_joins: z.number().int().min(0).nullable(),
     /** Native (mobile/desktop SDK) sessions. `null`: not yet measurable in a grouped query. */
     native_sessions: z.number().int().min(0).nullable(),

@@ -612,6 +612,159 @@ describe('readDailyEngagementLogs', () => {
 });
 
 describe('composeDailyEngagementReport', () => {
+  it('uses covered SaaS Maker source zeros and calls its aggregate once with the report scope', async () => {
+    const calls: Array<{ date: string; catalogIds: string[] }> = [];
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(2), [
+        {
+          app_id: 'app-000',
+          event: 'feedback.submitted',
+          project_id: null,
+          project: null,
+          type: null,
+          kind: null,
+          count: 2,
+          last_seen: FROM + 100,
+        },
+      ]),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts(input) {
+          calls.push(input);
+          return {
+            coverageStart: DAY,
+            rows: [{ catalogId: 'product-000', feedback: 0, newsletter: 0, waitlist: 0 }],
+          };
+        },
+      },
+    });
+
+    expect(calls).toEqual([{ date: DAY, catalogIds: ['product-000', 'product-001'] }]);
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: 0,
+      newsletter_joins: 0,
+      waitlist_joins: 0,
+    });
+    // The omitted product is unbound and cannot inherit a source zero.
+    expect(report.products[1]).toMatchObject({
+      feedback_submitted: null,
+      newsletter_joins: null,
+      waitlist_joins: null,
+    });
+  });
+
+  it('keeps null source metrics unknown when there are no observed logs', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: DAY,
+            rows: [{ catalogId: 'product-000', feedback: null, newsletter: null, waitlist: null }],
+          };
+        },
+      },
+    });
+
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: null,
+      newsletter_joins: null,
+      waitlist_joins: null,
+    });
+  });
+
+  it('falls back to positive observed logs as lower bounds when the RPC fails', async () => {
+    const logs: EngagementLogRow[] = [
+      {
+        app_id: 'app-000',
+        event: 'feedback.submitted',
+        project_id: null,
+        project: null,
+        type: null,
+        kind: null,
+        count: 2,
+        last_seen: FROM + 100,
+      },
+    ];
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), logs),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          throw new Error('private metrics unavailable');
+        },
+      },
+    });
+
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: 2,
+      newsletter_joins: null,
+      waitlist_joins: null,
+    });
+    expect(report.notes).toContain(
+      'SaaS Maker source counts were unavailable; positive App Health log counts are lower bounds, and absent counts remain unknown.',
+    );
+  });
+
+  it('does not infer historical zero before source coverage begins', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: '2026-09-28',
+            rows: [{ catalogId: 'product-000', feedback: 0, newsletter: 0, waitlist: 0 }],
+          };
+        },
+      },
+    });
+
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: null,
+      newsletter_joins: null,
+      waitlist_joins: null,
+    });
+    expect(report.notes).toContain(
+      'SaaS Maker source counts do not cover this date; positive App Health log counts are lower bounds, and absent counts remain unknown.',
+    );
+  });
+
+  it('treats malformed aggregate counts as unavailable', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(1), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: DAY,
+            rows: [{ catalogId: 'product-000', feedback: -1, newsletter: 0, waitlist: 0 }],
+          };
+        },
+      },
+    });
+
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: null,
+      newsletter_joins: null,
+      waitlist_joins: null,
+    });
+    expect(report.notes).toContain(
+      'SaaS Maker source counts were unavailable; positive App Health log counts are lower bounds, and absent counts remain unknown.',
+    );
+  });
+
   it('keeps browser results when the grouped log query fails', async () => {
     class FailingLogDatabase extends MockDatabase {
       override prepare(sql: string): D1PreparedStatement {
@@ -835,14 +988,23 @@ describe('worker /v1/reports/daily-engagement route', () => {
 
   it('requires a workspace owner and serves no-store JSON', async () => {
     // Bearer owner has no workspaceId -> 403 (consistent with catalog import).
+    let rpcCalls = 0;
+    const env = routeEnv();
+    env.SAASMAKER_METRICS = {
+      async getDailyCaptureCounts() {
+        rpcCalls += 1;
+        return { coverageStart: DAY, rows: [] };
+      },
+    };
     const res = await worker.fetch(
       new Request('https://health.sassmaker.com/v1/reports/daily-engagement', {
         headers: { authorization: 'Bearer aho_production-owner' },
       }),
-      routeEnv(),
+      env,
     );
     expect(res.status).toBe(403);
     expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(rpcCalls).toBe(0);
   });
 
   it('forbids product-scoped keys', async () => {

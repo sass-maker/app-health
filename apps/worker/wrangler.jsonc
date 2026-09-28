@@ -58,6 +58,13 @@
       "migrations_dir": "migrations",
     },
   ],
+  "services": [
+    {
+      "binding": "SAASMAKER_METRICS",
+      "service": "saasmaker-api",
+      "entrypoint": "PrivateMetrics",
+    },
+  ],
   "triggers": {
     "crons": ["17 * * * *"],
   },

@@ -1,7 +1,9 @@
 // Bounded owner-only daily engagement report across the workspace's declared
 // catalog products. Reports one completed Asia/Kolkata day using grouped Analytics
 // Engine queries (browser visitors + CTA events) and a grouped D1 log_events
-// query (feedback / waitlist / newsletter joins). No per-app query loops.
+// query (feedback / waitlist / newsletter joins). SaaS Maker source aggregates
+// are preferred when covered; positive log counts remain lower bounds otherwise.
+// No per-app query loops.
 //
 // Privacy: only counts, canonical IDs, and freshness timestamps leave this
 // module. Centralized SaaS Maker log props (project_id/project/type/kind) are
@@ -15,6 +17,7 @@
 import {
   DAILY_ENGAGEMENT_SCHEMA,
   DailyEngagementReportV1,
+  ReportDate,
   type DailyEngagementProductReportV1,
 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
@@ -62,6 +65,22 @@ export interface EngagementLogRow {
   last_seen: number;
 }
 
+export interface DailyCaptureCountRow {
+  catalogId: string;
+  feedback: number | null;
+  newsletter: number | null;
+  waitlist: number | null;
+}
+
+export interface DailyCaptureCounts {
+  coverageStart: string | null;
+  rows: readonly DailyCaptureCountRow[];
+}
+
+export interface DailyCaptureCountsService {
+  getDailyCaptureCounts(input: { date: string; catalogIds: string[] }): Promise<DailyCaptureCounts>;
+}
+
 export interface DailyEngagementInputs {
   catalog: readonly CatalogProductRow[];
   browserVisitors: readonly BrowserVisitorRow[];
@@ -79,10 +98,62 @@ export interface DailyEngagementInputs {
   /** False when the CTA query failed; CTA counts are unknown. Defaults to browserMeasured. */
   ctaMeasured?: boolean;
   logsMeasured: boolean;
+  /** SaaS Maker source counts are exact only on or after coverageStart. */
+  captureCounts?: DailyCaptureCounts;
+  captureCountsAvailable?: boolean;
+  /** True when the source service was configured and queried, even if it failed. */
+  captureCountsRequested?: boolean;
   notes?: string[];
 }
 
 type MetricKind = 'feedback' | 'waitlist' | 'newsletter';
+
+function validateDailyCaptureCounts(
+  value: unknown,
+  catalogIds: readonly string[],
+): DailyCaptureCounts {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('invalid SaaS Maker aggregate response');
+  const response = value as Record<string, unknown>;
+  const coverageStart = response.coverageStart;
+  if (
+    coverageStart !== null &&
+    (typeof coverageStart !== 'string' || !ReportDate.safeParse(coverageStart).success)
+  )
+    throw new Error('invalid SaaS Maker aggregate coverage');
+  if (!Array.isArray(response.rows) || response.rows.length > catalogIds.length)
+    throw new Error('invalid SaaS Maker aggregate rows');
+  const allowedIds = new Set(catalogIds);
+  const seenIds = new Set<string>();
+  const rows = response.rows.map((value): DailyCaptureCountRow => {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new Error('invalid SaaS Maker aggregate row');
+    const row = value as Record<string, unknown>;
+    if (
+      typeof row.catalogId !== 'string' ||
+      !allowedIds.has(row.catalogId) ||
+      seenIds.has(row.catalogId)
+    )
+      throw new Error('invalid SaaS Maker aggregate catalog mapping');
+    seenIds.add(row.catalogId);
+    const count = (kind: MetricKind): number | null => {
+      const result = row[kind];
+      if (
+        result !== null &&
+        (typeof result !== 'number' || !Number.isSafeInteger(result) || result < 0)
+      )
+        throw new Error('invalid SaaS Maker aggregate count');
+      return result;
+    };
+    return {
+      catalogId: row.catalogId,
+      feedback: count('feedback'),
+      newsletter: count('newsletter'),
+      waitlist: count('waitlist'),
+    };
+  });
+  return { coverageStart: coverageStart as string | null, rows };
+}
 
 function nonEmpty(value: string | null): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -232,6 +303,34 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
   if (analyticsNote) notes.push(analyticsNote);
   if (!input.logsMeasured)
     notes.push('D1 log_events query was unavailable; feedback and join counts are unknown.');
+  notes.push(
+    'Feedback and join counts cover SaaS Maker hosted submissions and observed App Health events only; feedback from other native or API sources is unknown.',
+  );
+  const captureCoverage =
+    input.captureCounts?.coverageStart !== null && input.captureCounts?.coverageStart !== undefined;
+  if (!input.captureCountsAvailable) {
+    notes.push(
+      'SaaS Maker source counts were unavailable; positive App Health log counts are lower bounds, and absent counts remain unknown.',
+    );
+  } else if (!captureCoverage || input.date < input.captureCounts!.coverageStart!) {
+    notes.push(
+      'SaaS Maker source counts do not cover this date; positive App Health log counts are lower bounds, and absent counts remain unknown.',
+    );
+  } else if (
+    input.catalog.some((row) => {
+      const source = input.captureCounts?.rows.find((item) => item.catalogId === row.catalog_id);
+      return (
+        !source ||
+        source.feedback === null ||
+        source.newsletter === null ||
+        source.waitlist === null
+      );
+    })
+  ) {
+    notes.push(
+      'SaaS Maker source counts are unavailable for one or more product metrics; positive App Health log counts are lower bounds.',
+    );
+  }
   if (input.browserVisitors.some((row) => row.sample_interval > 1))
     notes.push(
       'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
@@ -249,8 +348,29 @@ function metricCount(
   row: CatalogProductRow,
   counts: Partial<Record<MetricKind, number>> | undefined,
 ): number | null {
+  const exactCounts =
+    input.captureCountsAvailable &&
+    input.captureCounts?.coverageStart !== null &&
+    input.captureCounts?.coverageStart !== undefined &&
+    input.date >= input.captureCounts.coverageStart;
+  const source = exactCounts
+    ? input.captureCounts?.rows.find((item) => item.catalogId === row.catalog_id)
+    : undefined;
+  const sourceCount = source?.[kind];
+  if (sourceCount !== null && sourceCount !== undefined) return sourceCount;
+
+  // App Health log delivery is asynchronous, so a positive count is an observed
+  // lower bound when the source aggregate is unavailable or does not cover it.
+  const observedLogCount = input.logsMeasured ? counts?.[kind] : undefined;
+  if (observedLogCount !== undefined && observedLogCount > 0) return observedLogCount;
+
+  // A confirmed hook can establish zero only when the log source itself is the
+  // authoritative measured surface. Never use that inference for fallback.
   const confirmed = input.confirmedLogMetricsByCatalogId?.[row.catalog_id] ?? [];
-  return input.logsMeasured && (counts?.[kind] !== undefined || confirmed.includes(kind))
+  return !input.captureCountsRequested &&
+    !exactCounts &&
+    input.logsMeasured &&
+    confirmed.includes(kind)
     ? (counts?.[kind] ?? 0)
     : null;
 }
@@ -595,14 +715,16 @@ export async function composeDailyEngagementReport(args: {
   ctaEventNamesByCatalogId?: Readonly<Record<string, readonly string[]>>;
   ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
+  captureCountsService?: DailyCaptureCountsService;
 }): Promise<DailyEngagementReportV1> {
   const window = dailyEngagementWindow(args.date, args.now);
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
   const catalog = await readDailyEngagementCatalog(args.db, args.workspaceId);
   const appIds = catalog.map((row) => row.app_id);
+  const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
-  const [browser, logResult] = await Promise.all([
+  const [browser, logResult, captureResult] = await Promise.all([
     args.query
       ? readDailyEngagementBrowser(
           args.workspaceId,
@@ -621,6 +743,15 @@ export async function composeDailyEngagementReport(args: {
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
+    args.captureCountsService
+      ? args.captureCountsService
+          .getDailyCaptureCounts({ date: window.date, catalogIds: sourceCatalogIds })
+          .then((result) => ({
+            result: validateDailyCaptureCounts(result, sourceCatalogIds),
+            available: true,
+          }))
+          .catch(() => ({ result: undefined, available: false }))
+      : Promise.resolve({ result: undefined, available: false }),
   ]);
   return buildDailyEngagementReport({
     catalog,
@@ -637,5 +768,8 @@ export async function composeDailyEngagementReport(args: {
     browserMeasured: browser.visitorsMeasured,
     ctaMeasured: browser.ctaMeasured,
     logsMeasured: logResult.measured,
+    captureCounts: captureResult.result,
+    captureCountsAvailable: captureResult.available,
+    captureCountsRequested: true,
   });
 }
