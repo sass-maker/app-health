@@ -510,15 +510,14 @@ async function handleAppsRoute(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
-  ctx?: WorkerContext,
-  timings?: OwnerRequestTimings,
+  options?: { ctx?: WorkerContext; timings?: OwnerRequestTimings },
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/apps') return null;
   const { service } = bundle;
   if (request.method === 'GET') {
     const routeReadStarted = performance.now();
     const listed = await service.listApps(owner.appId);
-    if (timings) timings.routeReadMs = performance.now() - routeReadStarted;
+    if (options?.timings) options.timings.routeReadMs = performance.now() - routeReadStarted;
     return json(200, ListAppsResponseV1.parse(listed), true);
   }
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
@@ -527,7 +526,7 @@ async function handleAppsRoute(
     const parsed = CreateAppRequestV1.safeParse(await readJsonBounded(request));
     if (!parsed.success) return json(400, { error: 'invalid app creation request' }, true);
     const created = await service.createApp(parsed.data, Date.now());
-    await scheduleProductMilestone(env, 'project.created', created.app.id, ctx);
+    await scheduleProductMilestone(env, 'project.created', created.app.id, options?.ctx);
     return json(201, created, true);
   } catch (error) {
     if (error instanceof BodyTooLargeError)
@@ -757,8 +756,7 @@ async function handleOwnerRoutes(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
-  ctx?: WorkerContext,
-  timings?: OwnerRequestTimings,
+  options?: { ctx?: WorkerContext; timings?: OwnerRequestTimings },
 ): Promise<Response> {
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const shareResponse = await handleAnalyticsShareOwner(
@@ -777,11 +775,11 @@ async function handleOwnerRoutes(
     bundle.local,
   );
   if (nativeResponse) return nativeResponse;
-  const projectResponse = await handleProjectRoutes(request, bundle.repos, owner, timings);
+  const projectResponse = await handleProjectRoutes(request, bundle.repos, owner, options?.timings);
   if (projectResponse) return projectResponse;
   const browserResponse = await handleBrowserOwner(request, env, owner, bundle.local);
   if (browserResponse) return browserResponse;
-  const appsResponse = await handleAppsRoute(request, bundle, owner, url, env, ctx, timings);
+  const appsResponse = await handleAppsRoute(request, bundle, owner, url, env, options);
   if (appsResponse) return appsResponse;
   const handlers = [
     handleRevokeRoute,
@@ -878,8 +876,7 @@ async function handleAccountOwner(
     account.owner,
     url,
     env,
-    ctx,
-    timings,
+    { ctx, timings },
   );
   return withOwnerServerTiming(response, timings);
 }
@@ -904,18 +901,18 @@ async function handleBearerOwner(
 ): Promise<Response> {
   const owner = await bundle.identity.resolve(request);
   if (!owner) return json(403, { error: 'owner secret required' }, true);
-  if (owner.appId || !env.DB) return handleOwnerRoutes(request, bundle, owner, url, env, ctx);
+  if (owner.appId || !env.DB) return handleOwnerRoutes(request, bundle, owner, url, env, { ctx });
   const accountSchema =
     env.APP_HEALTH_ACCOUNTS ||
     (await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workspace_apps'",
     ).first());
-  if (!accountSchema) return handleOwnerRoutes(request, bundle, owner, url, env, ctx);
+  if (!accountSchema) return handleOwnerRoutes(request, bundle, owner, url, env, { ctx });
   const legacy = workspaceBundle(bundle, env.DB, null);
   // The legacy inventory query is already scoped to unclaimed apps. Avoid
   // listing those same apps first just to construct an unused appIds guard.
   if (url.pathname === '/v1/apps' && request.method === 'GET') {
-    const inventory = await handleAppsRoute(request, legacy, owner, url, env, ctx);
+    const inventory = await handleAppsRoute(request, legacy, owner, url, env, { ctx });
     if (inventory) return inventory;
   }
   const apps = await legacy.repos.apps.listApps();
@@ -925,7 +922,7 @@ async function handleBearerOwner(
     { ...owner, appIds: apps.map((app) => app.id) },
     url,
     env,
-    ctx,
+    { ctx },
   );
 }
 

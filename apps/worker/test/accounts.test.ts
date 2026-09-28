@@ -180,6 +180,43 @@ describe('Google account boundary with real D1 SQL', () => {
     expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
   });
 
+  it('keeps public get-session limited but skips duplicate limiting for owner reads', async () => {
+    const ip = '203.0.113.87';
+    const authRequest = (path: string, body?: unknown, cookie?: string) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: new Headers({
+            'cf-connecting-ip': ip,
+            origin: 'https://dashboard.example.com',
+            'content-type': 'application/json',
+            ...(cookie ? { cookie } : {}),
+          }),
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        env,
+      );
+    const rateLimitRows = async () =>
+      (await env.DB!.prepare('SELECT COUNT(*) AS count FROM rateLimit').first<{ count: number }>())
+        ?.count ?? 0;
+    const before = await rateLimitRows();
+
+    const publicSession = await authRequest('/v1/auth/get-session');
+    expect(publicSession.status).toBe(200);
+    expect(await publicSession.json()).toBeNull();
+    const afterPublicSession = await rateLimitRows();
+    expect(afterPublicSession).toBeGreaterThan(before);
+
+    const ownerRead = await authRequest('/v1/apps', undefined, aliceCookie);
+    expect(ownerRead.status).toBe(200);
+    expect(await rateLimitRows()).toBe(afterPublicSession);
+
+    const signInBody = { provider: 'google', callbackURL: '/' };
+    for (let i = 0; i < 3; i++)
+      expect((await authRequest('/v1/auth/sign-in/social', signInBody)).status).toBe(200);
+    expect((await authRequest('/v1/auth/sign-in/social', signInBody)).status).toBe(429);
+  });
+
   it('denies cross-account reads, key creation and revocation on every existing route', async () => {
     const query = `app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`;
     for (const route of ['endpoints', 'failures', 'logs', 'public-keys', 'installation/status']) {
@@ -743,8 +780,13 @@ describe('Google account boundary with real D1 SQL', () => {
   });
 
   it('revokes the actual session on sign-out', async () => {
+    const beforeSignOut = await request('/v1/auth/get-session', bobCookie);
+    expect(beforeSignOut.status).toBe(200);
+    expect(await beforeSignOut.json()).toMatchObject({ user: { name: 'bob' } });
+
     const response = await request('/v1/auth/sign-out', bobCookie, {});
     expect(response.status).toBe(200);
+    expect(await (await request('/v1/auth/get-session', bobCookie)).json()).toBeNull();
     expect((await request('/v1/apps', bobCookie)).status).toBe(401);
   });
 
