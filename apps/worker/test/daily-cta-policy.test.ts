@@ -10,10 +10,10 @@ describe('daily CTA policy', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(9);
+    ).toHaveLength(1);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
-    ).toHaveLength(35);
+    ).toHaveLength(43);
     expect(DAILY_CTA_POLICY.posttrainllm).toMatchObject({
       clarityCandidate: 'quickstart_opened',
       qualification: 'verified',
@@ -24,8 +24,8 @@ describe('daily CTA policy', () => {
     ).toHaveLength(11);
     expect(DAILY_CTA_POLICY['app-health']).toMatchObject({
       clarityCandidate: 'release_status_opened',
-      qualification: 'candidate_only',
-      qualifiedAppHealthEvents: [],
+      qualification: 'verified',
+      qualifiedAppHealthEvents: ['release_status_opened'],
     });
     expect(DAILY_CTA_POLICY['site-health']).toMatchObject({
       clarityCandidate: null,
@@ -38,20 +38,25 @@ describe('daily CTA policy', () => {
     expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
       anchor: ['testflight_status_opened'],
       'anime-list': ['cta_search'],
+      'app-health': ['release_status_opened'],
       browserdaddy: ['release_status_opened'],
       calorie: ['cta_testflight', 'cta_look_inside'],
       codevetter: ['benchmark_opened'],
       contextdaddy: ['how_it_works_opened'],
       daddyrad: ['app.performance.opened'],
+      'email-manager': ['kinetic.cta.hero_connect_gmail'],
       'every-song-is-a-website': ['song_world_opened'],
       'field-track': ['manager_dashboard_opened'],
       gitstat: ['cta.source_repository_opened'],
       'issue-pages': ['repository_reader_opened'],
+      karte: ['page_creation_opened', 'live_profile_opened'],
       kith: ['how_it_works_opened'],
+      'knowledge-base': ['integration.contract.opened'],
       live: ['hobby_finder_opened'],
       looptv: ['looptv.cta.start_watching', 'looptv.cta.browse_stations'],
       mashup: ['proof.play.clicked'],
       'meme-lab': ['paired_run_started'],
+      'chatgpt-memory-insights': ['capabilities_opened'],
       mentionpilot: ['free_check.opened'],
       motion: ['how_it_works_opened'],
       'nutrition-formula-engine': ['formula_checked', 'report_downloaded'],
@@ -63,6 +68,7 @@ describe('daily CTA policy', () => {
       posttrainllm: ['quickstart_opened'],
       'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
       reader: ['sample_opened'],
+      'research-papers': ['reading_paths_opened'],
       rolepatch: ['free_tools_opened'],
       'saas-maker': ['directory_opened'],
       'sarthakagrawal-personal': ['projects_opened'],
@@ -70,6 +76,8 @@ describe('daily CTA policy', () => {
       significanthobbies: ['apps_explored', 'kith_opened'],
       starboard: ['public_catalog_browsed'],
       storagedaddy: ['download.clicked'],
+      'swe-interview-prep': ['cta.daily_priority'],
+      'web-playables': ['game_opened'],
       'what-it-takes-to-win': ['journey_continued'],
     });
   });
