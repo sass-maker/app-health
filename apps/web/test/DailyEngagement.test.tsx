@@ -1,8 +1,69 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { DailyEngagement } from '../src/DailyEngagement.js';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+async function flushFetch(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+it('rolls the default report forward at India midnight and on focus', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-28T18:29:59.000Z'));
+  const fetch = vi.fn(async (_input: RequestInfo | URL) => Response.json(report));
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  await flushFetch();
+  expect(String(fetch.mock.calls[0][0])).toContain('date=2026-09-27');
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1_100);
+  });
+  await flushFetch();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(String(fetch.mock.calls[1][0])).toContain('date=2026-09-28');
+
+  vi.setSystemTime(new Date('2026-09-29T18:31:00.000Z'));
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  await flushFetch();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(String(fetch.mock.calls[2][0])).toContain('date=2026-09-29');
+  vi.useRealTimers();
+});
+
+it('keeps a manually selected historical day until latest is chosen', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-09-28T18:29:59.000Z'));
+  const fetch = vi.fn(async (_input: RequestInfo | URL) => Response.json(report));
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  await flushFetch();
+  fireEvent.change(screen.getByLabelText('Report date'), { target: { value: '2026-09-25' } });
+  await flushFetch();
+  expect(fetch).toHaveBeenCalledTimes(2);
+  vi.setSystemTime(new Date('2026-09-28T18:31:00.000Z'));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2_000);
+  });
+  await act(async () => {
+    window.dispatchEvent(new Event('focus'));
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button', { name: 'Show latest completed day' }));
+  await flushFetch();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(String(fetch.mock.calls[2][0])).toContain('date=2026-09-28');
+  vi.useRealTimers();
+});
 
 const report = {
   schema: 'app-health.daily-engagement.v1',

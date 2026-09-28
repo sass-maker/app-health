@@ -2,7 +2,9 @@
 
 The App Health **Overview → Daily engagement** section is the owner's chosen
 destination for the daily 55-product report. It loads the latest completed
-Asia/Kolkata calendar day on opening and can read a previous completed date.
+Asia/Kolkata calendar day on opening, follows the next completed day at India
+midnight or when the tab regains focus, and can read a manually selected older
+date until the owner chooses **Latest**.
 The owner-only API is `GET /v1/reports/daily-engagement?date=YYYY-MM-DD`.
 Responses are computed on request; no scheduled snapshot or outbound delivery
 is part of this source change.

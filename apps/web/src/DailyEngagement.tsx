@@ -28,14 +28,21 @@ function previousReportDay(): string {
   return new Date(Date.now() + 330 * 60_000 - 86_400_000).toISOString().slice(0, 10);
 }
 
+function nextIndiaDayBoundary(): number {
+  const today = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  return Date.parse(`${today}T00:00:00Z`) + 86_400_000 - 330 * 60_000;
+}
+
 function ReportHeader({
   date,
   onDateChange,
   onRefresh,
+  onLatest,
 }: {
   date: string;
   onDateChange: (date: string) => void;
   onRefresh: () => void;
+  onLatest: () => void;
 }): JSX.Element {
   return (
     <CardHeader className="gap-4 border-b px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
@@ -67,6 +74,16 @@ function ReportHeader({
             className="mt-1 h-10 w-42"
           />
         </label>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onLatest}
+          aria-label="Show latest completed day"
+          className="h-10"
+        >
+          Latest
+        </Button>
         <Button
           type="button"
           variant="outline"
@@ -317,11 +334,34 @@ function ReportBody({
 
 export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Element {
   const [date, setDate] = useState(previousReportDay);
+  const [followsLatest, setFollowsLatest] = useState(true);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!followsLatest) return;
+    const syncDate = () => setDate(previousReportDay());
+    let timer: ReturnType<typeof setTimeout>;
+    const scheduleBoundary = () => {
+      timer = setTimeout(
+        () => {
+          syncDate();
+          scheduleBoundary();
+        },
+        Math.max(0, nextIndiaDayBoundary() - Date.now() + 25),
+      );
+    };
+    const onFocus = () => syncDate();
+    scheduleBoundary();
+    window.addEventListener('focus', onFocus);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [followsLatest]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -357,7 +397,14 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
     >
       <ReportHeader
         date={date}
-        onDateChange={setDate}
+        onDateChange={(nextDate) => {
+          setFollowsLatest(false);
+          setDate(nextDate);
+        }}
+        onLatest={() => {
+          setFollowsLatest(true);
+          setDate(previousReportDay());
+        }}
         onRefresh={() => setRetry((value) => value + 1)}
       />
       <CardContent className="space-y-4 p-5">
