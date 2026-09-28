@@ -96,6 +96,7 @@ describe('buildDailyEngagementReport', () => {
       waitlist_applicability: true,
       native_sessions_applicability: true,
       browser_visitors_applicability: true,
+      server_requests_applicability: true,
     });
     expect(legacy.products).toHaveLength(2);
     for (const product of legacy.products) expect(oldRowSchema.parse(product)).toEqual(product);
@@ -543,6 +544,14 @@ describe('buildDailyEngagementReport', () => {
         { app_id: 'app-000', request_count: 37, upstream_sampled: 0 },
         { app_id: 'app-001', request_count: 12, upstream_sampled: 1 },
       ],
+      captureCounts: {
+        coverageStart: DAY,
+        rows: [],
+        serverRequestsApplicabilityByCatalogId: {
+          'product-000': 'not_applicable',
+          'product-001': 'applicable',
+        },
+      },
       logs: [],
       ctaEventNamesByCatalogId: {},
       date: DAY,
@@ -554,6 +563,11 @@ describe('buildDailyEngagementReport', () => {
       logsMeasured: false,
     });
     expect(report.products.map((row) => row.api_activity)).toEqual([37, null, null]);
+    expect(report.products.map((row) => row.server_requests_applicability)).toEqual([
+      'not_applicable',
+      'applicable',
+      'unknown',
+    ]);
     expect(report.products.map((row) => row.browser_visitors)).toEqual([null, null, null]);
   });
 
@@ -920,6 +934,10 @@ describe('composeDailyEngagementReport', () => {
               'site-health': 'not_applicable',
               pace: 'applicable',
             },
+            serverRequestsApplicabilityByCatalogId: {
+              'site-health': 'not_applicable',
+              pace: 'applicable',
+            },
           };
         },
       },
@@ -929,12 +947,14 @@ describe('composeDailyEngagementReport', () => {
       native_sessions_applicability: 'not_applicable',
       browser_visitors: 3,
       browser_visitors_applicability: 'not_applicable',
+      server_requests_applicability: 'not_applicable',
     });
     expect(report.products[1]).toMatchObject({
       native_sessions: null,
       native_sessions_applicability: 'applicable',
       browser_visitors: null,
       browser_visitors_applicability: 'applicable',
+      server_requests_applicability: 'applicable',
     });
   });
 

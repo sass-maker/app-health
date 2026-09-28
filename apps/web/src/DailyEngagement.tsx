@@ -30,7 +30,8 @@ function captureCount(
   applicability:
     | Product['newsletter_applicability']
     | Product['native_sessions_applicability']
-    | Product['browser_visitors_applicability'],
+    | Product['browser_visitors_applicability']
+    | Product['server_requests_applicability'],
 ): string {
   if (value !== null && value > 0) return count(value);
   if (applicability === 'not_applicable') return 'Not applicable';
@@ -176,7 +177,7 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
       'Native sessions',
       captureCount(product.native_sessions, product.native_sessions_applicability),
     ],
-    ['Server requests', product.api_activity],
+    ['Server requests', captureCount(product.api_activity, product.server_requests_applicability)],
     ['Feedback', product.feedback_submitted],
     ['Newsletter', captureCount(product.newsletter_joins, product.newsletter_applicability)],
     ['Waitlist', captureCount(product.waitlist_joins, product.waitlist_applicability)],
@@ -243,7 +244,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 {captureCount(product.native_sessions, product.native_sessions_applicability)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                {count(product.api_activity)}
+                {captureCount(product.api_activity, product.server_requests_applicability)}
               </TableCell>
               <TableCell className="min-w-52">
                 <ProductActions events={product.cta_events} status={product.cta_status} />

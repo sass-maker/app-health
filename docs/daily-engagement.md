@@ -58,14 +58,20 @@ shape until reloaded, so the API omits those added fields for those clients.
 - Native sessions count distinct, scoped session hashes from accepted native
   active heartbeats in the completed day. Their Analytics Engine projection is
   best-effort; missing or sampled rows remain unknown. Browser visitor slots do
-  not contain these rows. Server requests are counted separately from visitors from durable D1
+  not contain these rows.
+- Server requests are counted separately from visitors from durable D1
   `endpoint_rollups`, scoped to imported active/primary products and their exact
   production environment. The disjoint minute/hour/day ranges avoid double
   counting rollup resolutions. Positive unsampled accepted request totals are
   shown; sampled groups and missing query/source coverage stay unknown. Missing
   rows remain unknown because endpoint capability receipts predate the
   durable rollup cutover and cannot establish historical zero. Requests are not
-  people.
+  people. The canonical catalog explicitly marks products with an app server
+  applicable, high-confidence static or local products Not applicable, and
+  unresolved products Unknown. This policy does not establish telemetry coverage;
+  an observed positive request count remains visible even if it conflicts with
+  the current applicability classification. An older provider response without
+  server-request policy keeps the applicability Unknown.
 - Unknown means the source was unavailable, unconfigured, or had no qualifying
   receipt. Zero appears only where the source was measured.
 

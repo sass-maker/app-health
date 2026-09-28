@@ -96,6 +96,10 @@ export const DailyEngagementProductReportV1 = z
       .default('unknown'),
     /** Server request count, not people. `null` when durable unsampled endpoint coverage is unknown. */
     api_activity: z.number().int().min(0).nullable(),
+    /** Catalogued app-server surface applicability; independent of whether requests were observed. */
+    server_requests_applicability: z
+      .enum(['applicable', 'not_applicable', 'unknown'])
+      .default('unknown'),
     freshness: DailyFreshness,
     /** How much of this product's row was actually measured. */
     coverage: z.enum(['full', 'partial', 'unknown']),

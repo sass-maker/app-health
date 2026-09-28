@@ -93,6 +93,7 @@ interface DailyCaptureCounts {
   applicabilityByCatalogId?: Readonly<Record<string, CaptureApplicability>>;
   nativeSessionsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
   browserVisitorsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
+  serverRequestsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
 }
 
 export interface DailyCaptureCountsService {
@@ -190,12 +191,17 @@ function validateDailyCaptureCounts(
     response.browserVisitorsApplicabilityByCatalogId,
     allowedIds,
   );
+  const serverRequestsApplicabilityByCatalogId = parseMetricApplicability(
+    response.serverRequestsApplicabilityByCatalogId,
+    allowedIds,
+  );
   return {
     coverageStart: coverageStart as string | null,
     rows,
     applicabilityByCatalogId,
     nativeSessionsApplicabilityByCatalogId,
     browserVisitorsApplicabilityByCatalogId,
+    serverRequestsApplicabilityByCatalogId,
   };
 }
 
@@ -565,6 +571,7 @@ function buildProductReport(
     native_sessions: nativeSessions,
     native_sessions_applicability: nativeSessionApplicability(input, row.catalog_id),
     api_activity: apiActivity,
+    server_requests_applicability: serverRequestApplicability(input, row.catalog_id),
     freshness: {
       browser_last_seen: indexes.browserLastSeen.get(row.app_id) ?? null,
       log_last_seen: indexes.logLastSeen.get(row.catalog_id) ?? null,
@@ -585,6 +592,13 @@ function browserVisitorApplicability(
   catalogId: string,
 ): MetricApplicability {
   return input.captureCounts?.browserVisitorsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+}
+
+function serverRequestApplicability(
+  input: DailyEngagementInputs,
+  catalogId: string,
+): MetricApplicability {
+  return input.captureCounts?.serverRequestsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
 }
 
 function isProductBrowserMeasured(
@@ -716,6 +730,7 @@ export function dailyEngagementClientPayload(
       delete legacyRow.waitlist_applicability;
       delete legacyRow.native_sessions_applicability;
       delete legacyRow.browser_visitors_applicability;
+      delete legacyRow.server_requests_applicability;
       return legacyRow;
     }),
   };
