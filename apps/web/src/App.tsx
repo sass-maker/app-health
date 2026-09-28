@@ -213,7 +213,7 @@ function useEnvironmentCapabilities(project: SavedProject, ownerToken: string) {
       }
     }
     void load();
-    const stopPolling = pollWhileVisible(() => void load(), 10_000);
+    const stopPolling = pollWhileVisible(() => void load(), 30_000);
     return () => {
       cancelled = true;
       stopPolling();
@@ -3478,7 +3478,7 @@ export function App(): JSX.Element {
       }
     }
     void load();
-    const stopPolling = pollWhileVisible(() => void load(), 10_000);
+    const stopPolling = pollWhileVisible(() => void load(), 30_000);
     return () => {
       cancelled = true;
       stopPolling();
