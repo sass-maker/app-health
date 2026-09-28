@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   CheckCircle2,
   CircleDashed,
-  CalendarDays,
   RefreshCw,
   Search,
   ShieldAlert,
@@ -554,55 +553,68 @@ function EmptyProjectsView() {
   );
 }
 
-function WatchtowerHeader({
-  refreshedAt,
-  error,
-  reload,
-}: {
-  refreshedAt?: number;
+interface RequestHealthSectionProps {
+  rows: WatchtowerRow[];
+  health: ReturnType<typeof useWorkspaceHealth>;
+  analytics: ReturnType<typeof useWorkspaceAnalytics>;
+  loading: boolean;
   error: string;
-  reload: () => void;
-}) {
+  onOpen: ProjectsViewProps['onOpen'];
+}
+
+function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
+  const { rows, health, analytics, loading, error, onOpen } = props;
+  const healthReady = Boolean(health.data);
   return (
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          Daily briefing
-        </p>
-        <h2 id="projects-title" className="mt-1 text-2xl font-semibold tracking-tight">
-          Portfolio overview
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Completed India day, owner alerts, and request health across the imported portfolio.
-        </p>
+    <section aria-labelledby="request-health-title" className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h3 id="request-health-title" className="text-lg font-semibold tracking-tight">
+            Request health
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Measured endpoint traffic and issues across workspace environments.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          {health.data?.refreshed_at ? (
+            <span>
+              Refreshed <Freshness timestamp={health.data.refreshed_at} now={Date.now()} />
+            </span>
+          ) : null}
+          {error ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                health.reload();
+                analytics.reload();
+              }}
+            >
+              <RefreshCw /> Retry
+            </Button>
+          ) : null}
+        </div>
       </div>
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            document.getElementById('daily-engagement')?.scrollIntoView({
-              behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-                ? 'auto'
-                : 'smooth',
-            })
-          }
+      <WatchtowerTotals rows={rows} healthReady={healthReady} />
+      {loading ? (
+        <div
+          role="status"
+          aria-label="Loading Watchtower"
+          className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"
         >
-          <CalendarDays className="size-4" /> Daily report
-        </Button>
-        {refreshedAt ? (
-          <span>
-            Refreshed <Freshness timestamp={refreshedAt} now={Date.now()} />
-          </span>
-        ) : null}
-        {error ? (
-          <Button type="button" variant="outline" size="sm" onClick={reload}>
-            <RefreshCw /> Retry
-          </Button>
-        ) : null}
-      </div>
-    </div>
+          <Skeleton className="h-80 w-full rounded-xl" />
+          <Skeleton className="h-80 w-full rounded-xl" />
+          <span className="sr-only">Loading Watchtower…</span>
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+          <AttentionQueue rows={rows} onOpen={onOpen} healthReady={healthReady} />
+          <ReliabilityField rows={rows} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -636,15 +648,10 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
   const error = health.error || analytics.error;
   const loading = !health.data && !health.error;
   return (
-    <section aria-labelledby="projects-title" className="mx-auto w-full max-w-7xl space-y-6">
-      <WatchtowerHeader
-        refreshedAt={health.data?.refreshed_at}
-        error={error}
-        reload={() => {
-          health.reload();
-          analytics.reload();
-        }}
-      />
+    <section
+      aria-labelledby="daily-engagement-title"
+      className="mx-auto w-full max-w-7xl space-y-6"
+    >
       {error ? (
         <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="flex items-start gap-3 p-4 text-sm">
@@ -658,33 +665,14 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
       ) : null}
       <DailyEngagement ownerToken={ownerToken} onReport={onDailyReport} />
       <OwnerAlertFeed ownerToken={ownerToken} />
-      <section aria-labelledby="request-health-title" className="space-y-4">
-        <div>
-          <h3 id="request-health-title" className="text-lg font-semibold tracking-tight">
-            Request health
-          </h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Measured endpoint traffic and issues across workspace environments.
-          </p>
-        </div>
-        <WatchtowerTotals rows={rows} healthReady={Boolean(health.data)} />
-        {loading ? (
-          <div
-            role="status"
-            aria-label="Loading Watchtower"
-            className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"
-          >
-            <Skeleton className="h-80 w-full rounded-xl" />
-            <Skeleton className="h-80 w-full rounded-xl" />
-            <span className="sr-only">Loading Watchtower…</span>
-          </div>
-        ) : (
-          <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
-            <AttentionQueue rows={rows} onOpen={onOpen} healthReady={Boolean(health.data)} />
-            <ReliabilityField rows={rows} />
-          </div>
-        )}
-      </section>
+      <RequestHealthSection
+        rows={rows}
+        health={health}
+        analytics={analytics}
+        loading={loading}
+        error={error}
+        onOpen={onOpen}
+      />
       <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Requests are server or function calls, never a count of

@@ -122,6 +122,6 @@
   },
   "ownerFeedback": {
     "decision": "keep",
-    "note": "Owner selected A — Daily briefing on 2026-09-29. The prior 2026-09-22 Watchtower selection and receipt are archived under .fleet/evidence/daily-briefing-2026-09-29/watchtower-receipt-2026-09-22.json; measured request health remains below the report."
+    "note": "Owner selected A — Daily briefing on 2026-09-29. The prior 2026-09-22 Watchtower selection and receipt are archived under .fleet/evidence/daily-briefing-2026-09-29/watchtower-receipt-2026-09-22.json; measured request health remains below the report. after-*.jpg are local QA captures with synthetic counts and an in-image QA label; the owner will add signed-in production screenshots after review and deployment."
   }
 }

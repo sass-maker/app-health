@@ -101,7 +101,7 @@ function WorkspaceSidebar({
       <SidebarContent>
         <NavigationGroup
           label="Workspace"
-          items={[{ id: 'overview', label: 'Overview', icon: Layers3 }]}
+          items={[{ id: 'overview', label: 'Briefing', icon: Layers3 }]}
           view={view}
           onView={onView}
         />

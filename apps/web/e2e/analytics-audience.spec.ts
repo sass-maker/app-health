@@ -133,8 +133,9 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   await expect(period).toHaveText('Last 7 days');
   await page.getByRole('combobox', { name: 'Project', exact: true }).click();
   await page.getByRole('option', { name: 'All projects', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Overview', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Portfolio overview' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
+  const briefingDay = page.getByRole('region').filter({ hasText: 'Completed India day' });
+  await expect(briefingDay.getByRole('heading', { level: 2 })).toBeVisible();
   await expect(page.getByText('Complete inventory', { exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
   for (const theme of ['dark', 'light']) {

@@ -83,7 +83,7 @@ function AlertBody({
   if (!feed?.entries.length)
     return (
       <p className="text-sm text-muted-foreground">
-        No feedback, waitlist, or newsletter activity yet.
+        No retained response receipts are available in this feed.
       </p>
     );
   return <AlertEntries entries={feed.entries} />;
@@ -102,10 +102,10 @@ function AlertHeader({
     <CardHeader className="flex-row items-center justify-between gap-4 border-b px-5 py-4">
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Workspace activity
+          Recent receipts
         </p>
         <CardTitle id="owner-alert-feed-title" className="mt-1 text-lg">
-          Feedback, waitlist, and newsletter
+          Feedback and consented joins · separate from the selected day
         </CardTitle>
       </div>
       <div className="flex items-center gap-3">
