@@ -60,7 +60,7 @@ describe('daily CTA policy', () => {
       'issue-pages': ['repository_reader_opened', 'publish_started'],
       karte: ['page_creation_opened', 'live_profile_opened'],
       kith: ['how_it_works_opened', 'testflight_status_opened'],
-      'knowledge-base': ['integration.contract.opened'],
+      'knowledge-base': ['integration.contract.opened', 'integration.examples.opened'],
       live: ['hobby_finder_opened', 'hobby_timeline_builder_opened'],
       looptv: ['looptv.cta.start_watching', 'looptv.cta.browse_stations'],
       mashup: ['proof.play.clicked', 'proof.construction.clicked', 'local.run.clicked'],
