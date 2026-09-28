@@ -148,8 +148,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
       (_, element) => element?.textContent === 'Unknown browsers · Approx. 20 actions',
     ),
   ).toHaveLength(2);
-  expect(atlas.cells[4].textContent).toBe('Unknown');
-  expect(atlas.cells[5].textContent).toBe('2');
+  expect(within(atlas).getByText('Newsletter').parentElement).toHaveTextContent('Unknown');
+  expect(within(atlas).getByText('Waitlist').parentElement).toHaveTextContent('2');
   expect(
     screen.getByText(/Native sessions count only observed, unsampled native heartbeats/),
   ).toBeTruthy();
@@ -160,18 +160,40 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(1);
-  expect(beacon.cells[6].textContent).toBe('Not applicable');
-  expect(beacon.cells[1].textContent).toBe('Not applicable');
+  expect(within(beacon).getByText('Native sessions').parentElement).toHaveTextContent(
+    'Not applicable',
+  );
+  expect(within(beacon).getByText('Browser visitors').parentElement).toHaveTextContent(
+    'Not applicable',
+  );
   const beaconCard = within(mobile).getByText('Beacon').closest('li')!;
   const nativeMetric = within(beaconCard).getByText('Native sessions').parentElement!;
   expect(nativeMetric.querySelector('dd')?.textContent).toBe('Not applicable');
   const browserMetric = within(beaconCard).getByText('Browser visitors').parentElement!;
   expect(browserMetric.querySelector('dd')?.textContent).toBe('Not applicable');
-  expect(beacon.cells[4].textContent).toBe('Not applicable');
-  expect(beacon.cells[5].textContent).toBe('Not applicable');
+  expect(within(beacon).getByText('Newsletter').parentElement).toHaveTextContent('Not applicable');
+  expect(within(beacon).getByText('Waitlist').parentElement).toHaveTextContent('Not applicable');
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');
   fireEvent.change(screen.getByPlaceholderText('Search products'), { target: { value: 'Beacon' } });
   expect(within(table).queryByText('atlas')).toBeNull();
+});
+
+it('opens a source summary on its measured product rows and restores the full inventory', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json(report)),
+  );
+  render(<DailyEngagement ownerToken="owner" />);
+  const table = await screen.findByRole('table');
+
+  fireEvent.click(screen.getByRole('button', { name: /Visited/ }));
+  expect(screen.getByText(/Showing 1 of 2 products with browser visitor evidence/)).toBeTruthy();
+  expect(within(table).getByText('atlas')).toBeTruthy();
+  expect(within(table).queryByText('beacon')).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Show all products' }));
+  expect(within(table).getByText('atlas')).toBeTruthy();
+  expect(within(table).getByText('beacon')).toBeTruthy();
 });
 
 it('shows a retryable error when the owner report is unavailable', async () => {

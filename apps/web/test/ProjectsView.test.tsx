@@ -181,8 +181,8 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
 
-  const daily = await screen.findByRole('heading', { name: 'Daily engagement' });
-  const alerts = screen.getByText('Feedback, waitlist, and newsletter', {
+  const daily = await screen.findByRole('heading', { name: 'Monday, 28 Sept 2026' });
+  const alerts = screen.getByText('Feedback and consented joins · separate from the selected day', {
     selector: '[data-slot="card-title"]',
   });
   const requestHealth = screen.getByRole('heading', { name: 'Request health' });
@@ -202,7 +202,7 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
 it('keeps slow measured requests separate from unconfigured inventory', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
-  expect(await screen.findByRole('heading', { name: 'Portfolio overview' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Request health' })).toBeTruthy();
   expect(screen.getByText(/p95 histogram upper bound against 5xx rate/)).toBeTruthy();
   const queue = screen
     .getByText('Request issues', { selector: '[data-slot="card-title"]' })

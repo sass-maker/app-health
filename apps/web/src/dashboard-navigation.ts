@@ -9,8 +9,9 @@ const backend = {
 export const DASHBOARD_PAGES = {
   overview: {
     eyebrow: 'Workspace',
-    title: 'Overview',
-    description: 'See traffic and live sessions across your projects and environments.',
+    title: 'Daily briefing',
+    description:
+      'A completed India day across your products, followed by recent receipts and measured request health.',
   },
   analytics: {
     eyebrow: 'Product',

@@ -79,6 +79,13 @@ function ReportHeader({
   onRefresh: () => void;
   onLatest: () => void;
 }): JSX.Element {
+  const dayLabel = new Date(`${date}T12:00:00+05:30`).toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Kolkata',
+  });
   return (
     <CardHeader className="gap-4 border-b px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
       <div>
@@ -91,11 +98,10 @@ function ReportHeader({
           aria-level={2}
           className="mt-1 text-lg"
         >
-          Daily engagement
+          {dayLabel}
         </CardTitle>
         <p className="mt-1 text-xs text-muted-foreground">
-          Independent signals of visits, chosen actions, feedback, and consented joins across the
-          portfolio. A visit or action does not imply a submission.
+          Independent browser, action, and response signals across the product inventory.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -134,7 +140,17 @@ function ReportHeader({
   );
 }
 
-function ReportSummary({ report }: { report: Report }): JSX.Element {
+type SourceView = 'all' | 'visitors' | 'actions' | 'responses';
+
+function ReportSummary({
+  report,
+  sourceView,
+  onSourceView,
+}: {
+  report: Report;
+  sourceView: SourceView;
+  onSourceView: (sourceView: SourceView) => void;
+}): JSX.Element {
   const visitors = report.products.filter((row) => row.browser_visitors !== null).length;
   const actions = report.products.filter((row) => row.cta_status === 'measured').length;
   const feedback = report.products.reduce((total, row) => total + (row.feedback_submitted ?? 0), 0);
@@ -155,7 +171,12 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
         <span>Unknown means the source has no verified value for this day.</span>
       </div>
       <div className="grid gap-3 lg:grid-cols-3" aria-label="Daily evidence summary">
-        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-4">
+        <button
+          type="button"
+          aria-pressed={sourceView === 'visitors'}
+          onClick={() => onSourceView(sourceView === 'visitors' ? 'all' : 'visitors')}
+          className="min-h-28 rounded-lg border border-sky-500/20 bg-sky-500/5 p-4 text-left transition-colors hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <p className="text-xs font-medium text-muted-foreground">Visited</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-sky-600 dark:text-sky-300">
             {visitors}
@@ -163,8 +184,13 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
           <p className="text-xs text-muted-foreground">
             {visitors === 1 ? 'product' : 'products'} with browser visitor evidence
           </p>
-        </div>
-        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4">
+        </button>
+        <button
+          type="button"
+          aria-pressed={sourceView === 'actions'}
+          onClick={() => onSourceView(sourceView === 'actions' ? 'all' : 'actions')}
+          className="min-h-28 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-left transition-colors hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <p className="text-xs font-medium text-muted-foreground">Chose an action</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
             {actions}
@@ -172,21 +198,26 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
           <p className="text-xs text-muted-foreground">
             {actions === 1 ? 'product' : 'products'} with measured primary actions
           </p>
-        </div>
-        <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-4">
+        </button>
+        <button
+          type="button"
+          aria-pressed={sourceView === 'responses'}
+          onClick={() => onSourceView(sourceView === 'responses' ? 'all' : 'responses')}
+          className="min-h-28 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-left transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <p className="text-xs font-medium text-muted-foreground">Replied or joined</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-300">
             {receipts}
           </p>
           <p className="text-xs text-muted-foreground">
-            Feedback: {feedback} · Newsletter joins: {newsletter} · Waitlist:{' '}
+            Observed receipts · Feedback: {feedback} · Newsletter joins: {newsletter} · Waitlist:{' '}
             {waitlistApplies ? waitlist : 'not applicable'}
           </p>
-        </div>
+        </button>
       </div>
       <p className="text-xs text-muted-foreground">
         Source counts are separate; they are not a conversion funnel. Submission receipts may
-        include QA activity.
+        include qualification and QA activity, so they do not establish organic demand.
       </p>
       {missingScope ? (
         <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
@@ -279,18 +310,18 @@ function MobileProducts({ products }: { products: Product[] }): JSX.Element {
 
 function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
   return (
-    <div className="hidden max-w-full overflow-x-auto rounded-md border xl:block">
+    <div className="hidden max-w-full rounded-md border xl:block">
+      <p className="border-b px-3 py-2 text-xs text-muted-foreground">
+        Scroll horizontally to view all report sources.
+      </p>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Product</TableHead>
-            <TableHead className="text-right">Browser visitors</TableHead>
-            <TableHead>Primary actions</TableHead>
-            <TableHead className="text-right">Feedback</TableHead>
-            <TableHead className="text-right">Newsletter</TableHead>
-            <TableHead className="text-right">Waitlist</TableHead>
-            <TableHead className="text-right">Native sessions</TableHead>
-            <TableHead className="text-right">Server requests</TableHead>
+            <TableHead className="whitespace-normal">Product</TableHead>
+            <TableHead className="whitespace-normal">Visits</TableHead>
+            <TableHead className="whitespace-normal">Primary actions</TableHead>
+            <TableHead className="whitespace-normal">Responses</TableHead>
+            <TableHead className="whitespace-normal text-right">Server requests</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -300,10 +331,26 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 <span className="font-medium">{product.name}</span>
                 <span className="block text-xs text-muted-foreground">{product.catalog_id}</span>
               </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {captureCount(product.browser_visitors, product.browser_visitors_applicability)}
+              <TableCell className="min-w-40">
+                <dl className="space-y-1.5 text-xs">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Browser visitors</dt>
+                    <dd className="shrink-0 text-right tabular-nums">
+                      {captureCount(
+                        product.browser_visitors,
+                        product.browser_visitors_applicability,
+                      )}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Native sessions</dt>
+                    <dd className="shrink-0 text-right tabular-nums">
+                      {captureCount(product.native_sessions, product.native_sessions_applicability)}
+                    </dd>
+                  </div>
+                </dl>
                 {browserVisitorReason(product) ? (
-                  <span className="block text-xs font-normal text-muted-foreground">
+                  <span className="mt-1 block text-xs text-muted-foreground">
                     {browserVisitorReason(product)}
                   </span>
                 ) : null}
@@ -311,17 +358,27 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
               <TableCell className="min-w-52">
                 <ProductActions events={product.cta_events} status={product.cta_status} />
               </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {count(product.feedback_submitted)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {captureCount(product.newsletter_joins, product.newsletter_applicability)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {captureCount(product.waitlist_joins, product.waitlist_applicability)}
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {captureCount(product.native_sessions, product.native_sessions_applicability)}
+              <TableCell>
+                <dl className="space-y-1.5 text-xs">
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Feedback</dt>
+                    <dd className="shrink-0 text-right tabular-nums">
+                      {count(product.feedback_submitted)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Newsletter</dt>
+                    <dd className="shrink-0 text-right tabular-nums">
+                      {captureCount(product.newsletter_joins, product.newsletter_applicability)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Waitlist</dt>
+                    <dd className="shrink-0 text-right tabular-nums">
+                      {captureCount(product.waitlist_joins, product.waitlist_applicability)}
+                    </dd>
+                  </div>
+                </dl>
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {captureCount(product.api_activity, product.server_requests_applicability)}
@@ -365,21 +422,65 @@ function ReportResults({
   report,
   query,
   onQueryChange,
+  sourceView,
+  onSourceView,
 }: {
   report: Report;
   query: string;
   onQueryChange: (query: string) => void;
+  sourceView: SourceView;
+  onSourceView: (sourceView: SourceView) => void;
 }): JSX.Element {
   const products = useMemo(
     () =>
-      report.products.filter((product) =>
-        `${product.name} ${product.catalog_id}`.toLowerCase().includes(query.trim().toLowerCase()),
-      ),
-    [report, query],
+      report.products.filter((product) => {
+        const matchesSearch = `${product.name} ${product.catalog_id}`
+          .toLowerCase()
+          .includes(query.trim().toLowerCase());
+        if (!matchesSearch) return false;
+        if (sourceView === 'visitors') return product.browser_visitors !== null;
+        if (sourceView === 'actions') return product.cta_status === 'measured';
+        if (sourceView === 'responses')
+          return (
+            (product.feedback_submitted ?? 0) > 0 ||
+            (product.newsletter_joins ?? 0) > 0 ||
+            (product.waitlist_joins ?? 0) > 0
+          );
+        return true;
+      }),
+    [report, query, sourceView],
   );
+  const sourceViewLabel = {
+    all: 'all products',
+    visitors: 'products with browser visitor evidence',
+    actions: 'products with measured primary actions',
+    responses: 'products with stored response receipts',
+  }[sourceView];
   return (
     <>
-      <ReportSummary report={report} />
+      <ReportSummary report={report} sourceView={sourceView} onSourceView={onSourceView} />
+      <div
+        id="daily-product-evidence"
+        className="flex flex-wrap items-center justify-between gap-2 scroll-mt-24"
+      >
+        <p className="text-xs text-muted-foreground" aria-live="polite">
+          Showing {products.length} of {report.product_count} {sourceViewLabel}
+          {sourceView !== 'all' ? ' · Unknown sources remain in the full inventory.' : ''}
+        </p>
+        {sourceView !== 'all' ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              onQueryChange('');
+              onSourceView('all');
+            }}
+          >
+            Show all products
+          </Button>
+        ) : null}
+      </div>
       <label className="relative block max-w-sm">
         <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
         <span className="sr-only">Search daily report products</span>
@@ -404,12 +505,16 @@ function ReportBody({
   report,
   query,
   onQueryChange,
+  sourceView,
+  onSourceView,
 }: {
   loading: boolean;
   error: string;
   report: Report | null;
   query: string;
   onQueryChange: (query: string) => void;
+  sourceView: SourceView;
+  onSourceView: (sourceView: SourceView) => void;
 }): JSX.Element | null {
   if (loading)
     return (
@@ -425,7 +530,13 @@ function ReportBody({
       </div>
     );
   return report ? (
-    <ReportResults report={report} query={query} onQueryChange={onQueryChange} />
+    <ReportResults
+      report={report}
+      query={query}
+      onQueryChange={onQueryChange}
+      sourceView={sourceView}
+      onSourceView={onSourceView}
+    />
   ) : null;
 }
 
@@ -443,6 +554,20 @@ export function DailyEngagement({
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
   const [query, setQuery] = useState('');
+  const [sourceView, setSourceView] = useState<SourceView>('all');
+
+  const selectSourceView = (next: SourceView) => {
+    setSourceView(next);
+    if (next === 'all') return;
+    window.requestAnimationFrame?.(() => {
+      document.getElementById('daily-product-evidence')?.scrollIntoView({
+        block: 'start',
+        behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+      });
+    });
+  };
 
   useEffect(() => {
     if (!followsLatest) return;
@@ -521,6 +646,8 @@ export function DailyEngagement({
           report={report}
           query={query}
           onQueryChange={setQuery}
+          sourceView={sourceView}
+          onSourceView={selectSourceView}
         />
       </CardContent>
     </Card>
