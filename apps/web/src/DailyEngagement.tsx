@@ -133,7 +133,7 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
         {report.sampled ? <Badge variant="outline">Sampled</Badge> : null}
         <span>Unknown means the source has no verified value for this day.</span>
       </div>
-      <div className="grid gap-3 sm:grid-cols-3" aria-label="Daily evidence summary">
+      <div className="grid gap-3 lg:grid-cols-3" aria-label="Daily evidence summary">
         <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-4">
           <p className="text-xs font-medium text-muted-foreground">Visited</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-sky-600 dark:text-sky-300">
