@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import process from 'node:process';
 import { log } from 'node:console';
 
@@ -17,6 +17,7 @@ assert(runWorkerFirst.includes('/v1/*'));
 assert(runWorkerFirst.includes('/live'));
 const scratch = await mkdtemp(join(tmpdir(), 'app-health-assets-'));
 const config = join(scratch, 'wrangler.jsonc');
+const persistTo = join(scratch, 'state');
 await writeFile(
   config,
   JSON.stringify({
@@ -50,6 +51,35 @@ await writeFile(
   'utf8',
 );
 
+const migrations = spawnSync(
+  'pnpm',
+  [
+    '--filter',
+    '@app-health/worker',
+    'exec',
+    'wrangler',
+    'd1',
+    'migrations',
+    'apply',
+    'DB',
+    '--local',
+    '--persist-to',
+    persistTo,
+    '--config',
+    config,
+  ],
+  {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
+  },
+);
+assert.equal(
+  migrations.status,
+  0,
+  `local D1 migrations failed\n${migrations.stdout}\n${migrations.stderr}`,
+);
+
 const child = spawn(
   'pnpm',
   [
@@ -63,6 +93,8 @@ const child = spawn(
     config,
     '--port',
     '8794',
+    '--persist-to',
+    persistTo,
   ],
   {
     cwd: projectRoot,
@@ -95,7 +127,7 @@ try {
   const navigate = { headers: { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' } };
   const callback = await globalThis.fetch(
     `${origin}/v1/auth/callback/google?code=invalid&state=invalid`,
-    navigate,
+    { ...navigate, redirect: 'manual' },
   );
   assert.notEqual(callback.headers.get('content-type')?.split(';')[0], 'text/html');
   assert.equal((await callback.text()).includes('<div id="root">'), false);
