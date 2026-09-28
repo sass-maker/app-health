@@ -3,7 +3,12 @@ import { URL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { makeSignature } from 'better-auth/crypto';
-import { createAccountAuth, personalWorkspace, accountMutationAllowed } from '../src/accounts.js';
+import {
+  accountIdentity,
+  createAccountAuth,
+  personalWorkspace,
+  accountMutationAllowed,
+} from '../src/accounts.js';
 import worker, { type Env } from '../src/index.js';
 import { D1ControlPlane } from '../src/d1-adapter.js';
 
@@ -119,6 +124,36 @@ describe('Google account boundary with real D1 SQL', () => {
     const listed = (await (await request('/v1/apps')).json()) as { apps: unknown[] };
     expect(listed.apps).toHaveLength(1);
     expect(await (await request('/v1/apps', bobCookie)).json()).toMatchObject({ apps: [] });
+  });
+
+  it('loads workspace and owned app scope with one joined D1 read', async () => {
+    const statements: string[] = [];
+    const db = env.DB!;
+    const countedDb = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            statements.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/apps', {
+        headers: { cookie: aliceCookie },
+      }),
+      { ...env, DB: countedDb },
+    );
+    expect(identity?.workspace.id).toBeTruthy();
+    expect(identity?.owner.appIds).toContain(aliceApp.app.id);
+    const workspaceReads = statements.filter((sql) => /FROM workspaces w/.test(sql));
+    expect(workspaceReads).toHaveLength(1);
+    expect(workspaceReads[0]).toContain('LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id');
+    expect(workspaceReads[0]).toContain(
+      'LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL',
+    );
   });
 
   it('denies cross-account reads, key creation and revocation on every existing route', async () => {
@@ -663,6 +698,13 @@ describe('Google account boundary with real D1 SQL', () => {
       .run();
     const listed = (await (await request('/v1/apps')).json()) as { apps: Array<{ id: string }> };
     expect(listed.apps.some((app) => app.id === project.app.id)).toBe(false);
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/apps', {
+        headers: { cookie: aliceCookie },
+      }),
+      env,
+    );
+    expect(identity?.owner.appIds).not.toContain(project.app.id);
     const query = `app_id=${project.app.id}&environment_id=${project.environment.id}`;
     expect((await request(`/v1/logs?${query}`)).status).toBe(403);
     expect(

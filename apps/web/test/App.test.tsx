@@ -745,6 +745,8 @@ describe('App Health V0 UI', () => {
     const fetchMock = installFetch();
     render(<App />);
     expect(await screen.findAllByText('/orders')).toHaveLength(2);
+    expect(screen.getAllByText('≤ 180 ms').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('≤ 2,400 ms').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/insufficient data/i).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: '1h' }));
     await waitFor(() => {

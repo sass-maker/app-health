@@ -104,6 +104,7 @@ it('keeps slow measured requests separate from unconfigured inventory', async ()
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
   expect(await screen.findByRole('heading', { name: 'Portfolio overview' })).toBeTruthy();
+  expect(screen.getByText(/p95 histogram upper bound against 5xx rate/)).toBeTruthy();
   const queue = screen
     .getByText('Request issues', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;

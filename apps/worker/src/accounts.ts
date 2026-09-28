@@ -105,6 +105,21 @@ export async function personalWorkspace(
   return workspace;
 }
 
+async function workspaceAndApps(db: D1DatabaseLike, userId: string) {
+  const { results } = await db
+    .prepare(
+      `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id
+       FROM workspaces w
+       LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id
+       LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
+       WHERE w.owner_id = ?
+       ORDER BY a.id`,
+    )
+    .bind(userId)
+    .all<{ workspace_id: string; workspace_name: string; app_id: string | null }>();
+  return results;
+}
+
 export async function accountIdentity(
   request: Request,
   env: AccountBindings,
@@ -114,21 +129,20 @@ export async function accountIdentity(
   if (!auth || !env.DB) return null;
   const session = await auth.api.getSession({ headers: request.headers });
   if (!session || !session.user.emailVerified) return null;
-  const workspace = await personalWorkspace(env.DB, session.user.id, () =>
-    onSignup?.(session.user.id),
-  );
-  const { results } = await env.DB.prepare(
-    'SELECT w.app_id FROM workspace_apps w JOIN apps a ON a.id = w.app_id WHERE w.workspace_id = ? AND a.archived_at IS NULL',
-  )
-    .bind(workspace.id)
-    .all<{ app_id: string }>();
+  let rows = await workspaceAndApps(env.DB, session.user.id);
+  if (!rows.length) {
+    await personalWorkspace(env.DB, session.user.id, () => onSignup?.(session.user.id));
+    rows = await workspaceAndApps(env.DB, session.user.id);
+  }
+  const workspaceRow = rows[0];
+  if (!workspaceRow) throw new Error('Workspace could not be read');
   return {
-    workspace,
+    workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
     owner: {
       id: session.user.id,
       label: session.user.name,
-      workspaceId: workspace.id,
-      appIds: results.map((row) => row.app_id),
+      workspaceId: workspaceRow.workspace_id,
+      appIds: rows.flatMap((row) => (row.app_id === null ? [] : [row.app_id])),
     },
   };
 }

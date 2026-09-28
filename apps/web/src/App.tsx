@@ -358,6 +358,10 @@ function formatBytes(bytes: number | null | undefined): string {
   return `${mib < 10 ? mib.toFixed(1) : Math.round(mib)} MiB`;
 }
 
+function formatPercentileUpperBound(milliseconds: number): string {
+  return `≤ ${milliseconds.toLocaleString()} ms`;
+}
+
 function formatAge(timestamp: number | null): string {
   if (timestamp === null) return 'Never';
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
@@ -912,8 +916,12 @@ function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.
       >
         {hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'}
       </TableCell>
-      <TableCell className="tabular-nums">{hasMetrics ? `${endpoint.p50_ms} ms` : '—'}</TableCell>
-      <TableCell className="tabular-nums">{hasMetrics ? `${endpoint.p95_ms} ms` : '—'}</TableCell>
+      <TableCell className="tabular-nums" title="Histogram upper-bound estimate">
+        {hasMetrics ? formatPercentileUpperBound(endpoint.p50_ms) : '—'}
+      </TableCell>
+      <TableCell className="tabular-nums" title="Histogram upper-bound estimate">
+        {hasMetrics ? formatPercentileUpperBound(endpoint.p95_ms) : '—'}
+      </TableCell>
       <TableCell className="tabular-nums">
         {hasMetrics ? (
           <span className="inline-flex items-center gap-1.5">
@@ -971,8 +979,8 @@ function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Elem
           {[
             ['Requests', hasMetrics ? endpoint.request_count.toLocaleString() : '—'],
             ['Error rate', hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'],
-            ['p50', hasMetrics ? `${endpoint.p50_ms} ms` : '—'],
-            ['p95', hasMetrics ? `${endpoint.p95_ms} ms` : '—'],
+            ['p50 upper bound', hasMetrics ? formatPercentileUpperBound(endpoint.p50_ms) : '—'],
+            ['p95 upper bound', hasMetrics ? formatPercentileUpperBound(endpoint.p95_ms) : '—'],
             ['Avg size', hasMetrics ? formatBytes(endpoint.avg_response_bytes) : '—'],
             [
               'Size growth',

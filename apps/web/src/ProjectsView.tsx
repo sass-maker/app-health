@@ -301,7 +301,7 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
       <CardHeader className="border-b px-5 py-4">
         <CardTitle className="text-sm">Reliability field</CardTitle>
         <p className="text-xs text-muted-foreground">
-          p95 latency against 5xx rate · bubble size is request volume
+          p95 histogram upper bound against 5xx rate · bubble size is request volume
         </p>
       </CardHeader>
       <CardContent className="p-4">
@@ -324,8 +324,8 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
             <ul className="sr-only" aria-label="Reliability field values">
               {points.map((point) => (
                 <li key={point.name}>
-                  {point.name}: {point.requests} requests, {point.errors.toFixed(1)}% errors,{' '}
-                  {point.latency}ms p95
+                  {point.name}: {point.requests} requests, {point.errors.toFixed(1)}% errors, ≤{' '}
+                  {point.latency.toLocaleString()}ms p95 histogram upper bound
                 </li>
               ))}
             </ul>
