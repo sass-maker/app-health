@@ -16,6 +16,8 @@ Further real public clicks reached owner Events for GitStat `cta.analysis_starte
 
 Web Playables `source_repository_opened` and Every Song Is a Website `song_listen_clicked` also appeared in owner Events after real production clicks. The former opens the source repository; the latter starts a playable song and does not establish listening duration.
 
+Meme Lab `feedback_choice_clicked` appeared in owner Events after a synthetic smoke run using its built-in example and selecting “Yes, that fits” on the result. It records a feedback choice click, not an organic feedback submission. Nomad Data Adventure `shortlist_export_clicked` appeared in owner Events after a real public “Filtered CSV” click; this records export intent, not a completed download. The first Nomad click hit a cached older script and sent `shortlist_exported`; the deployed page now loads a versioned asset, and a fresh click sent the corrected name. The old smoke event remains in the first-day raw Events view but is excluded from daily CTA policy.
+
 The [55-row capability matrix](fleet-engagement-capability-matrix.csv) is the original source-level rollout plan: 45 catalog-declared web footer candidates and 10 without an applicable public footer. Its `UNKNOWN` live-status cells are a historical baseline, not the current deployment state. Current qualified CTA names live in `apps/worker/src/daily-cta-policy.ts` and the authenticated owner dashboard. The matrix's feedback and capture proposals remain plans unless separately verified.
 
 | Product ID                 | Product                    | Platforms                | Catalog deployment | Existing Clarity CTA       | Source hints                                                                                     | App Health receipt  |
