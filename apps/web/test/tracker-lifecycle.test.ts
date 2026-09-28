@@ -43,6 +43,25 @@ it('automatically retries a transient delivery with the same valid batch', async
   expect(batches[1].batch_id).toBe(batches[0].batch_id);
 });
 
+it('sends an event queued during an in-flight pageview before a caller finishes flushing', async () => {
+  let finishPageview!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        finishPageview = resolve;
+      }),
+  );
+  const pageview = tracker().flush();
+  tracker().track('library_opened');
+  const action = tracker().flush();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  finishPageview({ ok: true, status: 202 } as Response);
+  await Promise.all([pageview, action]);
+  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(validPayloads()[1].events.map((event) => event.name)).toEqual(['library_opened']);
+  expect(tracker().diagnostics().accepted).toBe(2);
+});
+
 it('uses one stable unknown session when reads fail even if writes appear to succeed', async () => {
   tracker().stop();
   vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {

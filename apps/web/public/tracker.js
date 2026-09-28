@@ -4,7 +4,7 @@
   const endpoint = script.dataset.endpoint || 'https://ingest.sassmaker.com/v1/browser';
   const queue = [];
   let pending = null;
-  let sending = false;
+  let delivery;
   let request;
   let timer;
   let stopped = false;
@@ -189,18 +189,22 @@
 
   async function flush() {
     if (waiting) await recording;
-    if (stopped || sending || document.visibilityState === 'hidden') return;
+    if (stopped || document.visibilityState === 'hidden') return;
+    if (delivery) {
+      await delivery;
+      if (queue.length) return flush();
+      return;
+    }
     clearTimeout(timer);
     timer = null;
     const body = payload();
     if (!body) return;
-    sending = true;
     const attempt = pending;
     const controller = new AbortController();
     request = controller;
     const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const response = await fetch(endpoint, {
+      delivery = fetch(endpoint, {
         method: 'POST',
         headers: { 'content-type': 'text/plain' },
         credentials: 'omit',
@@ -208,6 +212,7 @@
         keepalive: true,
         signal: controller.signal,
       });
+      const response = await delivery;
       if (!response.ok && (response.status === 429 || response.status >= 500)) throw new Error();
       if (response.ok) diagnostics.accepted += attempt.events.length;
       else diagnostics.dropped += attempt.events.length;
@@ -222,7 +227,7 @@
     } finally {
       clearTimeout(timeout);
       request = null;
-      sending = false;
+      delivery = null;
       if (pending || queue.length) schedule(1500 * Math.pow(2, attempt.attempts));
     }
   }
