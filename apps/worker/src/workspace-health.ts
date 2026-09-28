@@ -3,6 +3,7 @@ import {
   WINDOW_MS,
   WorkspaceHealthSummaryV1,
   approximatePercentiles,
+  histogramP95LowerBound,
   healthState,
   latencyHistogramSchemaFromBounds,
   normalizeLatencyHistogram,
@@ -75,13 +76,10 @@ function metricsFromBucket(bucket: BucketV1) {
   if (bucket.request_count === 0) return null;
   const errorRate = bucket.error_count / bucket.request_count;
   const { p95_ms } = approximatePercentiles(bucket.histogram);
-  const ambiguousLatencyCount = bucket.legacy_ambiguous_latency_count ?? 0;
-  const lowerHistogram = [...bucket.histogram];
-  if (ambiguousLatencyCount > 0) {
-    lowerHistogram[10] -= ambiguousLatencyCount;
-    lowerHistogram[9] += ambiguousLatencyCount;
-  }
-  const p95_lower_bound_ms = approximatePercentiles(lowerHistogram).p95_ms;
+  const lowerBound = histogramP95LowerBound(
+    bucket.histogram,
+    bucket.legacy_ambiguous_latency_count ?? 0,
+  );
   return {
     request_count: bucket.request_count,
     error_count: bucket.error_count,
@@ -92,7 +90,7 @@ function metricsFromBucket(bucket: BucketV1) {
       request_count: bucket.request_count,
       error_rate: errorRate,
       p95_ms,
-      ...(ambiguousLatencyCount > 0 ? { p95_lower_bound_ms } : {}),
+      ...lowerBound,
     }),
     ...(bucket.upstream_sampled ? { upstream_sampled: true } : {}),
   };

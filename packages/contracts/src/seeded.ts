@@ -140,14 +140,26 @@ export function approximatePercentiles(histogram: readonly number[]): {
   return { p50_ms: valueAtPercentile(0.5), p95_ms: valueAtPercentile(0.95) };
 }
 
-function legacyP95LowerBound(
+/**
+ * Return the lowest p95 consistent with the persisted histogram. The shared
+ * 500–1000ms bin straddles the degraded threshold, and legacy V1's 1000–2000ms
+ * bin (normalized into V2's >=2000ms bin) straddles the unhealthy threshold.
+ */
+export function histogramP95LowerBound(
   histogram: readonly number[],
-  ambiguousCount: number,
+  legacyAmbiguousCount = 0,
 ): { p95_lower_bound_ms?: number } {
-  if (ambiguousCount === 0) return {};
+  const degradedBinCount = histogram[8] ?? 0;
+  if (degradedBinCount === 0 && legacyAmbiguousCount === 0) return {};
   const lowerHistogram = [...histogram];
-  lowerHistogram[10] -= ambiguousCount;
-  lowerHistogram[9] += ambiguousCount;
+  if (degradedBinCount > 0) {
+    lowerHistogram[8] -= degradedBinCount;
+    lowerHistogram[7] += degradedBinCount;
+  }
+  if (legacyAmbiguousCount > 0) {
+    lowerHistogram[10] -= legacyAmbiguousCount;
+    lowerHistogram[9] += legacyAmbiguousCount;
+  }
   return { p95_lower_bound_ms: approximatePercentiles(lowerHistogram).p95_ms };
 }
 
@@ -203,7 +215,7 @@ export function mergeBuckets(
         request_count,
         error_rate,
         p95_ms,
-        ...legacyP95LowerBound(mergedHistogram, ambiguousLatencyCount),
+        ...histogramP95LowerBound(mergedHistogram, ambiguousLatencyCount),
       }),
       ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
       ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),

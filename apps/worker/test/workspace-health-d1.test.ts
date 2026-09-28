@@ -164,4 +164,56 @@ describe('workspace health D1 aggregation', () => {
       health_state: 'insufficient-data',
     });
   });
+
+  it('keeps a V2 500–1000ms p95 threshold crossing uncertain in workspace health', async () => {
+    const now = Math.floor(Date.now() / 60_000) * 60_000;
+    const owner = new D1ControlPlane(db, 'workspace-one');
+    const scope = await owner.createAppEnvironmentKey(
+      'Degraded boundary',
+      'production',
+      now - 100_000,
+    );
+    await owner
+      .asRepositories({} as never)
+      .capabilities!.recordCapability(
+        scope.app.id,
+        scope.environment.id,
+        'endpoints',
+        now - 60_000,
+      );
+    const events = [
+      ...Array.from({ length: 18 }, (_, index) => ({
+        event_id: `degraded-below-${scope.app.id}-${index}`,
+        timestamp: now - 60_000,
+        method: 'GET',
+        route: '/degraded-boundary',
+        status_code: 200,
+        duration_ms: 500,
+      })),
+      ...Array.from({ length: 2 }, (_, index) => ({
+        event_id: `degraded-edge-${scope.app.id}-${index}`,
+        timestamp: now - 60_000,
+        method: 'GET',
+        route: '/degraded-boundary',
+        status_code: 200,
+        duration_ms: 1000,
+      })),
+    ];
+    await new D1EndpointWriter(db).accept(
+      scope.app.id,
+      scope.environment.id,
+      'worker',
+      'test',
+      events,
+      { now, batchId: `degraded-boundary-${scope.app.id}` },
+    );
+
+    const response = await owner.queryWorkspaceHealth(now + 30_000);
+    const environment = response.environments.find((row) => row.app_id === scope.app.id);
+    expect(environment?.endpoints.metrics).toMatchObject({
+      request_count: 20,
+      p95_ms: 1000,
+      health_state: 'insufficient-data',
+    });
+  });
 });

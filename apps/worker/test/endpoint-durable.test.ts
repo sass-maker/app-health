@@ -294,6 +294,33 @@ it('keeps legacy threshold-straddling latency unknown without losing request cou
   });
 });
 
+it('does not call a threshold-straddling 500–1000ms p95 degraded as confirmed', async () => {
+  const timestamp = now - 60_000;
+  const events = [
+    ...Array.from({ length: 18 }, (_, index) => ({
+      ...event(`degraded-below-${index}`, timestamp),
+      duration_ms: 500,
+    })),
+    ...Array.from({ length: 2 }, (_, index) => ({
+      ...event(`degraded-edge-${index}`, timestamp),
+      duration_ms: 1000,
+    })),
+  ];
+  await writer.accept('degraded-boundary', 'prod', 'node', 'r1', events, {
+    now,
+    batchId: 'degraded-boundary',
+  });
+
+  const end = Math.floor(now / 60_000) * 60_000;
+  const [bucket] = await readEndpointBuckets(db, 'degraded-boundary', 'prod', end - 900_000, end);
+  const [aggregate] = mergeBuckets([bucket], '15m', end);
+  expect(aggregate).toMatchObject({
+    request_count: 20,
+    p95_ms: 1000,
+    health_state: 'insufficient-data',
+  });
+});
+
 it('combines old AE data with durable counts exactly once and keeps source errors visible', async () => {
   const end = Math.floor(now / 60_000) * 60_000;
   await writer.accept('a', 'prod', 'node', undefined, [event('new', now - 60_000)], {
