@@ -72,7 +72,7 @@ describe('daily CTA policy', () => {
       'knowledge-base': ['integration.contract.opened', 'integration.examples.opened'],
       live: ['hobby_finder_opened', 'hobby_timeline_builder_opened'],
       looptv: ['looptv.cta.start_watching', 'looptv.cta.browse_stations'],
-      mashup: ['proof.play.clicked', 'proof.construction.clicked', 'local.run.clicked'],
+      mashup: ['proof.construction.clicked', 'local.run.clicked'],
       'meme-lab': ['paired_run_started', 'feedback_choice_clicked'],
       'chatgpt-memory-insights': ['capabilities_opened', 'analysis_opened'],
       mentionpilot: ['free_check.opened', 'workspace.sign_in.opened'],
