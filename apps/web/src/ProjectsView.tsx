@@ -75,6 +75,15 @@ function endpointNotApplicable(row: WatchtowerRow): boolean {
   );
 }
 
+function reportServerApplicability(
+  report: DailyEngagementReportV1 | null,
+): Map<string, WatchtowerRow['serverRequestsApplicability']> {
+  return new Map(
+    report?.products.map((product) => [product.app_id, product.server_requests_applicability]) ??
+      [],
+  );
+}
+
 const number = (value: number) => value.toLocaleString();
 const percent = (value: number) => `${(value * 100).toFixed(value < 0.01 ? 1 : 0)}%`;
 
@@ -604,14 +613,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
     Map<string, WatchtowerRow['serverRequestsApplicability']>
   >(new Map());
   const onDailyReport = useCallback((report: DailyEngagementReportV1 | null) => {
-    setServerRequestsApplicability(
-      new Map(
-        report?.products.map((product) => [
-          product.app_id,
-          product.server_requests_applicability,
-        ]) ?? [],
-      ),
-    );
+    setServerRequestsApplicability(reportServerApplicability(report));
   }, []);
   const rows = useMemo(
     () =>
