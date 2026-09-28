@@ -398,6 +398,18 @@ function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null 
   return null;
 }
 
+function ctaQualificationNotes(input: DailyEngagementInputs): string[] {
+  if (
+    !input.ctaFullDayStart ||
+    input.date >= input.ctaFullDayStart ||
+    Object.keys(input.ctaEventNamesByCatalogId).length === 0
+  )
+    return [];
+  return [
+    'CTA hooks were activated during this day; observed actions are lower bounds and unobserved actions remain unknown.',
+  ];
+}
+
 function samplingNotes(input: DailyEngagementInputs): string[] {
   const notes: string[] = [];
   if (input.browserVisitors.some((row) => row.sample_interval > 1))
@@ -438,14 +450,7 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
     notes.push(
       `No qualified primary CTA events are reportable for ${input.date}; counts are unknown.`,
     );
-  if (
-    input.ctaFullDayStart &&
-    input.date < input.ctaFullDayStart &&
-    Object.keys(input.ctaEventNamesByCatalogId).length > 0
-  )
-    notes.push(
-      'CTA hooks were activated during this day; observed actions are lower bounds and unobserved actions remain unknown.',
-    );
+  notes.push(...ctaQualificationNotes(input));
   if (unmappedLogs > 0)
     notes.push(
       `${unmappedLogs} centralized log group(s) could not be mapped to a declared catalog product and were excluded.`,
