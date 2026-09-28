@@ -138,10 +138,12 @@ describe('D1 control plane', () => {
     expect(
       listed.apps.flatMap((entry) => entry.environments).some((env) => env.id === 'env-unowned'),
     ).toBe(false);
-    expect(db.queries.filter((query) => query.includes('FROM environments'))).toHaveLength(1);
-    expect(db.queries.filter((query) => query.includes('FROM environments'))[0]).toContain(
-      'app_id IN',
-    );
+    // The inventory read folds apps and their environments into a single
+    // bounded query (no N+1 per-app environment fetch).
+    const envQueries = db.queries.filter((query) => query.includes('environments'));
+    expect(envQueries).toHaveLength(1);
+    expect(envQueries[0]).toContain('FROM apps');
+    expect(envQueries[0]).toContain('LEFT JOIN environments');
 
     sqlite.close();
   });

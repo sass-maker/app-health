@@ -12,6 +12,7 @@ import type {
   CapabilityId,
   CapabilityState,
   AppV1,
+  AppEnvironmentV1,
   BucketV1,
   EnvironmentV1,
   InstallationStatusV1,
@@ -32,6 +33,12 @@ export interface AppRepository {
   createApp(name: string, now: number): Promise<AppV1>;
   getApp(appId: string): Promise<AppV1 | null>;
   listApps(): Promise<AppV1[]>;
+  /**
+   * Optional single-round-trip read of apps together with their environments.
+   * When implemented (D1), GET /v1/apps avoids a second sequential query;
+   * callers without it fall back to listApps() + listEnvironmentsForApps().
+   */
+  listAppsAndEnvironments?: () => Promise<AppEnvironmentV1[]>;
 }
 
 /** Persisted environment records, scoped to an app. */

@@ -1,5 +1,6 @@
 import type {
   AppV1,
+  AppEnvironmentV1,
   EnvironmentV1,
   InstallationStatusV1,
   KeyRecordV1,
@@ -276,6 +277,59 @@ export class D1ControlPlane
         )
         .all<AppV1>()
     ).results;
+  }
+
+  /**
+   * Single-round-trip read of apps with their environments for GET /v1/apps.
+   * Mirrors listApps() filtering and the per-app environment ordering of
+   * listEnvironmentsForApps(), but folds both into one D1 query so the
+   * dashboard inventory read pays one round-trip instead of two.
+   */
+  async listAppsAndEnvironments(): Promise<AppEnvironmentV1[]> {
+    const appFilter = this.workspaceId
+      ? 'JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? AND a.archived_at IS NULL'
+      : this.workspaceId === null
+        ? 'WHERE a.archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM workspace_apps w WHERE w.app_id = a.id)'
+        : 'WHERE a.archived_at IS NULL';
+    const statement = this.db.prepare(
+      `SELECT a.id AS app_id, a.name AS app_name, a.created_at AS app_created_at,
+                e.id AS env_id, e.app_id AS env_app_id, e.name AS env_name, e.created_at AS env_created_at
+         FROM apps a LEFT JOIN environments e ON e.app_id = a.id
+         ${appFilter}
+         ORDER BY a.created_at DESC, e.created_at`,
+    );
+    const bound = this.workspaceId ? statement.bind(this.workspaceId) : statement;
+    const rows = (
+      await bound.all<{
+        app_id: string;
+        app_name: string;
+        app_created_at: number;
+        env_id: string | null;
+        env_app_id: string | null;
+        env_name: string | null;
+        env_created_at: number | null;
+      }>()
+    ).results;
+    const byApp = new Map<string, AppEnvironmentV1>();
+    for (const row of rows) {
+      let entry = byApp.get(row.app_id);
+      if (!entry) {
+        entry = {
+          app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at },
+          environments: [],
+        };
+        byApp.set(row.app_id, entry);
+      }
+      if (row.env_id !== null) {
+        entry.environments.push({
+          id: row.env_id,
+          app_id: row.env_app_id ?? row.app_id,
+          name: row.env_name ?? '',
+          created_at: row.env_created_at ?? 0,
+        });
+      }
+    }
+    return [...byApp.values()];
   }
 
   async createEnvironment(appId: string, name: string, now: number): Promise<EnvironmentV1> {

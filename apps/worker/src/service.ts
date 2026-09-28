@@ -131,6 +131,11 @@ export class AppHealthService {
   }
 
   async listApps(appId?: string): Promise<ListAppsResponseV1> {
+    // Unscoped workspace inventory: prefer a single-round-trip read when the
+    // adapter supports it (D1), falling back to listApps + environments.
+    if (!appId && this.repos.apps.listAppsAndEnvironments) {
+      return { apps: await this.repos.apps.listAppsAndEnvironments() };
+    }
     const scopedApp = appId ? await this.repos.apps.getApp(appId) : null;
     const apps = appId ? (scopedApp ? [scopedApp] : []) : await this.repos.apps.listApps();
     const environments = await this.repos.environments.listEnvironmentsForApps(
