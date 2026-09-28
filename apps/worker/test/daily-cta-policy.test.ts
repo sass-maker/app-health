@@ -10,10 +10,10 @@ describe('daily CTA policy', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(12);
+    ).toHaveLength(9);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
-    ).toHaveLength(32);
+    ).toHaveLength(35);
     expect(DAILY_CTA_POLICY.posttrainllm).toMatchObject({
       clarityCandidate: 'quickstart_opened',
       qualification: 'verified',
@@ -39,6 +39,7 @@ describe('daily CTA policy', () => {
       anchor: ['testflight_status_opened'],
       'anime-list': ['cta_search'],
       browserdaddy: ['release_status_opened'],
+      calorie: ['cta_testflight', 'cta_look_inside'],
       codevetter: ['benchmark_opened'],
       contextdaddy: ['how_it_works_opened'],
       daddyrad: ['app.performance.opened'],
@@ -48,6 +49,7 @@ describe('daily CTA policy', () => {
       'issue-pages': ['repository_reader_opened'],
       kith: ['how_it_works_opened'],
       live: ['hobby_finder_opened'],
+      looptv: ['looptv.cta.start_watching', 'looptv.cta.browse_stations'],
       mashup: ['proof.play.clicked'],
       'meme-lab': ['paired_run_started'],
       mentionpilot: ['free_check.opened'],
@@ -62,6 +64,7 @@ describe('daily CTA policy', () => {
       'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
       reader: ['sample_opened'],
       rolepatch: ['free_tools_opened'],
+      'saas-maker': ['directory_opened'],
       'sarthakagrawal-personal': ['projects_opened'],
       setline: ['testflight_status_opened'],
       significanthobbies: ['apps_explored', 'kith_opened'],
