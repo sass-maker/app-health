@@ -87,18 +87,95 @@ const health = {
 
 afterEach(() => vi.unstubAllGlobals());
 
-function installFetch(options?: { healthResponse?: Response }) {
+function installFetch(options?: { healthResponse?: Response; reportResponse?: Response }) {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
     const path = String(input);
     if (path.includes('/v1/workspace/health'))
       return options?.healthResponse ?? Response.json(health);
     if (path.includes('/v1/workspace/alerts'))
       return Response.json({ generated_at: now, total_count: 0, entries: [] });
+    if (path.includes('/v1/reports/daily-engagement'))
+      return options?.reportResponse ?? Response.json(summary);
     return Response.json(summary);
   });
   vi.stubGlobal('fetch', fetch);
   return fetch;
 }
+
+it('uses catalog server applicability without hiding measured or out-of-report endpoints', async () => {
+  const endpointHealth = structuredClone(health);
+  endpointHealth.environments[2].endpoints = structuredClone(
+    endpointHealth.environments[1].endpoints,
+  );
+  endpointHealth.environments.push({
+    ...structuredClone(endpointHealth.environments[1]),
+    app_id: 'outside',
+    app_name: 'Outside',
+    environment_id: 'prod',
+    environment_name: 'production',
+  });
+  const reportProduct = (appId: string, applicability: 'applicable' | 'not_applicable') => ({
+    catalog_id: appId,
+    app_id: appId,
+    name: appId,
+    browser_visitors: null,
+    cta_events: [],
+    cta_status: 'unknown',
+    feedback_submitted: null,
+    newsletter_joins: null,
+    waitlist_joins: null,
+    native_sessions: null,
+    api_activity: null,
+    server_requests_applicability: applicability,
+    freshness: { browser_last_seen: null, log_last_seen: null },
+    coverage: 'unknown',
+  });
+  const report = {
+    schema: 'app-health.daily-engagement.v1',
+    schema_version: 1,
+    generated_at: now,
+    date: '2026-09-28',
+    timezone: 'Asia/Kolkata',
+    from: now - 86_400_000,
+    to: now,
+    product_count: 2,
+    products: [reportProduct('one', 'applicable'), reportProduct('two', 'not_applicable')],
+    sampled: false,
+    notes: [],
+  };
+  installFetch({
+    healthResponse: Response.json(endpointHealth),
+    reportResponse: Response.json(report),
+  });
+  render(
+    <ProjectsView
+      projects={[
+        ...projects,
+        { appId: 'outside', environmentId: 'prod', name: 'Outside', environment: 'production' },
+      ]}
+      ownerToken="owner"
+      onOpen={() => {}}
+    />,
+  );
+
+  const inventory = screen
+    .getByText('Complete inventory')
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  await waitFor(() =>
+    expect(
+      within(inventory).getByText(
+        /4 workspace environments · 1 connected · 0 waiting for data · 2 unconfigured · 1 not applicable/,
+      ),
+    ).toBeTruthy(),
+  );
+  const beacon = within(inventory).getByText('Beacon').closest('tr')!;
+  expect(within(beacon).getAllByText('Not applicable')).toHaveLength(2);
+  const outside = within(inventory).getByText('Outside').closest('tr')!;
+  expect(within(outside).getByText('Not configured')).toBeTruthy();
+  expect(within(outside).getByText('Never received')).toBeTruthy();
+  const atlas = within(inventory).getAllByText('Atlas')[0].closest('tr')!;
+  expect(within(atlas).getByText('Unhealthy')).toBeTruthy();
+});
 
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
   installFetch();

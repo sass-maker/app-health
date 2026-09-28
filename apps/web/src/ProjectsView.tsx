@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -13,6 +13,7 @@ import {
 import { CartesianGrid, ReferenceLine, Scatter, ScatterChart, XAxis, YAxis, ZAxis } from 'recharts';
 import type {
   BrowserSummary,
+  DailyEngagementReportV1,
   WorkspaceHealthEnvironmentV1,
   WorkspaceEndpointStateV1,
 } from '@app-health/contracts';
@@ -61,6 +62,17 @@ interface WatchtowerRow {
   project: ProjectsViewProject;
   analytics?: AnalyticsProject;
   health?: HealthEnvironment;
+  serverRequestsApplicability?: DailyEngagementReportV1['products'][number]['server_requests_applicability'];
+}
+
+function endpointNotApplicable(row: WatchtowerRow): boolean {
+  const endpoints = row.health?.endpoints;
+  return (
+    row.serverRequestsApplicability === 'not_applicable' &&
+    !endpoints?.metrics &&
+    endpoints?.last_received_at == null &&
+    (endpoints?.state === 'unconfigured' || endpoints?.state === 'waiting')
+  );
 }
 
 const number = (value: number) => value.toLocaleString();
@@ -140,6 +152,7 @@ function isAttention(row: WatchtowerRow): boolean {
 
 function statusBadge(row: WatchtowerRow) {
   const endpoints = row.health?.endpoints;
+  if (endpointNotApplicable(row)) return <Badge variant="secondary">Not applicable</Badge>;
   if (!endpoints) return <Badge variant="outline">Unknown</Badge>;
   const requestHealth = endpoints.metrics?.health_state;
   if (requestHealth === 'unhealthy') return <Badge variant="destructive">Unhealthy</Badge>;
@@ -395,7 +408,11 @@ function InventoryTable({
                   </div>
                 </TableCell>
                 <TableCell className="text-xs">
-                  <Freshness timestamp={row.health?.endpoints.last_received_at} now={now} />
+                  {endpointNotApplicable(row) ? (
+                    <span className="text-muted-foreground">Not applicable</span>
+                  ) : (
+                    <Freshness timestamp={row.health?.endpoints.last_received_at} now={now} />
+                  )}
                 </TableCell>
                 <TableCell className="pr-5 text-right">
                   <Button
@@ -425,6 +442,10 @@ function coverageLabel(rows: WatchtowerRow[], healthReady: boolean): string {
   if (!healthReady) return `${rows.length} workspace environments · endpoint coverage unavailable`;
   const coverage = rows.reduce(
     (counts, row) => {
+      if (endpointNotApplicable(row)) {
+        counts.notApplicable += 1;
+        return counts;
+      }
       const state = row.health?.endpoints.state;
       if (state === 'connected') counts.connected += 1;
       else if (state === 'stale') counts.stale += 1;
@@ -434,9 +455,17 @@ function coverageLabel(rows: WatchtowerRow[], healthReady: boolean): string {
       else if (!state) counts.unavailable += 1;
       return counts;
     },
-    { connected: 0, stale: 0, waiting: 0, unconfigured: 0, revoked: 0, unavailable: 0 },
+    {
+      connected: 0,
+      stale: 0,
+      waiting: 0,
+      unconfigured: 0,
+      revoked: 0,
+      unavailable: 0,
+      notApplicable: 0,
+    },
   );
-  return `${rows.length} workspace environments · ${coverage.connected} connected · ${coverage.waiting} waiting for data · ${coverage.unconfigured} unconfigured · ${coverage.stale} stale · ${coverage.revoked} revoked · ${coverage.unavailable} unavailable`;
+  return `${rows.length} workspace environments · ${coverage.connected} connected · ${coverage.waiting} waiting for data · ${coverage.unconfigured} unconfigured · ${coverage.notApplicable} not applicable · ${coverage.stale} stale · ${coverage.revoked} revoked · ${coverage.unavailable} unavailable`;
 }
 
 function Inventory({
@@ -571,6 +600,19 @@ function WatchtowerHeader({
 export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
+  const [serverRequestsApplicability, setServerRequestsApplicability] = useState<
+    Map<string, WatchtowerRow['serverRequestsApplicability']>
+  >(new Map());
+  const onDailyReport = useCallback((report: DailyEngagementReportV1 | null) => {
+    setServerRequestsApplicability(
+      new Map(
+        report?.products.map((product) => [
+          product.app_id,
+          product.server_requests_applicability,
+        ]) ?? [],
+      ),
+    );
+  }, []);
   const rows = useMemo(
     () =>
       projects.map((project): WatchtowerRow => ({
@@ -581,8 +623,9 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
         health: health.data?.environments.find(
           (item) => item.app_id === project.appId && item.environment_id === project.environmentId,
         ),
+        serverRequestsApplicability: serverRequestsApplicability.get(project.appId),
       })),
-    [projects, analytics.data, health.data],
+    [projects, analytics.data, health.data, serverRequestsApplicability],
   );
   const now = health.data?.refreshed_at ?? analytics.data?.live.measured_at ?? Date.now();
 
@@ -611,7 +654,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           </CardContent>
         </Card>
       ) : null}
-      <DailyEngagement ownerToken={ownerToken} />
+      <DailyEngagement ownerToken={ownerToken} onReport={onDailyReport} />
       <OwnerAlertFeed ownerToken={ownerToken} />
       <section aria-labelledby="request-health-title" className="space-y-4">
         <div>

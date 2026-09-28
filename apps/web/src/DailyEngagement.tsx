@@ -429,7 +429,13 @@ function ReportBody({
   ) : null;
 }
 
-export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Element {
+export function DailyEngagement({
+  ownerToken,
+  onReport,
+}: {
+  ownerToken: string;
+  onReport?: (report: Report | null) => void;
+}): JSX.Element {
   const [date, setDate] = useState(previousReportDay);
   const [followsLatest, setFollowsLatest] = useState(true);
   const [report, setReport] = useState<Report | null>(null);
@@ -464,6 +470,7 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
     const controller = new AbortController();
     setLoading(true);
     setError('');
+    onReport?.(null);
     const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1`;
     void fetch(url, {
       signal: controller.signal,
@@ -474,7 +481,10 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
         return DailyEngagementReportV1.parse(await response.json());
       })
       .then((next) => {
-        if (!controller.signal.aborted) setReport(next);
+        if (!controller.signal.aborted) {
+          setReport(next);
+          onReport?.(next);
+        }
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted)
@@ -484,7 +494,7 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [date, ownerToken, retry]);
+  }, [date, ownerToken, onReport, retry]);
 
   return (
     <Card
