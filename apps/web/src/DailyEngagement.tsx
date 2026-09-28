@@ -135,14 +135,13 @@ function ProductActions({
       {events.map((event) => (
         <li key={event.name} className="flex justify-between gap-3">
           <span className="font-mono">{event.name}</span>
-          <span
-            className="tabular-nums"
-            aria-label={
-              event.estimated ? `Approximate count ${event.count}` : `Count ${event.count}`
-            }
-          >
+          <span className="tabular-nums">
+            {event.unique_browsers === null
+              ? 'Unknown browsers'
+              : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}
+            {' · '}
             {event.estimated ? 'Approx. ' : ''}
-            {event.count}
+            {event.count} actions
           </span>
         </li>
       ))}

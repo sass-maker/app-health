@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { ListAppsResponseV1 } from '@app-health/contracts';
+import { AppHealthService } from '../src/service.js';
+import type { BucketRepository } from '../src/repository.js';
 import {
   D1ControlPlane,
   type D1DatabaseLike,
@@ -49,9 +52,12 @@ class Database implements D1DatabaseLike {
 }
 
 class SQLiteD1 implements D1DatabaseLike {
+  queries: string[] = [];
+
   constructor(readonly sqlite: DatabaseSync) {}
 
   prepare(sql: string): D1PreparedStatement {
+    this.queries.push(sql);
     const statement = this.sqlite.prepare(sql);
     let values: unknown[] = [];
     return {
@@ -95,6 +101,48 @@ describe('D1 control plane', () => {
     ]);
     expect(await new D1ControlPlane(db).getApp('demo')).toBeNull();
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM apps').get()).toMatchObject({ count: 4 });
+    sqlite.close();
+  });
+
+  it('lists environments for an authorized portfolio in one bounded query', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    sqlite.exec(`CREATE TABLE apps (id TEXT PRIMARY KEY, name TEXT, created_at INTEGER, archived_at INTEGER);
+      CREATE TABLE workspace_apps (app_id TEXT, workspace_id TEXT);
+      CREATE TABLE environments (id TEXT PRIMARY KEY, app_id TEXT, name TEXT, created_at INTEGER);`);
+    for (let index = 0; index < 56; index += 1) {
+      const appId = `owned-${String(index).padStart(2, '0')}`;
+      sqlite.prepare('INSERT INTO apps VALUES (?, ?, ?, NULL)').run(appId, `App ${index}`, index);
+      sqlite.prepare('INSERT INTO workspace_apps VALUES (?, ?)').run(appId, 'workspace');
+      sqlite
+        .prepare('INSERT INTO environments VALUES (?, ?, ?, ?)')
+        .run(`env-${index}`, appId, 'production', index);
+    }
+    sqlite.prepare('INSERT INTO apps VALUES (?, ?, ?, NULL)').run('unowned', 'Other', 100);
+    sqlite
+      .prepare('INSERT INTO environments VALUES (?, ?, ?, ?)')
+      .run('env-unowned', 'unowned', 'production', 100);
+
+    const db = new SQLiteD1(sqlite);
+    const controlPlane = new D1ControlPlane(db, 'workspace');
+    const buckets: BucketRepository = {
+      upsertBucket: async () => {},
+      queryBuckets: async () => [],
+    };
+    const service = new AppHealthService(controlPlane.asRepositories(buckets));
+
+    const listed = ListAppsResponseV1.parse(await service.listApps());
+
+    expect(listed.apps).toHaveLength(56);
+    expect(listed.apps.every((entry) => entry.environments.length === 1)).toBe(true);
+    expect(listed.apps.some((entry) => entry.app.id === 'unowned')).toBe(false);
+    expect(
+      listed.apps.flatMap((entry) => entry.environments).some((env) => env.id === 'env-unowned'),
+    ).toBe(false);
+    expect(db.queries.filter((query) => query.includes('FROM environments'))).toHaveLength(1);
+    expect(db.queries.filter((query) => query.includes('FROM environments'))[0]).toContain(
+      'app_id IN',
+    );
+
     sqlite.close();
   });
 

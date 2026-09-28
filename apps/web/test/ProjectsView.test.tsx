@@ -39,8 +39,8 @@ const health = {
         last_received_at: now - 60_000,
         metrics: {
           request_count: 100,
-          error_count: 6,
-          error_rate: 0.06,
+          error_count: 0,
+          error_rate: 0,
           p95_ms: 2500,
           last_seen: now - 60_000,
           health_state: 'unhealthy',
@@ -100,14 +100,20 @@ function installFetch(options?: { healthResponse?: Response }) {
   return fetch;
 }
 
-it('puts exceptions first while retaining every environment in the inventory', async () => {
+it('keeps slow measured requests separate from unconfigured inventory', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
-  expect(await screen.findByRole('heading', { name: 'What needs attention now?' })).toBeTruthy();
-  const queue = screen.getByText('Attention queue').closest<HTMLElement>('[data-slot="card"]')!;
-  expect(within(queue).getByText(/Unhealthy requests/)).toBeTruthy();
-  expect(within(queue).getByText(/Endpoint monitoring not configured/)).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'Portfolio overview' })).toBeTruthy();
+  const queue = screen
+    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(within(queue).getByText(/Slow requests/)).toBeTruthy();
+  expect(within(queue).queryByText(/Endpoint monitoring not configured/)).toBeNull();
   expect(within(queue).queryByText('Beacon')).toBeNull();
+  const issues = screen
+    .getByText('Request issues', { selector: 'p' })
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(within(issues).getByText('1')).toBeTruthy();
   const inventory = screen
     .getByText('Complete inventory')
     .closest<HTMLElement>('[data-slot="card"]')!;
@@ -115,6 +121,7 @@ it('puts exceptions first while retaining every environment in the inventory', a
   expect(within(inventory).getByText('Beacon')).toBeTruthy();
   expect(within(inventory).getByText('120')).toBeTruthy();
   expect(within(inventory).getByText('100 requests')).toBeTruthy();
+  expect(within(inventory).getByText(/2 connected · 1 awaiting setup/)).toBeTruthy();
   expect(screen.getByText(/Requests are server or function calls/)).toBeTruthy();
 });
 
@@ -139,7 +146,7 @@ it('searches and filters the complete inventory', async () => {
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(inventory).getByText('Beacon')).toBeTruthy();
   expect(within(inventory).queryByText('Atlas')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Attention only' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Request issues only' }));
   expect(within(inventory).getByText('No environments match this view.')).toBeTruthy();
 });
 
@@ -158,6 +165,13 @@ it('keeps partial data visible and retries both workspace feeds', async () => {
     'Some Watchtower data could not refresh',
   );
   expect(screen.getByText('120')).toBeTruthy();
+  expect(
+    screen.getByText('Request health is unavailable. Retry to check for issues.'),
+  ).toBeTruthy();
+  const issues = screen
+    .getByText('Request issues', { selector: 'p' })
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(within(issues).getByText('—')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
   await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(4));
 });

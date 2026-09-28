@@ -230,7 +230,11 @@ class ProductionStatement implements D1PreparedStatement {
     return null;
   }
   async all<T>() {
-    if (this.sql.includes('FROM environments WHERE app_id = ?') && this.values[0] === 'app-1') {
+    if (
+      (this.sql.includes('FROM environments WHERE app_id = ?') ||
+        (this.sql.includes('FROM environments') && this.sql.includes('app_id IN ('))) &&
+      this.values[0] === 'app-1'
+    ) {
       return {
         results: [
           { id: 'env-local', app_id: 'app-1', name: 'local', created_at: 1 },

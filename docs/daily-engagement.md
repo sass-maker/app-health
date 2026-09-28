@@ -25,9 +25,11 @@ is part of this source change.
   products remain unknown. Dates before the first qualification on 2026-09-28
   stay unknown rather than showing a retrospective zero.
 - Analytics Engine scales sampled CTA event rows into estimates. Each affected
-  action carries `estimated: true` and is labeled “Approx.” in the dashboard;
-  observed unsampled action rows remain exact. If any CTA group is sampled, the
-  report omits configured actions without an observed row because sampling may
+  action count carries `estimated: true` and is labeled “Approx.” in the dashboard;
+  observed unsampled action rows remain exact. Each action also reports distinct
+  recognized browsers from its browser hash; sampled or unavailable groups show
+  “Unknown browsers.” These are browsers, not people. If any CTA group is sampled,
+  the report omits configured actions without an observed row because sampling may
   have hidden them. A sampled visitor row without any CTA rows leaves CTA
   counts unknown. Sampled distinct visitor counts remain unknown because
   distinct counts cannot be scaled.

@@ -37,6 +37,8 @@ export const DailyCtaEvent = z
   .object({
     name: z.string().min(1).max(64),
     count: z.number().int().min(0),
+    /** Distinct recognized browsers that performed this action; unknown when sampled. */
+    unique_browsers: z.number().int().min(0).nullable(),
     /** True when Analytics Engine scaled sampled event rows into an estimate. */
     estimated: z.boolean(),
   })

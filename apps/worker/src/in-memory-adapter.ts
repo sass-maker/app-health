@@ -295,6 +295,13 @@ export class InMemoryAdapter
       .map((environment) => ({ ...environment }));
   }
 
+  async listEnvironmentsForApps(appIds: readonly string[]): Promise<EnvironmentV1[]> {
+    const appIdSet = new Set(appIds);
+    return [...this.environments.values()]
+      .filter((environment) => appIdSet.has(environment.app_id))
+      .map((environment) => ({ ...environment }));
+  }
+
   // --- KeyRepository ---
 
   async createEnvironmentKey(appId: string, name: string, now: number) {

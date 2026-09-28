@@ -16,6 +16,12 @@ import type {
   WorkspaceHealthEnvironmentV1,
   WorkspaceEndpointStateV1,
 } from '@app-health/contracts';
+import {
+  DEGRADED_ERROR_RATE,
+  DEGRADED_P95_MS,
+  UNHEALTHY_ERROR_RATE,
+  UNHEALTHY_P95_MS,
+} from '@app-health/contracts';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
@@ -88,23 +94,40 @@ function Freshness({ timestamp, now }: { timestamp: number | null | undefined; n
 
 function severity(row: WatchtowerRow): number {
   const health = row.health;
-  if (!health) return 6;
+  if (!health) return 7;
   if (health.endpoints.metrics?.health_state === 'unhealthy') return 0;
   if (health.endpoints.state === 'revoked') return 1;
-  if (health.endpoints.state === 'stale') return 2;
-  if (health.endpoints.metrics?.health_state === 'degraded') return 3;
-  if (health.endpoints.state === 'waiting') return 4;
-  if (health.endpoints.state === 'unconfigured') return 5;
+  if (health.endpoints.metrics?.health_state === 'degraded') return 2;
   return 7;
+}
+
+function requestIssueLabel(level: 'unhealthy' | 'degraded', errors: boolean, slow: boolean) {
+  if (level === 'unhealthy') {
+    if (errors && slow) return 'High 5xx and slow requests';
+    if (errors) return 'High 5xx error rate';
+    return 'Slow requests';
+  }
+  if (errors && slow) return 'Elevated 5xx and latency';
+  if (errors) return 'Elevated 5xx error rate';
+  return 'Elevated request latency';
 }
 
 function attentionLabel(row: WatchtowerRow): string {
   const endpoints = row.health?.endpoints;
   if (!endpoints) return 'Health has not loaded';
-  if (endpoints.metrics?.health_state === 'unhealthy') return 'Unhealthy requests';
+  const metrics = endpoints.metrics;
+  if (metrics?.health_state === 'unhealthy') {
+    const errors = metrics.error_rate >= UNHEALTHY_ERROR_RATE;
+    const slow = metrics.p95_ms >= UNHEALTHY_P95_MS;
+    return requestIssueLabel('unhealthy', errors, slow);
+  }
   if (endpoints.state === 'revoked') return 'Ingest key revoked';
+  if (metrics?.health_state === 'degraded') {
+    const errors = metrics.error_rate >= DEGRADED_ERROR_RATE;
+    const slow = metrics.p95_ms >= DEGRADED_P95_MS;
+    return requestIssueLabel('degraded', errors, slow);
+  }
   if (endpoints.state === 'stale') return 'Endpoint data is stale';
-  if (endpoints.metrics?.health_state === 'degraded') return 'Request health degraded';
   if (endpoints.state === 'waiting') return 'Waiting for endpoint data';
   if (endpoints.state === 'unconfigured') return 'Endpoint monitoring not configured';
   return 'Healthy';
@@ -156,9 +179,9 @@ function WatchtowerTotals({ rows, healthReady }: { rows: WatchtowerRow[]; health
       color: 'var(--chart-4)',
     },
     {
-      label: 'Need attention',
+      label: 'Request issues',
       value: healthReady ? rows.filter(isAttention).length : null,
-      note: 'Health, freshness, or setup issue',
+      note: 'Measured latency, 5xx, or revoked key',
       color: 'var(--chart-2)',
     },
   ];
@@ -190,9 +213,11 @@ function WatchtowerTotals({ rows, healthReady }: { rows: WatchtowerRow[]; health
 function AttentionQueue({
   rows,
   onOpen,
+  healthReady,
 }: {
   rows: WatchtowerRow[];
   onOpen: ProjectsViewProps['onOpen'];
+  healthReady: boolean;
 }) {
   const attention = rows
     .filter(isAttention)
@@ -203,15 +228,21 @@ function AttentionQueue({
         <div className="flex items-center justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <ShieldAlert className="size-4 text-amber-500" /> Attention queue
+              <ShieldAlert className="size-4 text-amber-500" /> Request issues
             </CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">Highest-risk environments first</p>
+            <p className="mt-1 text-xs text-muted-foreground">Measured issues first</p>
           </div>
-          <Badge variant={attention.length ? 'outline' : 'secondary'}>{attention.length}</Badge>
+          <Badge variant={attention.length ? 'outline' : 'secondary'}>
+            {healthReady ? attention.length : '—'}
+          </Badge>
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {attention.length ? (
+        {!healthReady ? (
+          <p className="p-6 text-sm text-muted-foreground">
+            Request health is unavailable. Retry to check for issues.
+          </p>
+        ) : attention.length ? (
           <ol className="divide-y">
             {attention.slice(0, 6).map((row) => (
               <li key={`${row.project.appId}:${row.project.environmentId}`}>
@@ -234,8 +265,8 @@ function AttentionQueue({
           </ol>
         ) : (
           <div className="flex items-center gap-3 p-6 text-sm text-muted-foreground">
-            <CheckCircle2 className="size-5 text-emerald-500" /> No known exceptions in the current
-            inventory.
+            <CheckCircle2 className="size-5 text-emerald-500" /> No measured request issues in the
+            current inventory.
           </div>
         )}
       </CardContent>
@@ -387,17 +418,37 @@ function InventoryTable({
   );
 }
 
+function coverageLabel(rows: WatchtowerRow[], healthReady: boolean): string {
+  if (!healthReady) return 'Endpoint coverage unavailable · every environment remains listed';
+  const coverage = rows.reduce(
+    (counts, row) => {
+      const state = row.health?.endpoints.state;
+      if (state === 'connected') counts.connected += 1;
+      else if (state === 'stale') counts.stale += 1;
+      else if (state === 'waiting' || state === 'unconfigured') counts.awaiting += 1;
+      else if (state === 'revoked') counts.revoked += 1;
+      else if (!state) counts.unavailable += 1;
+      return counts;
+    },
+    { connected: 0, stale: 0, awaiting: 0, revoked: 0, unavailable: 0 },
+  );
+  return `${coverage.connected} connected · ${coverage.awaiting} awaiting setup · ${coverage.stale} stale · ${coverage.revoked} revoked · ${coverage.unavailable} unavailable`;
+}
+
 function Inventory({
   rows,
   now,
   onOpen,
+  healthReady,
 }: {
   rows: WatchtowerRow[];
   now: number;
   onOpen: ProjectsViewProps['onOpen'];
+  healthReady: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const summary = coverageLabel(rows, healthReady);
   const filtered = rows.filter((row) => {
     const matches = `${row.project.name} ${row.project.environment}`
       .toLowerCase()
@@ -409,9 +460,7 @@ function Inventory({
       <CardHeader className="gap-4 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <CardTitle className="text-sm">Complete inventory</CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Every environment stays visible, including quiet ones
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
           <label className="relative min-w-60">
@@ -433,7 +482,7 @@ function Inventory({
             onClick={() => setAttentionOnly((value) => !value)}
             aria-pressed={attentionOnly}
           >
-            Attention only
+            Request issues only
           </Button>
         </div>
       </CardHeader>
@@ -475,10 +524,10 @@ function WatchtowerHeader({
           Portfolio watchtower
         </p>
         <h2 id="projects-title" className="mt-1 text-2xl font-semibold tracking-tight">
-          What needs attention now?
+          Portfolio overview
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Usage and request reliability across every configured environment.
+          Usage and request reliability across every imported environment.
         </p>
       </div>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -543,7 +592,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           analytics.reload();
         }}
       />
-      <WatchtowerTotals rows={rows} healthReady={Boolean(health.data || health.error)} />
+      <WatchtowerTotals rows={rows} healthReady={Boolean(health.data)} />
       {error ? (
         <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="flex items-start gap-3 p-4 text-sm">
@@ -567,13 +616,13 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
-          <AttentionQueue rows={rows} onOpen={onOpen} />
+          <AttentionQueue rows={rows} onOpen={onOpen} healthReady={Boolean(health.data)} />
           <ReliabilityField rows={rows} />
         </div>
       )}
       <DailyEngagement ownerToken={ownerToken} />
       <OwnerAlertFeed ownerToken={ownerToken} />
-      <Inventory rows={rows} now={now} onOpen={onOpen} />
+      <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Requests are server or function calls, never a count of
         people. Missing data is shown as unknown.

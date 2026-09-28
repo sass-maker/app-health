@@ -52,6 +52,7 @@ export interface D1DatabaseLike {
 }
 
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
+const ENVIRONMENT_APP_QUERY_CHUNK_SIZE = 90;
 
 function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -252,6 +253,24 @@ export class D1ControlPlane
         .bind(appId)
         .all<EnvironmentV1>()
     ).results;
+  }
+
+  async listEnvironmentsForApps(appIds: readonly string[]): Promise<EnvironmentV1[]> {
+    const uniqueAppIds = [...new Set(appIds)];
+    const environments: EnvironmentV1[] = [];
+    for (let offset = 0; offset < uniqueAppIds.length; offset += ENVIRONMENT_APP_QUERY_CHUNK_SIZE) {
+      const appIdChunk = uniqueAppIds.slice(offset, offset + ENVIRONMENT_APP_QUERY_CHUNK_SIZE);
+      const placeholders = appIdChunk.map(() => '?').join(', ');
+      const result = await this.db
+        .prepare(
+          `SELECT id, app_id, name, created_at FROM environments
+           WHERE app_id IN (${placeholders}) ORDER BY app_id, created_at`,
+        )
+        .bind(...appIdChunk)
+        .all<EnvironmentV1>();
+      environments.push(...result.results);
+    }
+    return environments;
   }
 
   async createEnvironmentKey(appId: string, name: string, now: number) {

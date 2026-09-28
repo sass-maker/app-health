@@ -86,8 +86,8 @@ const report = {
       name: 'Atlas',
       browser_visitors: 12,
       cta_events: [
-        { name: 'download_opened', count: 4, estimated: false },
-        { name: 'signup_clicked', count: 20, estimated: true },
+        { name: 'download_opened', count: 4, unique_browsers: 1, estimated: false },
+        { name: 'signup_clicked', count: 20, unique_browsers: null, estimated: true },
       ],
       cta_status: 'measured',
       feedback_submitted: 0,
@@ -126,8 +126,14 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('0')).toBeTruthy();
   expect(within(atlas).getByText('download_opened')).toBeTruthy();
-  expect(within(atlas).getByText('4')).toBeTruthy();
-  expect(screen.getAllByText('Approx. 20')).toHaveLength(2);
+  expect(
+    within(atlas).getByText((_, element) => element?.textContent === '1 browser · 4 actions'),
+  ).toBeTruthy();
+  expect(
+    screen.getAllByText(
+      (_, element) => element?.textContent === 'Unknown browsers · Approx. 20 actions',
+    ),
+  ).toHaveLength(2);
   expect(
     screen.getByText(/Native sessions count only observed, unsampled native heartbeats/),
   ).toBeTruthy();

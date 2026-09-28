@@ -45,6 +45,8 @@ export interface EnvironmentRepository {
   resolveEnvironment(appId: string, name: string, now: number): Promise<EnvironmentV1 | null>;
   getEnvironment(envId: string): Promise<EnvironmentV1 | null>;
   listEnvironments(appId: string): Promise<EnvironmentV1[]>;
+  /** Read environments for an already-authorized set of apps in bounded queries. */
+  listEnvironmentsForApps(appIds: readonly string[]): Promise<EnvironmentV1[]>;
 }
 
 /**

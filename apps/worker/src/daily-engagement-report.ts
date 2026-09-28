@@ -52,6 +52,7 @@ interface CtaEventRow {
   app_id: string;
   name: string;
   count: number;
+  unique_browsers: number;
   sample_interval: number;
 }
 
@@ -214,7 +215,10 @@ interface ReportIndexes {
   nativeSessionsByApp: Map<string, NativeSessionRow>;
   apiActivityByApp: Map<string, ApiActivityRow>;
   browserLastSeen: Map<string, number>;
-  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>;
+  ctaByApp: Map<
+    string,
+    Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>
+  >;
   logCounts: Map<string, Partial<Record<MetricKind, number>>>;
   logLastSeen: Map<string, number>;
   unmappedLogs: number;
@@ -244,14 +248,20 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
 
 function indexCtaEvents(
   rows: readonly CtaEventRow[],
-): Map<string, Map<string, { count: number; estimated: boolean }>> {
-  const byApp = new Map<string, Map<string, { count: number; estimated: boolean }>>();
+): Map<string, Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>> {
+  const byApp = new Map<
+    string,
+    Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>
+  >();
   for (const row of rows) {
     const events =
-      byApp.get(row.app_id) ?? new Map<string, { count: number; estimated: boolean }>();
+      byApp.get(row.app_id) ??
+      new Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>();
     const previous = events.get(row.name);
     events.set(row.name, {
       count: (previous?.count ?? 0) + row.count,
+      // Distinct counts from duplicate groups cannot be added without overlap data.
+      unique_browsers: previous || row.sample_interval > 1 ? null : row.unique_browsers,
       estimated: (previous?.estimated ?? false) || row.sample_interval > 1,
     });
     byApp.set(row.app_id, events);
@@ -491,7 +501,10 @@ function isProductCtaMeasured(
   row: CatalogProductRow,
   visitor: BrowserVisitorRow | undefined,
   input: DailyEngagementInputs,
-  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>,
+  ctaByApp: Map<
+    string,
+    Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>
+  >,
 ): boolean {
   return (
     (input.ctaEventNamesByCatalogId[row.catalog_id]?.length ?? 0) > 0 &&
@@ -507,7 +520,10 @@ function productCtas(
   row: CatalogProductRow,
   input: DailyEngagementInputs,
   visitor: BrowserVisitorRow | undefined,
-  ctaByApp: Map<string, Map<string, { count: number; estimated: boolean }>>,
+  ctaByApp: Map<
+    string,
+    Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>
+  >,
   browserMeasured: boolean,
 ): DailyEngagementProductReportV1['cta_events'] {
   const configured = input.ctaEventNamesByCatalogId[row.catalog_id] ?? [];
@@ -523,6 +539,7 @@ function productCtas(
         return {
           name,
           count: Math.max(0, Math.round(event.count)),
+          unique_browsers: event.unique_browsers,
           estimated: event.estimated,
         };
       });
@@ -533,6 +550,7 @@ function productCtas(
     return {
       name,
       count: Math.max(0, Math.round(event?.count ?? 0)),
+      unique_browsers: event?.unique_browsers ?? 0,
       estimated: event?.estimated ?? false,
     };
   });
@@ -743,6 +761,7 @@ interface CtaQueryRow {
   app_id: string;
   name: string;
   count: number | string;
+  unique_browsers: number | string;
   sample_interval: number | string;
 }
 interface NativeSessionQueryRow {
@@ -787,7 +806,8 @@ async function readDailyEngagementBrowser(
     GROUP BY blob1 LIMIT 1000`;
   const ctaNames = ctaEventNames.map(sqlLiteral).join(',');
   const ctaSql = `SELECT blob1 AS app_id, blob5 AS name,
-    SUM(_sample_interval) AS count, MAX(_sample_interval) AS sample_interval
+    SUM(_sample_interval) AS count, COUNT(DISTINCT blob8) AS unique_browsers,
+    MAX(_sample_interval) AS sample_interval
     FROM app_health_browser_v1
     WHERE index1 = ${sqlLiteral(workspace)} AND double2 >= ${from} AND double2 < ${to}
     AND blob3 = 'event' AND blob8 != '' AND blob5 IN (${ctaNames})
@@ -808,6 +828,7 @@ async function readDailyEngagementBrowser(
       app_id: String(row.app_id),
       name: String(row.name),
       count: Math.max(0, Math.round(num(row.count))),
+      unique_browsers: Math.max(0, Math.round(num(row.unique_browsers))),
       sample_interval: Math.max(1, Math.round(num(row.sample_interval))),
     }));
   // Run the two queries independently so a CTA failure does not discard

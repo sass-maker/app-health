@@ -23,6 +23,7 @@ import {
   validateLogBatch,
   type CreateAppRequestV1 as CreateAppRequest,
   type CreateAppResponseV1,
+  type EnvironmentV1,
   type EndpointQueryResponseV1,
   type EventBatchV1,
   type EventV1,
@@ -132,13 +133,17 @@ export class AppHealthService {
   async listApps(appId?: string): Promise<ListAppsResponseV1> {
     const scopedApp = appId ? await this.repos.apps.getApp(appId) : null;
     const apps = appId ? (scopedApp ? [scopedApp] : []) : await this.repos.apps.listApps();
+    const environments = await this.repos.environments.listEnvironmentsForApps(
+      apps.map((app) => app.id),
+    );
+    const environmentsByApp = new Map<string, EnvironmentV1[]>();
+    for (const environment of environments) {
+      const group = environmentsByApp.get(environment.app_id) ?? [];
+      group.push(environment);
+      environmentsByApp.set(environment.app_id, group);
+    }
     return {
-      apps: await Promise.all(
-        apps.map(async (app) => ({
-          app,
-          environments: await this.repos.environments.listEnvironments(app.id),
-        })),
-      ),
+      apps: apps.map((app) => ({ app, environments: environmentsByApp.get(app.id) ?? [] })),
     };
   }
 
