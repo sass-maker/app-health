@@ -40,10 +40,7 @@ export function accountsConfigured(env: AccountBindings): env is ConfiguredAccou
 }
 
 /** Auth context initialization uses D1 I/O and must stay within its Worker request. */
-export function createAccountAuth(
-  env: AccountBindings,
-  options: { skipGetSessionRateLimit?: boolean } = {},
-) {
+export function createAccountAuth(env: AccountBindings) {
   if (!accountsConfigured(env)) return null;
   const origin = `https://${env.APP_HEALTH_DASHBOARD_HOST}`;
   const auth = betterAuth<BetterAuthOptions>({
@@ -66,18 +63,7 @@ export function createAccountAuth(
       updateAge: 24 * 60 * 60,
       cookieCache: { enabled: false },
     },
-    rateLimit: {
-      enabled: true,
-      storage: 'database',
-      window: 60,
-      max: 60,
-      ...(options.skipGetSessionRateLimit
-        ? {
-            // Internal owner reads still validate sessions against D1.
-            customRules: { '/get-session': false },
-          }
-        : {}),
-    },
+    rateLimit: { enabled: true, storage: 'database', window: 60, max: 60 },
     advanced: {
       disableOriginCheck: false,
       disableCSRFCheck: false,
@@ -168,7 +154,7 @@ export async function accountIdentity(
   timings?: OwnerRequestTimings,
 ): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
   const authSetupStarted = performance.now();
-  const auth = createAccountAuth(env, { skipGetSessionRateLimit: true });
+  const auth = createAccountAuth(env);
   if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
   if (!auth || !env.DB) return null;
   const sessionLookupStarted = performance.now();

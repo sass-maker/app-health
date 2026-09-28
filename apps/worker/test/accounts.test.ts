@@ -180,7 +180,7 @@ describe('Google account boundary with real D1 SQL', () => {
     expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
   });
 
-  it('keeps public get-session limited but skips duplicate limiting for owner reads', async () => {
+  it('keeps the public get-session D1 limit while owner reads do not consume it', async () => {
     const ip = '203.0.113.87';
     const authRequest = (path: string, body?: unknown, cookie?: string) =>
       worker.fetch(
@@ -196,20 +196,23 @@ describe('Google account boundary with real D1 SQL', () => {
         }),
         env,
       );
-    const rateLimitRows = async () =>
-      (await env.DB!.prepare('SELECT COUNT(*) AS count FROM rateLimit').first<{ count: number }>())
-        ?.count ?? 0;
-    const before = await rateLimitRows();
+    const rateLimitCount = async () =>
+      (
+        await env
+          .DB!.prepare('SELECT COALESCE(SUM(count), 0) AS count FROM rateLimit')
+          .first<{ count: number }>()
+      )?.count ?? 0;
+    const before = await rateLimitCount();
 
     const publicSession = await authRequest('/v1/auth/get-session');
     expect(publicSession.status).toBe(200);
     expect(await publicSession.json()).toBeNull();
-    const afterPublicSession = await rateLimitRows();
+    const afterPublicSession = await rateLimitCount();
     expect(afterPublicSession).toBeGreaterThan(before);
 
     const ownerRead = await authRequest('/v1/apps', undefined, aliceCookie);
     expect(ownerRead.status).toBe(200);
-    expect(await rateLimitRows()).toBe(afterPublicSession);
+    expect(await rateLimitCount()).toBe(afterPublicSession);
 
     const signInBody = { provider: 'google', callbackURL: '/' };
     for (let i = 0; i < 3; i++)
