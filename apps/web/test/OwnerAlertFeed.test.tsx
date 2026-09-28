@@ -24,6 +24,14 @@ const feed = {
       event: 'waitlist.join',
       timestamp: Date.UTC(2026, 8, 28, 7),
     },
+    {
+      id: 'newsletter-1',
+      app_id: 'app-catalog',
+      catalog_id: 'catalog',
+      project_name: 'Catalog',
+      event: 'newsletter.subscribe',
+      timestamp: Date.UTC(2026, 8, 28, 6),
+    },
   ],
 };
 
@@ -35,6 +43,7 @@ it('shows recent workspace alerts and total count without exposing submitted det
   render(<OwnerAlertFeed ownerToken="owner-token" />);
   expect(await screen.findByText('New feedback')).toBeTruthy();
   expect(screen.getByText('Waitlist join')).toBeTruthy();
+  expect(screen.getByText('Newsletter subscription')).toBeTruthy();
   expect(screen.getByText('9 in retention')).toBeTruthy();
   expect(screen.getByText(/Atlas/)).toBeTruthy();
   expect(fetch.mock.calls[0][0]).toBe('/v1/workspace/alerts');

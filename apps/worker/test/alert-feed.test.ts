@@ -48,7 +48,7 @@ describe('readOwnerAlertFeed', () => {
         '{"project":"atlas"}',
       );
       insert.run(
-        'unknown-event-1',
+        'newsletter-1',
         'app-a',
         'prod-a',
         1_700_000_000_400,
@@ -92,7 +92,7 @@ describe('readOwnerAlertFeed', () => {
       const result = await readOwnerAlertFeed(db, 'ws-a', now, 10);
       expect(result).toEqual({
         generated_at: now,
-        total_count: 3,
+        total_count: 4,
         entries: [
           {
             id: 'central-known',
@@ -101,6 +101,14 @@ describe('readOwnerAlertFeed', () => {
             project_name: 'Atlas',
             event: 'feedback.submitted',
             timestamp: 1_700_000_000_500,
+          },
+          {
+            id: 'newsletter-1',
+            app_id: 'app-a',
+            catalog_id: 'atlas',
+            project_name: 'Atlas',
+            event: 'newsletter.subscribe',
+            timestamp: 1_700_000_000_400,
           },
           {
             id: 'waitlist-1',

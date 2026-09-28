@@ -8,7 +8,7 @@ interface OwnerAlert {
   app_id: string;
   catalog_id: string;
   project_name: string;
-  event: 'feedback.submitted' | 'waitlist.join';
+  event: 'feedback.submitted' | 'waitlist.join' | 'newsletter.subscribe';
   timestamp: number;
 }
 
@@ -19,7 +19,7 @@ export interface OwnerAlertFeed {
 }
 
 /**
- * Read the latest owner-authored feedback and waitlist alert metadata for one
+ * Read the latest owner-authored feedback, waitlist, and newsletter alert metadata for one
  * workspace. Submitted text, email, props, and other log fields are never read.
  */
 export async function readOwnerAlertFeed(
@@ -34,7 +34,7 @@ export async function readOwnerAlertFeed(
       AND lower(e.name) = 'production'
     JOIN catalog_project_imports c
       ON c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
-    WHERE l.event IN ('feedback.submitted', 'waitlist.join')
+    WHERE l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe')
       AND l.timestamp >= ? AND l.timestamp <= ?
       AND EXISTS (SELECT 1 FROM catalog_project_imports source
         WHERE source.workspace_id = ? AND source.app_id = l.app_id

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, MessageSquareText, RefreshCw, UserRoundPlus } from 'lucide-react';
+import { AlertTriangle, Mail, MessageSquareText, RefreshCw, UserRoundPlus } from 'lucide-react';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
 import { Skeleton } from './components/ui/skeleton.js';
@@ -9,7 +9,7 @@ interface AlertEntry {
   app_id: string;
   catalog_id: string;
   project_name: string;
-  event: 'feedback.submitted' | 'waitlist.join';
+  event: 'feedback.submitted' | 'waitlist.join' | 'newsletter.subscribe';
   timestamp: number;
 }
 
@@ -20,15 +20,16 @@ interface Feed {
 }
 
 function eventLabel(event: AlertEntry['event']): string {
-  return event === 'feedback.submitted' ? 'New feedback' : 'Waitlist join';
+  if (event === 'feedback.submitted') return 'New feedback';
+  if (event === 'waitlist.join') return 'Waitlist join';
+  return 'Newsletter subscription';
 }
 
 function EventIcon({ event }: { event: AlertEntry['event'] }) {
-  return event === 'feedback.submitted' ? (
-    <MessageSquareText aria-hidden="true" className="size-4" />
-  ) : (
-    <UserRoundPlus aria-hidden="true" className="size-4" />
-  );
+  if (event === 'feedback.submitted')
+    return <MessageSquareText aria-hidden="true" className="size-4" />;
+  if (event === 'waitlist.join') return <UserRoundPlus aria-hidden="true" className="size-4" />;
+  return <Mail aria-hidden="true" className="size-4" />;
 }
 
 function AlertEntries({ entries }: { entries: AlertEntry[] }): JSX.Element {
@@ -80,7 +81,11 @@ function AlertBody({
       </div>
     );
   if (!feed?.entries.length)
-    return <p className="text-sm text-muted-foreground">No feedback or waitlist activity yet.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        No feedback, waitlist, or newsletter activity yet.
+      </p>
+    );
   return <AlertEntries entries={feed.entries} />;
 }
 
@@ -100,7 +105,7 @@ function AlertHeader({
           Workspace activity
         </p>
         <CardTitle id="owner-alert-feed-title" className="mt-1 text-lg">
-          Feedback and waitlist
+          Feedback, waitlist, and newsletter
         </CardTitle>
       </div>
       <div className="flex items-center gap-3">
