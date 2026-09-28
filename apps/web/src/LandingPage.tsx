@@ -129,12 +129,14 @@ function Hero(): JSX.Element {
           </p>
           <div className="mt-6 flex gap-3">
             <Button asChild size="lg" className="h-12 px-6">
-              <a href="/app">
+              <a href="/app" data-app-health-event="dashboard_opened">
                 Open App Health <ArrowRight />
               </a>
             </Button>
             <Button asChild size="lg" variant="outline" className="hidden h-12 px-6 sm:inline-flex">
-              <a href="#product">Explore the product</a>
+              <a href="#product" data-app-health-event="product_explored">
+                Explore the product
+              </a>
             </Button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -252,7 +254,7 @@ function IntegrationSection(): JSX.Element {
             your team cares about. The tracker stays isolated from your application.
           </p>
           <Button asChild size="lg" className="mt-8 h-12">
-            <a href="/app">
+            <a href="/app" data-app-health-event="project_add_started">
               Add your project <ArrowRight />
             </a>
           </Button>
@@ -345,6 +347,7 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
             <a
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               href="/changelog"
+              data-app-health-event="release_status_opened"
             >
               Changelog
             </a>

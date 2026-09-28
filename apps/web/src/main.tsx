@@ -32,7 +32,42 @@ const RootView =
       : window.location.pathname === '/' && !window.location.search.includes('demo=')
         ? LandingPage
         : App;
-if (window.location.pathname !== '/live') void loadProductAnalytics();
+const analyticsReady =
+  window.location.pathname === '/live' ? Promise.resolve() : loadProductAnalytics();
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const link = target.closest('a[data-app-health-event]');
+  if (!(link instanceof HTMLAnchorElement)) return;
+  const name = link.dataset.appHealthEvent;
+  if (!name) return;
+
+  const shouldFlushBeforeNavigation =
+    event.button === 0 &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    link.target !== '_blank' &&
+    !link.hasAttribute('download') &&
+    new URL(link.href).pathname !== window.location.pathname;
+  if (shouldFlushBeforeNavigation) event.preventDefault();
+
+  let navigated = false;
+  const navigate = () => {
+    if (!shouldFlushBeforeNavigation || navigated) return;
+    navigated = true;
+    window.location.assign(link.href);
+  };
+  if (shouldFlushBeforeNavigation) window.setTimeout(navigate, 800);
+  void analyticsReady
+    .then(() => {
+      window.appHealth?.track(name);
+      return shouldFlushBeforeNavigation ? window.appHealth?.flush?.() : undefined;
+    })
+    .catch(() => undefined)
+    .finally(navigate);
+});
 document.title =
   RootView === PrivacyPage
     ? 'Privacy — App Health'
