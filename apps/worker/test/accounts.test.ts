@@ -380,6 +380,21 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     const control = new D1ControlPlane(env.DB!);
     const repos = control.asRepositories({} as never);
+    const scopedSetup = await repos.capabilitySetup!.getCapabilitySetup(
+      created.app.id,
+      staging.environment.id,
+    );
+    expect(scopedSetup?.private_key).toMatchObject({
+      environment_id: staging.environment.id,
+      revoked_at: null,
+    });
+    expect(scopedSetup?.private_key).not.toHaveProperty('verifier_hash');
+    expect(
+      await repos.capabilitySetup!.getCapabilitySetup('another-app', staging.environment.id),
+    ).toBeNull();
+    expect(
+      await repos.capabilitySetup!.getCapabilitySetup(created.app.id, 'missing-environment'),
+    ).toBeNull();
     await repos.capabilities!.setCapabilities(created.app.id, staging.environment.id, ['logs']);
     await repos.capabilities!.recordCapability(
       created.app.id,
@@ -396,13 +411,31 @@ describe('Google account boundary with real D1 SQL', () => {
       2000,
     );
     const state = (await (await request(path)).json()) as {
+      app_id: string;
+      environment_id: string;
       capabilities: {
         id: string;
         enabled: boolean;
         first_received_at: number | null;
         last_received_at: number | null;
       }[];
+      private_key: {
+        id: string;
+        environment_id: string | null;
+        created_at: number;
+        revoked_at: number | null;
+      } | null;
     };
+    expect(state.app_id).toBe(created.app.id);
+    expect(state.environment_id).toBe(staging.environment.id);
+    expect(state.private_key?.environment_id).toBe(staging.environment.id);
+    expect(Object.keys(state.private_key ?? {}).sort()).toEqual([
+      'created_at',
+      'environment_id',
+      'id',
+      'revoked_at',
+    ]);
+    expect(JSON.stringify(state)).not.toContain(created.key.key);
     expect(state.capabilities.find((c) => c.id === 'logs')).toMatchObject({
       enabled: false,
       first_received_at: 1000,
@@ -419,6 +452,7 @@ describe('Google account boundary with real D1 SQL', () => {
       `/v1/capabilities?app_id=${created.app.id}&environment_id=${aliceApp.environment.id}`,
     );
     expect(invalidScope.status).toBe(404);
+    expect(await invalidScope.json()).toEqual({ error: 'Environment not found' });
   });
 
   it('imports declared catalog identities atomically and idempotently without keys or cross-account claims', async () => {

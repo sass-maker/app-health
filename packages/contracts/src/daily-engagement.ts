@@ -76,8 +76,14 @@ export const DailyEngagementProductReportV1 = z
     feedback_submitted: z.number().int().min(0).nullable(),
     /** Newsletter joins, or an observed App Health log lower bound when source data is unavailable. */
     newsletter_joins: z.number().int().min(0).nullable(),
+    /** Capture policy applicability, separate from whether a count was measured. */
+    newsletter_applicability: z
+      .enum(['applicable', 'not_applicable', 'unknown'])
+      .default('unknown'),
     /** Waitlist joins, or an observed App Health log lower bound when source data is unavailable. */
     waitlist_joins: z.number().int().min(0).nullable(),
+    /** Capture policy applicability, separate from whether a count was measured. */
+    waitlist_applicability: z.enum(['applicable', 'not_applicable', 'unknown']).default('unknown'),
     /** Observed native sessions; null when absent, unavailable, or sampled. */
     native_sessions: z.number().int().min(0).nullable(),
     /** Server request count, not people. `null` when durable unsampled endpoint coverage is unknown. */

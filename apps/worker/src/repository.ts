@@ -234,6 +234,16 @@ export interface CapabilityRepository {
   ): Promise<void>;
 }
 
+export interface CapabilitySetup {
+  capabilities: CapabilityState[];
+  private_key: Pick<KeyRecordV1, 'id' | 'environment_id' | 'created_at' | 'revoked_at'> | null;
+}
+
+/** Reads the scoped environment, its capability state, and active key in one operation. */
+export interface CapabilitySetupRepository {
+  getCapabilitySetup(appId: string, envId: string): Promise<CapabilitySetup | null>;
+}
+
 export interface SetupRepository {
   createAppEnvironmentKey(
     name: string,
@@ -254,6 +264,7 @@ export const MAX_ENVIRONMENTS_PER_APP = 20;
 export interface AppHealthRepositories {
   durableEndpoints?: DurableEndpointWriter;
   capabilities?: CapabilityRepository;
+  capabilitySetup?: CapabilitySetupRepository;
   apps: AppRepository;
   environments: EnvironmentRepository;
   keys: KeyRepository;

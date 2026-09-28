@@ -92,7 +92,9 @@ const report = {
       cta_status: 'measured',
       feedback_submitted: 0,
       newsletter_joins: null,
+      newsletter_applicability: 'applicable',
       waitlist_joins: 2,
+      waitlist_applicability: 'not_applicable',
       native_sessions: 3,
       api_activity: null,
       freshness: { browser_last_seen: null, log_last_seen: null },
@@ -107,7 +109,9 @@ const report = {
       cta_status: 'not_applicable',
       feedback_submitted: null,
       newsletter_joins: null,
+      newsletter_applicability: 'not_applicable',
       waitlist_joins: null,
+      waitlist_applicability: 'not_applicable',
       native_sessions: null,
       api_activity: null,
       freshness: { browser_last_seen: null, log_last_seen: null },
@@ -134,6 +138,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
       (_, element) => element?.textContent === 'Unknown browsers · Approx. 20 actions',
     ),
   ).toHaveLength(2);
+  expect(atlas.cells[6].textContent).toBe('Unknown');
+  expect(atlas.cells[7].textContent).toBe('2');
   expect(
     screen.getByText(/Native sessions count only observed, unsampled native heartbeats/),
   ).toBeTruthy();
@@ -144,7 +150,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
-  expect(within(beacon).getByText('Not applicable')).toBeTruthy();
+  expect(beacon.cells[6].textContent).toBe('Not applicable');
+  expect(beacon.cells[7].textContent).toBe('Not applicable');
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');
   fireEvent.change(screen.getByPlaceholderText('Search products'), { target: { value: 'Beacon' } });
   expect(within(table).queryByText('atlas')).toBeNull();

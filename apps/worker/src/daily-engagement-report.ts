@@ -89,6 +89,8 @@ interface DailyCaptureCountRow {
 interface DailyCaptureCounts {
   coverageStart: string | null;
   rows: readonly DailyCaptureCountRow[];
+  /** Catalog policy returned by SaaS Maker; absent on older compatible providers. */
+  applicabilityByCatalogId?: Readonly<Record<string, CaptureApplicability>>;
 }
 
 export interface DailyCaptureCountsService {
@@ -127,6 +129,8 @@ export interface DailyEngagementInputs {
 }
 
 type MetricKind = 'feedback' | 'waitlist' | 'newsletter';
+type CaptureApplicability = 'newsletter' | 'waitlist' | 'not-applicable' | 'undetermined';
+type MetricApplicability = 'applicable' | 'not_applicable' | 'unknown';
 
 function validateDailyCaptureCounts(
   value: unknown,
@@ -172,7 +176,39 @@ function validateDailyCaptureCounts(
       waitlist: count('waitlist'),
     };
   });
-  return { coverageStart: coverageStart as string | null, rows };
+  const applicabilityByCatalogId = parseCaptureApplicability(
+    response.applicabilityByCatalogId,
+    allowedIds,
+  );
+  return { coverageStart: coverageStart as string | null, rows, applicabilityByCatalogId };
+}
+
+function parseCaptureApplicability(
+  value: unknown,
+  allowedIds: ReadonlySet<string>,
+): Record<string, CaptureApplicability> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('invalid SaaS Maker capture applicability');
+  const policy: Record<string, CaptureApplicability> = {};
+  for (const [catalogId, applicability] of Object.entries(value)) {
+    if (
+      !allowedIds.has(catalogId) ||
+      !['newsletter', 'waitlist', 'not-applicable', 'undetermined'].includes(String(applicability))
+    )
+      throw new Error('invalid SaaS Maker capture applicability');
+    policy[catalogId] = applicability as CaptureApplicability;
+  }
+  return policy;
+}
+
+function metricApplicability(
+  capture: CaptureApplicability | undefined,
+  metric: 'newsletter' | 'waitlist',
+): MetricApplicability {
+  if (!capture || capture === 'undetermined') return 'unknown';
+  if (capture === metric) return 'applicable';
+  return 'not_applicable';
 }
 
 function nonEmpty(value: string | null): string | null {
@@ -370,6 +406,7 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
   notes.push(
     'Feedback and join counts cover SaaS Maker hosted submissions and observed App Health events only; feedback from other native or API sources is unknown.',
   );
+  notes.push(...captureApplicabilityNotes(input));
   const captureCoverage =
     input.captureCounts?.coverageStart !== null && input.captureCounts?.coverageStart !== undefined;
   if (!input.captureCountsAvailable) {
@@ -397,6 +434,14 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
   }
   notes.push(...samplingNotes(input));
   return notes;
+}
+
+function captureApplicabilityNotes(input: DailyEngagementInputs): string[] {
+  return Object.keys(input.captureCounts?.applicabilityByCatalogId ?? {}).length > 0
+    ? [
+        'Newsletter and waitlist applicability follows canonical capture policy; Not applicable is not a measured zero, and observed positive counts remain visible.',
+      ]
+    : [];
 }
 
 function coveredCaptureCount(
@@ -472,7 +517,15 @@ function buildProductReport(
         : 'unknown',
     feedback_submitted: feedback,
     newsletter_joins: newsletter,
+    newsletter_applicability: metricApplicability(
+      input.captureCounts?.applicabilityByCatalogId?.[row.catalog_id],
+      'newsletter',
+    ),
     waitlist_joins: waitlist,
+    waitlist_applicability: metricApplicability(
+      input.captureCounts?.applicabilityByCatalogId?.[row.catalog_id],
+      'waitlist',
+    ),
     native_sessions: nativeSessions,
     api_activity: apiActivity,
     freshness: {

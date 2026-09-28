@@ -20,8 +20,18 @@ import {
 
 type Product = Report['products'][number];
 
-function count(value: number | null): string {
-  return value === null ? 'Unknown' : value.toLocaleString();
+function count(value: number | string | null): string {
+  if (value === null) return 'Unknown';
+  return typeof value === 'string' ? value : value.toLocaleString();
+}
+
+function captureCount(
+  value: number | null,
+  applicability: Product['newsletter_applicability'],
+): string {
+  if (value !== null && value > 0) return count(value);
+  if (applicability === 'not_applicable') return 'Not applicable';
+  return count(value);
 }
 
 function previousReportDay(): string {
@@ -159,8 +169,8 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
     ['Native sessions', product.native_sessions],
     ['Server requests', product.api_activity],
     ['Feedback', product.feedback_submitted],
-    ['Newsletter', product.newsletter_joins],
-    ['Waitlist', product.waitlist_joins],
+    ['Newsletter', captureCount(product.newsletter_joins, product.newsletter_applicability)],
+    ['Waitlist', captureCount(product.waitlist_joins, product.waitlist_applicability)],
   ] as const;
   return (
     <li className="rounded-lg border p-4">
@@ -233,10 +243,10 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 {count(product.feedback_submitted)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                {count(product.newsletter_joins)}
+                {captureCount(product.newsletter_joins, product.newsletter_applicability)}
               </TableCell>
               <TableCell className="text-right tabular-nums">
-                {count(product.waitlist_joins)}
+                {captureCount(product.waitlist_joins, product.waitlist_applicability)}
               </TableCell>
             </TableRow>
           ))}

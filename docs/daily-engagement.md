@@ -37,6 +37,12 @@ is part of this source change.
   from stored production App Health logs. Central SaaS Maker logs are attributed
   only when their project ID or slug resolves to an imported catalog product.
   Submission text and email are never included in the report.
+- Newsletter and waitlist applicability comes from the canonical catalog policy
+  returned by SaaS Maker's private metrics binding. A `Not applicable` cell is
+  a policy classification, not a measured zero. Applicable cells stay Unknown
+  until source coverage reaches the selected day; observed positive counts
+  remain visible even if they conflict with the current policy. An older
+  provider response without applicability metadata keeps these cells Unknown.
 - Native sessions count distinct, scoped session hashes from accepted native
   active heartbeats in the completed day. Their Analytics Engine projection is
   best-effort; missing or sampled rows remain unknown. Browser visitor slots do

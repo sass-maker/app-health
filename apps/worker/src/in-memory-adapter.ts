@@ -42,6 +42,8 @@ import type {
   AppHealthRepositories,
   AppRepository,
   BucketRepository,
+  CapabilitySetup,
+  CapabilitySetupRepository,
   DedupeRepository,
   EndpointInventoryRepository,
   EnvironmentRepository,
@@ -110,7 +112,8 @@ export class InMemoryAdapter
     LogRepository,
     PublicLogKeyRepository,
     BucketRepository,
-    WorkspaceHealthRepository
+    WorkspaceHealthRepository,
+    CapabilitySetupRepository
 {
   private readonly capabilities = new MemoryCapabilities();
   private readonly apps = new Map<string, AppV1>();
@@ -143,6 +146,7 @@ export class InMemoryAdapter
   asRepositories(): AppHealthRepositories {
     return {
       capabilities: this.capabilities,
+      capabilitySetup: this,
       apps: this,
       environments: this,
       keys: this,
@@ -187,6 +191,25 @@ export class InMemoryAdapter
       now,
       windowEnd,
     );
+  }
+
+  async getCapabilitySetup(appId: string, envId: string): Promise<CapabilitySetup | null> {
+    if ((await this.getEnvironment(envId))?.app_id !== appId) return null;
+    const [capabilities, key] = await Promise.all([
+      this.capabilities.getCapabilities(appId, envId),
+      this.getActiveKeyForEnvironment(appId, envId),
+    ]);
+    return {
+      capabilities,
+      private_key: key
+        ? {
+            id: key.id,
+            environment_id: key.environment_id,
+            created_at: key.created_at,
+            revoked_at: key.revoked_at,
+          }
+        : null,
+    };
   }
 
   private async seed(): Promise<void> {

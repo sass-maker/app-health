@@ -11,13 +11,20 @@ import type {
   PublicLogKeyV1,
   StoredLogV1,
 } from '@app-health/contracts';
-import { LOG_LEVELS, LOG_RETENTION_DAYS, PUBLIC_LOG_KEY_PREFIX } from '@app-health/contracts';
+import {
+  CAPABILITY_IDS,
+  LOG_LEVELS,
+  LOG_RETENTION_DAYS,
+  PUBLIC_LOG_KEY_PREFIX,
+} from '@app-health/contracts';
 import { D1Capabilities } from './capability-store.js';
 import { generateRawKey, hashKey } from './crypto.js';
 import type {
   AppHealthRepositories,
   AppRepository,
   BucketRepository,
+  CapabilitySetup,
+  CapabilitySetupRepository,
   DedupeRepository,
   EndpointInventoryRepository,
   FailureRepository,
@@ -83,7 +90,8 @@ export class D1ControlPlane
     LogRepository,
     PublicLogKeyRepository,
     SetupRepository,
-    WorkspaceHealthRepository
+    WorkspaceHealthRepository,
+    CapabilitySetupRepository
 {
   constructor(
     private readonly db: D1DatabaseLike,
@@ -93,6 +101,7 @@ export class D1ControlPlane
   asRepositories(buckets: BucketRepository): AppHealthRepositories {
     return {
       capabilities: new D1Capabilities(this.db),
+      capabilitySetup: this,
       apps: this,
       environments: this,
       keys: this,
@@ -110,6 +119,69 @@ export class D1ControlPlane
 
   queryWorkspaceHealth(now: number) {
     return new D1WorkspaceHealth(this.db, this.workspaceId).queryWorkspaceHealth(now);
+  }
+
+  async getCapabilitySetup(appId: string, envId: string): Promise<CapabilitySetup | null> {
+    const [environmentResult, capabilityResult, keyResult] = await this.db.batch([
+      this.db
+        .prepare('SELECT id, app_id, name, created_at FROM environments WHERE id = ?')
+        .bind(envId),
+      this.db
+        .prepare(
+          'SELECT capability AS id, enabled, first_received_at, last_received_at FROM environment_capabilities WHERE app_id = ? AND environment_id = ?',
+        )
+        .bind(appId, envId),
+      this.db
+        .prepare(
+          'SELECT id, environment_id, created_at, revoked_at FROM keys WHERE app_id = ? AND environment_id = ? AND revoked_at IS NULL UNION ALL SELECT id, NULL AS environment_id, created_at, revoked_at FROM product_keys WHERE app_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1',
+        )
+        .bind(appId, envId, appId),
+    ]);
+    if (![environmentResult, capabilityResult, keyResult].every((result) => result.success))
+      throw new Error('Capability setup could not be read');
+    const environment = environmentResult?.results?.[0] as { app_id?: unknown } | undefined;
+    if (environment?.app_id !== appId) return null;
+    const rows = new Map(
+      (capabilityResult?.results ?? []).map((candidate) => {
+        const row = candidate as {
+          id: CapabilitySetup['capabilities'][number]['id'];
+          enabled: number;
+          first_received_at: number | null;
+          last_received_at: number | null;
+        };
+        return [
+          row.id,
+          {
+            id: row.id,
+            enabled: Boolean(row.enabled),
+            first_received_at: row.first_received_at,
+            last_received_at: row.last_received_at,
+          },
+        ] as const;
+      }),
+    );
+    const first = keyResult?.results?.[0] as
+      | {
+          id: string;
+          environment_id: string | null;
+          created_at: number;
+          revoked_at: number | null;
+        }
+      | undefined;
+    return {
+      capabilities: CAPABILITY_IDS.map(
+        (id) =>
+          rows.get(id) ?? { id, enabled: false, first_received_at: null, last_received_at: null },
+      ),
+      private_key: first
+        ? {
+            id: first.id,
+            environment_id: first.environment_id,
+            created_at: first.created_at,
+            revoked_at: first.revoked_at,
+          }
+        : null,
+    };
   }
 
   async createAppEnvironmentKey(

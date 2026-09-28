@@ -100,6 +100,8 @@ describe('buildDailyEngagementReport', () => {
       expect(product.feedback_submitted).toBeNull();
       expect(product.waitlist_joins).toBeNull();
       expect(product.newsletter_joins).toBeNull();
+      expect(product.newsletter_applicability).toBe('unknown');
+      expect(product.waitlist_applicability).toBe('unknown');
       expect(product.native_sessions).toBeNull();
       expect(product.api_activity).toBeNull();
       expect(product.coverage).toBe('unknown');
@@ -782,6 +784,77 @@ describe('composeDailyEngagementReport', () => {
       newsletter_joins: null,
       waitlist_joins: null,
     });
+  });
+
+  it('keeps catalog applicability independent from source date coverage and counts', async () => {
+    const products = catalog(2).map((row, index) => ({
+      ...row,
+      catalog_id: index === 0 ? 'pace' : 'site-health',
+    }));
+    const unavailableDate = await composeDailyEngagementReport({
+      db: new MockDatabase(products, []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: '2026-09-28',
+            applicabilityByCatalogId: { pace: 'newsletter', 'site-health': 'not-applicable' },
+            rows: [
+              { catalogId: 'pace', feedback: null, newsletter: null, waitlist: null },
+              { catalogId: 'site-health', feedback: null, newsletter: null, waitlist: null },
+            ],
+          };
+        },
+      },
+    });
+    expect(unavailableDate.products[0]).toMatchObject({
+      newsletter_joins: null,
+      newsletter_applicability: 'applicable',
+      waitlist_joins: null,
+      waitlist_applicability: 'not_applicable',
+    });
+    expect(unavailableDate.products[1]).toMatchObject({
+      newsletter_joins: null,
+      newsletter_applicability: 'not_applicable',
+      waitlist_joins: null,
+      waitlist_applicability: 'not_applicable',
+    });
+
+    const coveredDate = await composeDailyEngagementReport({
+      db: new MockDatabase(products, []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: DAY,
+            applicabilityByCatalogId: { pace: 'newsletter', 'site-health': 'not-applicable' },
+            rows: [
+              { catalogId: 'pace', feedback: 0, newsletter: 0, waitlist: 0 },
+              { catalogId: 'site-health', feedback: 0, newsletter: 0, waitlist: 0 },
+            ],
+          };
+        },
+      },
+    });
+    expect(coveredDate.products[0]).toMatchObject({
+      newsletter_joins: 0,
+      newsletter_applicability: 'applicable',
+      waitlist_joins: 0,
+      waitlist_applicability: 'not_applicable',
+    });
+    expect(coveredDate.products[1]).toMatchObject({
+      newsletter_joins: 0,
+      newsletter_applicability: 'not_applicable',
+      waitlist_joins: 0,
+      waitlist_applicability: 'not_applicable',
+    });
+    expect(coveredDate.notes).toContain(
+      'Newsletter and waitlist applicability follows canonical capture policy; Not applicable is not a measured zero, and observed positive counts remain visible.',
+    );
   });
 
   it('keeps null source metrics unknown when there are no observed logs', async () => {

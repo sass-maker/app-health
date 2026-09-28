@@ -66,6 +66,43 @@ async function capabilities(
   const env = url.searchParams.get('environment_id') ?? '';
   if (!app || !env) return json(400, { error: 'Project and environment are required' });
   if (!canManage(owner, app)) return json(403, { error: 'Project access denied' });
+  const fastResponse = await capabilitySetupResponse(request, repos, url, app, env);
+  if (fastResponse) return fastResponse;
+  return standardCapabilityResponse(request, repos, url, app, env);
+}
+
+async function capabilitySetupResponse(
+  request: Request,
+  repos: AppHealthRepositories,
+  url: URL,
+  app: string,
+  env: string,
+): Promise<Response | null> {
+  if (
+    url.pathname === '/v1/capabilities' &&
+    request.method === 'GET' &&
+    repos.capabilities &&
+    repos.capabilitySetup
+  ) {
+    const setup = await repos.capabilitySetup.getCapabilitySetup(app, env);
+    if (!setup) return json(404, { error: 'Environment not found' });
+    return json(200, {
+      app_id: app,
+      environment_id: env,
+      capabilities: setup.capabilities,
+      private_key: setup.private_key,
+    });
+  }
+  return null;
+}
+
+async function standardCapabilityResponse(
+  request: Request,
+  repos: AppHealthRepositories,
+  url: URL,
+  app: string,
+  env: string,
+): Promise<Response> {
   if (!(await scopedEnvironment(repos, app, env)))
     return json(404, { error: 'Environment not found' });
   if (!repos.capabilities) return json(503, { error: 'Capability state is unavailable' });
