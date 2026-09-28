@@ -65,14 +65,14 @@ export interface EngagementLogRow {
   last_seen: number;
 }
 
-export interface DailyCaptureCountRow {
+interface DailyCaptureCountRow {
   catalogId: string;
   feedback: number | null;
   newsletter: number | null;
   waitlist: number | null;
 }
 
-export interface DailyCaptureCounts {
+interface DailyCaptureCounts {
   coverageStart: string | null;
   rows: readonly DailyCaptureCountRow[];
 }
