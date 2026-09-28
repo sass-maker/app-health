@@ -94,6 +94,7 @@ describe('buildDailyEngagementReport', () => {
     for (const product of report.products) {
       expect(product.browser_visitors).toBeNull();
       expect(product.cta_events).toEqual([]);
+      expect(product.cta_status).toBe('unknown');
       expect(product.feedback_submitted).toBeNull();
       expect(product.waitlist_joins).toBeNull();
       expect(product.newsletter_joins).toBeNull();
@@ -101,6 +102,24 @@ describe('buildDailyEngagementReport', () => {
       expect(product.api_activity).toBeNull();
       expect(product.coverage).toBe('unknown');
     }
+  });
+
+  it('labels a product with no applicable visitor CTA without inventing a count', () => {
+    const report = buildDailyEngagementReport({
+      catalog: catalog(1),
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      ctaNotApplicableCatalogIds: ['product-000'],
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    });
+    expect(report.products[0]).toMatchObject({ cta_events: [], cta_status: 'not_applicable' });
   });
 
   it('reports measurable zero honestly but treats absent telemetry as unknown', () => {

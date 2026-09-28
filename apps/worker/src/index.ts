@@ -12,7 +12,7 @@ import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
 import { composeDailyEngagementReport, dailyEngagementWindow } from './daily-engagement-report.js';
-import { dailyCtaEventNamesForDate } from './daily-cta-policy.js';
+import { DAILY_CTA_NOT_APPLICABLE_IDS, dailyCtaEventNamesForDate } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
@@ -635,6 +635,7 @@ async function handleDailyEngagementRoute(
       date: url.searchParams.get('date'),
       now,
       ctaEventNamesByCatalogId: 'error' in day ? {} : dailyCtaEventNamesForDate(day.date),
+      ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
     });
     return json(200, report, true);
   } catch (error) {

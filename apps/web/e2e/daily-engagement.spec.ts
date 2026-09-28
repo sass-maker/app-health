@@ -33,6 +33,7 @@ for (const width of [390, 768, 1440]) {
             name: item.name,
             browser_visitors: item.visitors,
             cta_events: item.cta === null ? [] : [{ name: 'primary_action', count: item.cta }],
+            cta_status: item.cta === null ? 'unknown' : 'measured',
             feedback_submitted: item.feedback,
             newsletter_joins: null,
             waitlist_joins: item.waitlist,

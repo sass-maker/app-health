@@ -22,6 +22,7 @@ const report = {
       name: 'Atlas',
       browser_visitors: 12,
       cta_events: [{ name: 'download_opened', count: 4 }],
+      cta_status: 'measured',
       feedback_submitted: 0,
       newsletter_joins: null,
       waitlist_joins: 2,
@@ -36,6 +37,7 @@ const report = {
       name: 'Beacon',
       browser_visitors: null,
       cta_events: [],
+      cta_status: 'not_applicable',
       feedback_submitted: null,
       newsletter_joins: null,
       waitlist_joins: null,
@@ -59,6 +61,7 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlas).getByText('download_opened')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
+  expect(within(beacon).getByText('Not applicable')).toBeTruthy();
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');
   fireEvent.change(screen.getByPlaceholderText('Search products'), { target: { value: 'Beacon' } });
   expect(within(table).queryByText('atlas')).toBeNull();

@@ -66,6 +66,8 @@ export const DailyEngagementProductReportV1 = z
     browser_visitors: z.number().int().min(0).nullable(),
     /** Up to three configured primary CTA event counts. Empty when none were measurable. */
     cta_events: z.array(DailyCtaEvent).max(3),
+    /** Distinguishes a measured action, unsupported product form, and missing evidence. */
+    cta_status: z.enum(['measured', 'not_applicable', 'unknown']),
     /** Successful feedback.submitted log events mapped to this product. */
     feedback_submitted: z.number().int().min(0).nullable(),
     /** Successful newsletter join log events mapped to this product. */

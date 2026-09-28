@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   DAILY_CTA_POLICY,
+  DAILY_CTA_NOT_APPLICABLE_IDS,
   DAILY_CTA_REPORT_EVENT_NAMES,
   dailyCtaEventNamesForDate,
 } from '../src/daily-cta-policy.js';
@@ -10,10 +11,10 @@ describe('daily CTA policy', () => {
     expect(Object.keys(DAILY_CTA_POLICY)).toHaveLength(55);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'candidate_only'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'verified'),
-    ).toHaveLength(43);
+    ).toHaveLength(48);
     expect(DAILY_CTA_POLICY.posttrainllm).toMatchObject({
       clarityCandidate: 'quickstart_opened',
       qualification: 'verified',
@@ -21,7 +22,7 @@ describe('daily CTA policy', () => {
     });
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'unknown'),
-    ).toHaveLength(11);
+    ).toHaveLength(0);
     expect(DAILY_CTA_POLICY['app-health']).toMatchObject({
       clarityCandidate: 'release_status_opened',
       qualification: 'verified',
@@ -29,14 +30,20 @@ describe('daily CTA policy', () => {
     });
     expect(DAILY_CTA_POLICY['site-health']).toMatchObject({
       clarityCandidate: null,
-      qualification: 'unknown',
+      qualification: 'not_applicable',
       qualifiedAppHealthEvents: [],
     });
+    expect(DAILY_CTA_NOT_APPLICABLE_IDS).toHaveLength(7);
+    expect(
+      Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'not_applicable'),
+    ).toHaveLength(7);
   });
 
   it('reports only App Health events with production ingest receipts', () => {
     expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
       anchor: ['testflight_status_opened'],
+      'agent-testing': ['tools_catalog_opened'],
+      'ai-game': ['play_now_clicked'],
       'anime-list': ['cta_search'],
       'app-health': ['release_status_opened'],
       browserdaddy: ['release_status_opened'],
@@ -47,7 +54,9 @@ describe('daily CTA policy', () => {
       'email-manager': ['kinetic.cta.hero_connect_gmail'],
       'every-song-is-a-website': ['song_world_opened'],
       'field-track': ['manager_dashboard_opened'],
+      'free-ai': ['access_requirements.opened'],
       gitstat: ['cta.source_repository_opened'],
+      'high-signal': ['signals.browse_opened'],
       'issue-pages': ['repository_reader_opened'],
       karte: ['page_creation_opened', 'live_profile_opened'],
       kith: ['how_it_works_opened'],
@@ -60,6 +69,7 @@ describe('daily CTA policy', () => {
       mentionpilot: ['free_check.opened'],
       motion: ['how_it_works_opened'],
       'nutrition-formula-engine': ['formula_checked', 'report_downloaded'],
+      'nomad-data-adventure': ['comparison_opened'],
       'on-record': ['cta.inspect_receipt'],
       'open-historia': ['hero.play.clicked'],
       pace: ['pace_download_cta_clicked'],

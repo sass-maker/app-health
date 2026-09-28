@@ -106,7 +106,13 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
   );
 }
 
-function ProductActions({ events }: { events: Product['cta_events'] }): JSX.Element {
+function ProductActions({
+  events,
+  status,
+}: {
+  events: Product['cta_events'];
+  status: Product['cta_status'];
+}): JSX.Element {
   return events.length ? (
     <ul className="space-y-1 text-xs">
       {events.map((event) => (
@@ -117,7 +123,9 @@ function ProductActions({ events }: { events: Product['cta_events'] }): JSX.Elem
       ))}
     </ul>
   ) : (
-    <span className="text-muted-foreground">Unknown</span>
+    <span className="text-muted-foreground">
+      {status === 'not_applicable' ? 'Not applicable' : 'Unknown'}
+    </span>
   );
 }
 
@@ -143,7 +151,7 @@ function MobileProductCard({ product }: { product: Product }): JSX.Element {
       <div className="mt-3 border-t pt-3 text-xs">
         <p className="text-muted-foreground">Primary actions</p>
         <div className="mt-1">
-          <ProductActions events={product.cta_events} />
+          <ProductActions events={product.cta_events} status={product.cta_status} />
         </div>
       </div>
     </li>
@@ -185,7 +193,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 {count(product.browser_visitors)}
               </TableCell>
               <TableCell className="min-w-52">
-                <ProductActions events={product.cta_events} />
+                <ProductActions events={product.cta_events} status={product.cta_status} />
               </TableCell>
               <TableCell className="text-right tabular-nums">
                 {count(product.feedback_submitted)}

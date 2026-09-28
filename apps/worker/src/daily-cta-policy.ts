@@ -13,13 +13,15 @@ export interface DailyCtaPolicy {
   clarityCandidate: string | null;
   /** App Health event names with qualifying production ingest evidence. */
   qualifiedAppHealthEvents: readonly string[];
-  qualification: 'verified' | 'candidate_only' | 'unknown';
+  qualification: 'verified' | 'candidate_only' | 'unknown' | 'not_applicable';
 }
 
 /** Production browser-ingest receipts observed on 2026-09-28. */
 const firstQualifiedIndiaDay = '2026-09-28';
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   anchor: ['testflight_status_opened'],
+  'agent-testing': ['tools_catalog_opened'],
+  'ai-game': ['play_now_clicked'],
   'anime-list': ['cta_search'],
   'app-health': ['release_status_opened'],
   browserdaddy: ['release_status_opened'],
@@ -30,7 +32,9 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   'email-manager': ['kinetic.cta.hero_connect_gmail'],
   'every-song-is-a-website': ['song_world_opened'],
   'field-track': ['manager_dashboard_opened'],
+  'free-ai': ['access_requirements.opened'],
   gitstat: ['cta.source_repository_opened'],
+  'high-signal': ['signals.browse_opened'],
   'issue-pages': ['repository_reader_opened'],
   karte: ['page_creation_opened', 'live_profile_opened'],
   kith: ['how_it_works_opened'],
@@ -43,6 +47,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   mentionpilot: ['free_check.opened'],
   motion: ['how_it_works_opened'],
   'nutrition-formula-engine': ['formula_checked', 'report_downloaded'],
+  'nomad-data-adventure': ['comparison_opened'],
   'on-record': ['cta.inspect_receipt'],
   'open-historia': ['hero.play.clicked'],
   pace: ['pace_download_cta_clicked'],
@@ -125,6 +130,18 @@ const productsWithoutCandidate = [
   'war-chest',
 ] as const;
 
+/** These products have no visitor-facing primary action in their current form. */
+export const DAILY_CTA_NOT_APPLICABLE_IDS = [
+  'site-health',
+  'chatgpt-connections',
+  'fleet-social',
+  'ios-landings',
+  'slow-serp',
+  'unified-portfolio',
+  'war-chest',
+] as const;
+const notApplicableIds = new Set<string>(DAILY_CTA_NOT_APPLICABLE_IDS);
+
 /** All 55 in-scope products; candidate names never become report counts. */
 export const DAILY_CTA_POLICY: Readonly<Record<string, DailyCtaPolicy>> = Object.freeze(
   Object.fromEntries([
@@ -141,7 +158,11 @@ export const DAILY_CTA_POLICY: Readonly<Record<string, DailyCtaPolicy>> = Object
       {
         clarityCandidate: null,
         qualifiedAppHealthEvents: verifiedAppHealthEvents[catalogId] ?? [],
-        qualification: verifiedAppHealthEvents[catalogId] ? 'verified' : 'unknown',
+        qualification: verifiedAppHealthEvents[catalogId]
+          ? 'verified'
+          : notApplicableIds.has(catalogId)
+            ? 'not_applicable'
+            : 'unknown',
       } satisfies DailyCtaPolicy,
     ]),
   ]),

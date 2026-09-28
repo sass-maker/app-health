@@ -68,6 +68,7 @@ export interface DailyEngagementInputs {
   ctaEvents: readonly CtaEventRow[];
   logs: readonly EngagementLogRow[];
   ctaEventNamesByCatalogId: Readonly<Record<string, readonly string[]>>;
+  ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
   date: string;
   from: number;
@@ -254,6 +255,11 @@ function buildProductReport(
     name: row.catalog_name,
     browser_visitors: browserMeasured ? Math.max(0, Math.round(visitor?.visitors ?? 0)) : null,
     cta_events: ctas,
+    cta_status: input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)
+      ? 'not_applicable'
+      : ctas.length > 0
+        ? 'measured'
+        : 'unknown',
     feedback_submitted: feedback,
     newsletter_joins: newsletter,
     waitlist_joins: waitlist,
@@ -511,6 +517,7 @@ export async function composeDailyEngagementReport(args: {
   date: string | null;
   now: number;
   ctaEventNamesByCatalogId?: Readonly<Record<string, readonly string[]>>;
+  ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
 }): Promise<DailyEngagementReportV1> {
   const window = dailyEngagementWindow(args.date, args.now);
@@ -540,6 +547,7 @@ export async function composeDailyEngagementReport(args: {
     ctaEvents: browser.cta,
     logs: logResult.rows,
     ctaEventNamesByCatalogId,
+    ctaNotApplicableCatalogIds: args.ctaNotApplicableCatalogIds,
     confirmedLogMetricsByCatalogId: args.confirmedLogMetricsByCatalogId,
     date: window.date,
     from: window.from,
