@@ -134,6 +134,8 @@ export function createAccountAuth(env: AccountBindings, timings?: OwnerRequestTi
     },
     rateLimit: { enabled: true, storage: 'database', window: 60, max: 60 },
     advanced: {
+      // Account tables are migration-managed; avoid introspecting D1 per auth context.
+      database: { validateSchema: false },
       disableOriginCheck: false,
       disableCSRFCheck: false,
       useSecureCookies: true,

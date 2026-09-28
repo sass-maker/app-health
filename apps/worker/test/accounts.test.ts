@@ -167,7 +167,7 @@ describe('Google account boundary with real D1 SQL', () => {
       expect(response.status).toBe(200);
       const header = response.headers.get('server-timing') ?? '';
       expect(header).toMatch(timingPattern);
-      expect(Number(header.match(/auth_db;[^,]*;desc="(\d+) ops"/)?.[1])).toBeGreaterThan(0);
+      expect(Number(header.match(/auth_db;[^,]*;desc="(\d+) ops"/)?.[1])).toBe(2);
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
     }
