@@ -19,8 +19,21 @@ export interface DailyCtaPolicy {
 /** Production browser-ingest receipts observed on 2026-09-28. */
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   codevetter: ['benchmark_opened'],
+  'every-song-is-a-website': ['song_world_opened'],
+  'field-track': ['manager_dashboard_opened'],
+  kith: ['how_it_works_opened'],
   live: ['hobby_finder_opened'],
+  mashup: ['proof.play.clicked'],
+  'meme-lab': ['paired_run_started'],
+  mentionpilot: ['free_check.opened'],
+  motion: ['how_it_works_opened'],
+  'open-historia': ['hero.play.clicked'],
+  'ph-catalog': ['sample_opened'],
   posttrainllm: ['quickstart_opened'],
+  'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
+  rolepatch: ['free_tools_opened'],
+  'sarthakagrawal-personal': ['projects_opened'],
+  setline: ['testflight_status_opened'],
 };
 
 const candidateNames: Readonly<Record<string, string>> = {
@@ -99,8 +112,8 @@ export const DAILY_CTA_POLICY: Readonly<Record<string, DailyCtaPolicy>> = Object
       catalogId,
       {
         clarityCandidate: null,
-        qualifiedAppHealthEvents: [],
-        qualification: 'unknown',
+        qualifiedAppHealthEvents: verifiedAppHealthEvents[catalogId] ?? [],
+        qualification: verifiedAppHealthEvents[catalogId] ? 'verified' : 'unknown',
       } satisfies DailyCtaPolicy,
     ]),
   ]),

@@ -18,8 +18,9 @@ is part of this source change.
   environment for that day. They are browsers, not people. Sampled visitor
   groups are shown as unknown because distinct counts cannot be scaled.
 - Primary CTA names must be qualified per product before counts appear. The
-  checked-in CTA policy records 42 Clarity candidates, but none has an accepted
-  App Health event and dashboard receipt yet; those counts remain unknown.
+  checked-in CTA policy keeps Clarity candidates separate from browser events
+  that have a production ingest and authenticated Events receipt. Unqualified
+  products remain unknown.
 - `feedback.submitted`, `waitlist.join`, and `newsletter.subscribe` are counted
   from stored production App Health logs. Central SaaS Maker logs are attributed
   only when their project ID or slug resolves to an imported catalog product.
@@ -31,10 +32,11 @@ is part of this source change.
 
 ## Qualification before a complete report
 
-The live overview showed 24 workspace projects on 2026-09-28, while the Fleet catalog has 55
-active products. Every product still needs a reviewed runtime-specific CTA
-policy, App Health registration and mapping, source integration, a successful
-accepted event, and an authenticated dashboard receipt. See
+The workspace import reached 55 of 55 active products on 2026-09-28. This
+proves report row coverage, not live instrumentation. Each product still needs
+an appropriate runtime-specific CTA policy, source integration, a successful
+accepted event, and an authenticated dashboard receipt before its CTA can be
+counted. See
 [`fleet-engagement-rollout-55.md`](fleet-engagement-rollout-55.md) for the
 source inventory. The owner authorized production activation on 2026-09-28;
 deployment and live qualification are recorded separately from source checks.
