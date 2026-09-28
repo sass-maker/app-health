@@ -45,6 +45,16 @@ release/runtime, and upstream sampling provenance are preserved. Bounds are part
 of the series key so future histogram changes cannot silently merge incompatible
 states. Upstream-sampled OTLP represents observed samples, not all traffic.
 
+The latency histogram uses the same fixed 16-bin storage shape in both schema
+versions. V2 replaces the 2000 ms upper bound with 1999 ms, separating integer
+durations below the unhealthy threshold from durations at or above it without a
+D1 table migration. D1 rows retain the serialized bounds in their series key;
+new Analytics Engine points carry a `latency-v2` marker. Readers recognize both
+formats. A legacy V1 `(1000, 2000]` bin is conservatively placed in V2's
+`>=2000` bin because its individual samples cannot be recovered. Unknown
+histogram identities fail closed. Old ambiguous data may retain an unhealthy
+label until it leaves the selected window; it is never silently made healthy.
+
 A batch uses five SQL statements in one transaction. All three resolutions are
 updated only for active groups; there are no empty bucket writes or periodic
 full-history scans. This adds up to three aggregate row writes per affected

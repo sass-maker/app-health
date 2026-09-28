@@ -1,9 +1,11 @@
 import {
-  LATENCY_BUCKET_BOUNDS_MS,
+  LATENCY_HISTOGRAM_BUCKETS,
   WINDOW_MS,
   WorkspaceHealthSummaryV1,
   approximatePercentiles,
   healthState,
+  latencyHistogramSchemaFromBounds,
+  normalizeLatencyHistogram,
   type BucketV1,
   type CapabilityState,
   type Runtime,
@@ -15,10 +17,7 @@ import type { D1DatabaseLike } from './d1-adapter.js';
 import { endpointReadRanges } from './endpoint-read.js';
 import type { WorkspaceHealthRepository } from './repository.js';
 
-const HISTOGRAM = Array.from(
-  { length: LATENCY_BUCKET_BOUNDS_MS.length + 1 },
-  (_, index) => `h${index}`,
-);
+const HISTOGRAM = Array.from({ length: LATENCY_HISTOGRAM_BUCKETS }, (_, index) => `h${index}`);
 const MAX_ENVIRONMENTS = 1000;
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
 
@@ -252,21 +251,21 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
     if (result.results.length > MAX_ENVIRONMENTS)
       throw new Error('Workspace health metrics exceeded environment limit');
     return result.results.map((row) => {
-      if (row.histogram_bounds_ms !== JSON.stringify(LATENCY_BUCKET_BOUNDS_MS))
-        throw new Error('Unsupported endpoint histogram schema');
-      const histogram = HISTOGRAM.map((name) => Number(row[name]));
+      const schema = latencyHistogramSchemaFromBounds(String(row.histogram_bounds_ms));
+      const rawHistogram = HISTOGRAM.map((name) => Number(row[name]));
       const requestCount = Number(row.request_count);
       const errorCount = Number(row.error_count);
       const lastSeen = Number(row.last_seen);
       if (
-        ![requestCount, errorCount, lastSeen, ...histogram].every(Number.isSafeInteger) ||
+        ![requestCount, errorCount, lastSeen, ...rawHistogram].every(Number.isSafeInteger) ||
         requestCount < 0 ||
         errorCount < 0 ||
         errorCount > requestCount ||
-        histogram.some((value) => value < 0) ||
-        histogram.reduce((sum, value) => sum + value, 0) !== requestCount
+        rawHistogram.some((value) => value < 0) ||
+        rawHistogram.reduce((sum, value) => sum + value, 0) !== requestCount
       )
         throw new Error('Invalid workspace endpoint aggregate');
+      const histogram = normalizeLatencyHistogram(rawHistogram, schema);
       return {
         app_id: row.app_id,
         environment_id: row.environment_id,

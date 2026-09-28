@@ -13,14 +13,21 @@ passive request measurement: it does not probe uptime or discover unused routes.
 - Error rate means HTTP **5xx / requests**. Recent failure details include both
   4xx and 5xx, retained for 24 hours. These are distinct measurements.
 - p50 and p95 come from a merged fixed histogram, not averaged percentiles.
-  Values represent histogram bounds rather than exact individual durations.
+  Values represent histogram bounds rather than exact individual durations. The
+  current histogram has a 1999 ms edge so integer durations below 2000 ms cannot
+  be classified as crossing the unhealthy threshold solely from a 2000 ms
+  upper-bound estimate.
 - The supported report windows are 15 minutes, one hour, and 24 hours. Local
   storage uses minute buckets; production Analytics Engine windows use collector
   receipt time. Delayed batches can therefore cross a window boundary. Last seen
   reports the event timestamp. Events beyond five minutes of clock skew are rejected.
 - Fewer than 20 requests yields insufficient data. With enough requests, at least
   1% errors or 1 second p95 is degraded; at least 5% errors or 2 seconds p95 is
-  unhealthy. These are fixed explanatory defaults, not configured alert rules.
+  unhealthy. New integer-millisecond histograms separate 1999 ms from 2000 ms.
+  Legacy V1 data used a `(1000, 2000]` bucket that straddles the threshold; that
+  whole bucket is read conservatively as `>= 2000 ms`, which can overstate old
+  percentiles but never turns ambiguous old latency into healthy status. These
+  are fixed explanatory defaults, not configured alert rules.
 - Sampled storage and sampled upstream trace contributions are labelled. An
   inventory record without report measurements remains visible with unavailable
   metrics; it is never presented as zero traffic or a healthy endpoint.

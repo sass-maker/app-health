@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { WINDOW_MS } from '@app-health/contracts';
+import {
+  LATENCY_HISTOGRAM_SCHEMA_V2,
+  WINDOW_MS,
+  approximatePercentiles,
+  healthState,
+} from '@app-health/contracts';
 import {
   AnalyticsEngineBuckets,
   createAnalyticsQuery,
@@ -26,7 +31,7 @@ describe('Analytics Engine telemetry adapter', () => {
     ]);
     expect(points).toHaveLength(1);
     expect(points[0]).toMatchObject({
-      blobs: ['GET', '/users/:id', '3', 'node', 'r1', ''],
+      blobs: ['GET', '/users/:id', '3', 'node', 'r1', '', '', LATENCY_HISTOGRAM_SCHEMA_V2],
       doubles: [2, 1, 32, 101, 2048, 1],
     });
     expect(JSON.stringify(points[0])).not.toMatch(
@@ -66,6 +71,56 @@ describe('Analytics Engine telemetry adapter', () => {
     ]);
     const buckets = await reader.queryBuckets('app-a', 'env-a', 1000 - WINDOW_MS['15m'], 1000);
     expect(buckets[0].upstream_sampled).toBe(true);
+  });
+
+  it('writes V2 threshold buckets and conservatively decodes markerless legacy rows', async () => {
+    const points: { blobs: string[] }[] = [];
+    const writer = new AnalyticsEngineBuckets(
+      { writeDataPoint: (point) => points.push(point) },
+      async () => [],
+    );
+    await writer.upsertEvents('app-a', 'env-a', 'node', undefined, [
+      { timestamp: 100, method: 'GET', route: '/slow', status_code: 200, duration_ms: 1500 },
+      { timestamp: 101, method: 'GET', route: '/slow', status_code: 200, duration_ms: 2000 },
+    ]);
+    expect(points.map((point) => point.blobs[2]).sort()).toEqual(['10', '9']);
+    expect(points.every((point) => point.blobs[7] === LATENCY_HISTOGRAM_SCHEMA_V2)).toBe(true);
+
+    const reader = new AnalyticsEngineBuckets({ writeDataPoint: () => undefined }, async () => [
+      {
+        method: 'GET',
+        route: '/legacy',
+        latency_bucket: 9,
+        request_count: 20,
+        error_count: 0,
+        duration_sum_ms: 30_000,
+        last_seen: 100,
+      },
+      {
+        method: 'GET',
+        route: '/current',
+        latency_bucket: 9,
+        histogram_schema: LATENCY_HISTOGRAM_SCHEMA_V2,
+        request_count: 20,
+        error_count: 0,
+        duration_sum_ms: 30_000,
+        last_seen: 100,
+      },
+    ]);
+    const buckets = await reader.queryBuckets('app-a', 'env-a', 1000 - WINDOW_MS['15m'], 1000);
+    const legacy = buckets.find((bucket) => bucket.route === '/legacy')!;
+    const current = buckets.find((bucket) => bucket.route === '/current')!;
+    expect(legacy.histogram[9]).toBe(0);
+    expect(legacy.histogram[10]).toBe(20);
+    expect(
+      healthState({
+        request_count: legacy.request_count,
+        error_rate: 0,
+        ...approximatePercentiles(legacy.histogram),
+      }),
+    ).toBe('unhealthy');
+    expect(current.histogram[9]).toBe(20);
+    expect(current.histogram[10]).toBe(0);
   });
 
   it('uses fixed sampling-aware SQL and rebuilds a weighted histogram', async () => {

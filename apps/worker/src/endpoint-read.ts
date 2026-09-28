@@ -1,6 +1,7 @@
 import {
-  LATENCY_BUCKET_BOUNDS_MS,
   LATENCY_HISTOGRAM_BUCKETS,
+  latencyHistogramSchemaFromBounds,
+  normalizeLatencyHistogram,
   type BucketV1,
 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
@@ -73,8 +74,7 @@ function decodeEndpointBucket(
   envId: string,
   from: number,
 ): BucketV1 {
-  if (row.histogram_bounds_ms !== JSON.stringify(LATENCY_BUCKET_BOUNDS_MS))
-    throw new Error('Unsupported endpoint histogram schema');
+  const schema = latencyHistogramSchemaFromBounds(String(row.histogram_bounds_ms));
   const histogram = HISTOGRAM.map((name) => Number(row[name]));
   const count = Number(row.request_count);
   const errors = Number(row.error_count);
@@ -109,7 +109,7 @@ function decodeEndpointBucket(
     response_bytes_sum: bytesSum,
     response_bytes_measured: bytesMeasured,
     last_seen: lastSeen,
-    histogram,
+    histogram: normalizeLatencyHistogram(histogram, schema),
     ...(Number(row.upstream_sampled) > 0 ? { upstream_sampled: true } : {}),
   };
 }

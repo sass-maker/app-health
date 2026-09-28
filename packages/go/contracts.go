@@ -36,11 +36,30 @@ const (
 	DegradedP95Ms        = 1000
 )
 
-// LatencyBucketBoundsMs mirrors the TypeScript fixed histogram bounds.
-var LatencyBucketBoundsMs = [15]int{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000}
+// LegacyLatencyBucketBoundsMs identifies persisted V1 histograms. Its 2000ms
+// bucket straddles the unhealthy threshold and must be decoded conservatively.
+var LegacyLatencyBucketBoundsMs = [15]int{1, 5, 10, 25, 50, 100, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 64000}
+
+// LatencyBucketBoundsMs mirrors the TypeScript V2 bounds. The 1999ms edge
+// separates integer durations below 2000ms from durations at or above it.
+var LatencyBucketBoundsMs = [15]int{1, 5, 10, 25, 50, 100, 250, 500, 1000, 1999, 4000, 8000, 16000, 32000, 64000}
+
+// LatencyHistogramSchemaV2 tags new persisted histogram points independently
+// of the V1 endpoint-ingest event contract.
+const LatencyHistogramSchemaV2 = "latency-v2"
 
 // LatencyHistogramBuckets is the number of histogram buckets (bounds + overflow).
 const LatencyHistogramBuckets = 16
+
+// LatencyHistogramIndex returns the first V2 upper bound containing durationMs.
+func LatencyHistogramIndex(durationMs int) int {
+	for index, bound := range LatencyBucketBoundsMs {
+		if durationMs <= bound {
+			return index
+		}
+	}
+	return len(LatencyBucketBoundsMs)
+}
 
 // Runtime is the SDK runtime reported for installation verification.
 type Runtime string

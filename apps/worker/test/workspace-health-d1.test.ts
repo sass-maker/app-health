@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { D1ControlPlane } from '../src/d1-adapter.js';
 import { D1EndpointWriter } from '../src/endpoint-durable.js';
+import { LEGACY_LATENCY_BUCKET_BOUNDS_MS } from '@app-health/contracts';
 
 describe('workspace health D1 aggregation', () => {
   const mf = new Miniflare({
@@ -112,6 +113,54 @@ describe('workspace health D1 aggregation', () => {
         state: 'connected',
         metrics: { request_count: 1, error_count: 0, p95_ms: 25 },
       },
+    });
+  });
+
+  it('keeps legacy threshold-straddling rollups unhealthy in workspace health', async () => {
+    const now = Math.floor(Date.now() / 60_000) * 60_000;
+    const owner = new D1ControlPlane(db, 'workspace-one');
+    const scope = await owner.createAppEnvironmentKey(
+      'Legacy latency',
+      'production',
+      now - 100_000,
+    );
+    await owner
+      .asRepositories({} as never)
+      .capabilities!.recordCapability(
+        scope.app.id,
+        scope.environment.id,
+        'endpoints',
+        now - 60_000,
+      );
+    const events = Array.from({ length: 20 }, (_, index) => ({
+      event_id: `legacy-event-${index}`,
+      timestamp: now - 60_000,
+      method: 'GET',
+      route: '/legacy-threshold',
+      status_code: 200,
+      duration_ms: 1500,
+    }));
+    await new D1EndpointWriter(db).accept(
+      scope.app.id,
+      scope.environment.id,
+      'worker',
+      'test',
+      events,
+      { now, batchId: 'legacy-threshold' },
+    );
+    await db
+      .prepare(
+        'UPDATE endpoint_rollups SET histogram_bounds_ms = ?, h9 = 20, h10 = 0 WHERE app_id = ?',
+      )
+      .bind(JSON.stringify(LEGACY_LATENCY_BUCKET_BOUNDS_MS), scope.app.id)
+      .run();
+
+    const response = await owner.queryWorkspaceHealth(now + 30_000);
+    const environment = response.environments.find((row) => row.app_id === scope.app.id);
+    expect(environment?.endpoints.metrics).toMatchObject({
+      request_count: 20,
+      p95_ms: 4000,
+      health_state: 'unhealthy',
     });
   });
 });

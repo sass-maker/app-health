@@ -22,6 +22,10 @@ import {
   FailureEventV1,
   FailureQueryRequestV1,
   FailureQueryResponseV1,
+  LATENCY_BUCKET_BOUNDS_MS,
+  LEGACY_LATENCY_BUCKET_BOUNDS_MS,
+  latencyHistogramSchemaFromBounds,
+  normalizeLatencyHistogram,
 } from '../src/index.js';
 
 it('preserves literal route separators and storage sampling when merging measurements', () => {
@@ -36,6 +40,40 @@ it('uses the accepted duration ceiling for an overflow percentile bound', () => 
   expect(approximatePercentiles(histogram)).toEqual({
     p50_ms: MAX_DURATION_MS,
     p95_ms: MAX_DURATION_MS,
+  });
+});
+
+describe('latency histogram threshold boundary', () => {
+  it('separates sub-2000ms integer durations from the unhealthy threshold', () => {
+    expect(LATENCY_BUCKET_BOUNDS_MS[9]).toBe(1999);
+    const belowThreshold = new Array<number>(16).fill(0);
+    belowThreshold[9] = 20;
+    const belowPercentiles = approximatePercentiles(belowThreshold);
+    expect(belowPercentiles.p95_ms).toBe(1999);
+    expect(healthState({ request_count: 20, error_rate: 0, ...belowPercentiles })).toBe('degraded');
+
+    const atThreshold = new Array<number>(16).fill(0);
+    atThreshold[10] = 20;
+    const atPercentiles = approximatePercentiles(atThreshold);
+    expect(atPercentiles.p95_ms).toBe(4000);
+    expect(healthState({ request_count: 20, error_rate: 0, ...atPercentiles })).toBe('unhealthy');
+  });
+
+  it('conservatively maps ambiguous legacy V1 threshold bins to unhealthy V2 bins', () => {
+    expect(latencyHistogramSchemaFromBounds(JSON.stringify(LEGACY_LATENCY_BUCKET_BOUNDS_MS))).toBe(
+      'legacy-v1',
+    );
+    const legacy = new Array<number>(16).fill(0);
+    legacy[9] = 20;
+    const normalized = normalizeLatencyHistogram(legacy, 'legacy-v1');
+    expect(normalized[9]).toBe(0);
+    expect(normalized[10]).toBe(20);
+    const percentiles = approximatePercentiles(normalized);
+    expect(healthState({ request_count: 20, error_rate: 0, ...percentiles })).toBe('unhealthy');
+  });
+
+  it('rejects unrecognized persisted histogram bounds', () => {
+    expect(() => latencyHistogramSchemaFromBounds('[1,2,3]')).toThrow('histogram schema');
   });
 });
 

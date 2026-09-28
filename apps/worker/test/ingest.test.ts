@@ -630,9 +630,28 @@ describe('fixed latency histograms and window merging', () => {
     const endpoint = response.endpoints.find((e) => e.route === '/p95');
     expect(endpoint).toBeDefined();
     expect(endpoint!.request_count).toBe(20);
-    // 2000ms is bound index 9. p95 of 20 samples = ceil(20*0.95)=19th sample,
-    // which falls in the 2000ms bucket.
-    expect(endpoint!.p95_ms).toBe(LATENCY_BUCKET_BOUNDS_MS[9]);
+    // The V2 boundary separates <2000ms values from values at/above 2000ms.
+    // The 2000ms events land in the next bucket (upper bound 4000ms).
+    expect(endpoint!.p95_ms).toBe(LATENCY_BUCKET_BOUNDS_MS[10]);
+    expect(endpoint!.health_state).toBe('unhealthy');
+  });
+
+  it('does not classify a sub-2000ms p95 as unhealthy from the V2 upper bound', async () => {
+    const { service } = await freshService();
+    const events = Array.from({ length: 20 }, (_, i) =>
+      makeEvent({
+        event_id: uuid(250 + i),
+        timestamp: NOW,
+        route: '/below-unhealthy-boundary',
+        duration_ms: 1500,
+      }),
+    );
+    await service.ingest(SEED_KEY, makeBatch(events), NOW);
+    const response = await service.queryEndpoints(SEED_APP_ID, SEED_ENV_ID, '15m', NOW);
+    const endpoint = response.endpoints.find((row) => row.route === '/below-unhealthy-boundary');
+    expect(endpoint).toBeDefined();
+    expect(endpoint!.p95_ms).toBe(1999);
+    expect(endpoint!.health_state).toBe('degraded');
   });
 });
 

@@ -136,6 +136,23 @@ func TestComputeHealthState(t *testing.T) {
 	}
 }
 
+func TestLatencyHistogramIndexResolvesUnhealthyBoundary(t *testing.T) {
+	cases := []struct {
+		duration int
+		want     int
+	}{
+		{duration: 1999, want: 9},
+		{duration: 2000, want: 10},
+		{duration: 4000, want: 10},
+		{duration: 4001, want: 11},
+	}
+	for _, c := range cases {
+		if got := LatencyHistogramIndex(c.duration); got != c.want {
+			t.Errorf("LatencyHistogramIndex(%d) = %d, want %d", c.duration, got, c.want)
+		}
+	}
+}
+
 func TestValidateBatch_ErrorMentionsField(t *testing.T) {
 	b := GoBatchFixture()
 	b.Events[0].EventID = "not-a-uuid"

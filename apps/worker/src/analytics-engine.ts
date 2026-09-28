@@ -1,10 +1,13 @@
 import { browserQuery } from './browser-query.js';
 import {
+  LATENCY_HISTOGRAM_SCHEMA_V2,
   LATENCY_HISTOGRAM_BUCKETS,
   MAX_METHOD_LENGTH,
   MAX_ROUTE_LENGTH,
   WINDOW_MS,
+  normalizeLatencyHistogramIndex,
   type BucketV1,
+  type LatencyHistogramSchema,
   type Runtime,
   type Window,
 } from '@app-health/contracts';
@@ -20,6 +23,7 @@ interface QueryRow {
   method: string;
   route: string;
   latency_bucket: string | number;
+  histogram_schema?: string | null;
   request_count: string | number;
   error_count: string | number;
   duration_sum_ms: string | number;
@@ -142,7 +146,8 @@ export class AnalyticsEngineBuckets implements BucketRepository {
           runtime,
           point.release,
           point.upstreamSampled ? 'sampled' : '',
-          ...(this.durableQuery ? ['durable-v1'] : []),
+          this.durableQuery ? 'durable-v1' : '',
+          LATENCY_HISTOGRAM_SCHEMA_V2,
         ],
         doubles: [
           point.count,
@@ -175,13 +180,14 @@ export class AnalyticsEngineBuckets implements BucketRepository {
     // Analytics Engine is append-only. This exact release was a manually
     // injected connectivity check, not application traffic, so query-tombstone
     // it after its durable D1 inventory and installation state are removed.
-    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, SUM(double5 * _sample_interval) AS response_bytes_sum, SUM(double6 * _sample_interval) AS response_bytes_measured, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' ${this.durableQuery ? "AND blob7 != 'durable-v1'" : ''} AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket ORDER BY method, route, latency_bucket`;
+    const sql = `SELECT blob1 AS method, blob2 AS route, blob3 AS latency_bucket, blob8 AS histogram_schema, SUM(double1 * _sample_interval) AS request_count, SUM(double2 * _sample_interval) AS error_count, SUM(double3 * _sample_interval) AS duration_sum_ms, MAX(double4) AS last_seen, SUM(double5 * _sample_interval) AS response_bytes_sum, SUM(double6 * _sample_interval) AS response_bytes_measured, MAX(IF(blob6 = 'sampled', 1, 0)) AS upstream_sampled, MAX(_sample_interval) AS sample_interval FROM ${DATASET} WHERE index1 = '${scope}' AND blob5 != 'polaris-staging-canary' ${this.durableQuery ? "AND blob7 != 'durable-v1'" : ''} AND timestamp >= toDateTime(${Math.floor(from / 1000)}) AND timestamp < toDateTime(${Math.ceil(to / 1000)}) GROUP BY method, route, latency_bucket, histogram_schema ORDER BY method, route, histogram_schema, latency_bucket`;
     const rows = await this.query(sql);
     if (rows.length > MAX_QUERY_ROWS)
       throw new Error('Analytics Engine query returned too many rows');
     const grouped = new Map<string, BucketV1>();
     for (const row of rows) {
       validateQueryRow(row);
+      const schema = analyticsHistogramSchema(row.histogram_schema);
       const key = `${row.method}\u0000${row.route}`;
       const bucket = grouped.get(key) ?? {
         app_id: appId,
@@ -203,7 +209,8 @@ export class AnalyticsEngineBuckets implements BucketRepository {
         bucketIndex >= 0 &&
         bucketIndex < bucket.histogram.length
       ) {
-        bucket.histogram[bucketIndex] += count;
+        const normalizedIndex = normalizeLatencyHistogramIndex(bucketIndex, schema);
+        bucket.histogram[normalizedIndex] += count;
       }
       bucket.request_count += count;
       bucket.error_count += Math.max(0, Math.round(Number(row.error_count)));
@@ -221,6 +228,12 @@ export class AnalyticsEngineBuckets implements BucketRepository {
     }
     return [...grouped.values()];
   }
+}
+
+function analyticsHistogramSchema(value: string | null | undefined): LatencyHistogramSchema {
+  if (value === undefined || value === null || value === '') return 'legacy-v1';
+  if (value === LATENCY_HISTOGRAM_SCHEMA_V2) return LATENCY_HISTOGRAM_SCHEMA_V2;
+  throw new Error('Unsupported Analytics Engine histogram schema');
 }
 
 function windowFor(duration: number): Window {

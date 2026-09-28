@@ -1,6 +1,6 @@
 import { readEndpointBuckets } from '../src/endpoint-read.js';
 import { AnalyticsEngineBuckets, telemetryScope } from '../src/analytics-engine.js';
-import { mergeBuckets } from '@app-health/contracts';
+import { LEGACY_LATENCY_BUCKET_BOUNDS_MS, mergeBuckets } from '@app-health/contracts';
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import { URL } from 'node:url';
@@ -266,6 +266,29 @@ it('reads completed minutes without current/future buckets or other tenant traff
   );
 });
 
+it('reads a legacy ambiguous 2000ms bucket conservatively as unhealthy', async () => {
+  const timestamp = now - 60_000;
+  const events = Array.from({ length: 20 }, (_, index) => ({
+    ...event(`legacy-${index}`, timestamp),
+    duration_ms: 1500,
+  }));
+  await writer.accept('legacy-app', 'prod', 'node', 'r1', events, { now, batchId: 'legacy' });
+  await db
+    .prepare(
+      'UPDATE endpoint_rollups SET histogram_bounds_ms = ?, h9 = 20, h10 = 0 WHERE app_id = ? AND resolution_ms = 60000',
+    )
+    .bind(JSON.stringify(LEGACY_LATENCY_BUCKET_BOUNDS_MS), 'legacy-app')
+    .run();
+
+  const end = Math.floor(now / 60_000) * 60_000;
+  const [bucket] = await readEndpointBuckets(db, 'legacy-app', 'prod', end - 900_000, end);
+  expect(bucket.histogram[9]).toBe(0);
+  expect(bucket.histogram[10]).toBe(20);
+  const [aggregate] = mergeBuckets([bucket], '15m', end);
+  expect(aggregate.p95_ms).toBe(4000);
+  expect(aggregate.health_state).toBe('unhealthy');
+});
+
 it('combines old AE data with durable counts exactly once and keeps source errors visible', async () => {
   const end = Math.floor(now / 60_000) * 60_000;
   await writer.accept('a', 'prod', 'node', undefined, [event('new', now - 60_000)], {
@@ -275,7 +298,7 @@ it('combines old AE data with durable counts exactly once and keeps source error
   await db
     .prepare(
       `CREATE TABLE IF NOT EXISTS app_health_endpoint_v1 (
-    index1 TEXT, blob1 TEXT, blob2 TEXT, blob3 TEXT, blob5 TEXT, blob6 TEXT, blob7 TEXT,
+    index1 TEXT, blob1 TEXT, blob2 TEXT, blob3 TEXT, blob5 TEXT, blob6 TEXT, blob7 TEXT, blob8 TEXT,
     double1 REAL, double2 REAL, double3 REAL, double4 REAL, double5 REAL, double6 REAL,
     _sample_interval INTEGER, timestamp INTEGER
   )`,
@@ -285,7 +308,7 @@ it('combines old AE data with durable counts exactly once and keeps source error
   for (const tag of ['', 'durable-v1']) {
     await db
       .prepare(
-        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, 1, 0, 10, ?, NULL, NULL, 1, ?)`,
+        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, '', 1, 0, 10, ?, NULL, NULL, 1, ?)`,
       )
       .bind(scope, tag, now - 60_000, Math.floor((now - 60_000) / 1000))
       .run();
