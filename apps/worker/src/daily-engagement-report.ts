@@ -91,6 +91,7 @@ interface DailyCaptureCounts {
   rows: readonly DailyCaptureCountRow[];
   /** Catalog policy returned by SaaS Maker; absent on older compatible providers. */
   applicabilityByCatalogId?: Readonly<Record<string, CaptureApplicability>>;
+  nativeSessionsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
 }
 
 export interface DailyCaptureCountsService {
@@ -180,7 +181,35 @@ function validateDailyCaptureCounts(
     response.applicabilityByCatalogId,
     allowedIds,
   );
-  return { coverageStart: coverageStart as string | null, rows, applicabilityByCatalogId };
+  const nativeSessionsApplicabilityByCatalogId = parseMetricApplicability(
+    response.nativeSessionsApplicabilityByCatalogId,
+    allowedIds,
+  );
+  return {
+    coverageStart: coverageStart as string | null,
+    rows,
+    applicabilityByCatalogId,
+    nativeSessionsApplicabilityByCatalogId,
+  };
+}
+
+function parseMetricApplicability(
+  value: unknown,
+  allowedIds: ReadonlySet<string>,
+): Record<string, MetricApplicability> {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('invalid SaaS Maker metric applicability');
+  const policy: Record<string, MetricApplicability> = {};
+  for (const [catalogId, applicability] of Object.entries(value)) {
+    if (
+      !allowedIds.has(catalogId) ||
+      !['applicable', 'not_applicable', 'unknown'].includes(String(applicability))
+    )
+      throw new Error('invalid SaaS Maker metric applicability');
+    policy[catalogId] = applicability as MetricApplicability;
+  }
+  return policy;
 }
 
 function parseCaptureApplicability(
@@ -527,6 +556,7 @@ function buildProductReport(
       'waitlist',
     ),
     native_sessions: nativeSessions,
+    native_sessions_applicability: nativeSessionApplicability(input, row.catalog_id),
     api_activity: apiActivity,
     freshness: {
       browser_last_seen: indexes.browserLastSeen.get(row.app_id) ?? null,
@@ -534,6 +564,13 @@ function buildProductReport(
     },
     coverage: measured === 0 ? 'unknown' : 'partial',
   };
+}
+
+function nativeSessionApplicability(
+  input: DailyEngagementInputs,
+  catalogId: string,
+): MetricApplicability {
+  return input.captureCounts?.nativeSessionsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
 }
 
 function isProductBrowserMeasured(
@@ -663,6 +700,7 @@ export function dailyEngagementClientPayload(
       const legacyRow: Partial<DailyEngagementProductReportV1> = { ...row };
       delete legacyRow.newsletter_applicability;
       delete legacyRow.waitlist_applicability;
+      delete legacyRow.native_sessions_applicability;
       return legacyRow;
     }),
   };

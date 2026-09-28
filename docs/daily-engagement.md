@@ -8,9 +8,9 @@ date until the owner chooses **Latest**.
 The owner-only API is `GET /v1/reports/daily-engagement?date=YYYY-MM-DD`.
 Responses are computed on request; no scheduled snapshot or outbound delivery
 is part of this source change.
-The current dashboard requests `capture_applicability=1` to receive newsletter
-and waitlist policy fields. Existing open dashboard tabs use the original strict
-row shape until reloaded, so the API omits those added fields for those clients.
+The current dashboard requests `capture_applicability=1` to receive catalog
+applicability fields. Existing open dashboard tabs use the original strict row
+shape until reloaded, so the API omits those added fields for those clients.
 
 ## What a row means
 
@@ -46,6 +46,11 @@ row shape until reloaded, so the API omits those added fields for those clients.
   until source coverage reaches the selected day; observed positive counts
   remain visible even if they conflict with the current policy. An older
   provider response without applicability metadata keeps these cells Unknown.
+- Native-session applicability is derived from the canonical catalog's product
+  form and platforms. A native app or game form means sessions are applicable,
+  not that the product is instrumented. Non-native product forms are labeled
+  Not applicable; missing telemetry for applicable products stays Unknown.
+  Observed positive session counts remain visible if they conflict with the form.
 - Native sessions count distinct, scoped session hashes from accepted native
   active heartbeats in the completed day. Their Analytics Engine projection is
   best-effort; missing or sampled rows remain unknown. Browser visitor slots do

@@ -7,6 +7,7 @@ import {
   LATENCY_BUCKET_BOUNDS_MS,
   LATENCY_HISTOGRAM_BUCKETS,
   MAX_CLOCK_SKEW_MS,
+  WINDOW_MS,
   SEED_APP_ID,
   SEED_ENV_ID,
   SEED_KEY,
@@ -284,6 +285,58 @@ describe('ingest idempotent batch handling', () => {
     expect(endpoint?.avg_response_bytes).toBe(200);
     expect(endpoint?.total_response_bytes).toBe(200);
     expect(endpoint?.response_bytes_delta_pct).toBeCloseTo(100);
+  });
+
+  it('reads observed endpoint inventory while the previous byte window is pending', async () => {
+    const { service, adapter } = await freshService();
+    const repos = adapter.asRepositories();
+    const windowMs = WINDOW_MS['15m'];
+    for (const timestamp of [NOW - windowMs - 60_000, NOW - 60_000]) {
+      await repos.buckets.upsertBucket({
+        app_id: SEED_APP_ID,
+        environment_id: SEED_ENV_ID,
+        bucket_start: timestamp,
+        method: 'GET',
+        route: '/parallel-read',
+        statusIsError: false,
+        durationMs: 10,
+        timestamp,
+        responseBytes: timestamp < NOW - windowMs ? 100 : 200,
+      });
+    }
+
+    let releasePreviousWindow!: () => void;
+    const previousWindowGate = new Promise<void>((resolve) => {
+      releasePreviousWindow = resolve;
+    });
+    let previousWindowStarted!: () => void;
+    const previousWindowStartedPromise = new Promise<void>((resolve) => {
+      previousWindowStarted = resolve;
+    });
+    let inventoryStarted = false;
+    const queryBuckets = repos.buckets.queryBuckets.bind(repos.buckets);
+    repos.buckets.queryBuckets = async (appId, envId, from, to) => {
+      if (from === NOW - 2 * windowMs && to === NOW - windowMs) {
+        previousWindowStarted();
+        await previousWindowGate;
+      }
+      return queryBuckets(appId, envId, from, to);
+    };
+    const inventory = repos.inventory!;
+    const listObserved = inventory.listObserved.bind(inventory);
+    inventory.listObserved = async (appId, envId) => {
+      inventoryStarted = true;
+      return listObserved(appId, envId);
+    };
+
+    const pending = service.queryEndpoints(SEED_APP_ID, SEED_ENV_ID, '15m', NOW);
+    await previousWindowStartedPromise;
+    expect(inventoryStarted).toBe(true);
+    releasePreviousWindow();
+    const response = await pending;
+    expect(
+      response.endpoints.find((endpoint) => endpoint.route === '/parallel-read'),
+    ).toMatchObject({ response_bytes_delta_pct: 100 });
   });
 
   it('accepts repeated event IDs when they belong to distinct batches', async () => {

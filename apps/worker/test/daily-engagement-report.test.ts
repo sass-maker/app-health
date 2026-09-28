@@ -94,6 +94,7 @@ describe('buildDailyEngagementReport', () => {
     const oldRowSchema = DailyEngagementProductReportV1.omit({
       newsletter_applicability: true,
       waitlist_applicability: true,
+      native_sessions_applicability: true,
     });
     expect(legacy.products).toHaveLength(2);
     for (const product of legacy.products) expect(oldRowSchema.parse(product)).toEqual(product);
@@ -881,6 +882,48 @@ describe('composeDailyEngagementReport', () => {
     expect(coveredDate.notes).toContain(
       'Newsletter and waitlist applicability follows canonical capture policy; Not applicable is not a measured zero, and observed positive counts remain visible.',
     );
+  });
+
+  it('labels native sessions N/A only by catalog form and preserves positive observed counts', async () => {
+    const products = catalog(2).map((row, index) => ({
+      ...row,
+      catalog_id: index === 0 ? 'site-health' : 'pace',
+    }));
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(products, []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      query: async (sql) =>
+        sql.includes('blob20')
+          ? [{ app_id: products[0].app_id, sessions: 2, sample_interval: 1 }]
+          : [],
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: DAY,
+            rows: products.map((row) => ({
+              catalogId: row.catalog_id,
+              feedback: null,
+              newsletter: null,
+              waitlist: null,
+            })),
+            nativeSessionsApplicabilityByCatalogId: {
+              'site-health': 'not_applicable',
+              pace: 'applicable',
+            },
+          };
+        },
+      },
+    });
+    expect(report.products[0]).toMatchObject({
+      native_sessions: 2,
+      native_sessions_applicability: 'not_applicable',
+    });
+    expect(report.products[1]).toMatchObject({
+      native_sessions: null,
+      native_sessions_applicability: 'applicable',
+    });
   });
 
   it('keeps null source metrics unknown when there are no observed logs', async () => {

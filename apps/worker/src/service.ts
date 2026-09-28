@@ -470,13 +470,10 @@ export class AppHealthService {
       }
     }
     const endpoints = mergeBuckets(buckets, window, queryNow);
-    const byteDeltas = await this.responseBytesDeltas(
-      appId,
-      envId,
-      from,
-      queryNow - from,
-      endpoints,
-    );
+    const [byteDeltas, observedEndpoints] = await Promise.all([
+      this.responseBytesDeltas(appId, envId, from, queryNow - from, endpoints),
+      this.repos.inventory?.listObserved(appId, envId) ?? Promise.resolve([]),
+    ]);
     for (const endpoint of endpoints) {
       const delta = byteDeltas.get(`${endpoint.method}\u0000${endpoint.route}`);
       if (delta !== undefined) endpoint.response_bytes_delta_pct = delta;
@@ -484,7 +481,7 @@ export class AppHealthService {
     const measured = new Set(
       endpoints.map((endpoint) => `${endpoint.method}\u0000${endpoint.route}`),
     );
-    for (const observed of (await this.repos.inventory?.listObserved(appId, envId)) ?? []) {
+    for (const observed of observedEndpoints) {
       if (measured.has(`${observed.method}\u0000${observed.route}`)) continue;
       endpoints.push({
         method: observed.method,

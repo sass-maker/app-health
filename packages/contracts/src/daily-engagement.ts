@@ -86,6 +86,10 @@ export const DailyEngagementProductReportV1 = z
     waitlist_applicability: z.enum(['applicable', 'not_applicable', 'unknown']).default('unknown'),
     /** Observed native sessions; null when absent, unavailable, or sampled. */
     native_sessions: z.number().int().min(0).nullable(),
+    /** Catalog form applicability; independent of whether native telemetry is installed. */
+    native_sessions_applicability: z
+      .enum(['applicable', 'not_applicable', 'unknown'])
+      .default('unknown'),
     /** Server request count, not people. `null` when durable unsampled endpoint coverage is unknown. */
     api_activity: z.number().int().min(0).nullable(),
     freshness: DailyFreshness,

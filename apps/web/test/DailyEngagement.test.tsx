@@ -96,6 +96,7 @@ const report = {
       waitlist_joins: 2,
       waitlist_applicability: 'not_applicable',
       native_sessions: 3,
+      native_sessions_applicability: 'applicable',
       api_activity: null,
       freshness: { browser_last_seen: null, log_last_seen: null },
       coverage: 'partial',
@@ -113,6 +114,7 @@ const report = {
       waitlist_joins: null,
       waitlist_applicability: 'not_applicable',
       native_sessions: null,
+      native_sessions_applicability: 'not_applicable',
       api_activity: null,
       freshness: { browser_last_seen: null, log_last_seen: null },
       coverage: 'unknown',
@@ -150,6 +152,10 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(2);
+  expect(beacon.cells[2].textContent).toBe('Not applicable');
+  const beaconCard = within(mobile).getByText('Beacon').closest('li')!;
+  const nativeMetric = within(beaconCard).getByText('Native sessions').parentElement!;
+  expect(nativeMetric.querySelector('dd')?.textContent).toBe('Not applicable');
   expect(beacon.cells[6].textContent).toBe('Not applicable');
   expect(beacon.cells[7].textContent).toBe('Not applicable');
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');
