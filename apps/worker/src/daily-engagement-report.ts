@@ -651,6 +651,23 @@ export const buildDailyEngagementReport = (
   return DailyEngagementReportV1.parse(report);
 };
 
+/** Keep reports readable in already-open clients with the original strict row schema. */
+export function dailyEngagementClientPayload(
+  report: DailyEngagementReportV1,
+  includeCaptureApplicability: boolean,
+) {
+  if (includeCaptureApplicability) return report;
+  return {
+    ...report,
+    products: report.products.map((row) => {
+      const legacyRow: Partial<DailyEngagementProductReportV1> = { ...row };
+      delete legacyRow.newsletter_applicability;
+      delete legacyRow.waitlist_applicability;
+      return legacyRow;
+    }),
+  };
+}
+
 type DailyEngagementWindow = { date: string; from: number; to: number } | { error: string };
 
 /** India calendar-day bounds. Defaults to the latest completed day. */

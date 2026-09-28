@@ -13,6 +13,7 @@ import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
 import {
   composeDailyEngagementReport,
+  dailyEngagementClientPayload,
   dailyEngagementWindow,
   type DailyCaptureCountsService,
 } from './daily-engagement-report.js';
@@ -644,7 +645,11 @@ async function handleDailyEngagementRoute(
       ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
       captureCountsService: env.SAASMAKER_METRICS,
     });
-    return json(200, report, true);
+    return json(
+      200,
+      dailyEngagementClientPayload(report, url.searchParams.get('capture_applicability') === '1'),
+      true,
+    );
   } catch (error) {
     const status =
       error instanceof Error && 'status' in error && (error as { status: number }).status === 400

@@ -8,6 +8,9 @@ date until the owner chooses **Latest**.
 The owner-only API is `GET /v1/reports/daily-engagement?date=YYYY-MM-DD`.
 Responses are computed on request; no scheduled snapshot or outbound delivery
 is part of this source change.
+The current dashboard requests `capture_applicability=1` to receive newsletter
+and waitlist policy fields. Existing open dashboard tabs use the original strict
+row shape until reloaded, so the API omits those added fields for those clients.
 
 ## What a row means
 

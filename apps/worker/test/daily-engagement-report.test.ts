@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
-import { DailyEngagementReportV1 } from '@app-health/contracts';
+import { DailyEngagementProductReportV1, DailyEngagementReportV1 } from '@app-health/contracts';
 import worker, { type Env } from '../src/index.js';
 import {
   buildDailyEngagementReport,
+  dailyEngagementClientPayload,
   dailyEngagementWindow,
   readDailyEngagementLogs,
   readDailyApiActivity,
@@ -75,6 +76,31 @@ describe('dailyEngagementWindow', () => {
 });
 
 describe('buildDailyEngagementReport', () => {
+  it('keeps a strict, already-open report client compatible while new clients receive applicability', () => {
+    const report = buildDailyEngagementReport({
+      catalog: catalog(2),
+      browserVisitors: [],
+      ctaEvents: [],
+      logs: [],
+      ctaEventNamesByCatalogId: {},
+      date: DAY,
+      from: FROM,
+      to: TO,
+      now: NOW,
+      browserMeasured: true,
+      logsMeasured: true,
+    });
+    const legacy = dailyEngagementClientPayload(report, false);
+    const oldRowSchema = DailyEngagementProductReportV1.omit({
+      newsletter_applicability: true,
+      waitlist_applicability: true,
+    });
+    expect(legacy.products).toHaveLength(2);
+    for (const product of legacy.products) expect(oldRowSchema.parse(product)).toEqual(product);
+    expect(dailyEngagementClientPayload(report, true)).toEqual(report);
+    expect(DailyEngagementReportV1.parse(report)).toEqual(report);
+  });
+
   it('covers 55 catalog products and marks missing rows unknown, never zero', () => {
     const report = buildDailyEngagementReport({
       catalog: catalog(55),

@@ -386,7 +386,7 @@ export function DailyEngagement({ ownerToken }: { ownerToken: string }): JSX.Ele
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}`;
+    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1`;
     void fetch(url, {
       signal: controller.signal,
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
