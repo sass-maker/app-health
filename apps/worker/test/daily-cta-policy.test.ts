@@ -26,7 +26,7 @@ describe('daily CTA policy', () => {
     expect(DAILY_CTA_POLICY['app-health']).toMatchObject({
       clarityCandidate: 'release_status_opened',
       qualification: 'verified',
-      qualifiedAppHealthEvents: ['release_status_opened'],
+      qualifiedAppHealthEvents: ['release_status_opened', 'project_add_started'],
     });
     expect(DAILY_CTA_POLICY['site-health']).toMatchObject({
       clarityCandidate: null,
@@ -37,6 +37,15 @@ describe('daily CTA policy', () => {
     expect(
       Object.values(DAILY_CTA_POLICY).filter((policy) => policy.qualification === 'not_applicable'),
     ).toHaveLength(7);
+    expect(
+      Object.values(DAILY_CTA_POLICY)
+        .filter((policy) => policy.qualification === 'verified')
+        .every(
+          (policy) =>
+            policy.qualifiedAppHealthEvents.length >= 2 &&
+            policy.qualifiedAppHealthEvents.length <= 3,
+        ),
+    ).toBe(true);
   });
 
   it('reports only App Health events with production ingest receipts', () => {
@@ -45,7 +54,7 @@ describe('daily CTA policy', () => {
       'agent-testing': ['tools_catalog_opened', 'experiment_results_opened'],
       'ai-game': ['play_now_clicked', 'game.begin.clicked'],
       'anime-list': ['cta_search', 'cta_discover', 'cta_stats'],
-      'app-health': ['release_status_opened'],
+      'app-health': ['release_status_opened', 'project_add_started'],
       browserdaddy: ['release_status_opened', 'mac_download_clicked'],
       calorie: ['cta_testflight', 'cta_look_inside'],
       codevetter: ['benchmark_opened', 'download.release'],

@@ -23,7 +23,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   'agent-testing': ['tools_catalog_opened', 'experiment_results_opened'],
   'ai-game': ['play_now_clicked', 'game.begin.clicked'],
   'anime-list': ['cta_search', 'cta_discover', 'cta_stats'],
-  'app-health': ['release_status_opened'],
+  'app-health': ['release_status_opened', 'project_add_started'],
   browserdaddy: ['release_status_opened', 'mac_download_clicked'],
   calorie: ['cta_testflight', 'cta_look_inside'],
   codevetter: ['benchmark_opened', 'download.release'],
