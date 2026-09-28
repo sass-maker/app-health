@@ -193,6 +193,17 @@ function isSampled(input: DailyEngagementInputs): boolean {
   return [...input.browserVisitors, ...input.ctaEvents].some((row) => row.sample_interval > 1);
 }
 
+function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null {
+  const ctaMeasured = input.ctaMeasured ?? input.browserMeasured;
+  if (!input.browserMeasured && !ctaMeasured)
+    return 'Browser Analytics Engine query was unavailable; browser visitors and CTA events are unknown.';
+  if (!input.browserMeasured)
+    return 'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.';
+  if (!ctaMeasured)
+    return 'CTA Analytics Engine query was unavailable; CTA event counts are unknown.';
+  return null;
+}
+
 function reportNotes(
   input: DailyEngagementInputs,
   sampled: boolean,
@@ -214,17 +225,8 @@ function reportNotes(
     notes.push(
       `${unmappedLogs} centralized log group(s) could not be mapped to a declared catalog product and were excluded.`,
     );
-  const ctaMeasured = input.ctaMeasured ?? input.browserMeasured;
-  if (!input.browserMeasured && !ctaMeasured)
-    notes.push(
-      'Browser Analytics Engine query was unavailable; browser visitors and CTA events are unknown.',
-    );
-  if (!input.browserMeasured && ctaMeasured)
-    notes.push(
-      'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.',
-    );
-  if (input.browserMeasured && !ctaMeasured)
-    notes.push('CTA Analytics Engine query was unavailable; CTA event counts are unknown.');
+  const analyticsNote = analyticsAvailabilityNote(input);
+  if (analyticsNote) notes.push(analyticsNote);
   if (!input.logsMeasured)
     notes.push('D1 log_events query was unavailable; feedback and join counts are unknown.');
   if (sampled)
