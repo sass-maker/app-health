@@ -17,8 +17,13 @@ export interface DailyCtaPolicy {
 }
 
 /** Production browser-ingest receipts observed on 2026-09-28. */
+const firstQualifiedIndiaDay = '2026-09-28';
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
+  anchor: ['testflight_status_opened'],
+  browserdaddy: ['release_status_opened'],
   codevetter: ['benchmark_opened'],
+  contextdaddy: ['how_it_works_opened'],
+  daddyrad: ['app.performance.opened'],
   'every-song-is-a-website': ['song_world_opened'],
   'field-track': ['manager_dashboard_opened'],
   kith: ['how_it_works_opened'],
@@ -27,13 +32,18 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   'meme-lab': ['paired_run_started'],
   mentionpilot: ['free_check.opened'],
   motion: ['how_it_works_opened'],
+  'nutrition-formula-engine': ['formula_checked', 'report_downloaded'],
+  'on-record': ['cta.inspect_receipt'],
   'open-historia': ['hero.play.clicked'],
+  performancedaddy: ['source_opened'],
   'ph-catalog': ['sample_opened'],
   posttrainllm: ['quickstart_opened'],
   'reddit-insights': ['source_thread_opened', 'post_search_submitted'],
   rolepatch: ['free_tools_opened'],
   'sarthakagrawal-personal': ['projects_opened'],
   setline: ['testflight_status_opened'],
+  significanthobbies: ['apps_explored'],
+  'what-it-takes-to-win': ['journey_continued'],
 };
 
 const candidateNames: Readonly<Record<string, string>> = {
@@ -128,3 +138,10 @@ export const DAILY_CTA_REPORT_EVENT_NAMES: Readonly<Record<string, readonly stri
         .map(([catalogId, policy]) => [catalogId, policy.qualifiedAppHealthEvents]),
     ),
   );
+
+/** Older days remain unknown because these browser hooks were not yet qualified. */
+export function dailyCtaEventNamesForDate(
+  date: string,
+): Readonly<Record<string, readonly string[]>> {
+  return date >= firstQualifiedIndiaDay ? DAILY_CTA_REPORT_EVENT_NAMES : {};
+}

@@ -11,8 +11,8 @@ import { handleAnalyticsShareOwner, handlePublicAnalytics } from './analytics-sh
 import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
-import { composeDailyEngagementReport } from './daily-engagement-report.js';
-import { DAILY_CTA_REPORT_EVENT_NAMES } from './daily-cta-policy.js';
+import { composeDailyEngagementReport, dailyEngagementWindow } from './daily-engagement-report.js';
+import { dailyCtaEventNamesForDate } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
@@ -626,13 +626,15 @@ async function handleDailyEngagementRoute(
     }
   }
   try {
+    const now = Date.now();
+    const day = dailyEngagementWindow(url.searchParams.get('date'), now);
     const report = await composeDailyEngagementReport({
       db: env.DB,
       workspaceId: owner.workspaceId,
       query,
       date: url.searchParams.get('date'),
-      now: Date.now(),
-      ctaEventNamesByCatalogId: DAILY_CTA_REPORT_EVENT_NAMES,
+      now,
+      ctaEventNamesByCatalogId: 'error' in day ? {} : dailyCtaEventNamesForDate(day.date),
     });
     return json(200, report, true);
   } catch (error) {

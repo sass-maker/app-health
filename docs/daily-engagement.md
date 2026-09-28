@@ -20,7 +20,8 @@ is part of this source change.
 - Primary CTA names must be qualified per product before counts appear. The
   checked-in CTA policy keeps Clarity candidates separate from browser events
   that have a production ingest and authenticated Events receipt. Unqualified
-  products remain unknown.
+  products remain unknown. Dates before the first qualification on 2026-09-28
+  stay unknown rather than showing a retrospective zero.
 - `feedback.submitted`, `waitlist.join`, and `newsletter.subscribe` are counted
   from stored production App Health logs. Central SaaS Maker logs are attributed
   only when their project ID or slug resolves to an imported catalog product.
