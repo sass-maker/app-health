@@ -524,13 +524,13 @@ function WatchtowerHeader({
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
       <div>
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          Portfolio watchtower
+          Daily briefing
         </p>
         <h2 id="projects-title" className="mt-1 text-2xl font-semibold tracking-tight">
           Portfolio overview
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Usage and request reliability across every imported environment.
+          Completed India day, owner alerts, and request health across the imported portfolio.
         </p>
       </div>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
@@ -595,7 +595,6 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           analytics.reload();
         }}
       />
-      <WatchtowerTotals rows={rows} healthReady={Boolean(health.data)} />
       {error ? (
         <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
           <CardContent className="flex items-start gap-3 p-4 text-sm">
@@ -607,24 +606,35 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           </CardContent>
         </Card>
       ) : null}
-      {loading ? (
-        <div
-          role="status"
-          aria-label="Loading Watchtower"
-          className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"
-        >
-          <Skeleton className="h-80 w-full rounded-xl" />
-          <Skeleton className="h-80 w-full rounded-xl" />
-          <span className="sr-only">Loading Watchtower…</span>
-        </div>
-      ) : (
-        <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
-          <AttentionQueue rows={rows} onOpen={onOpen} healthReady={Boolean(health.data)} />
-          <ReliabilityField rows={rows} />
-        </div>
-      )}
       <DailyEngagement ownerToken={ownerToken} />
       <OwnerAlertFeed ownerToken={ownerToken} />
+      <section aria-labelledby="request-health-title" className="space-y-4">
+        <div>
+          <h3 id="request-health-title" className="text-lg font-semibold tracking-tight">
+            Request health
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Measured endpoint traffic and issues across the imported inventory.
+          </p>
+        </div>
+        <WatchtowerTotals rows={rows} healthReady={Boolean(health.data)} />
+        {loading ? (
+          <div
+            role="status"
+            aria-label="Loading Watchtower"
+            className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"
+          >
+            <Skeleton className="h-80 w-full rounded-xl" />
+            <Skeleton className="h-80 w-full rounded-xl" />
+            <span className="sr-only">Loading Watchtower…</span>
+          </div>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+            <AttentionQueue rows={rows} onOpen={onOpen} healthReady={Boolean(health.data)} />
+            <ReliabilityField rows={rows} />
+          </div>
+        )}
+      </section>
       <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Requests are server or function calls, never a count of

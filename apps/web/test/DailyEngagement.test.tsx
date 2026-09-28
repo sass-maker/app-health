@@ -130,6 +130,12 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   render(<DailyEngagement ownerToken="owner" />);
   const table = await screen.findByRole('table');
   expect(screen.getByText('2/55 imported')).toBeTruthy();
+  const summary = screen.getByLabelText('Daily evidence summary');
+  expect(within(summary).getAllByText('1')).toHaveLength(2);
+  expect(within(summary).getByText('product with browser visitor evidence')).toBeTruthy();
+  expect(within(summary).getByText('product with measured primary actions')).toBeTruthy();
+  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('0 feedback');
+  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('2 waitlist');
   expect(screen.getByText(/cannot show products that have not been imported/)).toBeTruthy();
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('0')).toBeTruthy();
@@ -142,8 +148,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
       (_, element) => element?.textContent === 'Unknown browsers · Approx. 20 actions',
     ),
   ).toHaveLength(2);
-  expect(atlas.cells[6].textContent).toBe('Unknown');
-  expect(atlas.cells[7].textContent).toBe('2');
+  expect(atlas.cells[4].textContent).toBe('Unknown');
+  expect(atlas.cells[5].textContent).toBe('2');
   expect(
     screen.getByText(/Native sessions count only observed, unsampled native heartbeats/),
   ).toBeTruthy();
@@ -154,15 +160,15 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(atlasCard).getByText('3')).toBeTruthy();
   const beacon = within(table).getByText('beacon').closest('tr')!;
   expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(1);
-  expect(beacon.cells[2].textContent).toBe('Not applicable');
+  expect(beacon.cells[6].textContent).toBe('Not applicable');
   expect(beacon.cells[1].textContent).toBe('Not applicable');
   const beaconCard = within(mobile).getByText('Beacon').closest('li')!;
   const nativeMetric = within(beaconCard).getByText('Native sessions').parentElement!;
   expect(nativeMetric.querySelector('dd')?.textContent).toBe('Not applicable');
   const browserMetric = within(beaconCard).getByText('Browser visitors').parentElement!;
   expect(browserMetric.querySelector('dd')?.textContent).toBe('Not applicable');
-  expect(beacon.cells[6].textContent).toBe('Not applicable');
-  expect(beacon.cells[7].textContent).toBe('Not applicable');
+  expect(beacon.cells[4].textContent).toBe('Not applicable');
+  expect(beacon.cells[5].textContent).toBe('Not applicable');
   expect(fetch.mock.calls[0][0]).toContain('/v1/reports/daily-engagement?date=');
   fireEvent.change(screen.getByPlaceholderText('Search products'), { target: { value: 'Beacon' } });
   expect(within(table).queryByText('atlas')).toBeNull();

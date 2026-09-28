@@ -100,6 +100,28 @@ function installFetch(options?: { healthResponse?: Response }) {
   return fetch;
 }
 
+it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
+  installFetch();
+  render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
+
+  const daily = await screen.findByRole('heading', { name: 'Daily engagement' });
+  const alerts = screen.getByText('Feedback, waitlist, and newsletter', {
+    selector: '[data-slot="card-title"]',
+  });
+  const requestHealth = screen.getByRole('heading', { name: 'Request health' });
+  const issues = screen.getByText('Request issues', { selector: '[data-slot="card-title"]' });
+  const inventory = screen.getByText('Complete inventory', {
+    selector: '[data-slot="card-title"]',
+  });
+  const precedes = (first: HTMLElement, second: HTMLElement) =>
+    Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  expect(precedes(daily, alerts)).toBe(true);
+  expect(precedes(alerts, requestHealth)).toBe(true);
+  expect(precedes(requestHealth, issues)).toBe(true);
+  expect(precedes(issues, inventory)).toBe(true);
+});
+
 it('keeps slow measured requests separate from unconfigured inventory', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
