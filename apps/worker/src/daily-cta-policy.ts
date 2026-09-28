@@ -31,7 +31,7 @@ const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
   daddyrad: ['app.performance.opened', 'app.storage.opened'],
   'email-manager': ['kinetic.cta.hero_connect_gmail', 'kinetic.cta.nav_open_app'],
   'every-song-is-a-website': ['song_world_opened', 'song_listen_clicked'],
-  'field-track': ['manager_dashboard_opened'],
+  'field-track': ['manager_dashboard_opened', 'employee_onboarding_opened'],
   'free-ai': ['access_requirements.opened', 'provider_status.opened'],
   gitstat: ['cta.source_repository_opened', 'cta.analysis_started'],
   'high-signal': ['signals.browse_opened', 'track_record.opened', 'source.explored'],
