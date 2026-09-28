@@ -87,7 +87,7 @@ const report = {
       browser_visitors: 12,
       browser_visitors_applicability: 'applicable',
       cta_events: [
-        { name: 'download_opened', count: 4, unique_browsers: 1, estimated: false },
+        { name: 'download_opened', count: 1, unique_browsers: 1, estimated: false },
         { name: 'signup_clicked', count: 20, unique_browsers: null, estimated: true },
       ],
       cta_status: 'measured',
@@ -95,7 +95,7 @@ const report = {
       newsletter_joins: null,
       newsletter_applicability: 'applicable',
       waitlist_joins: 2,
-      waitlist_applicability: 'not_applicable',
+      waitlist_applicability: 'applicable',
       native_sessions: 3,
       native_sessions_applicability: 'applicable',
       api_activity: null,
@@ -135,13 +135,13 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(within(summary).getByText('product with browser visitor evidence')).toBeTruthy();
   expect(within(summary).getByText('product with measured primary actions')).toBeTruthy();
   expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('0 feedback');
-  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('2 waitlist');
+  expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('2 waitlist joins');
   expect(screen.getByText(/cannot show products that have not been imported/)).toBeTruthy();
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('0')).toBeTruthy();
   expect(within(atlas).getByText('download_opened')).toBeTruthy();
   expect(
-    within(atlas).getByText((_, element) => element?.textContent === '1 browser · 4 actions'),
+    within(atlas).getByText((_, element) => element?.textContent === '1 browser · 1 action'),
   ).toBeTruthy();
   expect(
     screen.getAllByText(

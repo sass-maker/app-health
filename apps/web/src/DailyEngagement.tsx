@@ -119,6 +119,9 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
   const feedback = report.products.reduce((total, row) => total + (row.feedback_submitted ?? 0), 0);
   const newsletter = report.products.reduce((total, row) => total + (row.newsletter_joins ?? 0), 0);
   const waitlist = report.products.reduce((total, row) => total + (row.waitlist_joins ?? 0), 0);
+  const waitlistApplies = report.products.some(
+    (row) => row.waitlist_applicability === 'applicable',
+  );
   const receipts = feedback + newsletter + waitlist;
   const missingScope = report.product_count !== 55;
   return (
@@ -155,7 +158,8 @@ function ReportSummary({ report }: { report: Report }): JSX.Element {
             {receipts}
           </p>
           <p className="text-xs text-muted-foreground">
-            {feedback} feedback · {newsletter} newsletter · {waitlist} waitlist receipts
+            {feedback} feedback receipts · {newsletter} newsletter joins ·{' '}
+            {waitlistApplies ? `${waitlist} waitlist joins` : 'waitlist not applicable'}
           </p>
         </div>
       </div>
@@ -190,7 +194,7 @@ function ProductActions({
               : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}
             {' · '}
             {event.estimated ? 'Approx. ' : ''}
-            {event.count} actions
+            {event.count} {event.count === 1 ? 'action' : 'actions'}
           </span>
         </li>
       ))}
