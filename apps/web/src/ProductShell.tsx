@@ -116,7 +116,11 @@ function WorkspaceSidebar({
             variant="outline"
             className="h-11 w-full justify-start"
             aria-label="Add another project"
-            onClick={onAdd}
+            onClick={() => {
+              window.appHealth?.track('project_add_started');
+              void window.appHealth?.flush?.();
+              onAdd();
+            }}
           >
             <Plus />
             Add project
