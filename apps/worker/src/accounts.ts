@@ -40,7 +40,7 @@ export function accountsConfigured(env: AccountBindings): env is ConfiguredAccou
 }
 
 /** Auth context initialization uses D1 I/O and must stay within its Worker request. */
-export function createAccountAuth(env: AccountBindings) {
+export function createAccountAuth(env: AccountBindings, timings?: OwnerRequestTimings) {
   if (!accountsConfigured(env)) return null;
   const origin = `https://${env.APP_HEALTH_DASHBOARD_HOST}`;
   const auth = betterAuth<BetterAuthOptions>({
@@ -48,7 +48,7 @@ export function createAccountAuth(env: AccountBindings) {
     baseURL: origin,
     basePath: '/v1/auth',
     secret: env.BETTER_AUTH_SECRET,
-    database: env.DB,
+    database: timings ? withAuthReadTiming(env.DB, timings) : env.DB,
     trustedOrigins: [origin],
     socialProviders: {
       google: {
@@ -84,8 +84,53 @@ export interface Workspace {
 export interface OwnerRequestTimings {
   authSetupMs?: number;
   sessionLookupMs?: number;
+  sessionDbReadMs?: number;
+  userDbReadMs?: number;
   workspaceScopeMs?: number;
   routeReadMs?: number;
+}
+
+/**
+ * Measures Better Auth's session and user D1 reads separately. SQL is used
+ * transiently for classification and is never retained or emitted.
+ */
+function withAuthReadTiming(db: D1Database, timings: OwnerRequestTimings): D1Database {
+  const readTimingFor = (query: string): 'session' | 'user' | undefined => {
+    if (/\bfrom\s+["`]?session["`]?(?=\s|\)|$)/i.test(query)) return 'session';
+    if (/\bfrom\s+["`]?user["`]?(?=\s|\)|$)/i.test(query)) return 'user';
+    return undefined;
+  };
+
+  const wrapStatement = (statement: D1PreparedStatement, read: 'session' | 'user' | undefined) =>
+    new Proxy(statement, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (property === 'bind' && typeof value === 'function')
+          return (...values: unknown[]) => wrapStatement(value.apply(target, values), read);
+        if (property === 'all' && read && typeof value === 'function')
+          return async (...args: unknown[]) => {
+            const started = performance.now();
+            try {
+              return await value.apply(target, args);
+            } finally {
+              const elapsed = performance.now() - started;
+              if (read === 'session')
+                timings.sessionDbReadMs = (timings.sessionDbReadMs ?? 0) + elapsed;
+              else timings.userDbReadMs = (timings.userDbReadMs ?? 0) + elapsed;
+            }
+          };
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+  return new Proxy(db, {
+    get(target, property) {
+      const value = Reflect.get(target, property, target);
+      if (property === 'prepare' && typeof value === 'function')
+        return (query: string) => wrapStatement(value.call(target, query), readTimingFor(query));
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 export function withOwnerServerTiming(response: Response, timings?: OwnerRequestTimings): Response {
@@ -93,6 +138,8 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
   const values = [
     ['auth_setup', timings.authSetupMs],
     ['session_lookup', timings.sessionLookupMs],
+    ['session_db_read', timings.sessionDbReadMs],
+    ['user_db_read', timings.userDbReadMs],
     ['workspace_scope', timings.workspaceScopeMs],
     ['route_read', timings.routeReadMs],
   ]
@@ -156,7 +203,7 @@ export async function accountIdentity(
   timings?: OwnerRequestTimings,
 ): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
   const authSetupStarted = performance.now();
-  const auth = createAccountAuth(env);
+  const auth = createAccountAuth(env, timings);
   if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
   if (!auth || !env.DB) return null;
   const sessionLookupStarted = performance.now();
