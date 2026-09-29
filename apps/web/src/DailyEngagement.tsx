@@ -239,8 +239,8 @@ function ProductActions({
     <ul className="space-y-1 text-xs">
       {events.map((event) => (
         <li key={event.name} className="flex justify-between gap-3">
-          <span className="min-w-0 break-words font-mono">{event.name}</span>
-          <span className="shrink-0 text-right tabular-nums">
+          <span className="min-w-0 whitespace-normal break-words font-mono">{event.name}</span>
+          <span className="shrink-0 whitespace-nowrap text-right tabular-nums">
             {event.unique_browsers === null
               ? 'Unknown browsers'
               : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}

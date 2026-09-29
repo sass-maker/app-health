@@ -188,6 +188,12 @@ for (const width of [390, 768, 1440]) {
           );
         });
       expect(serverHeaderIsInView).toBe(true);
+      const actionLabelsFit = await report
+        .locator('tbody li span:first-child')
+        .evaluateAll((labels) =>
+          labels.every((label) => label.scrollWidth <= label.clientWidth + 1),
+        );
+      expect(actionLabelsFit).toBe(true);
     }
     await checkReadability(page);
 
