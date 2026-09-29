@@ -9,6 +9,7 @@ import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import {
+  processBrowserArchiveAuditJob,
   processPendingBrowserArchiveAuditJobs,
   readBrowserArchiveAuditJob,
   startBrowserArchiveAuditJob,
@@ -87,12 +88,18 @@ async function archiveBody() {
 let body: R2ObjectBody;
 let forceSnapshotChange = false;
 let shardZeroPageCalls = 0;
+let batchLookupCalls = 0;
+let dayPageCalls = 0;
 const archive = {
   getByName(name: string) {
     const shard = Number(name.split(':').at(-1));
     return {
-      archiveSegmentForBatch: async () => REFERENCE,
+      archiveSegmentForBatch: async () => {
+        batchLookupCalls++;
+        return REFERENCE;
+      },
       archiveSegmentsForEventDay: async (day: string) => {
+        dayPageCalls++;
         if (forceSnapshotChange && shard === 0) {
           shardZeroPageCalls++;
           return {
@@ -135,6 +142,9 @@ beforeAll(async () => {
 beforeEach(async () => {
   forceSnapshotChange = false;
   shardZeroPageCalls = 0;
+  batchLookupCalls = 0;
+  dayPageCalls = 0;
+  body = await archiveBody();
   await db.prepare('DELETE FROM browser_archive_audit_jobs').run();
   await db.prepare('DELETE FROM browser_visitor_days').run();
   await db.prepare('DELETE FROM browser_visitor_receipt_days').run();
@@ -269,5 +279,49 @@ describe('resumable browser archive audit jobs', () => {
       .bind(old.job_id)
       .first<{ count: number }>();
     expect(oldFacts?.count).toBe(0);
+  });
+
+  it('serializes overlapping slice deliveries with a D1 lease', async () => {
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 5_000);
+    const results = await Promise.allSettled([
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_100),
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_100),
+    ]);
+    expect(batchLookupCalls).toBe(1);
+    expect(
+      results.map((result) => (result.status === 'rejected' ? String(result.reason) : 'fulfilled')),
+    ).toEqual(['fulfilled', 'fulfilled']);
+    const job = await db
+      .prepare(
+        'SELECT receipt_cursor, receipts_processed, lease_token FROM browser_archive_audit_jobs WHERE job_id = ?',
+      )
+      .bind(started.job_id)
+      .first<{ receipt_cursor: number; receipts_processed: number; lease_token: string | null }>();
+    const facts = await db
+      .prepare('SELECT archive_count FROM browser_archive_audit_facts WHERE job_id = ?')
+      .bind(started.job_id)
+      .all<{ archive_count: number }>();
+    expect(job?.receipt_cursor).toBeGreaterThan(0);
+    expect(job?.receipts_processed).toBe(1);
+    expect(job?.lease_token).toBeNull();
+    expect(facts.results.map((fact) => fact.archive_count)).toEqual([1]);
+
+    await Promise.all([
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_200),
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_200),
+    ]);
+    await Promise.all([
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_300),
+      processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 5_300),
+    ]);
+    const indexJob = await db
+      .prepare(
+        'SELECT shard_state_json, segment_count, archive_fact_count FROM browser_archive_audit_jobs WHERE job_id = ?',
+      )
+      .bind(started.job_id)
+      .first<{ shard_state_json: string; segment_count: number; archive_fact_count: number }>();
+    expect(dayPageCalls).toBe(4);
+    expect(indexJob?.segment_count).toBe(1);
+    expect(indexJob?.archive_fact_count).toBe(1);
   });
 });

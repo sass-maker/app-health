@@ -19,6 +19,7 @@ const MAX_ARCHIVE_FACTS = 10_000;
 const MAX_JOBS_PER_WORKSPACE = 2;
 const ACTIVE_JOB_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const FINISHED_JOB_TTL_MS = 24 * 60 * 60 * 1000;
+const SLICE_LEASE_MS = 5 * 60 * 1000;
 const REASONS_ALWAYS_INCOMPLETE = [
   'batch_index_returns_one_candidate',
   'd1_retention_unverified',
@@ -44,6 +45,8 @@ type JobRow = {
   created_at: number;
   updated_at: number;
   expires_at: number;
+  lease_token: string | null;
+  lease_until: number | null;
   receipt_high_water: number;
   expected_receipts: number;
   receipt_cursor: number;
@@ -145,6 +148,15 @@ type AuditCounts = {
   missing_archive_digests: number;
 };
 
+class AuditLeaseError extends Error {
+  constructor(
+    message: string,
+    readonly leaseToken: string,
+  ) {
+    super(message);
+  }
+}
+
 const zeroCounts = (): AuditCounts => ({
   matched: 0,
   mismatched: 0,
@@ -220,7 +232,8 @@ export async function startBrowserArchiveAuditJob(
   await db
     .prepare(
       `UPDATE browser_archive_audit_jobs SET status = 'incomplete', phase = 'done',
-       incomplete_reasons_json = '["audit_job_expired"]', updated_at = ?
+       incomplete_reasons_json = '["audit_job_expired"]', lease_token = NULL,
+       lease_until = NULL, updated_at = ?
        WHERE workspace_id = ? AND status IN ('queued', 'running') AND expires_at <= ?`,
     )
     .bind(now, workspace, now)
@@ -334,32 +347,54 @@ export async function readBrowserArchiveAuditJob(
   return row ? jobPublicState(row, await countsForJob(db, row.job_id)) : null;
 }
 
-function receiptQuery(db: D1DatabaseLike, jobId: string, row: ReceiptRow, identityHash: string) {
+function receiptQuery(
+  db: D1DatabaseLike,
+  jobId: string,
+  row: ReceiptRow,
+  identityHash: string,
+  leaseToken: string,
+) {
   return db
     .prepare(
       `INSERT INTO browser_archive_audit_facts
        (job_id, identity_hash, has_receipt, receipt_digest_version, receipt_digest)
-       VALUES (?, ?, 1, ?, ?)
+       SELECT ?, ?, 1, ?, ? WHERE EXISTS (
+         SELECT 1 FROM browser_archive_audit_jobs WHERE job_id = ? AND lease_token = ?
+       )
        ON CONFLICT(job_id, identity_hash) DO UPDATE SET
          has_receipt = 1, receipt_digest_version = excluded.receipt_digest_version,
          receipt_digest = excluded.receipt_digest`,
     )
-    .bind(jobId, identityHash, row.facts_digest_version, row.facts_digest);
+    .bind(jobId, identityHash, row.facts_digest_version, row.facts_digest, jobId, leaseToken);
 }
 
 function appendReason(reasons: string[], reason: string): string[] {
   return [...new Set([...reasons, reason])].sort();
 }
 
-async function markIncomplete(db: D1DatabaseLike, job: JobRow, reason: string, now: number) {
+async function markIncomplete(
+  db: D1DatabaseLike,
+  job: JobRow,
+  reason: string,
+  now: number,
+  leaseToken: string,
+) {
   const reasons = appendReason(JSON.parse(job.incomplete_reasons_json), reason);
   await db
     .prepare(
       `UPDATE browser_archive_audit_jobs SET status = 'incomplete', phase = 'done',
-       updated_at = ?, expires_at = ?, incomplete_reasons_json = ?
-       WHERE job_id = ? AND workspace_id = ?`,
+       updated_at = ?, expires_at = ?, incomplete_reasons_json = ?,
+       lease_token = NULL, lease_until = NULL
+       WHERE job_id = ? AND workspace_id = ? AND lease_token = ?`,
     )
-    .bind(now, now + FINISHED_JOB_TTL_MS, JSON.stringify(reasons), job.job_id, job.workspace_id)
+    .bind(
+      now,
+      now + FINISHED_JOB_TTL_MS,
+      JSON.stringify(reasons),
+      job.job_id,
+      job.workspace_id,
+      leaseToken,
+    )
     .run();
 }
 
@@ -435,6 +470,7 @@ async function archiveWritesForSegments(
   receiptHashes: ReadonlySet<string>,
   bindings: BrowserArchiveAuditJobBindings,
   includeAllFacts: boolean,
+  leaseToken: string,
 ) {
   const uniqueRefs = [...new Map(refs.map((ref) => [ref.object_key, ref])).values()];
   const seen = await existingSegmentHashes(db, job.job_id, job.identity_salt, uniqueRefs);
@@ -534,16 +570,21 @@ async function archiveWritesForSegments(
     ...processedSegments.map((hash) =>
       db
         .prepare(
-          'INSERT OR IGNORE INTO browser_archive_audit_segments (job_id, segment_hash) VALUES (?, ?)',
+          `INSERT OR IGNORE INTO browser_archive_audit_segments (job_id, segment_hash)
+           SELECT ?, ? WHERE EXISTS (
+             SELECT 1 FROM browser_archive_audit_jobs WHERE job_id = ? AND lease_token = ?
+           )`,
         )
-        .bind(job.job_id, hash),
+        .bind(job.job_id, hash, job.job_id, leaseToken),
     ),
     ...factRows.map((row) =>
       db
         .prepare(
           `INSERT INTO browser_archive_audit_facts
            (job_id, identity_hash, archive_count, archive_digest_version, archive_digest, archive_in_day)
-           VALUES (?, ?, 1, ?, ?, ?)
+           SELECT ?, ?, 1, ?, ?, ? WHERE EXISTS (
+             SELECT 1 FROM browser_archive_audit_jobs WHERE job_id = ? AND lease_token = ?
+           )
            ON CONFLICT(job_id, identity_hash) DO UPDATE SET
              archive_count = browser_archive_audit_facts.archive_count + 1,
              archive_in_day = MAX(browser_archive_audit_facts.archive_in_day, excluded.archive_in_day),
@@ -558,6 +599,8 @@ async function archiveWritesForSegments(
           row.digest_version ?? null,
           row.digest ?? null,
           row.target_day ? 1 : 0,
+          job.job_id,
+          leaseToken,
         ),
     ),
   ];
@@ -569,6 +612,7 @@ async function processReceiptSlice(
   job: JobRow,
   bindings: BrowserArchiveAuditJobBindings,
   now: number,
+  leaseToken: string,
 ) {
   if (job.expected_receipts > MAX_FACT_ROWS) throw new Error('audit receipt cap');
   const page = await readReceiptSlice(db, job);
@@ -577,9 +621,10 @@ async function processReceiptSlice(
       throw new Error('receipt snapshot changed');
     await db
       .prepare(
-        "UPDATE browser_archive_audit_jobs SET phase = 'archive_index', status = 'running', updated_at = ? WHERE job_id = ?",
+        `UPDATE browser_archive_audit_jobs SET phase = 'archive_index', status = 'running',
+         lease_token = NULL, lease_until = NULL, updated_at = ? WHERE job_id = ? AND lease_token = ?`,
       )
-      .bind(now, job.job_id)
+      .bind(now, job.job_id, leaseToken)
       .run();
     return;
   }
@@ -605,9 +650,17 @@ async function processReceiptSlice(
     if (ref) refs.push(ref);
   }
   const receiptWrites = receipts.map((row, index) =>
-    receiptQuery(db, job.job_id, row, identityHashes[index]!),
+    receiptQuery(db, job.job_id, row, identityHashes[index]!, leaseToken),
   );
-  const archive = await archiveWritesForSegments(db, job, refs, receiptHashSet, bindings, true);
+  const archive = await archiveWritesForSegments(
+    db,
+    job,
+    refs,
+    receiptHashSet,
+    bindings,
+    true,
+    leaseToken,
+  );
   if ((await countFactRows(db, job.job_id)) + receipts.length + archive.facts > MAX_FACT_ROWS)
     throw new Error('audit fact row cap');
   const nextCursor = receipts[receipts.length - 1]!.row_id;
@@ -619,7 +672,8 @@ async function processReceiptSlice(
         `UPDATE browser_archive_audit_jobs SET status = 'running', phase = ?,
          receipt_cursor = ?, receipts_processed = receipts_processed + ?,
          segment_count = segment_count + ?, archive_fact_count = archive_fact_count + ?,
-         updated_at = ? WHERE job_id = ? AND receipt_cursor < ?`,
+         lease_token = NULL, lease_until = NULL, updated_at = ?
+         WHERE job_id = ? AND lease_token = ? AND receipt_cursor < ?`,
       )
       .bind(
         'receipts',
@@ -629,6 +683,7 @@ async function processReceiptSlice(
         archive.facts,
         now,
         job.job_id,
+        leaseToken,
         nextCursor,
       ),
   ];
@@ -641,6 +696,7 @@ async function processArchiveIndexSlice(
   job: JobRow,
   bindings: BrowserArchiveAuditJobBindings,
   now: number,
+  leaseToken: string,
 ) {
   const states = JSON.parse(job.shard_state_json) as ShardState[];
   if (states.length !== SHARD_COUNT) throw new Error('invalid shard cursor state');
@@ -668,6 +724,7 @@ async function processArchiveIndexSlice(
       new Set(),
       bindings,
       false,
+      leaseToken,
     );
     if (addedFacts + result.facts > MAX_FACTS_PER_SLICE) throw new Error('audit fact slice cap');
     if ((await countFactRows(db, job.job_id)) + addedFacts + result.facts > MAX_FACT_ROWS)
@@ -691,16 +748,17 @@ async function processArchiveIndexSlice(
     db
       .prepare(
         `UPDATE browser_archive_audit_jobs SET status = 'running', phase = ?,
-       shard_state_json = ?, segment_count = segment_count + ?,
-       archive_fact_count = archive_fact_count + ?, updated_at = ? WHERE job_id = ?`,
+         shard_state_json = ?, segment_count = segment_count + ?,
+       archive_fact_count = archive_fact_count + ?, lease_token = NULL,
+       lease_until = NULL, updated_at = ? WHERE job_id = ? AND lease_token = ?`,
       )
-      .bind(phase, JSON.stringify(states), addedSegments, addedFacts, now, job.job_id),
+      .bind(phase, JSON.stringify(states), addedSegments, addedFacts, now, job.job_id, leaseToken),
   ];
   const results = await db.batch(writes);
   if (results.some((result) => !result.success)) throw new Error('audit index slice failed');
 }
 
-async function finalizeAuditJob(db: D1DatabaseLike, job: JobRow, now: number) {
+async function finalizeAuditJob(db: D1DatabaseLike, job: JobRow, now: number, leaseToken: string) {
   const row = await db
     .prepare(
       'SELECT COUNT(*) AS receipts FROM browser_archive_audit_facts WHERE job_id = ? AND has_receipt = 1',
@@ -713,13 +771,15 @@ async function finalizeAuditJob(db: D1DatabaseLike, job: JobRow, now: number) {
   const update = await db
     .prepare(
       `UPDATE browser_archive_audit_jobs SET status = 'finished', phase = 'done',
-       updated_at = ?, expires_at = ?, incomplete_reasons_json = ? WHERE job_id = ?`,
+       updated_at = ?, expires_at = ?, incomplete_reasons_json = ?,
+       lease_token = NULL, lease_until = NULL WHERE job_id = ? AND lease_token = ?`,
     )
     .bind(
       now,
       now + FINISHED_JOB_TTL_MS,
       JSON.stringify(appendReason(reasons, 'audit_is_evidence_only')),
       job.job_id,
+      leaseToken,
     )
     .run();
   if (!update.success) throw new Error('audit finalize failed');
@@ -735,9 +795,32 @@ export async function processBrowserArchiveAuditJob(
   const { db } = bindings;
   const job = await getJob(db, workspace, jobId);
   if (!job || job.expires_at <= now || ['finished', 'incomplete'].includes(job.status)) return;
-  if (job.phase === 'receipts') await processReceiptSlice(db, job, bindings, now);
-  else if (job.phase === 'archive_index') await processArchiveIndexSlice(db, job, bindings, now);
-  else if (job.phase === 'finalize') await finalizeAuditJob(db, job, now);
+  const leaseToken = crypto.randomUUID();
+  const claimed = await db
+    .prepare(
+      `UPDATE browser_archive_audit_jobs SET lease_token = ?, lease_until = ?
+       WHERE job_id = ? AND workspace_id = ? AND expires_at > ?
+         AND status IN ('queued', 'running')
+         AND (lease_token IS NULL OR lease_until <= ?)`,
+    )
+    .bind(leaseToken, now + SLICE_LEASE_MS, jobId, workspace, now, now)
+    .run();
+  if ((claimed.meta.changes ?? 0) !== 1) return;
+  const claimedJob = await getJob(db, workspace, jobId);
+  if (!claimedJob || claimedJob.lease_token !== leaseToken) return;
+  try {
+    if (claimedJob.phase === 'receipts')
+      await processReceiptSlice(db, claimedJob, bindings, now, leaseToken);
+    else if (claimedJob.phase === 'archive_index')
+      await processArchiveIndexSlice(db, claimedJob, bindings, now, leaseToken);
+    else if (claimedJob.phase === 'finalize')
+      await finalizeAuditJob(db, claimedJob, now, leaseToken);
+  } catch (error) {
+    throw new AuditLeaseError(
+      error instanceof Error ? error.message : 'audit slice failed',
+      leaseToken,
+    );
+  }
 }
 
 /** Scheduled driver: bounded job count and per-job slice count per hourly trigger. */
@@ -789,31 +872,42 @@ export async function processPendingBrowserArchiveAuditJobs(
     try {
       await processBrowserArchiveAuditJob(bindings, job.workspace_id, job.job_id, now + slice);
     } catch (error) {
+      const leaseToken = error instanceof AuditLeaseError ? error.leaseToken : null;
+      if (!leaseToken) break;
+      const message = error instanceof AuditLeaseError ? error.message : '';
       const terminalReason =
-        error instanceof Error &&
+        message &&
         [
           'audit fact row cap',
           'audit segment cap',
           'audit receipt cap',
           'audit fact slice cap',
           'audit archive fact cap',
-        ].includes(error.message)
-          ? error.message.replaceAll(' ', '_')
-          : error instanceof Error && error.message.includes('snapshot changed')
+        ].includes(message)
+          ? message.replaceAll(' ', '_')
+          : message.includes('snapshot changed')
             ? 'archive_index_snapshot_changed'
-            : error instanceof Error && error.message.includes('receipt snapshot')
+            : message.includes('receipt snapshot')
               ? 'receipt_snapshot_changed'
               : null;
       if (terminalReason) {
-        await markIncomplete(bindings.db, current, terminalReason, now + slice);
+        await markIncomplete(bindings.db, current, terminalReason, now + slice, leaseToken);
       } else if (current.slice_failures + 1 >= 3) {
-        await markIncomplete(bindings.db, current, 'audit_slice_retries_exhausted', now + slice);
+        await markIncomplete(
+          bindings.db,
+          current,
+          'audit_slice_retries_exhausted',
+          now + slice,
+          leaseToken,
+        );
       } else {
         await bindings.db
           .prepare(
-            'UPDATE browser_archive_audit_jobs SET slice_failures = slice_failures + 1, updated_at = ? WHERE job_id = ?',
+            `UPDATE browser_archive_audit_jobs SET slice_failures = slice_failures + 1,
+             lease_token = NULL, lease_until = NULL, updated_at = ?
+             WHERE job_id = ? AND lease_token = ?`,
           )
-          .bind(now + slice, current.job_id)
+          .bind(now + slice, current.job_id, leaseToken)
           .run();
       }
       break;

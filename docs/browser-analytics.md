@@ -196,7 +196,9 @@ per-slice archive fact work at 39 facts, and each job at 10,000 fact identities
 and 5,000 segments. An uninterrupted run at both hard caps can take about 11
 days (10,000 receipt rows at 90/hour plus 5,000 segment references at 36/hour);
 the 14-day active-job expiry leaves room for a small amount of scheduling
-delay. A cap or repeated provider failure ends the job incomplete. Finished
+delay. A five-minute D1 lease serializes concurrent scheduled deliveries; all
+slice writes require the active lease token, and a crashed invocation becomes
+eligible for retry after the lease expires. A cap or repeated provider failure ends the job incomplete. Finished
 status and salted identity-key digests expire after 24 hours. Status exposes
 aggregate counts and progress only.
 

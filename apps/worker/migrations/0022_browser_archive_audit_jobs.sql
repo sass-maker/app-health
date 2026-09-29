@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS browser_archive_audit_jobs (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
+  lease_token TEXT,
+  lease_until INTEGER,
   receipt_high_water INTEGER NOT NULL,
   expected_receipts INTEGER NOT NULL,
   receipt_cursor INTEGER NOT NULL DEFAULT 0,
