@@ -11,6 +11,10 @@ type QueryOptions = {
   token: string;
   fetchImpl?: typeof fetch;
   appIds?: readonly string[];
+  timings?: {
+    analyticsQueryWaitMs?: number;
+    analyticsReportAssemblyMs?: number;
+  };
 };
 
 interface QueryResponse {
@@ -71,6 +75,7 @@ export async function queryBrowserReport(
     exitRows,
     engagementAvailable,
   } = await loadReport(workspace, filter, from, to, step, options);
+  const assemblyStarted = options.timings ? performance.now() : undefined;
   const series = Array.from({ length: 24 }, (_, i) => ({
     timestamp: from + i * step,
     pageviews: 0,
@@ -115,7 +120,7 @@ export async function queryBrowserReport(
               exit_pages: [],
             }
           : safeEngagementResult(engagementRows, exitRows);
-  return {
+  const report: BrowserReport = {
     from,
     to,
     source: 'analytics-engine',
@@ -129,6 +134,9 @@ export async function queryBrowserReport(
     engagement,
     previous: previousResult(previousRows),
   };
+  if (options.timings && assemblyStarted !== undefined)
+    options.timings.analyticsReportAssemblyMs = performance.now() - assemblyStarted;
+  return report;
 }
 
 function engagementResult(rows: QueryRow[], exits: QueryRow[]): BrowserEngagement {
@@ -223,10 +231,18 @@ async function loadReport(
   );
   const optionalStart =
     filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
-  const [results, optional] = await Promise.all([
-    Promise.all(plan.sql.slice(0, optionalStart).map((sql) => query(sql, options))),
-    Promise.allSettled(plan.sql.slice(optionalStart).map((sql) => query(sql, options))),
-  ]);
+  const queryWaitStarted = options.timings ? performance.now() : undefined;
+  let results: QueryRow[][];
+  let optional: PromiseSettledResult<QueryRow[]>[];
+  try {
+    [results, optional] = await Promise.all([
+      Promise.all(plan.sql.slice(0, optionalStart).map((sql) => query(sql, options))),
+      Promise.allSettled(plan.sql.slice(optionalStart).map((sql) => query(sql, options))),
+    ]);
+  } finally {
+    if (options.timings && queryWaitStarted !== undefined)
+      options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
+  }
   const [trend, pages, sources, events, audienceRows, ...rest] = results;
   const engagementRows = optional[0]?.status === 'fulfilled' ? optional[0].value : [];
   const exitRows = optional[1]?.status === 'fulfilled' ? optional[1].value : [];

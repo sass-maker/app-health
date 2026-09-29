@@ -22,6 +22,23 @@ it('reuses authorized workspace reports without mixing accounts, workspaces or f
   expect(load).toHaveBeenCalledTimes(4);
 });
 
+it('reports only the cache lookup duration on a report cache hit', async () => {
+  const cache = {
+    match: vi.fn(async () => Response.json({ events: 3 })),
+    put: vi.fn(async () => {}),
+  };
+  const load = vi.fn(async () => ({ events: 4 }));
+  const timings: { analyticsCacheLookupMs?: number } = {};
+
+  await expect(
+    cachedAnalytics('account', 'workspace', 'private-filter', load, cache, 60, timings),
+  ).resolves.toEqual({ events: 3 });
+  expect(timings.analyticsCacheLookupMs).toBeGreaterThanOrEqual(0);
+  expect(Object.keys(timings)).toEqual(['analyticsCacheLookupMs']);
+  expect(load).not.toHaveBeenCalled();
+  expect(cache.put).not.toHaveBeenCalled();
+});
+
 it('does not cache failures and tolerates unavailable cache storage', async () => {
   const cache = {
     match: vi.fn().mockRejectedValue(new Error('cache unavailable')),

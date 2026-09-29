@@ -384,7 +384,7 @@ export async function handleBrowserOwner(
   const workspace = browserWorkspace(owner, local);
   if (!workspace) return json(403, { error: 'Sign in with Google to view workspace analytics.' });
   if (path === '/v1/analytics/report')
-    return measureOwnerRouteRead(timings, () => browserReport(request, env, owner, local));
+    return measureOwnerRouteRead(timings, () => browserReport(request, env, owner, local, timings));
   if (local) return json(200, localAnalytics.summary());
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
@@ -434,6 +434,7 @@ async function browserReport(
   env: BrowserEnvironment,
   owner: OwnerIdentity,
   local: boolean,
+  timings?: OwnerRequestTimings,
 ): Promise<Response> {
   const filter = BrowserReportFilter.safeParse(
     Object.fromEntries(new URL(request.url).searchParams),
@@ -458,7 +459,11 @@ async function browserReport(
             accountId,
             token,
             appIds: owner.appIds ?? [],
+            timings,
           }),
+        undefined,
+        60,
+        timings,
       ),
     );
   } catch {
