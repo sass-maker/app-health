@@ -59,11 +59,14 @@ no qualifying analytics receipt exists.
   until source coverage reaches the selected day; observed positive counts
   remain visible even if they conflict with the current policy. An older
   provider response without applicability metadata keeps these cells Unknown.
-- Native-session applicability is derived from the canonical catalog's product
-  form and platforms. A native app or game form means sessions are applicable,
-  not that the product is instrumented. Non-native product forms are labeled
-  Not applicable; missing telemetry for applicable products stays Unknown.
-  Observed positive session counts remain visible if they conflict with the form.
+- Native-session applicability comes from an explicit canonical catalog
+  decision for each native app or game. Product form alone does not imply
+  approval to collect post-download usage. The current 13 native products are
+  Not applicable in this report under their existing disclosures and the
+  owner's focus on visits and actions before download. A product can become
+  applicable after its own opt-in or disclosure decision and integration.
+  Observed positive session counts remain visible if they conflict with policy,
+  so unexpected collection can be investigated.
 - Native sessions count distinct, scoped session hashes from accepted native
   active heartbeats in the completed day. Their Analytics Engine projection is
   best-effort; missing or sampled rows remain unknown. Browser visitor slots do
