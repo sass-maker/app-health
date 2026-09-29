@@ -209,6 +209,49 @@ describe('exact browser visitor daily ledger', () => {
     ).toMatchObject({ results: [{ india_day: '2026-09-29' }, { india_day: '2026-09-30' }] });
   });
 
+  it('leaves legacy 0019 receipts unindexed when retried with the same fingerprint', async () => {
+    const item = batch({ batch_id: 'legacy-0019-batch' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE browser_visitor_batch_receipts SET accepted_at = NULL, event_count = NULL
+           WHERE batch_id = ?`,
+        )
+        .bind(item.batch_id),
+      db.prepare('DELETE FROM browser_visitor_receipt_days WHERE batch_id = ?').bind(item.batch_id),
+      db
+        .prepare(
+          `DELETE FROM browser_visitor_days
+           WHERE app_id = ? AND environment_id = ? AND visitor_hash = ?`,
+        )
+        .bind(item.app_id, item.environment_id, item.visitor_hash),
+    ]);
+
+    await acceptBrowserVisitorBatch(db, item, item.received_at + 10_000);
+
+    expect(
+      await db
+        .prepare(
+          'SELECT accepted_at, event_count FROM browser_visitor_batch_receipts WHERE batch_id = ?',
+        )
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ accepted_at: null, event_count: null });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days WHERE batch_id = ?')
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ n: 0 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_days WHERE app_id = ?')
+        .bind(item.app_id)
+        .first(),
+    ).toEqual({ n: 0 });
+  });
+
   it('indexes accepted batches without a visitor hash and rejects changed event counts on retry', async () => {
     const item = batch({ batch_id: 'hashless-batch', visitor_hash: undefined });
     await acceptBrowserVisitorBatch(db, item, item.received_at);

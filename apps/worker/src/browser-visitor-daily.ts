@@ -19,7 +19,7 @@ type ExactBrowserVisitorDay =
   { complete: true; visitors: number } | { complete: false; visitors: null };
 export type ExactBrowserVisitorScope = { app_id: string; environment_id: string };
 export type ExactBrowserVisitorResult = ExactBrowserVisitorScope & ExactBrowserVisitorDay;
-export type BrowserVisitorReceiptScope = ExactBrowserVisitorScope & { batch_id: string };
+type BrowserVisitorReceiptScope = ExactBrowserVisitorScope & { batch_id: string };
 export type BrowserVisitorReceiptCursor = BrowserVisitorReceiptScope;
 export type BrowserVisitorReceiptPage = {
   receipts: Array<
@@ -125,9 +125,7 @@ export async function acceptBrowserVisitorBatch(
            (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at, accepted_at, event_count)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, app_id, environment_id, batch_id)
-         DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at),
-           accepted_at = COALESCE(browser_visitor_batch_receipts.accepted_at, excluded.accepted_at),
-           event_count = COALESCE(browser_visitor_batch_receipts.event_count, excluded.event_count)
+         DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at)
          WHERE browser_visitor_batch_receipts.fingerprint = excluded.fingerprint
            AND (browser_visitor_batch_receipts.event_count IS NULL
              OR browser_visitor_batch_receipts.event_count = excluded.event_count)`,
@@ -156,6 +154,7 @@ export async function acceptBrowserVisitorBatch(
              SELECT 1 FROM browser_visitor_batch_receipts
              WHERE workspace_id = ? AND app_id = ? AND environment_id = ?
                AND batch_id = ? AND fingerprint = ?
+               AND accepted_at IS NOT NULL AND event_count = ?
            )
            ON CONFLICT (workspace_id, app_id, environment_id, batch_id, india_day) DO NOTHING`,
         )
@@ -170,6 +169,7 @@ export async function acceptBrowserVisitorBatch(
           batch.environment_id,
           batch.batch_id,
           fingerprint,
+          batch.events.length,
         ),
     );
     if (visitorHash === undefined) continue;
@@ -183,6 +183,7 @@ export async function acceptBrowserVisitorBatch(
              SELECT 1 FROM browser_visitor_batch_receipts
              WHERE workspace_id = ? AND app_id = ? AND environment_id = ?
                AND batch_id = ? AND fingerprint = ?
+               AND accepted_at IS NOT NULL AND event_count = ?
            )
            ON CONFLICT (workspace_id, app_id, environment_id, india_day, visitor_hash)
            DO UPDATE SET expires_at = MAX(browser_visitor_days.expires_at, excluded.expires_at)`,
@@ -199,21 +200,25 @@ export async function acceptBrowserVisitorBatch(
           batch.environment_id,
           batch.batch_id,
           fingerprint,
+          batch.events.length,
         ),
     );
   }
   statements.push(
     db
       .prepare(
-        `SELECT fingerprint, event_count FROM browser_visitor_batch_receipts
+        `SELECT fingerprint, accepted_at, event_count FROM browser_visitor_batch_receipts
          WHERE workspace_id = ? AND app_id = ? AND environment_id = ? AND batch_id = ?`,
       )
       .bind(batch.workspace, batch.app_id, batch.environment_id, batch.batch_id),
   );
   const results = await db.batch(statements);
   const receipt = results.at(-1)?.results?.[0] as
-    { fingerprint: string; event_count: number | null } | undefined;
-  if (receipt?.fingerprint !== fingerprint || receipt.event_count !== batch.events.length)
+    { fingerprint: string; accepted_at: number | null; event_count: number | null } | undefined;
+  const legacyReceipt = receipt?.accepted_at === null && receipt.event_count === null;
+  const indexedReceipt =
+    receipt?.accepted_at !== null && receipt?.event_count === batch.events.length;
+  if (receipt?.fingerprint !== fingerprint || (!legacyReceipt && !indexedReceipt))
     throw new Error('Browser batch identity reused with different facts');
 }
 
