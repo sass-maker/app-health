@@ -142,7 +142,10 @@ not exactly-once end-to-end analytics.
 day. It pages in stable app/environment/batch order, accepts at most 128 scopes
 and 500 rows per page, and returns the v1 facts digest alongside the receipt;
 legacy null digests stay null. `reconcileBrowserArchiveDay` compares up to
-10,000 selected D1 receipts and 10,000 caller-supplied archived batch facts. It
+10,000 selected D1 receipts and archived facts, with no more than 8 MiB of
+aggregate canonical serialized facts and 25 events per archived batch. The
+byte cap is checked for every selected fact before any digest is computed; an
+over-cap input throws and must be reported as incomplete by the caller. It
 recomputes each archived fact digest and reports matches, missing archive facts,
 legacy receipts, missing archive digests, mismatches, duplicate facts, and
 archive facts without a D1 receipt. Its overall result remains incomplete when

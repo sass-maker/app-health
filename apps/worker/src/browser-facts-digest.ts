@@ -12,8 +12,8 @@ export type BrowserFactsBatch = {
   visitor_hash?: string;
 };
 
-export async function digestBrowserEventFacts(batch: BrowserFactsBatch): Promise<string> {
-  const canonical = JSON.stringify([
+export function serializeBrowserEventFacts(batch: BrowserFactsBatch): string {
+  return JSON.stringify([
     'app-health-browser-event-facts',
     BROWSER_EVENT_FACTS_DIGEST_VERSION,
     batch.workspace,
@@ -30,6 +30,13 @@ export async function digestBrowserEventFacts(batch: BrowserFactsBatch): Promise
       event.referrer,
     ]),
   ]);
+}
+
+export async function digestSerializedBrowserEventFacts(canonical: string): Promise<string> {
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical));
   return [...new Uint8Array(hash)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+export async function digestBrowserEventFacts(batch: BrowserFactsBatch): Promise<string> {
+  return digestSerializedBrowserEventFacts(serializeBrowserEventFacts(batch));
 }

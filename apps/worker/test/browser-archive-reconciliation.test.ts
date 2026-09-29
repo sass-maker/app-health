@@ -147,4 +147,43 @@ describe('offline browser archive day reconciliation', () => {
     expect(result.complete).toBe(false);
     expect(result.rows).toMatchObject([{ state: 'archive_without_d1_receipt' }]);
   });
+
+  it('rejects aggregate serialized archive facts above 8 MiB before digesting', async () => {
+    const archived = Array.from({ length: 210 }, (_, index) =>
+      batch({
+        batch_id: `large-${index}`,
+        events: [
+          {
+            event_id: `event-${index}`,
+            timestamp,
+            type: 'pageview',
+            path: `/${'x'.repeat(40_000)}`,
+            referrer: '',
+          },
+        ],
+      }),
+    );
+    await expect(
+      reconcileBrowserArchiveDay({
+        ...(await readyInput()),
+        receipts: [],
+        archived,
+      }),
+    ).rejects.toThrow('8 MiB serialized-byte cap');
+  });
+
+  it('rejects archive batches above the accepted 25-event limit', async () => {
+    const item = batch({
+      events: Array.from({ length: 26 }, (_, index) => ({
+        event_id: `event-${index}`,
+        timestamp,
+        type: 'pageview',
+        path: '/',
+        referrer: '',
+      })),
+    });
+    await expect(reconcileBrowserArchiveDay(await readyInput(item))).rejects.toThrow(
+      '25-event batch limit',
+    );
+  });
 });
