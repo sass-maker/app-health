@@ -9,6 +9,7 @@ export type BrowserFactsBatch = {
   environment_id: string;
   batch_id: string;
   events: readonly BrowserEventV1[];
+  visitor_hash?: string;
 };
 
 export async function digestBrowserEventFacts(batch: BrowserFactsBatch): Promise<string> {
@@ -19,6 +20,7 @@ export async function digestBrowserEventFacts(batch: BrowserFactsBatch): Promise
     batch.app_id,
     batch.environment_id,
     batch.batch_id,
+    batch.visitor_hash?.toLowerCase() ?? null,
     batch.events.map((event) => [
       event.event_id,
       event.timestamp,

@@ -678,17 +678,48 @@ describe('BrowserArchive projection outbox', () => {
   it('deduplicates metadata changes but rejects immutable visitor changes', async () => {
     const unit = unitArchive(true);
     await unit.ready();
-    const original = collected('fingerprint');
+    const original = { ...collected('fingerprint'), visitor_hash: 'a'.repeat(64) };
+    const digest = await digestBrowserEventFacts(original);
     await unit.archive.stage([
-      { ...original, metadata: { channel: '', device: 'mobile', browser: '', country: '' } },
+      {
+        ...original,
+        facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+        facts_digest: digest,
+        metadata: { channel: '', device: 'mobile', browser: '', country: '' },
+      },
     ]);
     expect(
       (
         await unit.archive.stage([
-          { ...original, metadata: { channel: '', device: 'desktop', browser: '', country: '' } },
+          {
+            ...original,
+            facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+            facts_digest: digest,
+            metadata: { channel: '', device: 'desktop', browser: '', country: '' },
+          },
         ])
       ).duplicates,
     ).toBe(1);
+    const changedHash = { ...original, visitor_hash: 'c'.repeat(64) };
+    const missingHash = { ...original, visitor_hash: undefined };
+    await expect(
+      unit.archive.stage([
+        {
+          ...changedHash,
+          facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: digest,
+        },
+      ]),
+    ).rejects.toThrow('digest mismatch');
+    await expect(
+      unit.archive.stage([
+        {
+          ...missingHash,
+          facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: digest,
+        },
+      ]),
+    ).rejects.toThrow('digest mismatch');
     await expect(
       unit.archive.stage([{ ...original, visitor_hash: 'changed-visitor' }]),
     ).rejects.toThrow('identity reused');

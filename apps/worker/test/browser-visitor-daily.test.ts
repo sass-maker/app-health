@@ -5,6 +5,7 @@ import { Miniflare } from 'miniflare';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
 import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { acceptBrowser } from '../src/browser-routes.js';
+import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import type { AppHealthRepositories } from '../src/repository.js';
 import {
   acceptBrowserVisitorBatch,
@@ -304,6 +305,22 @@ describe('exact browser visitor daily ledger', () => {
     await expect(acceptBrowserVisitorBatch(db, changed, changed.received_at)).rejects.toThrow(
       'Browser batch identity reused with different facts',
     );
+  });
+
+  it('binds the scoped visitor hash, including its absent state, into the canonical digest', async () => {
+    const item = batch({ batch_id: 'visitor-digest-binding' });
+    const originalDigest = await digestBrowserEventFacts(item);
+    const changedHashDigest = await digestBrowserEventFacts({ ...item, visitor_hash: VISITOR_B });
+    const missingHashDigest = await digestBrowserEventFacts({ ...item, visitor_hash: undefined });
+    const uppercaseHashDigest = await digestBrowserEventFacts({
+      ...item,
+      visitor_hash: VISITOR_A.toUpperCase(),
+    });
+
+    expect(changedHashDigest).not.toBe(originalDigest);
+    expect(missingHashDigest).not.toBe(originalDigest);
+    expect(uppercaseHashDigest).toBe(originalDigest);
+    expect(originalDigest).not.toContain(VISITOR_A);
   });
 
   it('stores only a versioned digest of event facts in D1 and leaves historical rows unverified', async () => {
