@@ -352,7 +352,12 @@ describe('Google account boundary with real D1 SQL', () => {
       ...env,
       BROWSER_EVENTS: { send },
       BROWSER_HISTORY: { put: vi.fn(), list: vi.fn(), delete: vi.fn() },
-      BROWSER_ARCHIVE: { getByName: () => ({ stage: vi.fn() }) },
+      BROWSER_ARCHIVE: {
+        getByName: () => ({
+          stage: vi.fn(),
+          lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
+        }),
+      },
       BROWSER_ANALYTICS: { writeDataPoint() {} },
       WORKSPACE_PRESENCE: { getByName },
     };

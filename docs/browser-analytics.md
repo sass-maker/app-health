@@ -129,6 +129,14 @@ the archiver verifies its length and hashes the stored bytes before releasing
 staged facts. Missing, unreadable, or conflicting objects retain staging and retry;
 they cannot silently become successful archival receipts. Verification reads at
 most one bounded segment and does not authorize source deletion or compaction.
+The Durable Object exposes an indexed lookup for up to 100 scoped batch
+identities per call; the Queue helper routes up to 1,000 D1 acceptance identities
+to those same stable shards in groups of at most 100. A hit means the matching
+identity remains in the shard's bounded SQLite dedupe ledger after stage commit.
+Pending rows remain visible while R2 retries; successfully archived rows remain
+visible for the 31-day dedupe window, then lookups report them missing. The result
+contains app, environment, and batch IDs only. It proves a local stage receipt,
+not Queue/DLQ exhaustion, successful R2 archival, or day completeness.
 R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
 queried with `_sample_interval` weighting. A durable bounded outbox retries failed
