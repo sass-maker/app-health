@@ -3,6 +3,8 @@ interface ReportCache {
   put(request: Request, response: Response): Promise<void>;
 }
 
+type AnalyticsCacheTimings = { analyticsCacheLookupMs?: number };
+
 const noCache = {};
 const inflightByCache = new WeakMap<object, Map<string, Promise<unknown>>>();
 
@@ -14,17 +16,28 @@ export async function cachedAnalytics<T>(
   load: () => Promise<T>,
   cache: ReportCache | undefined = typeof caches === 'undefined' ? undefined : caches.default,
   maxAge = 60,
+  timings?: AnalyticsCacheTimings,
 ): Promise<T> {
   const cacheKey = `${account}\0${workspace}\0${query}`;
   const key = new Request(
     `https://app-health.internal/analytics/${encodeURIComponent(account)}/${encodeURIComponent(workspace)}?query=${encodeURIComponent(query)}`,
   );
+  let hit: T | undefined;
+  let cacheHit = false;
+  const cacheLookupStarted = timings ? performance.now() : undefined;
   try {
-    const hit = await cache?.match(key);
-    if (hit) return await hit.json<T>();
+    const cached = await cache?.match(key);
+    if (cached) {
+      hit = await cached.json<T>();
+      cacheHit = true;
+    }
   } catch {
     // Cache availability never determines whether an authorized report can load.
+  } finally {
+    if (timings && cacheLookupStarted !== undefined)
+      timings.analyticsCacheLookupMs = performance.now() - cacheLookupStarted;
   }
+  if (cacheHit) return hit as T;
   const owner = cache ?? noCache;
   let inflight = inflightByCache.get(owner);
   if (!inflight) {

@@ -88,6 +88,18 @@ export interface OwnerRequestTimings {
   userDbReadMs?: number;
   workspaceScopeMs?: number;
   capabilitySetupReadMs?: number;
+  analyticsCacheLookupMs?: number;
+  analyticsQueryWaitMs?: number;
+  analyticsTrendMs?: number;
+  analyticsPagesMs?: number;
+  analyticsSourcesMs?: number;
+  analyticsEventsMs?: number;
+  analyticsAudienceMs?: number;
+  analyticsDimensionMaxMs?: number;
+  analyticsPreviousMs?: number;
+  analyticsEngagementMs?: number;
+  analyticsExitsMs?: number;
+  analyticsReportAssemblyMs?: number;
   routeReadMs?: number;
 }
 
@@ -156,6 +168,18 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['user_db_read', timings.userDbReadMs],
     ['workspace_scope', timings.workspaceScopeMs],
     ['capability_setup_read', timings.capabilitySetupReadMs],
+    ['analytics_cache_lookup', timings.analyticsCacheLookupMs],
+    ['analytics_query_wait', timings.analyticsQueryWaitMs],
+    ['analytics_trend', timings.analyticsTrendMs],
+    ['analytics_pages', timings.analyticsPagesMs],
+    ['analytics_sources', timings.analyticsSourcesMs],
+    ['analytics_events', timings.analyticsEventsMs],
+    ['analytics_audience', timings.analyticsAudienceMs],
+    ['analytics_dimension_max', timings.analyticsDimensionMaxMs],
+    ['analytics_previous', timings.analyticsPreviousMs],
+    ['analytics_engagement', timings.analyticsEngagementMs],
+    ['analytics_exits', timings.analyticsExitsMs],
+    ['analytics_report_assembly', timings.analyticsReportAssemblyMs],
     ['route_read', timings.routeReadMs],
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)

@@ -109,11 +109,17 @@ describe('browser reports', () => {
         }),
       );
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
+    const timings: {
+      analyticsQueryWaitMs?: number;
+      analyticsReportAssemblyMs?: number;
+    } = {};
     const report = await queryBrowserReport(
       'w-one',
       { range: '24h', app_id: 'a-one', environment_id: 'e-one', event: 'signup.completed' },
-      options,
+      { ...options, timings },
     );
+    expect(timings.analyticsQueryWaitMs).toBeGreaterThanOrEqual(0);
+    expect(timings.analyticsReportAssemblyMs).toBeGreaterThanOrEqual(0);
     expect(report.sampled).toBe(true);
     expect(report.series[23].events).toBe(4);
     expect(report.sources[0].name).toBe('Unknown');
