@@ -217,6 +217,40 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     });
   }, 30_000);
 
+  it('looks up durable per-batch stage receipts through restart and expiry', async () => {
+    app = await harness();
+    const source = batch('receipt-one');
+    const identity = {
+      app_id: source.app_id,
+      environment_id: source.environment_id,
+      batch_id: source.batch_id,
+    };
+    const requestWithPrivateExtra = { ...identity, visitor_hash: 'raw-visitor-id' };
+    expect((await app.call('lookupStaged', [requestWithPrivateExtra])).body).toEqual({
+      staged: [],
+      missing: 1,
+    });
+    await app.call('stage', [source]);
+    await app.restart();
+    const found = (await app.call('lookupStaged', [requestWithPrivateExtra])).body;
+    expect(found).toEqual({
+      staged: [identity],
+      missing: 0,
+    });
+    expect(JSON.stringify(found)).not.toContain('raw-visitor-id');
+    expect(
+      (await app.call('lookupStaged', [identity, { ...identity, batch_id: 'not-staged' }])).body,
+    ).toEqual({ staged: [identity], missing: 1 });
+    expect((await app.call('lookupStaged', [identity, identity])).status).toBe(503);
+    await app.call('flush');
+    expect((await app.call('lookupStaged', [identity])).body).toEqual({
+      staged: [identity],
+      missing: 0,
+    });
+    await app.call('expire');
+    expect((await app.call('lookupStaged', [identity])).body).toEqual({ staged: [], missing: 1 });
+  });
+
   it('stages once, separates environments, rejects conflicting calls atomically, and arms the alarm', async () => {
     app = await harness();
     const before = Date.now();

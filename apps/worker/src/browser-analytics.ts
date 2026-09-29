@@ -8,7 +8,7 @@ import {
 } from '@app-health/contracts';
 import { localBrowserReport } from './browser-reports.js';
 import type { AnalyticsEngineDatasetLike } from './analytics-engine.js';
-import type { BrowserArchiveStageResult } from './browser-archive.js';
+import type { BrowserArchiveStageResult, BrowserArchiveStagingLookup } from './browser-archive.js';
 import type { BROWSER_EVENT_FACTS_DIGEST_VERSION } from './browser-facts-digest.js';
 
 export async function browserSessionScope(
@@ -46,6 +46,9 @@ export interface BrowserBindings {
   BROWSER_ARCHIVE?: {
     getByName(name: string): {
       stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult>;
+      lookupStaged(
+        batches: Array<Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>>,
+      ): Promise<BrowserArchiveStagingLookup>;
       archiveSegmentsForEventDay?(
         day: string,
         cursor?: { event_day: string; object_key: string; snapshot_sequence: number } | null,

@@ -32,6 +32,11 @@ export interface BrowserArchiveStageResult {
   accepted: BatchIdentity[];
   duplicates: number;
 }
+export interface BrowserArchiveStagingLookup {
+  /** Batch identities whose Durable Object stage transaction committed and remain retained. */
+  staged: BatchIdentity[];
+  missing: number;
+}
 interface PreparedBatch {
   identity: string;
   scope: BatchIdentity;
@@ -228,6 +233,45 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     await this.ctx.storage.sync();
     // Threshold flush runs as an alarm, so an R2 failure cannot lose a new-stage receipt.
     return result;
+  }
+
+  /**
+   * Resolve D1 acceptance identities against this shard's durable SQLite stage ledger.
+   * A hit proves only that this archive shard committed the batch to its bounded ledger;
+   * it does not prove Queue/DLQ exhaustion or successful R2 archival.
+   */
+  async lookupStaged(batches: BatchIdentity[]): Promise<BrowserArchiveStagingLookup> {
+    if (!Array.isArray(batches) || batches.length > MAX_STAGE_BATCHES)
+      throw new Error('Archive staging lookup exceeds 100 batches');
+    const identities = batches.map((batch) => {
+      const names = [batch.app_id, batch.environment_id, batch.batch_id];
+      if (names.some((name) => typeof name !== 'string' || !name.length || name.length > 200))
+        throw new Error('Invalid archive identity');
+      return {
+        identity: JSON.stringify(names),
+        scope: {
+          app_id: batch.app_id,
+          environment_id: batch.environment_id,
+          batch_id: batch.batch_id,
+        },
+      };
+    });
+    if (new Set(identities.map(({ identity }) => identity)).size !== identities.length)
+      throw new Error('Duplicate archive staging lookup identity');
+    if (!identities.length) return { staged: [], missing: 0 };
+    const staged = this.ctx.storage.sql
+      .exec<{ identity: string }>(
+        `SELECT identity FROM archive_seen WHERE (expires_at IS NULL OR expires_at > ?)
+         AND identity IN (${identities.map(() => '?').join(',')})`,
+        Date.now(),
+        ...identities.map(({ identity }) => identity),
+      )
+      .toArray();
+    const found = new Set(staged.map(({ identity }) => identity));
+    return {
+      staged: identities.filter(({ identity }) => found.has(identity)).map(({ scope }) => scope),
+      missing: identities.length - found.size,
+    };
   }
 
   private insert(batches: PreparedBatch[]): BrowserArchiveStageResult {

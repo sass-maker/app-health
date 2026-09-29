@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { browserArchiveShard, consumeBrowserBatches } from '../src/browser-queue.js';
+import {
+  browserArchiveShard,
+  consumeBrowserBatches,
+  lookupBrowserStagingReceipts,
+} from '../src/browser-queue.js';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
 
 function message(workspace = 'workspace', batch_id = 'batch'): Message<CollectedBrowserBatch> {
@@ -22,7 +26,7 @@ function message(workspace = 'workspace', batch_id = 'batch'): Message<Collected
   };
 }
 describe('durable browser queue staging', () => {
-  it('uses stable scoped shards and projects each new identity only after staging', async () => {
+  it('acks newly accepted and identical duplicate deliveries only after atomic staging', async () => {
     const first = message();
     const duplicate = message();
     const stage = vi.fn(async (batches: CollectedBrowserBatch[]) => {
@@ -30,7 +34,10 @@ describe('durable browser queue staging', () => {
       return { accepted: [batches[0]], duplicates: 1 };
     });
     const writeDataPoint = vi.fn();
-    const getByName = vi.fn(() => ({ stage }));
+    const getByName = vi.fn(() => ({
+      stage,
+      lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
+    }));
     await consumeBrowserBatches([first, duplicate], {
       BROWSER_ARCHIVE: { getByName },
       BROWSER_ANALYTICS: { writeDataPoint },
@@ -53,6 +60,36 @@ describe('durable browser queue staging', () => {
     });
     expect(writeDataPoint).not.toHaveBeenCalled();
   });
+  it('joins bounded D1 identities to the same workspace shards without visitor identifiers', async () => {
+    const first = message();
+    first.body.visitor_hash = 'raw-visitor-id';
+    const second = message('workspace', 'batch-two');
+    const lookupStaged = vi.fn(
+      async (
+        batches: Array<{
+          app_id: string;
+          environment_id: string;
+          batch_id: string;
+        }>,
+      ) => ({ staged: batches.slice(0, 1), missing: batches.length - 1 }),
+    );
+    const getByName = vi.fn(() => ({ stage: vi.fn(), lookupStaged }));
+    const result = await lookupBrowserStagingReceipts('workspace', [first.body, second.body], {
+      BROWSER_ARCHIVE: { getByName },
+    });
+    const expectedShards = new Set(
+      await Promise.all([first.body, second.body].map((entry) => browserArchiveShard(entry))),
+    );
+    expect(getByName).toHaveBeenCalledTimes(expectedShards.size);
+    expect(lookupStaged).toHaveBeenCalledTimes(expectedShards.size);
+    expect(result.staged.length + result.missing).toBe(2);
+    expect(JSON.stringify(result)).not.toContain('visitor_hash');
+    await expect(
+      lookupBrowserStagingReceipts('workspace', Array(1001).fill(first.body), {
+        BROWSER_ARCHIVE: { getByName },
+      }),
+    ).rejects.toThrow('exceeds 1000 batches');
+  });
   it('retries failed groups while acknowledging unrelated work and bounds staging calls', async () => {
     const failed = message('failed');
     const successful = Array.from({ length: 101 }, () => message());
@@ -62,6 +99,7 @@ describe('durable browser queue staging', () => {
     }));
     const getByName = (name: string) => ({
       stage: name.startsWith('failed:') ? vi.fn().mockRejectedValue(new Error('full')) : stage,
+      lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
     });
     await consumeBrowserBatches([failed, ...successful], { BROWSER_ARCHIVE: { getByName } });
     expect(failed.ack).not.toHaveBeenCalled();

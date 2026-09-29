@@ -164,6 +164,7 @@ describe('browser analytical data', () => {
               accepted: [{ app_id: 'app-one', environment_id: 'env-one', batch_id: 'batch-one' }],
               duplicates: 0,
             }),
+            lookupStaged: async () => ({ staged: [], missing: 0 }),
           }),
         },
         BROWSER_ANALYTICS: { writeDataPoint: () => {} },
@@ -365,7 +366,10 @@ describe('browser collector boundary', () => {
           delete: async () => {},
         },
         BROWSER_ARCHIVE: {
-          getByName: () => ({ stage: async () => ({ accepted: [], duplicates: 0 }) }),
+          getByName: () => ({
+            stage: async () => ({ accepted: [], duplicates: 0 }),
+            lookupStaged: async () => ({ staged: [], missing: 0 }),
+          }),
         },
         BROWSER_ANALYTICS: { writeDataPoint: () => {} },
       },
