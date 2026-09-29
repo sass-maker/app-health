@@ -104,6 +104,18 @@ export interface DailyCaptureCountsService {
   getDailyCaptureCounts(input: { date: string; catalogIds: string[] }): Promise<DailyCaptureCounts>;
 }
 
+function readDailyCaptureCountsForReport(
+  service: DailyCaptureCountsService | undefined,
+  date: string,
+  catalogIds: string[],
+): Promise<{ result: DailyCaptureCounts | undefined; available: boolean }> {
+  if (!service) return Promise.resolve({ result: undefined, available: false });
+  return service
+    .getDailyCaptureCounts({ date, catalogIds })
+    .then((result) => ({ result: validateDailyCaptureCounts(result, catalogIds), available: true }))
+    .catch(() => ({ result: undefined, available: false }));
+}
+
 export interface DailyEngagementInputs {
   catalog: readonly CatalogProductRow[];
   browserVisitors: readonly BrowserVisitorRow[];
@@ -612,12 +624,8 @@ function buildProductReport(
   indexes: ReportIndexes,
 ): DailyEngagementProductReportV1 {
   const visitor = indexes.visitorsByApp.get(row.app_id);
-  const exactVisitorCount = row.environment_id
-    ? indexes.exactVisitorsByScope.get(exactBrowserVisitorScopeKey(row.app_id, row.environment_id))
-    : undefined;
+  const browserMetrics = productBrowserVisitorMetrics(row, visitor, input, indexes);
   const nativeSession = indexes.nativeSessionsByApp.get(row.app_id);
-  const browserMeasured =
-    exactVisitorCount !== undefined || isProductBrowserMeasured(row, visitor, input);
   const ctaMeasured = isProductCtaMeasured(row, visitor, input, indexes.ctaByApp);
   const ctas = productCtas(row, input, visitor, indexes.ctaByApp, ctaMeasured);
   const logCounts = indexes.logCounts.get(row.catalog_id);
@@ -631,7 +639,7 @@ function buildProductReport(
       : null;
   const apiActivity = productApiActivity(row, input, indexes);
   const measured =
-    Number(browserMeasured) +
+    Number(browserMetrics.measured) +
     Number(ctas.length > 0) +
     Number(logsMeasured) +
     Number(nativeSessions !== null) +
@@ -640,19 +648,11 @@ function buildProductReport(
     catalog_id: row.catalog_id,
     app_id: row.app_id,
     name: row.catalog_name,
-    browser_visitors: browserMeasured
-      ? Math.max(0, Math.round(exactVisitorCount ?? visitor?.visitors ?? 0))
-      : null,
+    browser_visitors: browserMetrics.count,
     browser_visitors_applicability: browserVisitorApplicability(input, row.catalog_id),
-    browser_visitors_unknown_reason: browserMeasured
-      ? undefined
-      : browserVisitorUnknownReason(row, visitor, input),
+    browser_visitors_unknown_reason: browserMetrics.unknownReason,
     cta_events: ctas,
-    cta_status: input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)
-      ? 'not_applicable'
-      : ctas.length > 0
-        ? 'measured'
-        : 'unknown',
+    cta_status: productCtaStatus(row, ctas, input),
     feedback_submitted: feedback,
     newsletter_joins: newsletter,
     newsletter_applicability: metricApplicability(
@@ -674,6 +674,36 @@ function buildProductReport(
     },
     coverage: measured === 0 ? 'unknown' : 'partial',
   };
+}
+
+function productBrowserVisitorMetrics(
+  row: CatalogProductRow,
+  visitor: BrowserVisitorRow | undefined,
+  input: DailyEngagementInputs,
+  indexes: ReportIndexes,
+): {
+  measured: boolean;
+  count: number | null;
+  unknownReason: DailyEngagementProductReportV1['browser_visitors_unknown_reason'];
+} {
+  const exactCount = row.environment_id
+    ? indexes.exactVisitorsByScope.get(exactBrowserVisitorScopeKey(row.app_id, row.environment_id))
+    : undefined;
+  const measured = exactCount !== undefined || isProductBrowserMeasured(row, visitor, input);
+  return {
+    measured,
+    count: measured ? Math.max(0, Math.round(exactCount ?? visitor?.visitors ?? 0)) : null,
+    unknownReason: measured ? undefined : browserVisitorUnknownReason(row, visitor, input),
+  };
+}
+
+function productCtaStatus(
+  row: CatalogProductRow,
+  ctas: DailyEngagementProductReportV1['cta_events'],
+  input: DailyEngagementInputs,
+): DailyEngagementProductReportV1['cta_status'] {
+  if (input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)) return 'not_applicable';
+  return ctas.length > 0 ? 'measured' : 'unknown';
 }
 
 function nativeSessionApplicability(
@@ -1173,16 +1203,13 @@ export async function composeDailyEngagementReport(args: {
   const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
-  const exactScopes = catalog.flatMap((row) =>
-    row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
-  );
-  const exactBrowserVisitorsPromise = readExactBrowserVisitorDays(
+  const exactBrowserVisitorsPromise = readExactBrowserVisitorsForReport(
     args.db,
     args.workspaceId,
-    exactScopes,
+    catalog,
     window.date,
     args.now,
-  ).catch(() => [] as ExactBrowserVisitorResult[]);
+  );
   const [browser, nativeSessions, apiActivity, logResult, captureResult] = await Promise.all([
     args.query
       ? readDailyEngagementBrowser(
@@ -1214,15 +1241,7 @@ export async function composeDailyEngagementReport(args: {
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
-    args.captureCountsService
-      ? args.captureCountsService
-          .getDailyCaptureCounts({ date: window.date, catalogIds: sourceCatalogIds })
-          .then((result) => ({
-            result: validateDailyCaptureCounts(result, sourceCatalogIds),
-            available: true,
-          }))
-          .catch(() => ({ result: undefined, available: false }))
-      : Promise.resolve({ result: undefined, available: false }),
+    readDailyCaptureCountsForReport(args.captureCountsService, window.date, sourceCatalogIds),
   ]);
   const exactBrowserVisitors = await exactBrowserVisitorsPromise;
   return buildDailyEngagementReport({
@@ -1250,4 +1269,19 @@ export async function composeDailyEngagementReport(args: {
     captureCountsAvailable: captureResult.available,
     captureCountsRequested: true,
   });
+}
+
+function readExactBrowserVisitorsForReport(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  catalog: readonly CatalogProductRow[],
+  date: string,
+  now: number,
+): Promise<ExactBrowserVisitorResult[]> {
+  const scopes = catalog.flatMap((row) =>
+    row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
+  );
+  return readExactBrowserVisitorDays(db, workspaceId, scopes, date, now).catch(
+    () => [] as ExactBrowserVisitorResult[],
+  );
 }
