@@ -26,9 +26,37 @@ const batch: CollectedBrowserBatch = {
 };
 const objectKey = 'browser/workspace-a/2026/09/30/segment-a.jsonl.gz';
 
-async function fixture(options: { manifest?: boolean; corrupt?: boolean } = {}) {
+async function fixture(
+  options: {
+    manifest?: boolean;
+    corrupt?: boolean;
+    dayIndex?: boolean;
+    archivedTimestamp?: number;
+    overflowStream?: boolean;
+    receiptCount?: number;
+  } = {},
+) {
   const digest = await digestBrowserEventFacts(batch);
-  const archived = { ...batch, facts_digest_version: 1, facts_digest: digest };
+  const archivedBatch =
+    options.archivedTimestamp === undefined
+      ? batch
+      : { ...batch, events: [{ ...batch.events[0]!, timestamp: options.archivedTimestamp }] };
+  const archivedDigest = await digestBrowserEventFacts(archivedBatch);
+  const archived = { ...archivedBatch, facts_digest_version: 1, facts_digest: archivedDigest };
+  const receiptRows = Array.from({ length: options.receiptCount ?? 1 }, (_, index) => {
+    const receiptBatchId =
+      index === 0 ? batch.batch_id : `z-batch-${String(index).padStart(4, '0')}`;
+    return {
+      app_id: batch.app_id,
+      environment_id: batch.environment_id,
+      batch_id: receiptBatchId,
+      fingerprint: 'f'.repeat(64),
+      accepted_at: batch.received_at,
+      event_count: 1,
+      facts_digest_version: 1,
+      facts_digest: index === 0 ? digest : 'e'.repeat(64),
+    };
+  });
   const raw = Buffer.from(`${JSON.stringify(archived)}\n`);
   const compressed = gzipSync(raw);
   const checksum = createHash('sha256').update(compressed).digest('hex');
@@ -40,16 +68,17 @@ async function fixture(options: { manifest?: boolean; corrupt?: boolean } = {}) 
     content_sha256: options.corrupt ? '0'.repeat(64) : checksum,
     row_count: 1,
     event_count: 1,
-    min_event_at: batch.events[0]!.timestamp,
-    max_event_at: batch.events[0]!.timestamp,
+    min_event_at: archivedBatch.events[0]!.timestamp,
+    max_event_at: archivedBatch.events[0]!.timestamp,
     uncompressed_bytes: raw.byteLength,
-    compressed_bytes: compressed.byteLength,
+    compressed_bytes: options.overflowStream ? 1 : compressed.byteLength,
     created_at: Date.now(),
     state: 'active',
   };
   const shardNames: string[] = [];
   const dayReads: number[] = [];
   const batchReads: string[] = [];
+  let overflowCancelled = false;
   const db = {
     prepare(query: string) {
       const bindings: unknown[] = [];
@@ -63,21 +92,15 @@ async function fixture(options: { manifest?: boolean; corrupt?: boolean } = {}) 
             return {
               results: [{ app_id: batch.app_id, environment_id: batch.environment_id }] as T[],
             };
-          if (query.includes('FROM requested'))
+          if (query.includes('FROM requested')) {
+            const after = typeof bindings[5] === 'string' ? bindings[5] : undefined;
+            const limit = Number(bindings.at(-1));
             return {
-              results: [
-                {
-                  app_id: batch.app_id,
-                  environment_id: batch.environment_id,
-                  batch_id: batch.batch_id,
-                  fingerprint: 'f'.repeat(64),
-                  accepted_at: batch.received_at,
-                  event_count: 1,
-                  facts_digest_version: 1,
-                  facts_digest: digest,
-                },
-              ] as T[],
+              results: receiptRows
+                .filter((row) => !after || row.batch_id > after)
+                .slice(0, limit) as T[],
             };
+          }
           throw new Error('unexpected D1 query');
         },
       };
@@ -96,7 +119,7 @@ async function fixture(options: { manifest?: boolean; corrupt?: boolean } = {}) 
           const shard = Number(name.split(':').at(-1));
           dayReads.push(shard);
           return {
-            segments: shard === 0 ? [reference] : [],
+            segments: shard === 0 && options.dayIndex !== false ? [reference] : [],
             next_cursor: null,
             snapshot_sequence: 7,
           };
@@ -110,16 +133,31 @@ async function fixture(options: { manifest?: boolean; corrupt?: boolean } = {}) 
   };
   const history = {
     async get() {
+      const body = options.overflowStream
+        ? new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(3 * 1024 * 1024));
+            },
+            cancel() {
+              overflowCancelled = true;
+            },
+          })
+        : new Response(compressed).body!;
       return {
-        size: compressed.byteLength,
+        size: options.overflowStream ? 1 : compressed.byteLength,
         customMetadata: options.manifest === false ? {} : { manifest: JSON.stringify(manifest) },
-        body: new Response(compressed).body!,
+        body,
       };
     },
   } as never;
   return {
     input: { db, workspace, day, archive, history },
-    observations: { shardNames, dayReads, batchReads },
+    observations: {
+      shardNames,
+      dayReads,
+      batchReads,
+      isOverflowCancelled: () => overflowCancelled,
+    },
   };
 }
 
@@ -169,5 +207,35 @@ describe('offline browser archive day auditor', () => {
       expect(result.incomplete_reasons).toContain('archive_facts_incomplete');
       expect(JSON.stringify(result)).not.toContain('segment-private-id');
     }
+  });
+
+  it('uses the batch index for a fact whose archived timestamp moved outside the selected India day', async () => {
+    const setup = await fixture({
+      dayIndex: false,
+      archivedTimestamp: Date.parse('2026-09-30T00:00:00Z'),
+    });
+    const result = await auditBrowserArchiveDay(setup.input);
+    expect(setup.observations.batchReads).toHaveLength(1);
+    expect(result.mismatched).toBe(1);
+    expect(result.complete).toBe(false);
+    expect(JSON.stringify(result)).not.toContain('private-id');
+  });
+
+  it('cancels an oversized stream and reports a bounded R2 read failure', async () => {
+    const setup = await fixture({ overflowStream: true });
+    const result = await auditBrowserArchiveDay(setup.input);
+    expect(setup.observations.isOverflowCancelled()).toBe(true);
+    expect(result.incomplete_reasons).toContain('r2_byte_cap');
+    expect(result.complete).toBe(false);
+  });
+
+  it('caps fallback batch-index lookups and reports skipped identities incomplete', async () => {
+    const setup = await fixture({ receiptCount: 101 });
+    const result = await auditBrowserArchiveDay(setup.input);
+    expect(setup.observations.batchReads).toHaveLength(100);
+    expect(result.incomplete_reasons).toContain('batch_index_cap');
+    expect(result.matched).toBe(1);
+    expect(result.missing_archive).toBe(100);
+    expect(result.complete).toBe(false);
   });
 });

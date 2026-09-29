@@ -37,12 +37,15 @@ separate work.
 `auditBrowserArchiveDay` in `apps/worker/src/browser-archive-day-audit.ts` is
 an internal/offline acquisition helper. Given an owned workspace, India day,
 D1 handle, archive namespace, and R2 bucket, it discovers at most 128
-app/environment scopes, pages the D1 receipt selector, visits the event-day
-index on all 16 archive shards with stable snapshot cursors, and looks up each
-selected receipt in its identity shard. It fetches each unique referenced R2
-object within per-object and global byte limits, validates its manifest,
-compressed SHA-256, gzip contents, row/event counts, and event-time bounds, then
-passes the verified facts to `reconcileBrowserArchiveDay`.
+app/environment scopes, pages up to 10,000 D1 receipts, and visits the
+event-day index on all 16 archive shards with stable snapshot cursors. It makes
+at most 100 fallback batch-index lookups, with at most 25 concurrent DO RPCs;
+further receipts are explicitly marked unverified and cannot be reported as
+matched. It examines at most 5,000 unique segments, 2 MiB compressed and 2 MiB
+decompressed per object, 64 MiB compressed and 8 MiB decompressed in total,
+and 10,000 archive facts. It validates each manifest, compressed SHA-256, gzip
+contents, row/event counts, and event-time bounds, then passes verified facts
+to `reconcileBrowserArchiveDay`.
 
 The returned object contains only the day, aggregate state counts, bounded work
 counts, and reason codes; it does not return receipt IDs, visitor hashes,
@@ -52,6 +55,11 @@ reports `complete: false`: Queue and DLQ reconciliation, D1/R2 retention, and a
 current-state ingestion barrier are not inputs to this offline helper. Exhausted
 snapshot pages do not close those proof gates and never advance visitor-day
 coverage metadata.
+
+Stream readers cancel their source as soon as a compressed or decompressed
+limit is crossed. A fallback lookup cap, any unvisited snapshot page, or
+unfetched object adds an incomplete reason; the result must not be interpreted
+as a partial match count for identities whose batch-index lookup was skipped.
 
 The helper does not call external provider APIs or read Queue/DLQ state. Its
 result is useful for bounded evidence collection and comparison only. It is

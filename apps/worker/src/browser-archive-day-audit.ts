@@ -16,10 +16,12 @@ const RECEIPT_PAGE_LIMIT = Math.ceil(RECEIPT_LIMIT / RECEIPT_PAGE_SIZE);
 const SHARD_PAGE_SIZE = 100;
 const SHARD_PAGE_LIMIT = 100;
 const SEGMENT_LIMIT = 5_000;
+const BATCH_INDEX_LOOKUP_LIMIT = 100;
+const BATCH_INDEX_LOOKUP_CONCURRENCY = 25;
 const SEGMENT_BYTES_LIMIT = 64 * 1024 * 1024;
 const SEGMENT_BYTES_MAX = 2 * 1024 * 1024;
-const DECOMPRESSED_BYTES_LIMIT = 128 * 1024 * 1024;
-const DECOMPRESSED_BYTES_MAX = 8 * 1024 * 1024;
+const DECOMPRESSED_BYTES_LIMIT = 8 * 1024 * 1024;
+const DECOMPRESSED_BYTES_MAX = 2 * 1024 * 1024;
 const ARCHIVE_FACT_LIMIT = 10_000;
 
 type DayCursor = { event_day: string; object_key: string; snapshot_sequence: number };
@@ -99,6 +101,9 @@ async function readBoundedBody(
       if (size > maxBytes) throw new Error('segment byte cap');
       chunks.push(value);
     }
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -294,6 +299,8 @@ type AuditState = {
   }>;
   receiptPagesComplete: boolean;
   references: Map<string, SegmentReference>;
+  processedReferences: Set<string>;
+  batchLookupSkipped: Set<string>;
   shardsExhausted: number;
   archiveLookupComplete: boolean;
   archived: CollectedBrowserBatch[];
@@ -313,6 +320,8 @@ function newAuditState(): AuditState {
     receipts: [],
     receiptPagesComplete: false,
     references: new Map(),
+    processedReferences: new Set(),
+    batchLookupSkipped: new Set(),
     shardsExhausted: 0,
     archiveLookupComplete: true,
     archived: [],
@@ -424,19 +433,44 @@ async function readBatchIndexes(
     state.archiveLookupComplete = false;
     return;
   }
-  for (const receipt of state.receipts) {
-    try {
-      const shardName = await shardForReceipt(input.workspace, receipt);
-      const reference = await input.archive
-        .getByName(shardName)
-        .archiveSegmentForBatch(receipt.app_id, receipt.environment_id, receipt.batch_id);
-      if (reference) addReference(state, reference);
-    } catch {
-      state.archiveLookupComplete = false;
-      state.reasons.add('batch_index_read_failed');
-      return;
+  const skipped = state.receipts.slice(BATCH_INDEX_LOOKUP_LIMIT);
+  if (skipped.length > 0) {
+    state.archiveLookupComplete = false;
+    state.reasons.add('batch_index_cap');
+    for (const receipt of skipped) state.batchLookupSkipped.add(receiptKey(receipt));
+  }
+  const selected = state.receipts.slice(0, BATCH_INDEX_LOOKUP_LIMIT);
+  for (let start = 0; start < selected.length; start += BATCH_INDEX_LOOKUP_CONCURRENCY) {
+    const chunk = selected.slice(start, start + BATCH_INDEX_LOOKUP_CONCURRENCY);
+    const results = await Promise.allSettled(
+      chunk.map(async (receipt) => {
+        const shardName = await shardForReceipt(input.workspace, receipt);
+        return input.archive
+          .getByName(shardName)
+          .archiveSegmentForBatch(receipt.app_id, receipt.environment_id, receipt.batch_id);
+      }),
+    );
+    for (const [index, result] of results.entries()) {
+      const receipt = chunk[index]!;
+      if (result.status === 'rejected') {
+        state.archiveLookupComplete = false;
+        state.batchLookupSkipped.add(receiptKey(receipt));
+        state.reasons.add('batch_index_read_failed');
+      } else if (result.value) {
+        try {
+          addReference(state, result.value);
+        } catch {
+          state.archiveLookupComplete = false;
+          state.batchLookupSkipped.add(receiptKey(receipt));
+          state.reasons.add('segment_cap');
+        }
+      }
     }
   }
+}
+
+function receiptKey(receipt: { app_id: string; environment_id: string; batch_id: string }): string {
+  return JSON.stringify([receipt.app_id, receipt.environment_id, receipt.batch_id]);
 }
 
 function segmentFailureReason(error: unknown): string {
@@ -454,6 +488,8 @@ async function acquireArchiveFacts(
   state: AuditState,
 ): Promise<void> {
   for (const reference of state.references.values()) {
+    if (state.processedReferences.has(reference.object_key)) continue;
+    state.processedReferences.add(reference.object_key);
     try {
       const batches = await readVerifiedSegment(input, reference, state.byteState);
       if (state.archived.length + batches.length > ARCHIVE_FACT_LIMIT)
@@ -485,11 +521,14 @@ function addComparisonReasons(state: AuditState, reasons: readonly string[]): vo
 
 async function compareFacts(input: BrowserArchiveDayAuditInput, state: AuditState) {
   try {
+    const archived = state.archived.filter(
+      (batch) => !state.batchLookupSkipped.has(receiptKey(batch)),
+    );
     const comparison = await reconcileBrowserArchiveDay({
       day: input.day,
       workspace: input.workspace,
       receipts: state.receipts,
-      archived: state.archived,
+      archived,
       receipt_pages_complete: state.receiptPagesComplete,
       archive_lookup_complete:
         state.archiveLookupComplete &&
