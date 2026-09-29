@@ -34,6 +34,7 @@ async function fixture(
     archivedTimestamp?: number;
     overflowStream?: boolean;
     receiptCount?: number;
+    batchLookupMissing?: boolean;
   } = {},
 ) {
   const digest = await digestBrowserEventFacts(batch);
@@ -126,7 +127,7 @@ async function fixture(
         },
         async archiveSegmentForBatch(appId: string, environmentId: string, batchId: string) {
           batchReads.push([appId, environmentId, batchId].join('/'));
-          return reference;
+          return options.batchLookupMissing ? null : reference;
         },
       };
     },
@@ -221,6 +222,15 @@ describe('offline browser archive day auditor', () => {
     expect(JSON.stringify(result)).not.toContain('private-id');
   });
 
+  it('reports a selected receipt with no day fact or batch-index candidate as missing and incomplete', async () => {
+    const setup = await fixture({ dayIndex: false, batchLookupMissing: true });
+    const result = await auditBrowserArchiveDay(setup.input);
+    expect(result.missing_archive).toBe(1);
+    expect(result.incomplete_reasons).toContain('missing_archive_fact');
+    expect(result.unverified_receipts).toBe(0);
+    expect(result.complete).toBe(false);
+  });
+
   it('cancels an oversized stream and reports a bounded R2 read failure', async () => {
     const setup = await fixture({ overflowStream: true });
     const result = await auditBrowserArchiveDay(setup.input);
@@ -235,7 +245,8 @@ describe('offline browser archive day auditor', () => {
     expect(setup.observations.batchReads).toHaveLength(100);
     expect(result.incomplete_reasons).toContain('batch_index_cap');
     expect(result.matched).toBe(1);
-    expect(result.missing_archive).toBe(100);
+    expect(result.missing_archive).toBe(99);
+    expect(result.unverified_receipts).toBe(1);
     expect(result.complete).toBe(false);
   });
 });

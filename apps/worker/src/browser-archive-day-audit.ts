@@ -67,6 +67,7 @@ export type BrowserArchiveDayAudit = {
   duplicate_archive: number;
   missing_archive_digest: number;
   receipt_count: number;
+  unverified_receipts: number;
   segment_count: number;
   shards_exhausted: number;
   incomplete_reasons: string[];
@@ -521,13 +522,16 @@ function addComparisonReasons(state: AuditState, reasons: readonly string[]): vo
 
 async function compareFacts(input: BrowserArchiveDayAuditInput, state: AuditState) {
   try {
+    const receipts = state.receipts.filter(
+      (receipt) => !state.batchLookupSkipped.has(receiptKey(receipt)),
+    );
     const archived = state.archived.filter(
       (batch) => !state.batchLookupSkipped.has(receiptKey(batch)),
     );
     const comparison = await reconcileBrowserArchiveDay({
       day: input.day,
       workspace: input.workspace,
-      receipts: state.receipts,
+      receipts,
       archived,
       receipt_pages_complete: state.receiptPagesComplete,
       archive_lookup_complete:
@@ -568,6 +572,7 @@ export async function auditBrowserArchiveDay(
     complete: false,
     ...counts,
     receipt_count: state.receipts.length,
+    unverified_receipts: state.batchLookupSkipped.size,
     segment_count: state.references.size,
     shards_exhausted: state.shardsExhausted,
     incomplete_reasons: [...state.reasons].sort(),
