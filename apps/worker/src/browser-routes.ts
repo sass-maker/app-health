@@ -19,6 +19,10 @@ import {
 import { queryBrowserReport } from './browser-reports.js';
 import { telemetryScope } from './analytics-engine.js';
 import { acceptBrowserVisitorBatch } from './browser-visitor-daily.js';
+import {
+  BROWSER_EVENT_FACTS_DIGEST_VERSION,
+  digestBrowserEventFacts,
+} from './browser-facts-digest.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import type { SharedAnalytics } from '@app-health/contracts';
 import {
@@ -126,12 +130,21 @@ export async function acceptBrowser(
   repos: AppHealthRepositories,
   local: boolean,
 ) {
-  const durableBatch = session
+  const scopedBatch = session
     ? {
         ...batch,
         session_hash: await browserSessionScope(batch.app_id, batch.environment_id, session),
       }
     : batch;
+  const durableBatch =
+    !local && scopedBatch.events.length
+      ? {
+          ...scopedBatch,
+          facts_digest_version:
+            BROWSER_EVENT_FACTS_DIGEST_VERSION as typeof BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: await digestBrowserEventFacts(scopedBatch),
+        }
+      : scopedBatch;
   const activeSession =
     !batch.events.length ||
     batch.events.some((event) => event.timestamp > batch.received_at - PRESENCE_TTL_MS)

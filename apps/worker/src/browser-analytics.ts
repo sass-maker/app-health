@@ -9,6 +9,7 @@ import {
 import { localBrowserReport } from './browser-reports.js';
 import type { AnalyticsEngineDatasetLike } from './analytics-engine.js';
 import type { BrowserArchiveStageResult } from './browser-archive.js';
+import type { BROWSER_EVENT_FACTS_DIGEST_VERSION } from './browser-facts-digest.js';
 
 export async function browserSessionScope(
   appId: string,
@@ -29,6 +30,9 @@ export interface CollectedBrowserBatch {
   batch_id: string;
   received_at: number;
   events: BrowserEventV1[];
+  /** Queue/archive copy of the D1 receipt's versioned event-facts digest. */
+  facts_digest_version?: typeof BROWSER_EVENT_FACTS_DIGEST_VERSION;
+  facts_digest?: string;
   /** Scoped one-way session identifier; raw browser session IDs never persist. */
   session_hash?: string;
   visitor_hash?: string;

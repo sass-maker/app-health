@@ -1,5 +1,9 @@
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
+import {
+  BROWSER_EVENT_FACTS_DIGEST_VERSION,
+  digestBrowserEventFacts,
+} from './browser-facts-digest.js';
 
 const INDIA_OFFSET_MS = 5 * 60 * 60 * 1000 + 30 * 60 * 1000;
 const BROWSER_VISITOR_DAY_MS = 86_400_000;
@@ -112,6 +116,13 @@ export async function acceptBrowserVisitorBatch(
     ...new Set(batch.events.map((event) => indiaDayForTimestamp(event.timestamp))),
   ].sort();
   const fingerprint = await batchFingerprint(normalizedBatch, days);
+  const factsDigest = await digestBrowserEventFacts(normalizedBatch);
+  if (
+    (batch.facts_digest_version !== undefined &&
+      batch.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION) ||
+    (batch.facts_digest !== undefined && batch.facts_digest !== factsDigest)
+  )
+    throw new Error('Browser event facts digest mismatch');
   const statements = [
     db
       .prepare(
@@ -122,11 +133,15 @@ export async function acceptBrowserVisitorBatch(
     db
       .prepare(
         `INSERT INTO browser_visitor_batch_receipts
-           (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at, accepted_at, event_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at, accepted_at, event_count,
+            facts_digest_version, facts_digest)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, app_id, environment_id, batch_id)
          DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at)
          WHERE browser_visitor_batch_receipts.fingerprint = excluded.fingerprint
+           AND (browser_visitor_batch_receipts.facts_digest IS NULL
+             OR (browser_visitor_batch_receipts.facts_digest_version = excluded.facts_digest_version
+               AND browser_visitor_batch_receipts.facts_digest = excluded.facts_digest))
            AND (browser_visitor_batch_receipts.event_count IS NULL
              OR browser_visitor_batch_receipts.event_count = excluded.event_count)`,
       )
@@ -139,6 +154,8 @@ export async function acceptBrowserVisitorBatch(
         now + RECEIPT_RETENTION_MS,
         now,
         batch.events.length,
+        BROWSER_EVENT_FACTS_DIGEST_VERSION,
+        factsDigest,
       ),
   ];
   for (const day of days) {
@@ -207,18 +224,31 @@ export async function acceptBrowserVisitorBatch(
   statements.push(
     db
       .prepare(
-        `SELECT fingerprint, accepted_at, event_count FROM browser_visitor_batch_receipts
+        `SELECT fingerprint, accepted_at, event_count, facts_digest_version, facts_digest FROM browser_visitor_batch_receipts
          WHERE workspace_id = ? AND app_id = ? AND environment_id = ? AND batch_id = ?`,
       )
       .bind(batch.workspace, batch.app_id, batch.environment_id, batch.batch_id),
   );
   const results = await db.batch(statements);
   const receipt = results.at(-1)?.results?.[0] as
-    { fingerprint: string; accepted_at: number | null; event_count: number | null } | undefined;
+    | {
+        fingerprint: string;
+        accepted_at: number | null;
+        event_count: number | null;
+        facts_digest_version: number | null;
+        facts_digest: string | null;
+      }
+    | undefined;
   const legacyReceipt = receipt?.accepted_at === null && receipt.event_count === null;
   const indexedReceipt =
     receipt?.accepted_at !== null && receipt?.event_count === batch.events.length;
-  if (receipt?.fingerprint !== fingerprint || (!legacyReceipt && !indexedReceipt))
+  if (
+    receipt?.fingerprint !== fingerprint ||
+    (!legacyReceipt &&
+      (!indexedReceipt ||
+        receipt.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION ||
+        receipt.facts_digest !== factsDigest))
+  )
     throw new Error('Browser batch identity reused with different facts');
 }
 
