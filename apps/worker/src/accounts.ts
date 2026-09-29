@@ -87,6 +87,7 @@ export interface OwnerRequestTimings {
   sessionDbReadMs?: number;
   userDbReadMs?: number;
   workspaceScopeMs?: number;
+  capabilitySetupReadMs?: number;
   routeReadMs?: number;
 }
 
@@ -154,6 +155,7 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['session_db_read', timings.sessionDbReadMs],
     ['user_db_read', timings.userDbReadMs],
     ['workspace_scope', timings.workspaceScopeMs],
+    ['capability_setup_read', timings.capabilitySetupReadMs],
     ['route_read', timings.routeReadMs],
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)

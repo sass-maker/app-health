@@ -69,7 +69,7 @@ async function capabilities(
   if (!app || !env) return json(400, { error: 'Project and environment are required' });
   if (!canManage(owner, app)) return json(403, { error: 'Project access denied' });
   const routeReadStarted = performance.now();
-  const fastResponse = await capabilitySetupResponse(request, repos, url, app, env);
+  const fastResponse = await capabilitySetupResponse(request, repos, url, app, env, timings);
   if (fastResponse) {
     if (timings) timings.routeReadMs = performance.now() - routeReadStarted;
     return fastResponse;
@@ -85,6 +85,7 @@ async function capabilitySetupResponse(
   url: URL,
   app: string,
   env: string,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (
     url.pathname === '/v1/capabilities' &&
@@ -92,7 +93,13 @@ async function capabilitySetupResponse(
     repos.capabilities &&
     repos.capabilitySetup
   ) {
-    const setup = await repos.capabilitySetup.getCapabilitySetup(app, env);
+    const started = performance.now();
+    let setup: Awaited<ReturnType<typeof repos.capabilitySetup.getCapabilitySetup>>;
+    try {
+      setup = await repos.capabilitySetup.getCapabilitySetup(app, env);
+    } finally {
+      if (timings) timings.capabilitySetupReadMs = performance.now() - started;
+    }
     if (!setup) return json(404, { error: 'Environment not found' });
     return json(200, {
       app_id: app,

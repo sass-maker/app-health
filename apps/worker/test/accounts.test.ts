@@ -235,7 +235,7 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     const analyticsReport = await request('/v1/analytics/report');
     const timingPattern =
-      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, user_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/;
+      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, user_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
     for (const [response, status] of [
       [apps, 200],
       [capabilities, 200],
@@ -250,6 +250,8 @@ describe('Google account boundary with real D1 SQL', () => {
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
     }
+    expect(capabilities.headers.get('server-timing')).toContain('capability_setup_read;dur=');
+    expect(apps.headers.get('server-timing')).not.toContain('capability_setup_read');
 
     const unauthenticated = await worker.fetch(
       new Request('https://dashboard.example.com/v1/apps'),
