@@ -4,6 +4,10 @@ import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js'
 import { cleanupExpiredAccountRecords } from './account-retention.js';
 import { cleanupBrowserVisitorDays } from './browser-visitor-daily.js';
 import {
+  processPendingBrowserArchiveAuditJobs,
+  type BrowserArchiveAuditJobBindings,
+} from './browser-archive-audit-jobs.js';
+import {
   selfAnalyticsConfig,
   scheduleProductMilestone,
   type SelfAnalyticsBindings,
@@ -1015,6 +1019,39 @@ const unmonitoredWorker = {
         );
     } catch {
       console.warn(JSON.stringify({ event: 'browser_visitor_retention_failed' }));
+    }
+    const archiveBinding = env.BROWSER_ARCHIVE;
+    const historyBinding = env.BROWSER_HISTORY;
+    if (archiveBinding && historyBinding?.get) {
+      try {
+        const archive: BrowserArchiveAuditJobBindings['archive'] = {
+          getByName(name) {
+            const shard = archiveBinding.getByName(name);
+            return {
+              archiveSegmentsForEventDay: (...args) => {
+                if (!shard.archiveSegmentsForEventDay)
+                  throw new Error('archive day index unavailable');
+                return shard.archiveSegmentsForEventDay(...args);
+              },
+              archiveSegmentForBatch: (...args) => {
+                if (!shard.archiveSegmentForBatch)
+                  throw new Error('archive batch index unavailable');
+                return shard.archiveSegmentForBatch(...args);
+              },
+            };
+          },
+        };
+        await processPendingBrowserArchiveAuditJobs(
+          {
+            db: env.DB,
+            archive,
+            history: { get: (...args) => historyBinding.get!(...args) },
+          },
+          Date.now(),
+        );
+      } catch {
+        console.warn(JSON.stringify({ event: 'browser_archive_audit_slice_failed' }));
+      }
     }
     await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupLogsExpired(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000, 10_000);

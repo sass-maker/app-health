@@ -30,6 +30,10 @@ import {
   queryPublicBrowserBreakdowns,
   queryPublicBrowserTraffic,
 } from './public-browser-report.js';
+import {
+  readBrowserArchiveAuditJob,
+  startBrowserArchiveAuditJob,
+} from './browser-archive-audit-jobs.js';
 
 export interface BrowserEnvironment extends BrowserBindings {
   DB?: D1DatabaseLike;
@@ -263,6 +267,63 @@ export async function handleBrowserOwner(
   timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const auditStartPath = '/v1/browser/archive-audits';
+  const auditStatusPrefix = `${auditStartPath}/`;
+  if (path === auditStartPath || path.startsWith(auditStatusPrefix)) {
+    if (local || !owner.workspaceId || owner.appId || owner.appIds)
+      return json(403, { error: 'Full workspace owner access is required.' });
+    if (!env.DB) return json(503, { error: 'Archive audit storage is unavailable.' });
+    const url = new URL(request.url);
+    if (path === auditStartPath && request.method === 'POST') {
+      if (
+        [...url.searchParams.keys()].some((key) => key !== 'day') ||
+        url.searchParams.getAll('day').length !== 1
+      )
+        return json(400, { error: 'Provide one valid day.' });
+      const archiveProbe = env.BROWSER_ARCHIVE?.getByName(
+        `${owner.workspaceId}:browser-archive-v1:0`,
+      );
+      if (
+        !archiveProbe?.archiveSegmentsForEventDay ||
+        !archiveProbe.archiveSegmentForBatch ||
+        !env.BROWSER_HISTORY?.get
+      )
+        return json(503, { error: 'Archive audit bindings are unavailable.' });
+      try {
+        return json(
+          202,
+          await startBrowserArchiveAuditJob(
+            env.DB,
+            owner.workspaceId,
+            url.searchParams.get('day') ?? '',
+          ),
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message === 'audit already running')
+          return json(409, { error: 'An archive audit is already running.' });
+        if (error instanceof Error && error.message === 'audit job quota')
+          return json(429, { error: 'Archive audit request limit reached.' });
+        if (error instanceof Error && error.message === 'audit receipt cap')
+          return json(413, { error: 'The selected day exceeds the audit work limit.' });
+        if (error instanceof Error && error.message === 'invalid scope')
+          return json(400, { error: 'Provide one valid day.' });
+        return json(503, { error: 'Archive audit could not be started.' });
+      }
+    }
+    if (path.startsWith(auditStatusPrefix) && request.method === 'GET') {
+      if ([...url.searchParams.keys()].length)
+        return json(400, { error: 'Invalid audit status query.' });
+      const jobId = path.slice(auditStatusPrefix.length);
+      if (!jobId || jobId.includes('/')) return json(404, { error: 'Archive audit not found.' });
+      try {
+        const result = await readBrowserArchiveAuditJob(env.DB, owner.workspaceId, jobId);
+        return result ? json(200, result) : json(404, { error: 'Archive audit not found.' });
+      } catch {
+        return json(503, { error: 'Archive audit status is unavailable.' });
+      }
+    }
+    return json(405, { error: 'Method not allowed.' });
+  }
   if (!['/v1/analytics', '/v1/analytics/live', '/v1/analytics/report'].includes(path)) return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
   const workspace = local ? 'local' : owner.workspaceId;

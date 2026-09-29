@@ -184,6 +184,30 @@ Queue/DLQ delivery and provider-retention evidence remain external and are
 unavailable to this offline helper, so it always returns incomplete. No
 production watermark or Daily briefing fallback is enabled.
 
+### Resumable owner audit jobs
+
+An authenticated full-workspace owner can start one bounded observation with
+`POST /v1/browser/archive-audits?day=YYYY-MM-DD` and poll
+`GET /v1/browser/archive-audits/<job_id>`. The request contains no workspace or
+product selectors; both are taken from owner authentication. The worker runs
+at most three bounded D1/DO/R2 slices per hourly scheduled invocation. It caps
+each receipt page at 30 rows, each event-day index page at three segments, the
+per-slice archive fact work at 39 facts, and each job at 10,000 fact identities
+and 5,000 segments. An uninterrupted run at both hard caps can take about 11
+days (10,000 receipt rows at 90/hour plus 5,000 segment references at 36/hour);
+the 14-day active-job expiry leaves room for a small amount of scheduling
+delay. A cap or repeated provider failure ends the job incomplete. Finished
+status and salted identity-key digests expire after 24 hours. Status exposes
+aggregate counts and progress only.
+
+Every result has `complete: false`. A finished job means only that its captured
+D1 rowid range and per-shard index snapshots were read within the limits. It
+does not prove a global snapshot barrier, all archive candidates for a batch,
+Queue/DLQ exhaustion or replay, provider retention, unsampled Analytics Engine
+parity, or production cutover. The one-candidate batch lookup and all external
+gates remain explicit incomplete reasons. The job never writes visitor
+coverage metadata and is not consumed by the Daily briefing.
+
 New segments also carry the versioned archive manifest in R2 custom metadata,
 committed atomically with the gzip bytes. It records the compressed-content
 SHA-256, batch and event counts, actual UTF-8/compressed byte lengths, workspace,

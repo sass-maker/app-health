@@ -25,7 +25,7 @@ const DECOMPRESSED_BYTES_MAX = 2 * 1024 * 1024;
 const ARCHIVE_FACT_LIMIT = 10_000;
 
 type DayCursor = { event_day: string; object_key: string; snapshot_sequence: number };
-type SegmentReference = { segment_id: string; object_key: string };
+export type SegmentReference = { segment_id: string; object_key: string };
 type DayPage = {
   segments: SegmentReference[];
   next_cursor: DayCursor | null;
@@ -168,6 +168,15 @@ async function readVerifiedSegment(
   } finally {
     await object.body.cancel().catch(() => undefined);
   }
+}
+
+/** Read and verify one indexed archive object for a bounded resumable operator slice. */
+export async function readBrowserArchiveAuditSegment(
+  input: BrowserArchiveDayAuditInput,
+  reference: SegmentReference,
+  byteState: { compressed: number; decompressed: number },
+): Promise<CollectedBrowserBatch[]> {
+  return readVerifiedSegment(input, reference, byteState);
 }
 
 async function readCompressedSegment(
