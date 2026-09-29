@@ -19,7 +19,15 @@ import {
 } from './browser-analytics.js';
 import { queryBrowserReport } from './browser-reports.js';
 import { telemetryScope } from './analytics-engine.js';
-import { acceptBrowserVisitorBatch } from './browser-visitor-daily.js';
+import {
+  acceptBrowserVisitorBatch,
+  confirmBrowserVisitorRolloutFullTraffic,
+  deactivateBrowserVisitorScope,
+  recordBrowserVisitorCoverageAudit,
+  recordBrowserVisitorRolloutStart,
+  recordBrowserVisitorScopeActivation,
+  sealExactBrowserVisitorDay,
+} from './browser-visitor-daily.js';
 import {
   BROWSER_EVENT_FACTS_DIGEST_VERSION,
   digestBrowserEventFacts,
@@ -273,6 +281,187 @@ export async function handleBrowserIngest(
 }
 
 const BROWSER_AUDIT_PATH = '/v1/browser/archive-audits';
+const BROWSER_VISITOR_COVERAGE_PATH = '/v1/browser/visitor-coverage';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
+  return Object.keys(value).sort().join(',') === [...keys].sort().join(',');
+}
+
+type CoverageActionArgs = {
+  db: D1DatabaseLike;
+  workspace: string;
+  input: Record<string, unknown>;
+  now: number;
+};
+
+function validCoverageTimestamps(input: Record<string, unknown>, now: number): boolean {
+  return Object.entries(input).every(
+    ([key, value]) =>
+      (!key.endsWith('_at') && key !== 'audited_through') ||
+      (typeof value === 'number' && Number.isSafeInteger(value) && value <= now + 60_000),
+  );
+}
+
+async function ownedProductionScope(
+  db: D1DatabaseLike,
+  workspace: string,
+  input: Record<string, unknown>,
+): Promise<boolean> {
+  if (input.app_id === undefined && input.environment_id === undefined) return true;
+  if (typeof input.app_id !== 'string' || typeof input.environment_id !== 'string') return false;
+  const scope = await db
+    .prepare(
+      `SELECT 1 AS owned FROM environments e JOIN workspace_apps wa
+       ON wa.app_id = e.app_id AND wa.workspace_id = ?
+       WHERE e.id = ? AND e.app_id = ? AND lower(e.name) = 'production' LIMIT 1`,
+    )
+    .bind(workspace, input.environment_id, input.app_id)
+    .first<{ owned: number }>();
+  return scope !== null;
+}
+
+async function rolloutStartAction({ db, workspace, input }: CoverageActionArgs) {
+  if (
+    !exactKeys(input, [
+      'action',
+      'generation_id',
+      'worker_version_id',
+      'source_sha',
+      'rollout_started_at',
+      'rollout_observed_at',
+      'rollout_traffic_percent',
+    ])
+  )
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  await recordBrowserVisitorRolloutStart(db, { ...input, workspace_id: workspace } as never);
+  return json(201, { recorded: true });
+}
+
+async function rolloutFullAction({ db, workspace, input }: CoverageActionArgs) {
+  if (
+    !exactKeys(input, [
+      'action',
+      'generation_id',
+      'worker_version_id',
+      'source_sha',
+      'full_traffic_at',
+      'observed_at',
+      'traffic_percent',
+    ])
+  )
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  await confirmBrowserVisitorRolloutFullTraffic(db, { ...input, workspace_id: workspace } as never);
+  return json(200, { recorded: true });
+}
+
+async function trackerActivateAction({ db, workspace, input }: CoverageActionArgs) {
+  if (
+    !exactKeys(input, [
+      'action',
+      'app_id',
+      'environment_id',
+      'activated_at',
+      'verified_at',
+      'tracker_source_sha',
+    ])
+  )
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  await recordBrowserVisitorScopeActivation(db, { ...input, workspace_id: workspace } as never);
+  return json(201, { recorded: true });
+}
+
+async function trackerDeactivateAction({ db, workspace, input }: CoverageActionArgs) {
+  if (
+    !exactKeys(input, [
+      'action',
+      'app_id',
+      'environment_id',
+      'activated_at',
+      'tracker_source_sha',
+      'deactivated_at',
+    ])
+  )
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  await deactivateBrowserVisitorScope(db, { ...input, workspace_id: workspace } as never);
+  return json(200, { recorded: true });
+}
+
+async function coverageAuditAction({ db, workspace, input }: CoverageActionArgs) {
+  const globalAudit = input.audit_kind === 'worker_rollouts';
+  const scopeAudit = input.audit_kind === 'tracker_scope';
+  const keys = [
+    'action',
+    'audit_id',
+    'audit_kind',
+    ...(globalAudit ? [] : ['app_id', 'environment_id']),
+    'audited_through',
+    'observed_at',
+    'evidence_sha',
+  ];
+  if ((!globalAudit && !scopeAudit) || !exactKeys(input, keys))
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  await recordBrowserVisitorCoverageAudit(db, { ...input, workspace_id: workspace } as never);
+  return json(201, { recorded: true });
+}
+
+async function sealCoverageDayAction({ db, workspace, input, now }: CoverageActionArgs) {
+  if (
+    !exactKeys(input, ['action', 'app_id', 'environment_id', 'day']) ||
+    typeof input.app_id !== 'string' ||
+    typeof input.environment_id !== 'string' ||
+    typeof input.day !== 'string'
+  )
+    return json(400, { error: 'Invalid coverage proof action or fields.' });
+  const sealed = await sealExactBrowserVisitorDay(db, {
+    workspace_id: workspace,
+    app_id: input.app_id,
+    environment_id: input.environment_id,
+    day: input.day,
+    now,
+  });
+  return sealed
+    ? json(200, { sealed: true })
+    : json(409, { error: 'Coverage proof is incomplete or the day is already sealed.' });
+}
+
+async function handleBrowserVisitorCoverageOperator(
+  request: Request,
+  env: BrowserEnvironment,
+  workspace: string,
+): Promise<Response> {
+  let input: unknown;
+  try {
+    input = await readPublicJson(request, 4096);
+  } catch {
+    return json(400, { error: 'Invalid coverage proof request.' });
+  }
+  if (!isRecord(input) || typeof input.action !== 'string')
+    return json(400, { error: 'Invalid coverage proof request.' });
+  const now = Date.now();
+  if (!validCoverageTimestamps(input, now))
+    return json(400, { error: 'Coverage proof timestamps must be finite and provider-observed.' });
+  if (!(await ownedProductionScope(env.DB!, workspace, input)))
+    return json(404, { error: 'Production scope not found.' });
+  const handlers: Record<string, (args: CoverageActionArgs) => Promise<Response>> = {
+    'rollout-start': rolloutStartAction,
+    'rollout-full': rolloutFullAction,
+    'tracker-activate': trackerActivateAction,
+    'tracker-deactivate': trackerDeactivateAction,
+    audit: coverageAuditAction,
+    'seal-day': sealCoverageDayAction,
+  };
+  const handler = handlers[input.action];
+  if (!handler) return json(400, { error: 'Invalid coverage proof action or fields.' });
+  try {
+    return await handler({ db: env.DB!, workspace, input, now });
+  } catch {
+    return json(409, { error: 'Coverage proof was rejected or could not be recorded.' });
+  }
+}
 
 function isBrowserAuditPath(path: string) {
   return path === BROWSER_AUDIT_PATH || path.startsWith(`${BROWSER_AUDIT_PATH}/`);
@@ -359,6 +548,22 @@ function browserWorkspace(owner: OwnerIdentity, local: boolean) {
   return local ? 'local' : owner.workspaceId;
 }
 
+async function browserVisitorCoverageOwnerRoute(
+  request: Request,
+  env: BrowserEnvironment,
+  owner: OwnerIdentity,
+  local: boolean,
+): Promise<Response | null> {
+  if (new URL(request.url).pathname !== BROWSER_VISITOR_COVERAGE_PATH) return null;
+  if (!browserAuditOwnerAllowed(owner, local))
+    return json(403, { error: 'Full workspace owner access is required.' });
+  if (!env.DB) return json(503, { error: 'Coverage proof storage is unavailable.' });
+  if (request.method !== 'POST') return json(405, { error: 'Method not allowed.' });
+  if (request.headers.get('origin') !== new URL(request.url).origin)
+    return json(403, { error: 'Same-origin operator request required.' });
+  return handleBrowserVisitorCoverageOperator(request, env, owner.workspaceId!);
+}
+
 async function browserLiveRoute(request: Request, presence: BrowserPresence) {
   if (request.headers.get('origin') !== new URL(request.url).origin)
     return json(403, { error: 'same-origin stream required' });
@@ -377,6 +582,8 @@ export async function handleBrowserOwner(
   timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const coverageResponse = await browserVisitorCoverageOwnerRoute(request, env, owner, local);
+  if (coverageResponse) return coverageResponse;
   const auditResponse = await handleBrowserArchiveAuditOwner(request, env, owner, local, path);
   if (auditResponse) return auditResponse;
   if (!['/v1/analytics', '/v1/analytics/live', '/v1/analytics/report'].includes(path)) return null;

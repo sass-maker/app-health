@@ -1011,7 +1011,12 @@ const unmonitoredWorker = {
     await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());
     try {
       const visitorRetention = await cleanupBrowserVisitorDays(env.DB, Date.now(), 10_000);
-      if (visitorRetention.backlog.visitors || visitorRetention.backlog.receipts)
+      if (
+        visitorRetention.backlog.visitors ||
+        visitorRetention.backlog.receipts ||
+        visitorRetention.backlog.fences ||
+        visitorRetention.backlog.audits
+      )
         console.warn(
           JSON.stringify({
             event: 'browser_visitor_retention_backlog',

@@ -821,8 +821,7 @@ class MockStatement implements D1PreparedStatement {
           return {
             app_id: appId,
             environment_id: environmentId,
-            covered_generation: row?.complete ? 'verified-generation' : null,
-            scope_active: row?.complete ? 1 : 0,
+            coverage_sealed: row?.complete ? 1 : 0,
             visitors: row?.complete ? row.visitors : 0,
           };
         }) as T[],

@@ -12,9 +12,11 @@ import {
   acceptBrowserVisitorBatch,
   confirmBrowserVisitorRolloutFullTraffic,
   deactivateBrowserVisitorScope,
+  recordBrowserVisitorCoverageAudit,
   readBrowserVisitorReceiptPage,
   recordBrowserVisitorRolloutStart,
   recordBrowserVisitorScopeActivation,
+  sealExactBrowserVisitorDay,
   BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
   BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
   BROWSER_VISITOR_RETENTION_DAYS,
@@ -30,6 +32,7 @@ const BROWSER_VISITOR_DAY_MS = 86_400_000;
 const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
 const WORKER_SHA = 'c'.repeat(40);
 const TRACKER_SHA = 'd'.repeat(40);
+const AUDIT_SHA = 'e'.repeat(64);
 
 const mf = new Miniflare({
   modules: true,
@@ -108,6 +111,43 @@ async function activateScope(
   });
 }
 
+async function auditAndSeal(
+  scope: typeof firstApp | typeof otherApp,
+  day: string,
+  now: number,
+  ids = `${scope.app_id}-${day}`,
+) {
+  const closeAt =
+    toMs(`${day}T18:30:00Z`) +
+    BROWSER_VISITOR_MAX_LATENESS_MS +
+    BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+  await recordBrowserVisitorCoverageAudit(db, {
+    workspace_id: scope.workspace,
+    audit_id: `worker-${ids}`,
+    audit_kind: 'worker_rollouts',
+    audited_through: closeAt,
+    observed_at: now,
+    evidence_sha: AUDIT_SHA,
+  });
+  await recordBrowserVisitorCoverageAudit(db, {
+    workspace_id: scope.workspace,
+    audit_id: `scope-${ids}`,
+    audit_kind: 'tracker_scope',
+    app_id: scope.app_id,
+    environment_id: scope.environment_id,
+    audited_through: closeAt,
+    observed_at: now,
+    evidence_sha: AUDIT_SHA,
+  });
+  return sealExactBrowserVisitorDay(db, {
+    workspace_id: scope.workspace,
+    app_id: scope.app_id,
+    environment_id: scope.environment_id,
+    day,
+    now,
+  });
+}
+
 async function apply(sql: string) {
   for (const statement of sql
     .replace(/--[^\n]*/g, '')
@@ -175,6 +215,12 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0026_browser_visitor_day_seals.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
@@ -185,6 +231,8 @@ beforeEach(async () => {
     db.prepare('DELETE FROM browser_queue_stage_receipts'),
     db.prepare('DELETE FROM browser_visitor_scope_activations'),
     db.prepare('DELETE FROM browser_visitor_acceptance_rollouts'),
+    db.prepare('DELETE FROM browser_visitor_acceptance_day_fences'),
+    db.prepare('DELETE FROM browser_visitor_coverage_audits'),
     db.prepare('DELETE FROM browser_visitor_rollup_meta'),
   ]);
 });
@@ -621,6 +669,8 @@ describe('exact browser visitor daily ledger', () => {
     await attestRollout(firstApp.workspace, 'generation-one', fullTrafficAt);
     await activateScope(firstApp, bounds.from, now);
     await activateScope(otherApp, bounds.from, now);
+    expect(await auditAndSeal(firstApp, day, now, 'first-app-day')).toBe(true);
+    expect(await auditAndSeal(otherApp, day, now, 'other-app-day')).toBe(true);
     const beforeSettlement = await readExactBrowserVisitorDays(
       db,
       firstApp.workspace,
@@ -720,6 +770,260 @@ describe('exact browser visitor daily ledger', () => {
     ]);
   });
 
+  it('fails closed when either provider audit stops before the late-event close', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const closeAt =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    const now = closeAt + 1;
+    await attestRollout(
+      firstApp.workspace,
+      'generation-audit-gap',
+      from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, from - 1000, now);
+    await recordBrowserVisitorCoverageAudit(db, {
+      workspace_id: firstApp.workspace,
+      audit_id: 'worker-audit-short',
+      audit_kind: 'worker_rollouts',
+      audited_through: closeAt - 1,
+      observed_at: now,
+      evidence_sha: AUDIT_SHA,
+    });
+    await recordBrowserVisitorCoverageAudit(db, {
+      workspace_id: firstApp.workspace,
+      audit_id: 'scope-audit-complete',
+      audit_kind: 'tracker_scope',
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      audited_through: closeAt,
+      observed_at: now,
+      evidence_sha: AUDIT_SHA,
+    });
+
+    expect(
+      await sealExactBrowserVisitorDay(db, {
+        workspace_id: firstApp.workspace,
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        day,
+        now,
+      }),
+    ).toBe(false);
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+  });
+
+  it('does not let an old open activation mask a later closed overlapping activation', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const now =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    await attestRollout(
+      firstApp.workspace,
+      'generation-overlap',
+      from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, from - BROWSER_VISITOR_DAY_MS, from);
+    const overlappingSha = 'f'.repeat(40);
+    await recordBrowserVisitorScopeActivation(db, {
+      workspace_id: firstApp.workspace,
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      activated_at: from + 1000,
+      verified_at: from + 2000,
+      tracker_source_sha: overlappingSha,
+    });
+    await deactivateBrowserVisitorScope(db, {
+      workspace_id: firstApp.workspace,
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      activated_at: from + 1000,
+      tracker_source_sha: overlappingSha,
+      deactivated_at: to + 1,
+    });
+
+    expect(await auditAndSeal(firstApp, day, now, 'overlap-day')).toBe(false);
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+  });
+
+  it('serializes a delayed final receipt against the day seal without producing a false zero', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const closeAt =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    const eventAt = to - 1;
+    const sealTime = closeAt;
+    const acceptedAt = eventAt + BROWSER_VISITOR_MAX_LATENESS_MS;
+    const receipt = batch({
+      batch_id: 'race-final-receipt',
+      received_at: acceptedAt,
+      visitor_hash: VISITOR_A,
+      events: [
+        { event_id: 'race-event', timestamp: eventAt, type: 'pageview', path: '/', referrer: '' },
+      ],
+    });
+    await attestRollout(
+      firstApp.workspace,
+      'generation-race',
+      from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, from, sealTime);
+    await recordBrowserVisitorCoverageAudit(db, {
+      workspace_id: firstApp.workspace,
+      audit_id: 'worker-race-audit',
+      audit_kind: 'worker_rollouts',
+      audited_through: closeAt,
+      observed_at: sealTime,
+      evidence_sha: AUDIT_SHA,
+    });
+    await recordBrowserVisitorCoverageAudit(db, {
+      workspace_id: firstApp.workspace,
+      audit_id: 'scope-race-audit',
+      audit_kind: 'tracker_scope',
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      audited_through: closeAt,
+      observed_at: sealTime,
+      evidence_sha: AUDIT_SHA,
+    });
+
+    const [accepted, sealed] = await Promise.allSettled([
+      acceptBrowserVisitorBatch(db, receipt, acceptedAt),
+      sealExactBrowserVisitorDay(db, {
+        workspace_id: firstApp.workspace,
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        day,
+        now: sealTime,
+      }),
+    ]);
+    expect(sealed.status).toBe('fulfilled');
+    const exact = await readExactBrowserVisitorDays(
+      db,
+      firstApp.workspace,
+      [firstApp],
+      day,
+      sealTime,
+    );
+    if (accepted.status === 'fulfilled') {
+      expect(exact).toEqual([
+        {
+          app_id: firstApp.app_id,
+          environment_id: firstApp.environment_id,
+          complete: true,
+          visitors: 1,
+        },
+      ]);
+    } else {
+      expect(exact).toEqual([
+        {
+          app_id: firstApp.app_id,
+          environment_id: firstApp.environment_id,
+          complete: true,
+          visitors: 0,
+        },
+      ]);
+      expect(
+        await db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM browser_visitor_batch_receipts WHERE batch_id = 'race-final-receipt'",
+          )
+          .first<{ n: number }>(),
+      ).toEqual({ n: 0 });
+    }
+  });
+
+  it('rejects a post-seal multi-day receipt without partially accepting its open day', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const closeAt =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    await attestRollout(
+      firstApp.workspace,
+      'generation-seal-first',
+      from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, from - 1000, closeAt);
+    expect(await auditAndSeal(firstApp, day, closeAt, 'seal-first-day')).toBe(true);
+
+    const acceptedAt = to + BROWSER_VISITOR_MAX_LATENESS_MS - 1;
+    const lateRetry = batch({
+      batch_id: 'sealed-multi-day-batch',
+      received_at: acceptedAt,
+      events: [
+        {
+          event_id: 'sealed-day-event',
+          timestamp: to - 1,
+          type: 'pageview',
+          path: '/',
+          referrer: '',
+        },
+        {
+          event_id: 'open-day-event',
+          timestamp: to + 1,
+          type: 'pageview',
+          path: '/next',
+          referrer: '',
+        },
+      ],
+    });
+    await expect(acceptBrowserVisitorBatch(db, lateRetry, acceptedAt)).rejects.toThrow(
+      'sealed or incomplete event day',
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM browser_visitor_batch_receipts WHERE batch_id = 'sealed-multi-day-batch'",
+        )
+        .first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await db.prepare('SELECT COUNT(*) AS n FROM browser_visitor_days').first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, closeAt),
+    ).toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: true,
+        visitors: 0,
+      },
+    ]);
+    expect(
+      await readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], '2026-09-29', closeAt),
+    ).toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+  });
+
   it('invalidates a day intersecting a partial rollout and qualifies only a later full day', async () => {
     const day = '2026-09-28';
     const bounds = { from: toMs('2026-09-27T18:30:00Z'), to: toMs('2026-09-28T18:30:00Z') };
@@ -772,6 +1076,7 @@ describe('exact browser visitor daily ledger', () => {
     const nextDayTo = nextDayFrom + BROWSER_VISITOR_DAY_MS;
     const nextDayNow =
       nextDayTo + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    expect(await auditAndSeal(firstApp, nextDay, nextDayNow)).toBe(true);
     await expect(
       readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], nextDay, nextDayNow),
     ).resolves.toEqual([
@@ -780,6 +1085,37 @@ describe('exact browser visitor daily ledger', () => {
         environment_id: firstApp.environment_id,
         complete: true,
         visitors: 0,
+      },
+    ]);
+  });
+
+  it('invalidates an older full rollout when a newer partial rollout begins before the day', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const now =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    await attestRollout(firstApp.workspace, 'generation-older-full', from - 10 * 60_000);
+    await recordBrowserVisitorRolloutStart(db, {
+      workspace_id: firstApp.workspace,
+      generation_id: 'generation-newer-partial',
+      worker_version_id: 'version-newer-partial',
+      source_sha: WORKER_SHA,
+      rollout_started_at: from - 5 * 60_000,
+      rollout_observed_at: from - 4 * 60_000,
+      rollout_traffic_percent: 10,
+    });
+    await activateScope(firstApp, from - BROWSER_VISITOR_DAY_MS, from - BROWSER_VISITOR_DAY_MS);
+
+    expect(await auditAndSeal(firstApp, day, now, 'partial-before-day')).toBe(false);
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
       },
     ]);
   });
@@ -815,6 +1151,7 @@ describe('exact browser visitor daily ledger', () => {
       }),
       acceptedAt,
     );
+    expect(await auditAndSeal(firstApp, day, now, 'hashless-day')).toBe(true);
     await expect(
       readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
     ).resolves.toEqual([
@@ -909,7 +1246,9 @@ describe('exact browser visitor daily ledger', () => {
     expect(await cleanupBrowserVisitorDays(db, now, 1)).toEqual({
       visitors: 1,
       receipts: 1,
-      backlog: { visitors: false, receipts: false },
+      fences: 0,
+      audits: 0,
+      backlog: { visitors: false, receipts: false, fences: false, audits: false },
     });
     expect(
       await db.prepare('SELECT COUNT(*) AS n FROM browser_visitor_days').first<{ n: number }>(),
@@ -933,12 +1272,16 @@ describe('exact browser visitor daily ledger', () => {
     expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
       visitors: 2,
       receipts: 2,
-      backlog: { visitors: true, receipts: true },
+      fences: 0,
+      audits: 0,
+      backlog: { visitors: true, receipts: true, fences: false, audits: false },
     });
     expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
       visitors: 1,
       receipts: 1,
-      backlog: { visitors: false, receipts: false },
+      fences: 0,
+      audits: 0,
+      backlog: { visitors: false, receipts: false, fences: false, audits: false },
     });
   });
 
@@ -959,12 +1302,16 @@ describe('exact browser visitor daily ledger', () => {
     expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
       visitors: 0,
       receipts: 2,
-      backlog: { visitors: false, receipts: true },
+      fences: 0,
+      audits: 0,
+      backlog: { visitors: false, receipts: true, fences: false, audits: false },
     });
     expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
       visitors: 0,
       receipts: 1,
-      backlog: { visitors: false, receipts: false },
+      fences: 0,
+      audits: 0,
+      backlog: { visitors: false, receipts: false, fences: false, audits: false },
     });
     expect(
       await db
