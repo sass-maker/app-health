@@ -21,6 +21,10 @@ import {
   type DailyEngagementProductReportV1,
 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
+import {
+  readExactBrowserVisitorDays,
+  type ExactBrowserVisitorResult,
+} from './browser-visitor-daily.js';
 import { endpointReadRanges } from './endpoint-read.js';
 
 /** SaaS Maker centralized log events that map to engagement metrics. */
@@ -100,9 +104,23 @@ export interface DailyCaptureCountsService {
   getDailyCaptureCounts(input: { date: string; catalogIds: string[] }): Promise<DailyCaptureCounts>;
 }
 
+function readDailyCaptureCountsForReport(
+  service: DailyCaptureCountsService | undefined,
+  date: string,
+  catalogIds: string[],
+): Promise<{ result: DailyCaptureCounts | undefined; available: boolean }> {
+  if (!service) return Promise.resolve({ result: undefined, available: false });
+  return service
+    .getDailyCaptureCounts({ date, catalogIds })
+    .then((result) => ({ result: validateDailyCaptureCounts(result, catalogIds), available: true }))
+    .catch(() => ({ result: undefined, available: false }));
+}
+
 export interface DailyEngagementInputs {
   catalog: readonly CatalogProductRow[];
   browserVisitors: readonly BrowserVisitorRow[];
+  /** Exact D1 values are eligible only when their scoped coverage evidence is complete. */
+  exactBrowserVisitors?: readonly ExactBrowserVisitorResult[];
   ctaEvents: readonly CtaEventRow[];
   nativeSessions?: readonly NativeSessionRow[];
   apiActivity?: readonly ApiActivityRow[];
@@ -294,6 +312,7 @@ interface ReportIndexes {
   nativeSessionsByApp: Map<string, NativeSessionRow>;
   apiActivityByApp: Map<string, ApiActivityRow>;
   browserLastSeen: Map<string, number>;
+  exactVisitorsByScope: Map<string, number>;
   ctaByApp: Map<
     string,
     Map<string, { count: number; unique_browsers: number | null; estimated: boolean }>
@@ -310,6 +329,14 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   const nativeSessionsByApp = new Map((input.nativeSessions ?? []).map((row) => [row.app_id, row]));
   const apiActivityByApp = new Map((input.apiActivity ?? []).map((row) => [row.app_id, row]));
   const browserLastSeen = new Map<string, number>();
+  const exactVisitorsByScope = new Map<string, number>();
+  const qualifiedExactScopes = qualifiedExactBrowserVisitorScopes(input);
+  for (const row of input.exactBrowserVisitors ?? []) {
+    const scopeKey = exactBrowserVisitorScopeKey(row.app_id, row.environment_id);
+    if (row.complete && qualifiedExactScopes.has(scopeKey)) {
+      exactVisitorsByScope.set(scopeKey, row.visitors);
+    }
+  }
   input.browserVisitors.forEach((row) => {
     if (row.last_seen !== null) browserLastSeen.set(row.app_id, row.last_seen);
   });
@@ -320,9 +347,33 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
     nativeSessionsByApp,
     apiActivityByApp,
     browserLastSeen,
+    exactVisitorsByScope,
     ctaByApp: indexCtaEvents(input.ctaEvents),
     ...indexLogEvents(input.logs, byCatalogId, byAppId),
   };
+}
+
+function exactBrowserVisitorScopeKey(appId: string, environmentId: string): string {
+  return JSON.stringify([appId, environmentId]);
+}
+
+function qualifiedExactBrowserVisitorScopes(input: DailyEngagementInputs): Set<string> {
+  const completeScopes = new Set(
+    (input.exactBrowserVisitors ?? [])
+      .filter((row) => row.complete)
+      .map((row) => exactBrowserVisitorScopeKey(row.app_id, row.environment_id)),
+  );
+  const visitorApps = new Set(input.browserVisitors.map((row) => row.app_id));
+  return new Set(
+    input.catalog.flatMap((row) => {
+      if (row.environment_id === null) return [];
+      const key = exactBrowserVisitorScopeKey(row.app_id, row.environment_id);
+      const hasActivationEvidence =
+        visitorApps.has(row.app_id) ||
+        (row.analytics_first_received_at !== null && row.analytics_first_received_at <= input.from);
+      return completeScopes.has(key) && hasActivationEvidence ? [key] : [];
+    }),
+  );
 }
 
 function indexCtaEvents(
@@ -382,17 +433,40 @@ function addLogCount(
 }
 
 function isSampled(input: DailyEngagementInputs): boolean {
-  return [...input.browserVisitors, ...input.ctaEvents, ...(input.nativeSessions ?? [])].some(
-    (row) => row.sample_interval > 1,
+  const exactScopes = qualifiedExactBrowserVisitorScopes(input);
+  const sampledVisitorsRemain = input.browserVisitors.some((visitor) => {
+    if (visitor.sample_interval <= 1) return false;
+    const product = input.catalog.find((row) => row.app_id === visitor.app_id);
+    return (
+      !product?.environment_id ||
+      !exactScopes.has(exactBrowserVisitorScopeKey(visitor.app_id, product.environment_id))
+    );
+  });
+  return (
+    sampledVisitorsRemain ||
+    [...input.ctaEvents, ...(input.nativeSessions ?? [])].some((row) => row.sample_interval > 1)
   );
 }
 
 function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null {
   const ctaMeasured = input.ctaMeasured ?? input.browserMeasured;
-  if (!input.browserMeasured && !ctaMeasured)
-    return 'Browser Analytics Engine query was unavailable; browser visitors and CTA events are unknown.';
-  if (!input.browserMeasured)
-    return 'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.';
+  const completeScopes = qualifiedExactBrowserVisitorScopes(input);
+  const scopedProducts = input.catalog.filter((row) => row.environment_id !== null);
+  const exactCoversEveryProduct =
+    scopedProducts.length > 0 &&
+    scopedProducts.every((row) =>
+      completeScopes.has(exactBrowserVisitorScopeKey(row.app_id, row.environment_id!)),
+    );
+  const hasAnyExactScope = completeScopes.size > 0;
+  const visitorUnavailable = !input.browserMeasured && !exactCoversEveryProduct;
+  if (visitorUnavailable && !ctaMeasured)
+    return hasAnyExactScope
+      ? 'Browser Analytics Engine query was unavailable; exact visitor counts are shown only for fully covered scopes, and uncovered visitor counts and CTA events are unknown.'
+      : 'Browser Analytics Engine query was unavailable; browser visitors and CTA events are unknown.';
+  if (visitorUnavailable)
+    return hasAnyExactScope
+      ? 'Browser visitor Analytics Engine query was unavailable; exact counts are shown only for fully covered scopes, and uncovered visitor counts are unknown.'
+      : 'Browser visitor Analytics Engine query was unavailable; browser visitors are unknown.';
   if (!ctaMeasured)
     return 'CTA Analytics Engine query was unavailable; CTA event counts are unknown.';
   return null;
@@ -412,7 +486,17 @@ function ctaQualificationNotes(input: DailyEngagementInputs): string[] {
 
 function samplingNotes(input: DailyEngagementInputs): string[] {
   const notes: string[] = [];
-  if (input.browserVisitors.some((row) => row.sample_interval > 1))
+  const exactScopes = qualifiedExactBrowserVisitorScopes(input);
+  if (
+    input.browserVisitors.some((row) => {
+      if (row.sample_interval <= 1) return false;
+      const product = input.catalog.find((item) => item.app_id === row.app_id);
+      return (
+        !product?.environment_id ||
+        !exactScopes.has(exactBrowserVisitorScopeKey(row.app_id, product.environment_id))
+      );
+    })
+  )
     notes.push(
       'Sampled browser visitor groups are unknown because distinct visitors cannot be scaled.',
     );
@@ -540,8 +624,8 @@ function buildProductReport(
   indexes: ReportIndexes,
 ): DailyEngagementProductReportV1 {
   const visitor = indexes.visitorsByApp.get(row.app_id);
+  const browserMetrics = productBrowserVisitorMetrics(row, visitor, input, indexes);
   const nativeSession = indexes.nativeSessionsByApp.get(row.app_id);
-  const browserMeasured = isProductBrowserMeasured(row, visitor, input);
   const ctaMeasured = isProductCtaMeasured(row, visitor, input, indexes.ctaByApp);
   const ctas = productCtas(row, input, visitor, indexes.ctaByApp, ctaMeasured);
   const logCounts = indexes.logCounts.get(row.catalog_id);
@@ -555,7 +639,7 @@ function buildProductReport(
       : null;
   const apiActivity = productApiActivity(row, input, indexes);
   const measured =
-    Number(browserMeasured) +
+    Number(browserMetrics.measured) +
     Number(ctas.length > 0) +
     Number(logsMeasured) +
     Number(nativeSessions !== null) +
@@ -564,17 +648,11 @@ function buildProductReport(
     catalog_id: row.catalog_id,
     app_id: row.app_id,
     name: row.catalog_name,
-    browser_visitors: browserMeasured ? Math.max(0, Math.round(visitor?.visitors ?? 0)) : null,
+    browser_visitors: browserMetrics.count,
     browser_visitors_applicability: browserVisitorApplicability(input, row.catalog_id),
-    browser_visitors_unknown_reason: browserMeasured
-      ? undefined
-      : browserVisitorUnknownReason(row, visitor, input),
+    browser_visitors_unknown_reason: browserMetrics.unknownReason,
     cta_events: ctas,
-    cta_status: input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)
-      ? 'not_applicable'
-      : ctas.length > 0
-        ? 'measured'
-        : 'unknown',
+    cta_status: productCtaStatus(row, ctas, input),
     feedback_submitted: feedback,
     newsletter_joins: newsletter,
     newsletter_applicability: metricApplicability(
@@ -596,6 +674,36 @@ function buildProductReport(
     },
     coverage: measured === 0 ? 'unknown' : 'partial',
   };
+}
+
+function productBrowserVisitorMetrics(
+  row: CatalogProductRow,
+  visitor: BrowserVisitorRow | undefined,
+  input: DailyEngagementInputs,
+  indexes: ReportIndexes,
+): {
+  measured: boolean;
+  count: number | null;
+  unknownReason: DailyEngagementProductReportV1['browser_visitors_unknown_reason'];
+} {
+  const exactCount = row.environment_id
+    ? indexes.exactVisitorsByScope.get(exactBrowserVisitorScopeKey(row.app_id, row.environment_id))
+    : undefined;
+  const measured = exactCount !== undefined || isProductBrowserMeasured(row, visitor, input);
+  return {
+    measured,
+    count: measured ? Math.max(0, Math.round(exactCount ?? visitor?.visitors ?? 0)) : null,
+    unknownReason: measured ? undefined : browserVisitorUnknownReason(row, visitor, input),
+  };
+}
+
+function productCtaStatus(
+  row: CatalogProductRow,
+  ctas: DailyEngagementProductReportV1['cta_events'],
+  input: DailyEngagementInputs,
+): DailyEngagementProductReportV1['cta_status'] {
+  if (input.ctaNotApplicableCatalogIds?.includes(row.catalog_id)) return 'not_applicable';
+  return ctas.length > 0 ? 'measured' : 'unknown';
 }
 
 function nativeSessionApplicability(
@@ -1095,6 +1203,13 @@ export async function composeDailyEngagementReport(args: {
   const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
+  const exactBrowserVisitorsPromise = readExactBrowserVisitorsForReport(
+    args.db,
+    args.workspaceId,
+    catalog,
+    window.date,
+    args.now,
+  );
   const [browser, nativeSessions, apiActivity, logResult, captureResult] = await Promise.all([
     args.query
       ? readDailyEngagementBrowser(
@@ -1126,19 +1241,13 @@ export async function composeDailyEngagementReport(args: {
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as EngagementLogRow[], measured: false })),
-    args.captureCountsService
-      ? args.captureCountsService
-          .getDailyCaptureCounts({ date: window.date, catalogIds: sourceCatalogIds })
-          .then((result) => ({
-            result: validateDailyCaptureCounts(result, sourceCatalogIds),
-            available: true,
-          }))
-          .catch(() => ({ result: undefined, available: false }))
-      : Promise.resolve({ result: undefined, available: false }),
+    readDailyCaptureCountsForReport(args.captureCountsService, window.date, sourceCatalogIds),
   ]);
+  const exactBrowserVisitors = await exactBrowserVisitorsPromise;
   return buildDailyEngagementReport({
     catalog,
     browserVisitors: browser.visitors,
+    exactBrowserVisitors,
     ctaEvents: browser.cta,
     nativeSessions: nativeSessions.rows,
     apiActivity: apiActivity.rows,
@@ -1160,4 +1269,19 @@ export async function composeDailyEngagementReport(args: {
     captureCountsAvailable: captureResult.available,
     captureCountsRequested: true,
   });
+}
+
+function readExactBrowserVisitorsForReport(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  catalog: readonly CatalogProductRow[],
+  date: string,
+  now: number,
+): Promise<ExactBrowserVisitorResult[]> {
+  const scopes = catalog.flatMap((row) =>
+    row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
+  );
+  return readExactBrowserVisitorDays(db, workspaceId, scopes, date, now).catch(
+    () => [] as ExactBrowserVisitorResult[],
+  );
 }
