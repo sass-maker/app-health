@@ -318,12 +318,11 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
   const apiActivityByApp = new Map((input.apiActivity ?? []).map((row) => [row.app_id, row]));
   const browserLastSeen = new Map<string, number>();
   const exactVisitorsByScope = new Map<string, number>();
+  const qualifiedExactScopes = qualifiedExactBrowserVisitorScopes(input);
   for (const row of input.exactBrowserVisitors ?? []) {
-    if (row.complete) {
-      exactVisitorsByScope.set(
-        exactBrowserVisitorScopeKey(row.app_id, row.environment_id),
-        row.visitors,
-      );
+    const scopeKey = exactBrowserVisitorScopeKey(row.app_id, row.environment_id);
+    if (row.complete && qualifiedExactScopes.has(scopeKey)) {
+      exactVisitorsByScope.set(scopeKey, row.visitors);
     }
   }
   input.browserVisitors.forEach((row) => {
@@ -344,6 +343,25 @@ function indexReportInputs(input: DailyEngagementInputs): ReportIndexes {
 
 function exactBrowserVisitorScopeKey(appId: string, environmentId: string): string {
   return JSON.stringify([appId, environmentId]);
+}
+
+function qualifiedExactBrowserVisitorScopes(input: DailyEngagementInputs): Set<string> {
+  const completeScopes = new Set(
+    (input.exactBrowserVisitors ?? [])
+      .filter((row) => row.complete)
+      .map((row) => exactBrowserVisitorScopeKey(row.app_id, row.environment_id)),
+  );
+  const visitorApps = new Set(input.browserVisitors.map((row) => row.app_id));
+  return new Set(
+    input.catalog.flatMap((row) => {
+      if (row.environment_id === null) return [];
+      const key = exactBrowserVisitorScopeKey(row.app_id, row.environment_id);
+      const hasActivationEvidence =
+        visitorApps.has(row.app_id) ||
+        (row.analytics_first_received_at !== null && row.analytics_first_received_at <= input.from);
+      return completeScopes.has(key) && hasActivationEvidence ? [key] : [];
+    }),
+  );
 }
 
 function indexCtaEvents(
@@ -403,11 +421,7 @@ function addLogCount(
 }
 
 function isSampled(input: DailyEngagementInputs): boolean {
-  const exactScopes = new Set(
-    (input.exactBrowserVisitors ?? [])
-      .filter((row) => row.complete)
-      .map((row) => exactBrowserVisitorScopeKey(row.app_id, row.environment_id)),
-  );
+  const exactScopes = qualifiedExactBrowserVisitorScopes(input);
   const sampledVisitorsRemain = input.browserVisitors.some((visitor) => {
     if (visitor.sample_interval <= 1) return false;
     const product = input.catalog.find((row) => row.app_id === visitor.app_id);
@@ -424,11 +438,7 @@ function isSampled(input: DailyEngagementInputs): boolean {
 
 function analyticsAvailabilityNote(input: DailyEngagementInputs): string | null {
   const ctaMeasured = input.ctaMeasured ?? input.browserMeasured;
-  const completeScopes = new Set(
-    (input.exactBrowserVisitors ?? [])
-      .filter((row) => row.complete)
-      .map((row) => exactBrowserVisitorScopeKey(row.app_id, row.environment_id)),
-  );
+  const completeScopes = qualifiedExactBrowserVisitorScopes(input);
   const scopedProducts = input.catalog.filter((row) => row.environment_id !== null);
   const exactCoversEveryProduct =
     scopedProducts.length > 0 &&
@@ -464,11 +474,7 @@ function ctaQualificationNotes(input: DailyEngagementInputs): string[] {
 
 function samplingNotes(input: DailyEngagementInputs): string[] {
   const notes: string[] = [];
-  const exactScopes = new Set(
-    (input.exactBrowserVisitors ?? [])
-      .filter((row) => row.complete)
-      .map((row) => exactBrowserVisitorScopeKey(row.app_id, row.environment_id)),
-  );
+  const exactScopes = qualifiedExactBrowserVisitorScopes(input);
   if (
     input.browserVisitors.some((row) => {
       if (row.sample_interval <= 1) return false;

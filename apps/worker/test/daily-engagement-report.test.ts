@@ -978,8 +978,36 @@ describe('composeDailyEngagementReport', () => {
     expect(report.sampled).toBe(true);
   });
 
-  it('uses a complete exact zero for a scope with no recognized visitor hashes even when AE is unavailable', async () => {
+  it('keeps exact workspace coverage Unknown for a product with no tracker evidence', async () => {
     const products = catalog(1);
+    const db = new MockDatabase(
+      products,
+      [],
+      [
+        {
+          app_id: products[0]!.app_id,
+          environment_id: products[0]!.environment_id!,
+          complete: true,
+          visitors: 0,
+        },
+      ],
+    );
+    const report = await composeDailyEngagementReport({
+      db,
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: TO + 86_400_000,
+      query: async () => [],
+    });
+
+    expect(report.products[0]?.browser_visitors).toBeNull();
+    expect(report.products[0]?.browser_visitors_unknown_reason).toBe(
+      'no_qualifying_analytics_receipt',
+    );
+  });
+
+  it('uses exact zero for an established tracker scope with no recognized visitor hashes', async () => {
+    const products = catalog(1).map((row) => ({ ...row, analytics_first_received_at: FROM }));
     const db = new MockDatabase(
       products,
       [],
