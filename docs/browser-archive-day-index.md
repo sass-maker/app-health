@@ -31,3 +31,41 @@ prove that every accepted batch was delivered from Queue or staged before
 upload. Neither lookup verifies current R2 availability, acquires bytes,
 reconciles facts, or advances a watermark. Queue/DLQ reconciliation remains
 separate work.
+
+## Offline day auditor
+
+`auditBrowserArchiveDay` in `apps/worker/src/browser-archive-day-audit.ts` is
+an internal/offline acquisition helper. Given an owned workspace, India day,
+D1 handle, archive namespace, and R2 bucket, it discovers at most 128
+app/environment scopes, pages up to 10,000 D1 receipts, and visits the
+event-day index on all 16 archive shards with stable snapshot cursors. It makes
+up to 100 batch-index lookups, with at most 25 concurrent DO RPCs; further
+receipts are explicitly marked unverified and cannot be reported as matched.
+It examines at most 5,000 unique segments, 2 MiB compressed and 2 MiB
+decompressed per object, 64 MiB compressed and 8 MiB decompressed in total,
+and 10,000 archive facts. It validates each manifest, compressed SHA-256, gzip
+contents, row/event counts, and event-time bounds, then passes verified facts
+to `reconcileBrowserArchiveDay`.
+
+The returned object contains only the day, `observed_comparison_counts`,
+bounded work counts, and reason codes; it does not return receipt IDs, visitor
+hashes, archived events, object keys, or provider errors. These counts describe
+only the verified facts acquired during this run. `no_archive_candidate` means
+no candidate was found in that acquired subset; it is not proof of absence when
+another page/object failed or retention is unknown. Any missing/corrupt evidence,
+page or fact cap, RPC failure, or comparison cap remains incomplete. It always
+reports `complete: false`: Queue and DLQ reconciliation, D1/R2 retention, and a
+current-state ingestion barrier are not inputs to this offline helper. Exhausted
+snapshot pages do not close those proof gates and never advance visitor-day
+coverage metadata.
+
+Stream readers cancel their source as soon as a compressed or decompressed
+limit is crossed. A fallback lookup cap, any unvisited snapshot page, or
+unfetched object adds an incomplete reason. Receipts with a skipped batch-index
+lookup are excluded from observed comparison counts and appear only in the
+aggregate `unverified_receipts` count.
+
+The helper does not call external provider APIs or read Queue/DLQ state. Its
+result is useful for bounded evidence collection and comparison only. It is
+not a production completeness certificate, a retention claim, a coverage
+watermark, or a Daily briefing fallback.
