@@ -174,10 +174,7 @@ for (const width of [390, 768, 1440]) {
         content: node.scrollWidth,
         visible: node.clientWidth,
       }));
-      expect(tableWidth.content).toBeGreaterThan(tableWidth.visible);
-      await table.evaluate((node) => {
-        node.scrollLeft = node.scrollWidth;
-      });
+      expect(tableWidth.content).toBeLessThanOrEqual(tableWidth.visible);
       await expect(report.getByRole('columnheader', { name: 'Server requests' })).toBeVisible();
       const serverHeaderIsInView = await report
         .getByRole('columnheader', { name: 'Server requests' })
@@ -191,9 +188,6 @@ for (const width of [390, 768, 1440]) {
           );
         });
       expect(serverHeaderIsInView).toBe(true);
-      await table.evaluate((node) => {
-        node.scrollLeft = 0;
-      });
     }
     await checkReadability(page);
 
