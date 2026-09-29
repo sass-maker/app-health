@@ -75,6 +75,37 @@ describe('offline browser archive day reconciliation', () => {
     expect(result).toMatchObject({ day, complete: true, rows: [{ state: 'matched' }] });
   });
 
+  it('returns only reconciliation fields when D1 rows contain extra metadata', async () => {
+    const input = await readyInput();
+    const receipt = input.receipts[0]!;
+    const enrichedReceipt = {
+      ...receipt,
+      fingerprint: 'private-fingerprint',
+      accepted_at: timestamp,
+      event_count: 1,
+      internal_note: 'must not leave the selector',
+    };
+    const result = await reconcileBrowserArchiveDay({
+      ...input,
+      receipts: [enrichedReceipt],
+    });
+
+    expect(result.rows).toEqual([
+      {
+        app_id: receipt.app_id,
+        environment_id: receipt.environment_id,
+        batch_id: receipt.batch_id,
+        state: 'matched',
+      },
+    ]);
+    expect(Object.keys(result.rows[0]!).sort()).toEqual([
+      'app_id',
+      'batch_id',
+      'environment_id',
+      'state',
+    ]);
+  });
+
   it('reports changed archived facts as a digest mismatch', async () => {
     const accepted = batch();
     const acceptedDigest = await digestBrowserEventFacts(accepted);

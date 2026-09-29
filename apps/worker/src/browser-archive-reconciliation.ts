@@ -189,7 +189,12 @@ function receiptState(
 function reconciliationRows(receipts: ReceiptMap, archived: ArchiveDigestMap) {
   const rows: BrowserArchiveReconciliationRow[] = [];
   for (const [key, receipt] of receipts)
-    rows.push({ ...receipt, state: receiptState(receipt, archived.get(key)) });
+    rows.push({
+      app_id: receipt.app_id,
+      environment_id: receipt.environment_id,
+      batch_id: receipt.batch_id,
+      state: receiptState(receipt, archived.get(key)),
+    });
   for (const [key, facts] of archived) {
     if (receipts.has(key)) continue;
     const [app_id, environment_id, batch_id] = JSON.parse(key) as [string, string, string];
