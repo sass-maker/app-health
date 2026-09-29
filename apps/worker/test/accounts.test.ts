@@ -58,6 +58,7 @@ describe('Google account boundary with real D1 SQL', () => {
       '0019_browser_visitor_days.sql',
       '0020_browser_receipt_reconciliation.sql',
       '0021_browser_event_facts_digest.sql',
+      '0022_browser_archive_audit_jobs.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql
@@ -169,6 +170,46 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(workspaceReads[0]).toContain(
       'LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL',
     );
+  });
+
+  it('lets the cookie-authenticated workspace owner start and poll an archive audit', async () => {
+    const created = await request('/v1/apps', aliceCookie, {
+      name: 'Archive audit owner fixture',
+      environment: 'production',
+    });
+    expect(created.status).toBe(201);
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/apps', {
+        headers: { cookie: aliceCookie },
+      }),
+      env,
+    );
+    expect(identity?.owner.workspaceId).toBeTruthy();
+    expect(identity?.owner.appIds?.length).toBeGreaterThan(0);
+
+    env.BROWSER_ARCHIVE = {
+      getByName: () => ({
+        archiveSegmentsForEventDay: async () => ({
+          segments: [],
+          next_cursor: null,
+          snapshot_sequence: 0,
+        }),
+        archiveSegmentForBatch: async () => null,
+      }),
+    } as unknown as Env['BROWSER_ARCHIVE'];
+    env.BROWSER_HISTORY = { get: async () => null } as unknown as Env['BROWSER_HISTORY'];
+
+    const started = await request('/v1/browser/archive-audits?day=2026-08-01', aliceCookie, {});
+    expect(started.status).toBe(202);
+    const startedBody = (await started.json()) as { job_id: string; complete: boolean };
+    expect(startedBody.complete).toBe(false);
+
+    const status = await request(`/v1/browser/archive-audits/${startedBody.job_id}`, aliceCookie);
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ job_id: startedBody.job_id, complete: false });
+
+    const hidden = await request(`/v1/browser/archive-audits/${startedBody.job_id}`, bobCookie);
+    expect(hidden.status).toBe(404);
   });
 
   it('returns anonymous Server-Timing stages only on authenticated owner read paths', async () => {

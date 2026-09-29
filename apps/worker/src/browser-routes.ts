@@ -30,6 +30,10 @@ import {
   queryPublicBrowserBreakdowns,
   queryPublicBrowserTraffic,
 } from './public-browser-report.js';
+import {
+  readBrowserArchiveAuditJob,
+  startBrowserArchiveAuditJob,
+} from './browser-archive-audit-jobs.js';
 
 export interface BrowserEnvironment extends BrowserBindings {
   DB?: D1DatabaseLike;
@@ -255,6 +259,103 @@ export async function handleBrowserIngest(
   }
 }
 
+const BROWSER_AUDIT_PATH = '/v1/browser/archive-audits';
+
+function isBrowserAuditPath(path: string) {
+  return path === BROWSER_AUDIT_PATH || path.startsWith(`${BROWSER_AUDIT_PATH}/`);
+}
+
+function browserAuditOwnerAllowed(owner: OwnerIdentity, local: boolean) {
+  return !local && Boolean(owner.workspaceId) && !owner.appId;
+}
+
+async function startBrowserAuditRoute(
+  request: Request,
+  env: BrowserEnvironment,
+  workspace: string,
+) {
+  const url = new URL(request.url);
+  const queryKeys = [...url.searchParams.keys()];
+  if (queryKeys.some((key) => key !== 'day') || url.searchParams.getAll('day').length !== 1)
+    return json(400, { error: 'Provide one valid day.' });
+  const archiveProbe = env.BROWSER_ARCHIVE?.getByName(`${workspace}:browser-archive-v1:0`);
+  if (
+    !archiveProbe?.archiveSegmentsForEventDay ||
+    !archiveProbe.archiveSegmentForBatch ||
+    !env.BROWSER_HISTORY?.get
+  )
+    return json(503, { error: 'Archive audit bindings are unavailable.' });
+  try {
+    return json(
+      202,
+      await startBrowserArchiveAuditJob(env.DB!, workspace, url.searchParams.get('day') ?? ''),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (message === 'audit already running')
+      return json(409, { error: 'An archive audit is already running.' });
+    if (message === 'audit job quota')
+      return json(429, { error: 'Archive audit request limit reached.' });
+    if (message === 'audit receipt cap')
+      return json(413, { error: 'The selected day exceeds the audit work limit.' });
+    if (message === 'invalid scope') return json(400, { error: 'Provide one valid day.' });
+    return json(503, { error: 'Archive audit could not be started.' });
+  }
+}
+
+async function readBrowserAuditStatusRoute(
+  request: Request,
+  env: BrowserEnvironment,
+  workspace: string,
+  path: string,
+) {
+  const url = new URL(request.url);
+  if ([...url.searchParams.keys()].length)
+    return json(400, { error: 'Invalid audit status query.' });
+  const jobId = path.slice(`${BROWSER_AUDIT_PATH}/`.length);
+  if (!jobId || jobId.includes('/')) return json(404, { error: 'Archive audit not found.' });
+  try {
+    const result = await readBrowserArchiveAuditJob(env.DB!, workspace, jobId);
+    return result ? json(200, result) : json(404, { error: 'Archive audit not found.' });
+  } catch {
+    return json(503, { error: 'Archive audit status is unavailable.' });
+  }
+}
+
+async function handleBrowserArchiveAuditOwner(
+  request: Request,
+  env: BrowserEnvironment,
+  owner: OwnerIdentity,
+  local: boolean,
+  path: string,
+): Promise<Response | null> {
+  if (!isBrowserAuditPath(path)) return null;
+  if (!browserAuditOwnerAllowed(owner, local))
+    return json(403, { error: 'Full workspace owner access is required.' });
+  if (!env.DB) return json(503, { error: 'Archive audit storage is unavailable.' });
+  if (path === BROWSER_AUDIT_PATH && request.method === 'POST')
+    return startBrowserAuditRoute(request, env, owner.workspaceId!);
+  if (path.startsWith(`${BROWSER_AUDIT_PATH}/`) && request.method === 'GET')
+    return readBrowserAuditStatusRoute(request, env, owner.workspaceId!, path);
+  return json(405, { error: 'Method not allowed.' });
+}
+
+type BrowserPresence = ReturnType<NonNullable<BrowserBindings['WORKSPACE_PRESENCE']>['getByName']>;
+
+function browserWorkspace(owner: OwnerIdentity, local: boolean) {
+  return local ? 'local' : owner.workspaceId;
+}
+
+async function browserLiveRoute(request: Request, presence: BrowserPresence) {
+  if (request.headers.get('origin') !== new URL(request.url).origin)
+    return json(403, { error: 'same-origin stream required' });
+  return presence.fetch(
+    new Request('https://presence/live', {
+      headers: { upgrade: request.headers.get('upgrade') ?? '' },
+    }),
+  );
+}
+
 export async function handleBrowserOwner(
   request: Request,
   env: BrowserEnvironment,
@@ -263,9 +364,11 @@ export async function handleBrowserOwner(
   timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const auditResponse = await handleBrowserArchiveAuditOwner(request, env, owner, local, path);
+  if (auditResponse) return auditResponse;
   if (!['/v1/analytics', '/v1/analytics/live', '/v1/analytics/report'].includes(path)) return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
-  const workspace = local ? 'local' : owner.workspaceId;
+  const workspace = browserWorkspace(owner, local);
   if (!workspace) return json(403, { error: 'Sign in with Google to view workspace analytics.' });
   if (path === '/v1/analytics/report')
     return measureOwnerRouteRead(timings, () => browserReport(request, env, owner, local));
@@ -273,22 +376,14 @@ export async function handleBrowserOwner(
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
   const presence = env.WORKSPACE_PRESENCE.getByName(workspace);
-  if (path.endsWith('/live')) {
-    if (request.headers.get('origin') !== new URL(request.url).origin)
-      return json(403, { error: 'same-origin stream required' });
-    return presence.fetch(
-      new Request('https://presence/live', {
-        headers: { upgrade: request.headers.get('upgrade') ?? '' },
-      }),
-    );
-  }
+  if (path.endsWith('/live')) return browserLiveRoute(request, presence);
   return workspaceSummary(workspace, env, presence, owner.appIds ?? []);
 }
 
 async function workspaceSummary(
   workspace: string,
   env: BrowserEnvironment,
-  presence: ReturnType<NonNullable<BrowserBindings['WORKSPACE_PRESENCE']>['getByName']>,
+  presence: BrowserPresence,
   appIds: readonly string[],
 ): Promise<Response> {
   try {

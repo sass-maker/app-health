@@ -25,7 +25,7 @@ const DECOMPRESSED_BYTES_MAX = 2 * 1024 * 1024;
 const ARCHIVE_FACT_LIMIT = 10_000;
 
 type DayCursor = { event_day: string; object_key: string; snapshot_sequence: number };
-type SegmentReference = { segment_id: string; object_key: string };
+export type SegmentReference = { segment_id: string; object_key: string };
 type DayPage = {
   segments: SegmentReference[];
   next_cursor: DayCursor | null;
@@ -75,7 +75,7 @@ export type BrowserArchiveDayAudit = {
   incomplete_reasons: string[];
 };
 
-function safeDay(day: string): boolean {
+export function isSafeBrowserArchiveDay(day: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
   const parsed = new Date(`${day}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
@@ -168,6 +168,15 @@ async function readVerifiedSegment(
   } finally {
     await object.body.cancel().catch(() => undefined);
   }
+}
+
+/** Read and verify one indexed archive object for a bounded resumable operator slice. */
+export async function readBrowserArchiveAuditSegment(
+  input: BrowserArchiveDayAuditInput,
+  reference: SegmentReference,
+  byteState: { compressed: number; decompressed: number },
+): Promise<CollectedBrowserBatch[]> {
+  return readVerifiedSegment(input, reference, byteState);
 }
 
 async function readCompressedSegment(
@@ -561,7 +570,7 @@ async function compareFacts(input: BrowserArchiveDayAuditInput, state: AuditStat
 export async function auditBrowserArchiveDay(
   input: BrowserArchiveDayAuditInput,
 ): Promise<BrowserArchiveDayAudit> {
-  if (!safeDay(input.day) || !input.workspace || input.workspace.length > 100)
+  if (!isSafeBrowserArchiveDay(input.day) || !input.workspace || input.workspace.length > 100)
     throw new Error('Invalid browser archive audit scope');
   const state = newAuditState();
   await readReceipts(input, state);

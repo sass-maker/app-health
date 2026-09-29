@@ -42,7 +42,7 @@ export interface CollectedBrowserBatch {
 }
 export interface BrowserBindings {
   BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
-  BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'>;
+  BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'> & Partial<Pick<R2Bucket, 'get'>>;
   BROWSER_ARCHIVE?: {
     getByName(name: string): {
       stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult>;
