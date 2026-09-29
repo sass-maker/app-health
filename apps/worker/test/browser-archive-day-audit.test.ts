@@ -173,7 +173,7 @@ describe('offline browser archive day auditor', () => {
     ]);
     expect(result).toMatchObject({
       complete: false,
-      matched: 1,
+      observed_comparison_counts: { matched: 1 },
       receipt_count: 1,
       segment_count: 1,
       shards_exhausted: 16,
@@ -217,7 +217,7 @@ describe('offline browser archive day auditor', () => {
     });
     const result = await auditBrowserArchiveDay(setup.input);
     expect(setup.observations.batchReads).toHaveLength(1);
-    expect(result.mismatched).toBe(1);
+    expect(result.observed_comparison_counts.mismatched).toBe(1);
     expect(result.complete).toBe(false);
     expect(JSON.stringify(result)).not.toContain('private-id');
   });
@@ -225,7 +225,7 @@ describe('offline browser archive day auditor', () => {
   it('reports a selected receipt with no day fact or batch-index candidate as missing and incomplete', async () => {
     const setup = await fixture({ dayIndex: false, batchLookupMissing: true });
     const result = await auditBrowserArchiveDay(setup.input);
-    expect(result.missing_archive).toBe(1);
+    expect(result.observed_comparison_counts.no_archive_candidate).toBe(1);
     expect(result.incomplete_reasons).toContain('missing_archive_fact');
     expect(result.unverified_receipts).toBe(0);
     expect(result.complete).toBe(false);
@@ -244,8 +244,8 @@ describe('offline browser archive day auditor', () => {
     const result = await auditBrowserArchiveDay(setup.input);
     expect(setup.observations.batchReads).toHaveLength(100);
     expect(result.incomplete_reasons).toContain('batch_index_cap');
-    expect(result.matched).toBe(1);
-    expect(result.missing_archive).toBe(99);
+    expect(result.observed_comparison_counts.matched).toBe(1);
+    expect(result.observed_comparison_counts.no_archive_candidate).toBe(99);
     expect(result.unverified_receipts).toBe(1);
     expect(result.complete).toBe(false);
   });

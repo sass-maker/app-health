@@ -47,9 +47,12 @@ and 10,000 archive facts. It validates each manifest, compressed SHA-256, gzip
 contents, row/event counts, and event-time bounds, then passes verified facts
 to `reconcileBrowserArchiveDay`.
 
-The returned object contains only the day, aggregate state counts, bounded work
-counts, and reason codes; it does not return receipt IDs, visitor hashes,
-archived events, object keys, or provider errors. Any missing/corrupt evidence,
+The returned object contains only the day, `observed_comparison_counts`,
+bounded work counts, and reason codes; it does not return receipt IDs, visitor
+hashes, archived events, object keys, or provider errors. These counts describe
+only the verified facts acquired during this run. `no_archive_candidate` means
+no candidate was found in that acquired subset; it is not proof of absence when
+another page/object failed or retention is unknown. Any missing/corrupt evidence,
 page or fact cap, RPC failure, or comparison cap remains incomplete. It always
 reports `complete: false`: Queue and DLQ reconciliation, D1/R2 retention, and a
 current-state ingestion barrier are not inputs to this offline helper. Exhausted
@@ -59,7 +62,7 @@ coverage metadata.
 Stream readers cancel their source as soon as a compressed or decompressed
 limit is crossed. A fallback lookup cap, any unvisited snapshot page, or
 unfetched object adds an incomplete reason. Receipts with a skipped batch-index
-lookup are excluded from matched and missing counts and appear only in the
+lookup are excluded from observed comparison counts and appear only in the
 aggregate `unverified_receipts` count.
 
 The helper does not call external provider APIs or read Queue/DLQ state. Its

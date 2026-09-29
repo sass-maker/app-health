@@ -59,13 +59,15 @@ export type BrowserArchiveDayAuditInput = {
 export type BrowserArchiveDayAudit = {
   day: string;
   complete: false;
-  matched: number;
-  mismatched: number;
-  missing_archive: number;
-  legacy: number;
-  archive_only: number;
-  duplicate_archive: number;
-  missing_archive_digest: number;
+  observed_comparison_counts: {
+    matched: number;
+    mismatched: number;
+    no_archive_candidate: number;
+    legacy_receipts: number;
+    archive_only_facts: number;
+    duplicate_archive_candidates: number;
+    missing_archive_digests: number;
+  };
   receipt_count: number;
   unverified_receipts: number;
   segment_count: number;
@@ -271,20 +273,20 @@ function countStates(rows: readonly { state: string }[]) {
   const counts = {
     matched: 0,
     mismatched: 0,
-    missing_archive: 0,
-    legacy: 0,
-    archive_only: 0,
-    duplicate_archive: 0,
-    missing_archive_digest: 0,
+    no_archive_candidate: 0,
+    legacy_receipts: 0,
+    archive_only_facts: 0,
+    duplicate_archive_candidates: 0,
+    missing_archive_digests: 0,
   };
   for (const { state } of rows) {
     if (state === 'matched') counts.matched++;
     else if (state === 'digest_mismatch') counts.mismatched++;
-    else if (state === 'missing_archive_fact') counts.missing_archive++;
-    else if (state === 'legacy_receipt') counts.legacy++;
-    else if (state === 'archive_without_d1_receipt') counts.archive_only++;
-    else if (state === 'duplicate_archive_fact') counts.duplicate_archive++;
-    else if (state === 'archive_digest_missing') counts.missing_archive_digest++;
+    else if (state === 'missing_archive_fact') counts.no_archive_candidate++;
+    else if (state === 'legacy_receipt') counts.legacy_receipts++;
+    else if (state === 'archive_without_d1_receipt') counts.archive_only_facts++;
+    else if (state === 'duplicate_archive_fact') counts.duplicate_archive_candidates++;
+    else if (state === 'archive_digest_missing') counts.missing_archive_digests++;
   }
   return counts;
 }
@@ -566,11 +568,11 @@ export async function auditBrowserArchiveDay(
   await readShardIndexes(input, state);
   await readBatchIndexes(input, state);
   await acquireArchiveFacts(input, state);
-  const counts = await compareFacts(input, state);
+  const observedComparisonCounts = await compareFacts(input, state);
   return {
     day: input.day,
     complete: false,
-    ...counts,
+    observed_comparison_counts: observedComparisonCounts,
     receipt_count: state.receipts.length,
     unverified_receipts: state.batchLookupSkipped.size,
     segment_count: state.references.size,

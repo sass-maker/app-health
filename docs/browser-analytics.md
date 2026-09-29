@@ -174,8 +174,11 @@ lookups at 100 with at most 25 concurrent DO calls, unique segments at 5,000,
 compressed and decompressed bytes at 64 MiB and 8 MiB globally, and 10,000
 archive facts. Per-object compressed and decompressed limits are 2 MiB. Any
 cap returns explicit reason codes; skipped batch-index identities are counted
-as unverified and excluded from matched/missing counts. The result contains aggregate counts only and never
-returns raw receipt identifiers, visitor hashes, or event fields. Snapshot
+as unverified and excluded from observed comparison counts. These counts
+describe only acquired, verified facts; `no_archive_candidate` is not proof of
+absence if another page/object failed or retention is unknown. The result
+contains aggregate counts only and never returns raw receipt identifiers,
+visitor hashes, or event fields. Snapshot
 exhaustion is not a Queue/DLQ barrier or current-state completeness proof.
 Queue/DLQ delivery and provider-retention evidence remain external and are
 unavailable to this offline helper, so it always returns incomplete. No
