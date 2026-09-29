@@ -56,12 +56,19 @@ type ArchiveStats = {
   pending_bytes: number;
   ledger_batches: number;
 };
-export type ArchiveDayIndexCursor = { object_key: string };
+export type ArchiveDayIndexCursor = {
+  event_day: string;
+  object_key: string;
+  snapshot_sequence: number;
+};
 export type ArchiveDayIndexPage = {
   /** Segment references observed in this shard; this is not a coverage receipt. */
   segments: Array<{ segment_id: string; object_key: string }>;
   next_cursor: ArchiveDayIndexCursor | null;
+  /** Monotonic index high-water captured by the first page of this listing. */
+  snapshot_sequence: number;
 };
+type ArchiveBatchIndexEntry = { segment_id: string; object_key: string };
 
 function eventIndiaDay(timestamp: number): string {
   if (!Number.isSafeInteger(timestamp) || timestamp < 0)
@@ -78,6 +85,17 @@ function validIndiaDay(day: string): boolean {
     parsed.getUTCFullYear() === year &&
     parsed.getUTCMonth() === month - 1 &&
     parsed.getUTCDate() === date
+  );
+}
+
+function validDayIndexCursor(day: string, cursor: ArchiveDayIndexCursor | null): boolean {
+  return (
+    cursor === null ||
+    (cursor.event_day === day &&
+      typeof cursor.object_key === 'string' &&
+      cursor.object_key.length <= 1024 &&
+      Number.isSafeInteger(cursor.snapshot_sequence) &&
+      cursor.snapshot_sequence >= 0)
   );
 }
 
@@ -164,8 +182,9 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       END;
       CREATE TABLE IF NOT EXISTS archive_segments (id TEXT PRIMARY KEY, object_key TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS archive_day_segments (
-        event_day TEXT NOT NULL, segment_id TEXT NOT NULL, object_key TEXT NOT NULL,
-        indexed_at INTEGER NOT NULL, PRIMARY KEY (event_day, object_key)
+        index_seq INTEGER PRIMARY KEY AUTOINCREMENT, event_day TEXT NOT NULL,
+        segment_id TEXT NOT NULL, object_key TEXT NOT NULL, indexed_at INTEGER NOT NULL,
+        UNIQUE (event_day, object_key)
       );
       CREATE INDEX IF NOT EXISTS archive_day_segments_expiry ON archive_day_segments(indexed_at);
       CREATE TABLE IF NOT EXISTS archive_batch_segments (
@@ -300,12 +319,17 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     if (!validIndiaDay(day)) throw new Error('Invalid India calendar day');
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE)
       throw new Error('Archive day index page exceeds limit');
-    if (
-      cursor !== null &&
-      (typeof cursor.object_key !== 'string' || cursor.object_key.length > 1024)
-    )
-      throw new Error('Invalid archive day index cursor');
+    if (!validDayIndexCursor(day, cursor)) throw new Error('Invalid archive day index cursor');
     const now = Date.now();
+    const snapshotSequence =
+      cursor?.snapshot_sequence ??
+      this.ctx.storage.sql
+        .exec<{ high_water: number }>(
+          'SELECT COALESCE(MAX(index_seq), 0) AS high_water FROM archive_day_segments WHERE event_day = ? AND indexed_at > ?',
+          day,
+          now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        )
+        .one().high_water;
     this.ctx.storage.sql.exec(
       'DELETE FROM archive_day_segments WHERE rowid IN (SELECT rowid FROM archive_day_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
       now - ARCHIVE_DAY_INDEX_RETENTION_MS,
@@ -314,9 +338,10 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     const rows = this.ctx.storage.sql
       .exec<{ segment_id: string; object_key: string }>(
         `SELECT segment_id, object_key FROM archive_day_segments
-         WHERE event_day = ? AND indexed_at > ? AND (? IS NULL OR object_key > ?)
+         WHERE event_day = ? AND index_seq <= ? AND indexed_at > ? AND (? IS NULL OR object_key > ?)
          ORDER BY object_key LIMIT ?`,
         day,
+        snapshotSequence,
         now - ARCHIVE_DAY_INDEX_RETENTION_MS,
         cursor?.object_key ?? null,
         cursor?.object_key ?? null,
@@ -329,8 +354,13 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       segments,
       next_cursor:
         hasMore && segments.length
-          ? { object_key: segments[segments.length - 1]!.object_key }
+          ? {
+              event_day: day,
+              object_key: segments[segments.length - 1]!.object_key,
+              snapshot_sequence: snapshotSequence,
+            }
           : null,
+      snapshot_sequence: snapshotSequence,
     };
   }
 
@@ -339,7 +369,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     appId: string,
     environmentId: string,
     batchId: string,
-  ): { segment_id: string; object_key: string } | null {
+  ): ArchiveBatchIndexEntry | null {
     if ([appId, environmentId, batchId].some((value) => !value || value.length > 200))
       throw new Error('Invalid archive batch identity');
     this.ctx.storage.sql.exec(

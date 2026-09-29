@@ -57,6 +57,11 @@ export class TestArchive extends BrowserArchive {
   lookupBatch(value) { return this.archiveSegmentForBatch(value.app_id, value.environment_id, value.batch_id); }
   expireDayIndex() { this.testCtx.storage.sql.exec('UPDATE archive_day_segments SET indexed_at = 1'); }
   expireBatchIndex() { this.testCtx.storage.sql.exec('UPDATE archive_batch_segments SET indexed_at = 1'); }
+  insertConcurrentDaySegment(day) {
+    this.testCtx.storage.sql.exec(
+      'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+      day, 'concurrent-segment', '!concurrent-after-first-page', Date.now());
+  }
   expire() { this.testCtx.storage.sql.exec('UPDATE archive_seen SET expires_at = 1 WHERE expires_at IS NOT NULL'); }
   fillLedger() {
     this.testCtx.storage.sql.exec(
@@ -334,13 +339,26 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     const first = (await app.call('listDay', { day: '2026-01-02', limit: 1 })).body;
     expect(first.segments).toHaveLength(1);
     expect(first.next_cursor).toEqual({
+      event_day: '2026-01-02',
       object_key: (first.segments as Array<{ object_key: string }>)[0]!.object_key,
+      snapshot_sequence: first.snapshot_sequence,
     });
+    await app.call('insertConcurrentDaySegment', '2026-01-02');
     const second = (
       await app.call('listDay', { day: '2026-01-02', cursor: first.next_cursor, limit: 1 })
     ).body;
     expect(second.segments).toHaveLength(1);
+    expect(second.segments).not.toContainEqual({
+      segment_id: 'concurrent-segment',
+      object_key: '!concurrent-after-first-page',
+    });
+    expect(second.snapshot_sequence).toBe(first.snapshot_sequence);
     expect(second.next_cursor).toBeNull();
+    const refreshed = (await app.call('listDay', { day: '2026-01-02', limit: 1 })).body;
+    expect(Number(refreshed.snapshot_sequence)).toBeGreaterThan(Number(first.snapshot_sequence));
+    expect(refreshed.segments).toEqual([
+      { segment_id: 'concurrent-segment', object_key: '!concurrent-after-first-page' },
+    ]);
     expect((await app.call('listDay', { day: '2026-01-02', limit: 101 })).status).toBe(503);
     expect((await app.call('listDay', { day: '2026-02-30', limit: 1 })).status).toBe(503);
     await app.call('expireDayIndex');

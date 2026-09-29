@@ -48,11 +48,16 @@ export interface BrowserBindings {
       stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult>;
       archiveSegmentsForEventDay?(
         day: string,
-        cursor?: { object_key: string } | null,
+        cursor?: { event_day: string; object_key: string; snapshot_sequence: number } | null,
         limit?: number,
       ): Promise<{
         segments: Array<{ segment_id: string; object_key: string }>;
-        next_cursor: { object_key: string } | null;
+        next_cursor: {
+          event_day: string;
+          object_key: string;
+          snapshot_sequence: number;
+        } | null;
+        snapshot_sequence: number;
       }>;
       archiveSegmentForBatch?(
         appId: string,
