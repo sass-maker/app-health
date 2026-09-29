@@ -2,6 +2,7 @@ import type { CollectedBrowserBatch } from './browser-analytics.js';
 import { digestBrowserEventFacts } from './browser-facts-digest.js';
 import { browserArchiveShard } from './browser-queue.js';
 import {
+  isSafeBrowserArchiveDay,
   readBrowserArchiveAuditSegment,
   type SegmentReference,
 } from './browser-archive-day-audit.js';
@@ -96,12 +97,6 @@ const emptyShards = (): ShardState[] =>
     exhausted: false,
   }));
 
-function safeDay(day: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
-  const parsed = new Date(`${day}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
-}
-
 function isHex(value: unknown, size: number): value is string {
   return typeof value === 'string' && new RegExp(`^[a-f0-9]{${size}}$`).test(value);
 }
@@ -167,6 +162,61 @@ const zeroCounts = (): AuditCounts => ({
   missing_archive_digests: 0,
 });
 
+type AuditFactRow = {
+  identity_hash: string;
+  has_receipt: number;
+  receipt_digest_version: number | null;
+  receipt_digest: string | null;
+  archive_count: number;
+  archive_in_day: number;
+  archive_digest_version: number | null;
+  archive_digest: string | null;
+};
+
+function countAuditFact(counts: AuditCounts, row: AuditFactRow) {
+  if (!row.has_receipt) {
+    countArchiveOnlyFact(counts, row);
+    return;
+  }
+  if (isLegacyAuditReceipt(row)) {
+    counts.legacy_receipts++;
+    return;
+  }
+  if (row.archive_count === 0) {
+    counts.no_archive_candidate++;
+    return;
+  }
+  if (row.archive_count > 1) {
+    counts.duplicate_archive_candidates += row.archive_count - 1;
+    return;
+  }
+  if (row.archive_digest_version === null || row.archive_digest === null) {
+    counts.missing_archive_digests++;
+    return;
+  }
+  if (archiveDigestsMatch(row)) counts.matched++;
+  else counts.mismatched++;
+}
+
+function countArchiveOnlyFact(counts: AuditCounts, row: AuditFactRow) {
+  if (row.archive_count > 0 && row.archive_in_day) counts.archive_only_facts++;
+  if (row.archive_count > 1) counts.duplicate_archive_candidates += row.archive_count - 1;
+}
+
+function isLegacyAuditReceipt(row: AuditFactRow) {
+  return row.receipt_digest_version === null || row.receipt_digest === null;
+}
+
+function archiveDigestsMatch(row: AuditFactRow) {
+  return (
+    row.receipt_digest_version === 1 &&
+    row.archive_digest_version === 1 &&
+    isHex(row.receipt_digest, 64) &&
+    isHex(row.archive_digest, 64) &&
+    row.receipt_digest === row.archive_digest
+  );
+}
+
 async function countsForJob(db: D1DatabaseLike, jobId: string): Promise<AuditCounts> {
   const result = await db
     .prepare(
@@ -175,50 +225,10 @@ async function countsForJob(db: D1DatabaseLike, jobId: string): Promise<AuditCou
        FROM browser_archive_audit_facts WHERE job_id = ? LIMIT ?`,
     )
     .bind(jobId, MAX_FACT_ROWS + 1)
-    .all<{
-      identity_hash: string;
-      has_receipt: number;
-      receipt_digest_version: number | null;
-      receipt_digest: string | null;
-      archive_count: number;
-      archive_in_day: number;
-      archive_digest_version: number | null;
-      archive_digest: string | null;
-    }>();
+    .all<AuditFactRow>();
   if (result.results.length > MAX_FACT_ROWS) throw new Error('audit fact row cap');
   const counts = zeroCounts();
-  for (const row of result.results) {
-    if (!row.has_receipt) {
-      if (row.archive_count > 0 && row.archive_in_day) counts.archive_only_facts++;
-      if (row.archive_count > 1) counts.duplicate_archive_candidates += row.archive_count - 1;
-      continue;
-    }
-    if (row.receipt_digest_version === null || row.receipt_digest === null) {
-      counts.legacy_receipts++;
-      continue;
-    }
-    if (row.archive_count === 0) {
-      counts.no_archive_candidate++;
-      continue;
-    }
-    if (row.archive_count > 1) {
-      counts.duplicate_archive_candidates += row.archive_count - 1;
-      continue;
-    }
-    if (row.archive_digest_version === null || row.archive_digest === null) {
-      counts.missing_archive_digests++;
-      continue;
-    }
-    if (
-      row.receipt_digest_version === 1 &&
-      row.archive_digest_version === 1 &&
-      isHex(row.receipt_digest, 64) &&
-      isHex(row.archive_digest, 64) &&
-      row.receipt_digest === row.archive_digest
-    )
-      counts.matched++;
-    else counts.mismatched++;
-  }
+  for (const row of result.results) countAuditFact(counts, row);
   return counts;
 }
 
@@ -228,25 +238,20 @@ export async function startBrowserArchiveAuditJob(
   day: string,
   now = Date.now(),
 ) {
-  if (!workspace || workspace.length > 200 || !safeDay(day)) throw new Error('invalid scope');
-  await db
-    .prepare(
-      `UPDATE browser_archive_audit_jobs SET status = 'incomplete', phase = 'done',
-       incomplete_reasons_json = '["audit_job_expired"]', lease_token = NULL,
-       lease_until = NULL, updated_at = ?
-       WHERE workspace_id = ? AND status IN ('queued', 'running') AND expires_at <= ?`,
-    )
-    .bind(now, workspace, now)
-    .run();
+  if (!workspace || workspace.length > 200 || !isSafeBrowserArchiveDay(day))
+    throw new Error('invalid scope');
+  await expireActiveAuditJobs(db, now);
   // The workspace/day uniqueness key outlives the public TTL. Retire an
   // expired same-day job (and its bounded pseudonymous children) before
   // attempting a fresh snapshot, so an operator can restart without waiting
   // for the hourly global cleanup pass.
   const expiredSameDay = await db
     .prepare(
-      'SELECT job_id FROM browser_archive_audit_jobs WHERE workspace_id = ? AND india_day = ? AND expires_at <= ?',
+      `SELECT job_id FROM browser_archive_audit_jobs
+       WHERE workspace_id = ? AND india_day = ? AND status = 'incomplete'
+         AND incomplete_reasons_json = '["audit_job_expired"]'`,
     )
-    .bind(workspace, day, now)
+    .bind(workspace, day)
     .first<{ job_id: string }>();
   if (expiredSameDay) {
     await db.batch([
@@ -257,8 +262,11 @@ export async function startBrowserArchiveAuditJob(
         .prepare('DELETE FROM browser_archive_audit_segments WHERE job_id = ?')
         .bind(expiredSameDay.job_id),
       db
-        .prepare('DELETE FROM browser_archive_audit_jobs WHERE job_id = ? AND expires_at <= ?')
-        .bind(expiredSameDay.job_id, now),
+        .prepare(
+          `DELETE FROM browser_archive_audit_jobs WHERE job_id = ? AND status = 'incomplete'
+           AND incomplete_reasons_json = '["audit_job_expired"]'`,
+        )
+        .bind(expiredSameDay.job_id),
     ]);
   }
   const existing = await db
@@ -270,9 +278,9 @@ export async function startBrowserArchiveAuditJob(
   if (existing) return jobPublicState(existing, await countsForJob(db, existing.job_id));
   const active = await db
     .prepare(
-      "SELECT job_id FROM browser_archive_audit_jobs WHERE workspace_id = ? AND status IN ('queued', 'running') AND expires_at > ? LIMIT 1",
+      "SELECT job_id FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running') AND expires_at > ? LIMIT 1",
     )
-    .bind(workspace, now)
+    .bind(now)
     .first();
   if (active) throw new Error('audit already running');
   const jobsCount = await db
@@ -327,7 +335,16 @@ export async function startBrowserArchiveAuditJob(
     )
     .bind(workspace, day, now)
     .first<JobRow>();
-  if (!row) throw new Error('audit could not be queued');
+  if (!row) {
+    const active = await db
+      .prepare(
+        "SELECT job_id FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running') AND expires_at > ? LIMIT 1",
+      )
+      .bind(now)
+      .first();
+    if (active) throw new Error('audit already running');
+    throw new Error('audit could not be queued');
+  }
   return jobPublicState(row, zeroCounts());
 }
 
@@ -463,24 +480,49 @@ async function existingSegmentHashes(
   );
 }
 
-async function archiveWritesForSegments(
-  db: D1DatabaseLike,
-  job: JobRow,
-  refs: readonly SegmentReference[],
-  receiptHashes: ReadonlySet<string>,
-  bindings: BrowserArchiveAuditJobBindings,
-  includeAllFacts: boolean,
-  leaseToken: string,
-) {
+type PendingArchiveFact = {
+  batch: CollectedBrowserBatch;
+  identity_hash: string;
+  target_day: boolean;
+};
+type ArchiveFactWrite = {
+  identity_hash: string;
+  digest_version?: number;
+  digest?: string;
+  target_day: boolean;
+};
+type ArchiveWriteContext = {
+  db: D1DatabaseLike;
+  job: JobRow;
+  bindings: BrowserArchiveAuditJobBindings;
+  receiptHashes: ReadonlySet<string>;
+  includeAllFacts: boolean;
+  leaseToken: string;
+  sliceSeenSegments?: Set<string>;
+};
+
+async function freshSegments(context: ArchiveWriteContext, refs: readonly SegmentReference[]) {
+  const { db, job } = context;
   const uniqueRefs = [...new Map(refs.map((ref) => [ref.object_key, ref])).values()];
   const seen = await existingSegmentHashes(db, job.job_id, job.identity_salt, uniqueRefs);
   const freshWithHashes: Array<{ ref: SegmentReference; hash: string }> = [];
   for (const ref of uniqueRefs) {
     const hash = await hashIdentity(job.identity_salt, ['segment', ref.object_key]);
-    if (!seen.has(hash)) freshWithHashes.push({ ref, hash });
+    if (!seen.has(hash) && !context.sliceSeenSegments?.has(hash)) {
+      context.sliceSeenSegments?.add(hash);
+      freshWithHashes.push({ ref, hash });
+    }
   }
   if (freshWithHashes.length + job.segment_count > MAX_SEGMENTS)
     throw new Error('audit segment cap');
+  return freshWithHashes;
+}
+
+async function readSegmentFacts(
+  context: ArchiveWriteContext,
+  fresh: Array<{ ref: SegmentReference; hash: string }>,
+) {
+  const { db, job, bindings } = context;
   const byteState = { compressed: 0, decompressed: 0 };
   const input = {
     db,
@@ -489,19 +531,9 @@ async function archiveWritesForSegments(
     archive: bindings.archive,
     history: bindings.history,
   };
-  const factRows: Array<{
-    identity_hash: string;
-    digest_version?: number;
-    digest?: string;
-    target_day: boolean;
-  }> = [];
-  const pendingFacts: Array<{
-    batch: CollectedBrowserBatch;
-    identity_hash: string;
-    target_day: boolean;
-  }> = [];
+  const pendingFacts: PendingArchiveFact[] = [];
   const processedSegments: string[] = [];
-  for (const { ref, hash } of freshWithHashes) {
+  for (const { ref, hash } of fresh) {
     const batches = await readBrowserArchiveAuditSegment(input, ref, byteState);
     processedSegments.push(hash);
     for (const batch of batches) {
@@ -518,6 +550,14 @@ async function archiveWritesForSegments(
       pendingFacts.push({ batch, identity_hash: identityHash, target_day: isTargetDay });
     }
   }
+  return { pendingFacts, processedSegments };
+}
+
+async function relevantArchiveFacts(
+  context: ArchiveWriteContext,
+  pendingFacts: PendingArchiveFact[],
+) {
+  const { db, job, receiptHashes, includeAllFacts } = context;
   const outsideDay = pendingFacts.filter(
     (fact) => !includeAllFacts && !fact.target_day && !receiptHashes.has(fact.identity_hash),
   );
@@ -543,6 +583,14 @@ async function archiveWritesForSegments(
       knownReceipts.has(fact.identity_hash),
   );
   if (relevantFacts.length > MAX_FACTS_PER_SLICE) throw new Error('audit fact slice cap');
+  return relevantFacts;
+}
+
+async function digestArchiveFacts(
+  relevantFacts: PendingArchiveFact[],
+  pendingFacts: PendingArchiveFact[],
+): Promise<ArchiveFactWrite[]> {
+  const factRows: ArchiveFactWrite[] = [];
   for (const { batch, identity_hash } of relevantFacts) {
     const computedDigest = await digestBrowserEventFacts(batch);
     const digestMatches =
@@ -561,13 +609,17 @@ async function archiveWritesForSegments(
       ),
     });
   }
-  const existing = await countFactRows(db, job.job_id);
-  const uniqueKeys = new Set(factRows.map((row) => row.identity_hash));
-  if (existing + uniqueKeys.size > MAX_FACT_ROWS) throw new Error('audit fact row cap');
-  if (job.archive_fact_count + factRows.length > MAX_ARCHIVE_FACTS)
-    throw new Error('audit archive fact cap');
-  const writes = [
-    ...processedSegments.map((hash) =>
+  return factRows;
+}
+
+function archiveFactStatements(
+  context: ArchiveWriteContext,
+  segmentHashes: string[],
+  factRows: ArchiveFactWrite[],
+) {
+  const { db, job, leaseToken } = context;
+  return [
+    ...segmentHashes.map((hash) =>
       db
         .prepare(
           `INSERT OR IGNORE INTO browser_archive_audit_segments (job_id, segment_hash)
@@ -604,6 +656,23 @@ async function archiveWritesForSegments(
         ),
     ),
   ];
+}
+
+async function archiveWritesForSegments(
+  context: ArchiveWriteContext,
+  refs: readonly SegmentReference[],
+) {
+  const { db, job } = context;
+  const fresh = await freshSegments(context, refs);
+  const { pendingFacts, processedSegments } = await readSegmentFacts(context, fresh);
+  const relevantFacts = await relevantArchiveFacts(context, pendingFacts);
+  const factRows = await digestArchiveFacts(relevantFacts, pendingFacts);
+  const existing = await countFactRows(db, job.job_id);
+  const uniqueKeys = new Set(factRows.map((row) => row.identity_hash));
+  if (existing + uniqueKeys.size > MAX_FACT_ROWS) throw new Error('audit fact row cap');
+  if (job.archive_fact_count + factRows.length > MAX_ARCHIVE_FACTS)
+    throw new Error('audit archive fact cap');
+  const writes = archiveFactStatements(context, processedSegments, factRows);
   return { segments: processedSegments.length, facts: factRows.length, writes };
 }
 
@@ -653,13 +722,8 @@ async function processReceiptSlice(
     receiptQuery(db, job.job_id, row, identityHashes[index]!, leaseToken),
   );
   const archive = await archiveWritesForSegments(
-    db,
-    job,
+    { db, job, receiptHashes: receiptHashSet, bindings, includeAllFacts: true, leaseToken },
     refs,
-    receiptHashSet,
-    bindings,
-    true,
-    leaseToken,
   );
   if ((await countFactRows(db, job.job_id)) + receipts.length + archive.facts > MAX_FACT_ROWS)
     throw new Error('audit fact row cap');
@@ -691,6 +755,42 @@ async function processReceiptSlice(
   if (results.some((result) => !result.success)) throw new Error('audit receipt slice failed');
 }
 
+async function readArchiveIndexPage(
+  context: {
+    db: D1DatabaseLike;
+    job: JobRow;
+    bindings: BrowserArchiveAuditJobBindings;
+    leaseToken: string;
+    sliceSeenSegments: Set<string>;
+  },
+  shard: number,
+  state: ShardState,
+) {
+  const { db, job, bindings, leaseToken, sliceSeenSegments } = context;
+  const page = await bindings.archive
+    .getByName(`${job.workspace_id}:browser-archive-v1:${shard}`)
+    .archiveSegmentsForEventDay(job.india_day, state.cursor, SHARD_PAGE_SIZE);
+  if (!Number.isSafeInteger(page.snapshot_sequence) || page.snapshot_sequence < 0)
+    throw new Error('invalid archive index snapshot');
+  if (state.snapshot_sequence !== null && state.snapshot_sequence !== page.snapshot_sequence)
+    throw new Error('archive index snapshot changed');
+  state.snapshot_sequence = page.snapshot_sequence;
+  state.cursor = page.next_cursor;
+  state.exhausted = page.next_cursor === null;
+  return archiveWritesForSegments(
+    {
+      db,
+      job,
+      receiptHashes: new Set(),
+      bindings,
+      includeAllFacts: false,
+      leaseToken,
+      sliceSeenSegments,
+    },
+    page.segments,
+  );
+}
+
 async function processArchiveIndexSlice(
   db: D1DatabaseLike,
   job: JobRow,
@@ -704,36 +804,19 @@ async function processArchiveIndexSlice(
   let addedSegments = 0;
   let addedFacts = 0;
   const factWrites: Array<ReturnType<D1DatabaseLike['prepare']>> = [];
+  const sliceSeenSegments = new Set<string>();
   for (let shard = 0; shard < SHARD_COUNT && processed < SHARDS_PER_SLICE; shard++) {
     const state = states[shard]!;
     if (state.exhausted) continue;
-    const page = await bindings.archive
-      .getByName(`${job.workspace_id}:browser-archive-v1:${shard}`)
-      .archiveSegmentsForEventDay(job.india_day, state.cursor, SHARD_PAGE_SIZE);
-    if (!Number.isSafeInteger(page.snapshot_sequence) || page.snapshot_sequence < 0)
-      throw new Error('invalid archive index snapshot');
-    if (state.snapshot_sequence !== null && state.snapshot_sequence !== page.snapshot_sequence)
-      throw new Error('archive index snapshot changed');
-    state.snapshot_sequence = page.snapshot_sequence;
-    state.cursor = page.next_cursor;
-    state.exhausted = page.next_cursor === null;
-    const result = await archiveWritesForSegments(
-      db,
-      job,
-      page.segments,
-      new Set(),
-      bindings,
-      false,
-      leaseToken,
+    const result = await readArchiveIndexPage(
+      { db, job, bindings, leaseToken, sliceSeenSegments },
+      shard,
+      state,
     );
     if (addedFacts + result.facts > MAX_FACTS_PER_SLICE) throw new Error('audit fact slice cap');
     if ((await countFactRows(db, job.job_id)) + addedFacts + result.facts > MAX_FACT_ROWS)
       throw new Error('audit fact row cap');
-    for (const statement of result.writes) {
-      // A duplicate reference within the same bounded invocation is counted once.
-      // Segment keys are salted hashes and appear only in this short-lived set.
-      factWrites.push(statement);
-    }
+    factWrites.push(...result.writes);
     addedSegments += result.segments;
     addedFacts += result.facts;
     processed++;
@@ -823,12 +906,22 @@ export async function processBrowserArchiveAuditJob(
   }
 }
 
-/** Scheduled driver: bounded job count and per-job slice count per hourly trigger. */
-export async function processPendingBrowserArchiveAuditJobs(
-  bindings: BrowserArchiveAuditJobBindings,
-  now = Date.now(),
-) {
-  const expired = await bindings.db
+async function expireActiveAuditJobs(db: D1DatabaseLike, now: number) {
+  await db
+    .prepare(
+      `UPDATE browser_archive_audit_jobs SET status = 'incomplete', phase = 'done',
+       incomplete_reasons_json = '["audit_job_expired"]', lease_token = NULL,
+       lease_until = NULL, updated_at = ?, expires_at = ?
+       WHERE status IN ('queued', 'running') AND expires_at <= ?`,
+    )
+    .bind(now, now + FINISHED_JOB_TTL_MS, now)
+    .run();
+}
+
+/** Physically remove expired pseudonymous facts and headers using only D1. */
+export async function cleanupExpiredBrowserArchiveAuditJobs(db: D1DatabaseLike, now = Date.now()) {
+  await expireActiveAuditJobs(db, now);
+  const expired = await db
     .prepare(
       `DELETE FROM browser_archive_audit_facts WHERE rowid IN
        (SELECT facts.rowid FROM browser_archive_audit_facts facts
@@ -838,7 +931,7 @@ export async function processPendingBrowserArchiveAuditJobs(
     .bind(now)
     .run();
   if (!expired.success) return;
-  await bindings.db
+  await db
     .prepare(
       `DELETE FROM browser_archive_audit_segments WHERE rowid IN
        (SELECT segments.rowid FROM browser_archive_audit_segments segments
@@ -847,7 +940,7 @@ export async function processPendingBrowserArchiveAuditJobs(
     )
     .bind(now)
     .run();
-  await bindings.db
+  await db
     .prepare(
       `DELETE FROM browser_archive_audit_jobs WHERE rowid IN
        (SELECT jobs.rowid FROM browser_archive_audit_jobs jobs
@@ -858,6 +951,13 @@ export async function processPendingBrowserArchiveAuditJobs(
     )
     .bind(now)
     .run();
+}
+
+/** Scheduled driver: one globally admitted job, with three fixed-work slices per hourly trigger. */
+export async function processPendingBrowserArchiveAuditJobs(
+  bindings: BrowserArchiveAuditJobBindings,
+  now = Date.now(),
+) {
   const jobs = await bindings.db
     .prepare(
       "SELECT job_id, workspace_id FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running') AND expires_at > ? ORDER BY created_at LIMIT 1",

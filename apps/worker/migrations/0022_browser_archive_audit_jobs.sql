@@ -24,8 +24,8 @@ CREATE TABLE IF NOT EXISTS browser_archive_audit_jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_browser_archive_audit_jobs_pending
   ON browser_archive_audit_jobs (status, created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_archive_audit_jobs_one_active_workspace
-  ON browser_archive_audit_jobs (workspace_id)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_archive_audit_jobs_one_active_global
+  ON browser_archive_audit_jobs ((1))
   WHERE status IN ('queued', 'running');
 CREATE INDEX IF NOT EXISTS idx_browser_archive_audit_jobs_expiry
   ON browser_archive_audit_jobs (expires_at);

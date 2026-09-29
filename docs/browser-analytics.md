@@ -190,7 +190,11 @@ An authenticated full-workspace owner can start one bounded observation with
 `POST /v1/browser/archive-audits?day=YYYY-MM-DD` and poll
 `GET /v1/browser/archive-audits/<job_id>`. The request contains no workspace or
 product selectors; both are taken from owner authentication. The worker runs
-at most three bounded D1/DO/R2 slices per hourly scheduled invocation. It caps
+at most one job globally and three bounded D1/DO/R2 slices per hourly
+scheduled invocation. Starting another workspace's job while one is active
+returns 409 and does not enqueue a job or start its retention clock. This
+admission cap prevents queued workspaces from silently expiring behind a
+long-running maximum-size job. It caps
 each receipt page at 30 rows, each event-day index page at three segments, the
 per-slice archive fact work at 39 facts, and each job at 10,000 fact identities
 and 5,000 segments. An uninterrupted run at both hard caps can take about 11
@@ -198,8 +202,11 @@ days (10,000 receipt rows at 90/hour plus 5,000 segment references at 36/hour);
 the 14-day active-job expiry leaves room for a small amount of scheduling
 delay. A five-minute D1 lease serializes concurrent scheduled deliveries; all
 slice writes require the active lease token, and a crashed invocation becomes
-eligible for retry after the lease expires. A cap or repeated provider failure ends the job incomplete. Finished
-status and salted identity-key digests expire after 24 hours. Status exposes
+eligible for retry after the lease expires. A cap or repeated provider failure
+ends the job incomplete. Expired active jobs also become inspectable incomplete
+jobs with an explicit `audit_job_expired` reason. Terminal status and salted
+identity-key digests are retained for 24 hours, then D1 cleanup physically
+removes them independently of DO/R2 binding availability. Status exposes
 aggregate counts and progress only.
 
 Every result has `complete: false`. A finished job means only that its captured

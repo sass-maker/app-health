@@ -4,6 +4,7 @@ import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js'
 import { cleanupExpiredAccountRecords } from './account-retention.js';
 import { cleanupBrowserVisitorDays } from './browser-visitor-daily.js';
 import {
+  cleanupExpiredBrowserArchiveAuditJobs,
   processPendingBrowserArchiveAuditJobs,
   type BrowserArchiveAuditJobBindings,
 } from './browser-archive-audit-jobs.js';
@@ -1019,6 +1020,11 @@ const unmonitoredWorker = {
         );
     } catch {
       console.warn(JSON.stringify({ event: 'browser_visitor_retention_failed' }));
+    }
+    try {
+      await cleanupExpiredBrowserArchiveAuditJobs(env.DB, Date.now());
+    } catch {
+      console.warn(JSON.stringify({ event: 'browser_archive_audit_cleanup_failed' }));
     }
     const archiveBinding = env.BROWSER_ARCHIVE;
     const historyBinding = env.BROWSER_HISTORY;

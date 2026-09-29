@@ -9,6 +9,7 @@ import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import {
+  cleanupExpiredBrowserArchiveAuditJobs,
   processBrowserArchiveAuditJob,
   processPendingBrowserArchiveAuditJobs,
   readBrowserArchiveAuditJob,
@@ -323,5 +324,74 @@ describe('resumable browser archive audit jobs', () => {
     expect(dayPageCalls).toBe(4);
     expect(indexJob?.segment_count).toBe(1);
     expect(indexJob?.archive_fact_count).toBe(1);
+  });
+
+  it('admits one globally active job and starts another workspace after completion', async () => {
+    const first = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 10_000);
+    await expect(
+      startBrowserArchiveAuditJob(db, 'workspace-b', '2026-09-28', 10_001),
+    ).rejects.toThrow('audit already running');
+
+    for (let tick = 0; tick < 5; tick++)
+      await processPendingBrowserArchiveAuditJobs({ db, archive, history }, 10_100 + tick * 100);
+    const completed = await readBrowserArchiveAuditJob(db, WORKSPACE, first.job_id, 10_700);
+    expect(completed?.status).toBe('finished');
+    expect(
+      await startBrowserArchiveAuditJob(db, 'workspace-b', '2026-09-28', 10_800),
+    ).toMatchObject({ status: 'queued', complete: false });
+  });
+
+  it('retires an expired active job globally before another workspace is admitted', async () => {
+    const first = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 200);
+    const afterExpiry = 200 + 14 * 24 * 60 * 60 * 1000;
+    const next = await startBrowserArchiveAuditJob(db, 'workspace-b', '2026-09-28', afterExpiry);
+    expect(next).toMatchObject({ status: 'queued', complete: false });
+    const expired = await db
+      .prepare('SELECT status, lease_token FROM browser_archive_audit_jobs WHERE job_id = ?')
+      .bind(first.job_id)
+      .first<{ status: string; lease_token: string | null }>();
+    expect(expired).toEqual({ status: 'incomplete', lease_token: null });
+  });
+
+  it('physically cleans expired pseudonymous state using D1 alone', async () => {
+    const old = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await db
+      .prepare(
+        `INSERT INTO browser_archive_audit_facts (job_id, identity_hash)
+         VALUES (?, ?)`,
+      )
+      .bind(old.job_id, 'c'.repeat(64))
+      .run();
+    await db
+      .prepare('INSERT INTO browser_archive_audit_segments (job_id, segment_hash) VALUES (?, ?)')
+      .bind(old.job_id, 'd'.repeat(64))
+      .run();
+
+    const activeExpiry = 100 + 14 * 24 * 60 * 60 * 1000;
+    await cleanupExpiredBrowserArchiveAuditJobs(db, activeExpiry);
+    const expiredState = await db
+      .prepare(
+        'SELECT status, incomplete_reasons_json FROM browser_archive_audit_jobs WHERE job_id = ?',
+      )
+      .bind(old.job_id)
+      .first<{ status: string; incomplete_reasons_json: string }>();
+    expect(expiredState).toEqual({
+      status: 'incomplete',
+      incomplete_reasons_json: '["audit_job_expired"]',
+    });
+
+    await cleanupExpiredBrowserArchiveAuditJobs(db, activeExpiry + 24 * 60 * 60 * 1000);
+
+    for (const table of [
+      'browser_archive_audit_facts',
+      'browser_archive_audit_segments',
+      'browser_archive_audit_jobs',
+    ]) {
+      const result = await db
+        .prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE job_id = ?`)
+        .bind(old.job_id)
+        .first<{ count: number }>();
+      expect(result?.count).toBe(0);
+    }
   });
 });

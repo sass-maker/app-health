@@ -75,7 +75,7 @@ export type BrowserArchiveDayAudit = {
   incomplete_reasons: string[];
 };
 
-function safeDay(day: string): boolean {
+export function isSafeBrowserArchiveDay(day: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
   const parsed = new Date(`${day}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === day;
@@ -570,7 +570,7 @@ async function compareFacts(input: BrowserArchiveDayAuditInput, state: AuditStat
 export async function auditBrowserArchiveDay(
   input: BrowserArchiveDayAuditInput,
 ): Promise<BrowserArchiveDayAudit> {
-  if (!safeDay(input.day) || !input.workspace || input.workspace.length > 100)
+  if (!isSafeBrowserArchiveDay(input.day) || !input.workspace || input.workspace.length > 100)
     throw new Error('Invalid browser archive audit scope');
   const state = newAuditState();
   await readReceipts(input, state);
