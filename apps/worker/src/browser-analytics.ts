@@ -46,6 +46,19 @@ export interface BrowserBindings {
   BROWSER_ARCHIVE?: {
     getByName(name: string): {
       stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult>;
+      archiveSegmentsForEventDay?(
+        day: string,
+        cursor?: { object_key: string } | null,
+        limit?: number,
+      ): Promise<{
+        segments: Array<{ segment_id: string; object_key: string }>;
+        next_cursor: { object_key: string } | null;
+      }>;
+      archiveSegmentForBatch?(
+        appId: string,
+        environmentId: string,
+        batchId: string,
+      ): Promise<{ segment_id: string; object_key: string } | null>;
     };
   };
   BROWSER_ANALYTICS?: AnalyticsEngineDatasetLike;
