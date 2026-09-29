@@ -185,6 +185,42 @@ describe('browser analytical data', () => {
     expect(sent[0].facts_digest).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(sent[0])).not.toContain('raw-session-secret');
   });
+  it('does not acknowledge a queued event that expires before the visitor ledger commits', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-29T12:00:00.000Z'));
+    const input = batch();
+    input.events = [{ ...input.events[0], timestamp: Date.now() - 86_399_500 }];
+    const db = acceptedReceiptDb();
+    const commit = vi.spyOn(db, 'batch');
+    const send = vi.fn(async () => {
+      vi.setSystemTime(Date.now() + 1_000);
+    });
+    const recordCapability = vi.fn();
+    const response = await acceptBrowser(
+      input,
+      undefined,
+      {
+        DB: db,
+        BROWSER_EVENTS: { send },
+        BROWSER_HISTORY: {} as NonNullable<
+          import('../src/browser-analytics.js').BrowserBindings['BROWSER_HISTORY']
+        >,
+        BROWSER_ARCHIVE: {} as NonNullable<
+          import('../src/browser-analytics.js').BrowserBindings['BROWSER_ARCHIVE']
+        >,
+        BROWSER_ANALYTICS: { writeDataPoint: vi.fn() },
+        WORKSPACE_PRESENCE: {} as NonNullable<
+          import('../src/browser-analytics.js').BrowserBindings['WORKSPACE_PRESENCE']
+        >,
+      },
+      { capabilities: { recordCapability } } as unknown as AppHealthRepositories,
+      false,
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(response.status).toBe(503);
+    expect(commit).not.toHaveBeenCalled();
+    expect(recordCapability).not.toHaveBeenCalled();
+  });
   it('stores delayed events without reviving presence and preserves explicit missing sources', async () => {
     const old = batch();
     old.events = [
