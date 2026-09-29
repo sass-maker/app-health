@@ -42,6 +42,7 @@ export interface BrowserEnvironment extends BrowserBindings {
   ANALYTICS_ENGINE_QUERY_TOKEN?: string;
 }
 const localAnalytics = new LocalBrowserAnalytics();
+const UNSAFE_BROWSER_PATH = /[@?#\\\s]/;
 const json = (status: number, body: unknown) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 
@@ -59,11 +60,14 @@ function validBrowserEventTimes(events: BrowserBatchV1['events'], now: number): 
 }
 
 function validBrowserEvents(input: BrowserBatchV1, now: number): boolean {
-  if (input.attribution && /[@?#\\\s]/.test(decodeURIComponent(input.attribution.entry_path)))
+  if (
+    input.attribution &&
+    UNSAFE_BROWSER_PATH.test(decodeURIComponent(input.attribution.entry_path))
+  )
     return false;
   return (
     validBrowserEventTimes(input.events, now) &&
-    !input.events.some((event) => /[@?#\\\s]/.test(decodeURIComponent(event.path)))
+    !input.events.some((event) => UNSAFE_BROWSER_PATH.test(decodeURIComponent(event.path)))
   );
 }
 async function browserContext(
