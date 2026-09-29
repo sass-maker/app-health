@@ -51,6 +51,17 @@ describe('Google account boundary with real D1 SQL', () => {
       .trim()
       .split(/\n(?=CREATE )/))
       await db.prepare(statement).run();
+    for (const file of [
+      '0019_browser_visitor_days.sql',
+      '0020_browser_receipt_reconciliation.sql',
+    ]) {
+      const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
+      for (const statement of sql
+        .replace(/--[^\n]*/g, '')
+        .split(';')
+        .filter((s) => s.trim()))
+        await db.prepare(statement).run();
+    }
     env = {
       DB: db,
       APP_HEALTH_ACCOUNTS: 'enabled',

@@ -10,6 +10,7 @@ import { localBrowserReport } from '../src/browser-reports.js';
 import { acceptBrowser, handleBrowserIngest, handleBrowserOwner } from '../src/browser-routes.js';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
 import type { AppHealthRepositories } from '../src/repository.js';
+import type { D1DatabaseLike, D1PreparedStatement } from '../src/d1-adapter.js';
 import { SEED_APP_ID, SEED_ENV_ID, SEED_PUBLIC_KEY } from '@app-health/contracts';
 
 const batch = (): CollectedBrowserBatch => ({
@@ -29,6 +30,45 @@ const batch = (): CollectedBrowserBatch => ({
   ],
   session_hash: 'f'.repeat(64),
 });
+function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
+  type Prepared = D1PreparedStatement & { sql: string; values: unknown[] };
+  return {
+    prepare(sql) {
+      const statement = {
+        sql,
+        values: [],
+        bind(...values: unknown[]) {
+          statement.values = values;
+          return statement;
+        },
+        async first<T>() {
+          return (workspaceId ? { workspace_id: workspaceId } : null) as T | null;
+        },
+        async all<T>() {
+          return { results: [] as T[] };
+        },
+        async run() {
+          return { success: true, meta: {} };
+        },
+      } as Prepared;
+      return statement;
+    },
+    async batch(statements) {
+      const receipt = statements.find((statement) =>
+        (statement as Prepared).sql.includes('INSERT INTO browser_visitor_batch_receipts'),
+      ) as Prepared | undefined;
+      return statements.map((_, index) => ({
+        success: true,
+        meta: {},
+        ...(index === statements.length - 1
+          ? {
+              results: [{ fingerprint: receipt?.values[4], event_count: receipt?.values[7] }],
+            }
+          : {}),
+      }));
+    },
+  };
+}
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -104,6 +144,7 @@ describe('browser analytical data', () => {
       batch(),
       'raw-session-secret',
       {
+        DB: acceptedReceiptDb(),
         BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
         BROWSER_HISTORY: {
           put: async () => ({}) as R2Object,
@@ -150,6 +191,7 @@ describe('browser analytical data', () => {
     const send = vi.fn();
     const heartbeat = vi.fn();
     const env = {
+      DB: acceptedReceiptDb(),
       BROWSER_EVENTS: { send },
       BROWSER_HISTORY: {} as NonNullable<
         import('../src/browser-analytics.js').BrowserBindings['BROWSER_HISTORY']
@@ -299,7 +341,7 @@ describe('browser collector boundary', () => {
       request(body),
       {
         APP_HEALTH_INGEST_HOST: 'localhost',
-        DB: { prepare: () => statement, batch: async () => [] },
+        DB: acceptedReceiptDb('local'),
         BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
         WORKSPACE_PRESENCE: {
           getByName: () => ({

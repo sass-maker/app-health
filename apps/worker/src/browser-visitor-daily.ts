@@ -12,11 +12,25 @@ const RECEIPT_RETENTION_MS = BROWSER_VISITOR_RETENTION_MS;
 const VISITOR_HASH = /^[a-f0-9]{64}$/i;
 const MAX_RETENTION_ROWS_PER_TABLE_PER_RUN = 10_000;
 export const MAX_EXACT_BROWSER_VISITOR_SCOPES = 128;
+export const MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE = 500;
+const MAX_BROWSER_VISITOR_RECEIPT_EVENTS = 25;
 
 type ExactBrowserVisitorDay =
   { complete: true; visitors: number } | { complete: false; visitors: null };
 export type ExactBrowserVisitorScope = { app_id: string; environment_id: string };
 export type ExactBrowserVisitorResult = ExactBrowserVisitorScope & ExactBrowserVisitorDay;
+export type BrowserVisitorReceiptScope = ExactBrowserVisitorScope & { batch_id: string };
+export type BrowserVisitorReceiptCursor = BrowserVisitorReceiptScope;
+export type BrowserVisitorReceiptPage = {
+  receipts: Array<
+    BrowserVisitorReceiptScope & {
+      fingerprint: string;
+      accepted_at: number;
+      event_count: number;
+    }
+  >;
+  next_cursor: BrowserVisitorReceiptCursor | null;
+};
 
 export function indiaDayForTimestamp(timestamp: number): string {
   if (!Number.isSafeInteger(timestamp) || timestamp < 0)
@@ -76,7 +90,7 @@ async function batchFingerprint(batch: CollectedBrowserBatch, days: readonly str
 }
 
 /**
- * Commit an idempotent visitor/day set and its coverage activation metadata.
+ * Commit an idempotent acceptance receipt, event-day index and optional visitor/day set.
  * Call only after Queue.send succeeds and before returning HTTP 202.
  */
 export async function acceptBrowserVisitorBatch(
@@ -85,10 +99,15 @@ export async function acceptBrowserVisitorBatch(
   now: number,
 ): Promise<void> {
   if (!batch.events.length) return;
+  if (batch.events.length > MAX_BROWSER_VISITOR_RECEIPT_EVENTS)
+    throw new Error('Browser receipt batch exceeds the event limit');
   const visitorHash = batch.visitor_hash;
-  if (visitorHash === undefined) return;
-  if (!VISITOR_HASH.test(visitorHash)) throw new Error('Invalid scoped browser visitor hash');
-  const normalizedBatch = { ...batch, visitor_hash: visitorHash.toLowerCase() };
+  if (visitorHash !== undefined && !VISITOR_HASH.test(visitorHash))
+    throw new Error('Invalid scoped browser visitor hash');
+  const normalizedBatch = {
+    ...batch,
+    ...(visitorHash === undefined ? {} : { visitor_hash: visitorHash.toLowerCase() }),
+  };
   const days = [
     ...new Set(batch.events.map((event) => indiaDayForTimestamp(event.timestamp))),
   ].sort();
@@ -103,11 +122,15 @@ export async function acceptBrowserVisitorBatch(
     db
       .prepare(
         `INSERT INTO browser_visitor_batch_receipts
-           (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+           (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at, accepted_at, event_count)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (workspace_id, app_id, environment_id, batch_id)
-         DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at)
-         WHERE browser_visitor_batch_receipts.fingerprint = excluded.fingerprint`,
+         DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at),
+           accepted_at = COALESCE(browser_visitor_batch_receipts.accepted_at, excluded.accepted_at),
+           event_count = COALESCE(browser_visitor_batch_receipts.event_count, excluded.event_count)
+         WHERE browser_visitor_batch_receipts.fingerprint = excluded.fingerprint
+           AND (browser_visitor_batch_receipts.event_count IS NULL
+             OR browser_visitor_batch_receipts.event_count = excluded.event_count)`,
       )
       .bind(
         batch.workspace,
@@ -116,11 +139,40 @@ export async function acceptBrowserVisitorBatch(
         batch.batch_id,
         fingerprint,
         now + RECEIPT_RETENTION_MS,
+        now,
+        batch.events.length,
       ),
   ];
   for (const day of days) {
     const bounds = indiaDayBounds(day);
     if (!bounds) throw new Error('Invalid India calendar day');
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO browser_visitor_receipt_days
+             (workspace_id, app_id, environment_id, batch_id, india_day)
+           SELECT ?, ?, ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM browser_visitor_batch_receipts
+             WHERE workspace_id = ? AND app_id = ? AND environment_id = ?
+               AND batch_id = ? AND fingerprint = ?
+           )
+           ON CONFLICT (workspace_id, app_id, environment_id, batch_id, india_day) DO NOTHING`,
+        )
+        .bind(
+          batch.workspace,
+          batch.app_id,
+          batch.environment_id,
+          batch.batch_id,
+          day,
+          batch.workspace,
+          batch.app_id,
+          batch.environment_id,
+          batch.batch_id,
+          fingerprint,
+        ),
+    );
+    if (visitorHash === undefined) continue;
     statements.push(
       db
         .prepare(
@@ -153,15 +205,99 @@ export async function acceptBrowserVisitorBatch(
   statements.push(
     db
       .prepare(
-        `SELECT fingerprint FROM browser_visitor_batch_receipts
+        `SELECT fingerprint, event_count FROM browser_visitor_batch_receipts
          WHERE workspace_id = ? AND app_id = ? AND environment_id = ? AND batch_id = ?`,
       )
       .bind(batch.workspace, batch.app_id, batch.environment_id, batch.batch_id),
   );
   const results = await db.batch(statements);
-  const receipt = results.at(-1)?.results?.[0]?.fingerprint;
-  if (receipt !== fingerprint)
+  const receipt = results.at(-1)?.results?.[0] as
+    { fingerprint: string; event_count: number | null } | undefined;
+  if (receipt?.fingerprint !== fingerprint || receipt.event_count !== batch.events.length)
     throw new Error('Browser batch identity reused with different facts');
+}
+
+/** Read one bounded page of accepted batch receipts that included an event on an India day. */
+export async function readBrowserVisitorReceiptPage(
+  db: D1DatabaseLike,
+  workspace: string,
+  scopes: readonly ExactBrowserVisitorScope[],
+  day: string,
+  limit = MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE,
+  after?: BrowserVisitorReceiptCursor,
+): Promise<BrowserVisitorReceiptPage> {
+  if (!indiaDayBounds(day)) throw new Error('Invalid India calendar day');
+  if (scopes.length > MAX_EXACT_BROWSER_VISITOR_SCOPES)
+    throw new Error('Browser receipt query exceeds the bounded scope limit');
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE)
+    throw new Error('Browser receipt page size exceeds the bounded query limit');
+  const scopeKeys = scopes.map((scope) => JSON.stringify([scope.app_id, scope.environment_id]));
+  if (new Set(scopeKeys).size !== scopeKeys.length)
+    throw new Error('Duplicate browser receipt scope');
+  if (!scopes.length) return { receipts: [], next_cursor: null };
+  const cursorClause = after
+    ? 'AND (receipt.app_id, receipt.environment_id, receipt.batch_id) > (?, ?, ?)'
+    : '';
+  const bindings: unknown[] = [
+    JSON.stringify(scopes.map((scope) => [scope.app_id, scope.environment_id])),
+    workspace,
+    day,
+  ];
+  if (after) bindings.push(after.app_id, after.environment_id, after.batch_id);
+  bindings.push(limit + 1);
+  const result = await db
+    .prepare(
+      `WITH requested AS (
+         SELECT json_extract(value, '$[0]') AS app_id,
+                json_extract(value, '$[1]') AS environment_id
+         FROM json_each(?)
+       )
+       SELECT receipt.app_id, receipt.environment_id, receipt.batch_id,
+              receipt.fingerprint, receipt.accepted_at, receipt.event_count
+       FROM requested
+       JOIN browser_visitor_receipt_days day_receipt
+         ON day_receipt.workspace_id = ?
+         AND day_receipt.app_id = requested.app_id
+         AND day_receipt.environment_id = requested.environment_id
+         AND day_receipt.india_day = ?
+       JOIN browser_visitor_batch_receipts receipt
+         ON receipt.workspace_id = day_receipt.workspace_id
+         AND receipt.app_id = day_receipt.app_id
+         AND receipt.environment_id = day_receipt.environment_id
+         AND receipt.batch_id = day_receipt.batch_id
+       ${cursorClause}
+       ORDER BY receipt.app_id, receipt.environment_id, receipt.batch_id
+       LIMIT ?`,
+    )
+    .bind(...bindings)
+    .all<{
+      app_id: string;
+      environment_id: string;
+      batch_id: string;
+      fingerprint: string;
+      accepted_at: number | null;
+      event_count: number | null;
+    }>();
+  if (result.results.length > limit)
+    return {
+      receipts: result.results.slice(0, limit).map((row) => {
+        if (row.accepted_at === null || row.event_count === null)
+          throw new Error('Browser receipt is missing reconciliation metadata');
+        return { ...row, accepted_at: row.accepted_at, event_count: row.event_count };
+      }),
+      next_cursor: (() => {
+        const last = result.results[limit - 1];
+        return last
+          ? { app_id: last.app_id, environment_id: last.environment_id, batch_id: last.batch_id }
+          : null;
+      })(),
+    };
+  const receipts = result.results.map((row) => {
+    if (row.accepted_at === null || row.event_count === null)
+      throw new Error('Browser receipt is missing reconciliation metadata');
+    return { ...row, accepted_at: row.accepted_at, event_count: row.event_count };
+  });
+  return { receipts, next_cursor: null };
 }
 
 /**
@@ -272,6 +408,16 @@ export async function cleanupBrowserVisitorDays(
       .bind(now, boundedLimit),
     db
       .prepare(
+        `DELETE FROM browser_visitor_receipt_days
+         WHERE (workspace_id, app_id, environment_id, batch_id) IN (
+           SELECT workspace_id, app_id, environment_id, batch_id
+           FROM browser_visitor_batch_receipts WHERE expires_at <= ?
+           ORDER BY expires_at LIMIT ?
+         )`,
+      )
+      .bind(now, boundedLimit),
+    db
+      .prepare(
         `DELETE FROM browser_visitor_batch_receipts WHERE rowid IN (
            SELECT rowid FROM browser_visitor_batch_receipts WHERE expires_at <= ? ORDER BY expires_at LIMIT ?
          )`,
@@ -294,7 +440,7 @@ export async function cleanupBrowserVisitorDays(
   ]);
   return {
     visitors: results[0]?.meta.changes ?? 0,
-    receipts: results[1]?.meta.changes ?? 0,
+    receipts: results[2]?.meta.changes ?? 0,
     backlog: {
       visitors: expiredVisitors !== null,
       receipts: expiredReceipts !== null,

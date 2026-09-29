@@ -143,7 +143,7 @@ export async function acceptBrowser(
     response = json(202, { accepted: batch.events.length, presence: !!activeSession });
   } else response = await enqueueBrowser(durableBatch, activeSession, env);
   if (response.status === 202 && durableBatch.events.length) {
-    if (!local && durableBatch.visitor_hash) {
+    if (!local) {
       try {
         if (!env.DB) throw new Error('Browser visitor ledger unavailable');
         await acceptBrowserVisitorBatch(env.DB, durableBatch, durableBatch.received_at);
