@@ -14,6 +14,7 @@ import {
   type EngagementLogRow,
 } from '../src/daily-engagement-report.js';
 import type { D1DatabaseLike, D1PreparedStatement, D1RunResult } from '../src/d1-adapter.js';
+import type { ExactBrowserVisitorResult } from '../src/browser-visitor-daily.js';
 import { endpointReadRanges } from '../src/endpoint-read.js';
 
 // 2026-09-27 is a completed India day when "now" is 2026-09-28 noon UTC.
@@ -778,11 +779,14 @@ describe('readDailyApiActivity', () => {
 
 // Minimal D1 mock that returns canned rows by SQL pattern, like worker.test.ts.
 class MockDatabase implements D1DatabaseLike {
+  exactVisitorQueryCount = 0;
   constructor(
     private readonly catalogRows: CatalogProductRow[],
     private readonly logRows: EngagementLogRow[],
+    private readonly exactVisitorRows: ExactBrowserVisitorResult[] = [],
   ) {}
   prepare(sql: string): D1PreparedStatement {
+    if (sql.includes('WITH requested AS')) this.exactVisitorQueryCount += 1;
     return new MockStatement(sql, this);
   }
   async batch(statements: D1PreparedStatement[]): Promise<D1RunResult[]> {
@@ -804,6 +808,24 @@ class MockStatement implements D1PreparedStatement {
     return null;
   }
   async all<T>(): Promise<{ results: T[] }> {
+    if (this.sql.includes('WITH requested AS')) {
+      const scopes = JSON.parse(String(this.values[0])) as [string, string][];
+      return {
+        results: scopes.map(([appId, environmentId]) => {
+          const row = this.db['exactVisitorRows'].find(
+            (candidate) => candidate.app_id === appId && candidate.environment_id === environmentId,
+          );
+          return {
+            app_id: appId,
+            environment_id: environmentId,
+            source_cutover_at: row?.complete ? 0 : null,
+            reconciled_through: row?.complete ? TO : null,
+            verified_at: row?.complete ? TO + 86_400_000 : null,
+            visitors: row?.complete ? row.visitors : 0,
+          };
+        }) as T[],
+      };
+    }
     if (this.sql.includes('FROM catalog_project_imports')) {
       return { results: this.db['catalogRows'] as unknown as T[] };
     }
@@ -893,6 +915,95 @@ describe('readDailyEngagementLogs', () => {
 });
 
 describe('composeDailyEngagementReport', () => {
+  it('uses complete scoped D1 visitor counts for more than 55 app environments in one grouped read', async () => {
+    const products = catalog(57);
+    const exactRows: ExactBrowserVisitorResult[] = products.map((row, index) => ({
+      app_id: row.app_id,
+      environment_id: row.environment_id!,
+      complete: true,
+      visitors: index === 56 ? 0 : index + 10,
+    }));
+    const db = new MockDatabase(products, [], exactRows);
+    const report = await composeDailyEngagementReport({
+      db,
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: TO + 86_400_000,
+      query: async (sql) =>
+        sql.includes('AS visitors')
+          ? products.map((row) => ({
+              app_id: row.app_id,
+              visitors: 900,
+              last_seen: FROM + 1,
+              sample_interval: 10,
+            }))
+          : [],
+    });
+
+    expect(db.exactVisitorQueryCount).toBe(1);
+    expect(report.products).toHaveLength(57);
+    expect(report.products[55]?.browser_visitors).toBe(65);
+    expect(report.products[56]?.browser_visitors).toBe(0);
+    expect(report.products[56]?.browser_visitors_unknown_reason).toBeUndefined();
+    expect(report.sampled).toBe(false);
+  });
+
+  it('keeps sampled AE Unknown when the exact scope is incomplete', async () => {
+    const products = catalog(1);
+    const db = new MockDatabase(
+      products,
+      [],
+      [
+        {
+          app_id: products[0]!.app_id,
+          environment_id: products[0]!.environment_id!,
+          complete: false,
+          visitors: null,
+        },
+      ],
+    );
+    const report = await composeDailyEngagementReport({
+      db,
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      query: async (sql) =>
+        sql.includes('AS visitors')
+          ? [{ app_id: products[0]!.app_id, visitors: 3, last_seen: FROM, sample_interval: 10 }]
+          : [],
+    });
+
+    expect(report.products[0]?.browser_visitors).toBeNull();
+    expect(report.products[0]?.browser_visitors_unknown_reason).toBe('sampled_visitor_group');
+    expect(report.sampled).toBe(true);
+  });
+
+  it('uses a complete exact zero for a scope with no recognized visitor hashes even when AE is unavailable', async () => {
+    const products = catalog(1);
+    const db = new MockDatabase(
+      products,
+      [],
+      [
+        {
+          app_id: products[0]!.app_id,
+          environment_id: products[0]!.environment_id!,
+          complete: true,
+          visitors: 0,
+        },
+      ],
+    );
+    const report = await composeDailyEngagementReport({
+      db,
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: TO + 86_400_000,
+    });
+
+    expect(report.products[0]?.browser_visitors).toBe(0);
+    expect(report.products[0]?.browser_visitors_unknown_reason).toBeUndefined();
+    expect(report.notes.some((note) => note.includes('browser visitors are unknown'))).toBe(false);
+  });
+
   it('uses covered SaaS Maker source zeros and calls its aggregate once with the report scope', async () => {
     const calls: Array<{ date: string; catalogIds: string[] }> = [];
     const report = await composeDailyEngagementReport({
