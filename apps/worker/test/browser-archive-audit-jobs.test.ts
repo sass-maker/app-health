@@ -137,6 +137,8 @@ beforeAll(async () => {
   await applyMigration('0020_browser_receipt_reconciliation.sql');
   await applyMigration('0021_browser_event_facts_digest.sql');
   await applyMigration('0022_browser_archive_audit_jobs.sql');
+  await applyMigration('0023_browser_queue_stage_receipts.sql');
+  await applyMigration('0024_browser_archive_queue_evidence.sql');
   body = await archiveBody();
 });
 
@@ -150,6 +152,7 @@ beforeEach(async () => {
   await db.prepare('DELETE FROM browser_visitor_days').run();
   await db.prepare('DELETE FROM browser_visitor_receipt_days').run();
   await db.prepare('DELETE FROM browser_visitor_batch_receipts').run();
+  await db.prepare('DELETE FROM browser_queue_stage_receipts').run();
   await db.prepare('DELETE FROM browser_visitor_rollup_meta').run();
   await acceptBrowserVisitorBatch(db, batch, batch.received_at);
 });
@@ -158,6 +161,14 @@ afterAll(() => mf.dispose());
 
 describe('resumable browser archive audit jobs', () => {
   it('advances bounded scheduled slices and reports aggregate-only incomplete evidence', async () => {
+    await db
+      .prepare(
+        `INSERT INTO browser_queue_stage_receipts
+         (workspace_id, app_id, environment_id, batch_id, staged_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(WORKSPACE, batch.app_id, batch.environment_id, batch.batch_id, 150, 35_000_000_000)
+      .run();
     const bindings = { db, archive, history };
     const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
     expect(started.status).toBe('queued');
@@ -175,7 +186,11 @@ describe('resumable browser archive audit jobs', () => {
       await processPendingBrowserArchiveAuditJobs(bindings, 300 + tick * 10);
     const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1_000);
     expect(finished).toMatchObject({ status: 'finished', complete: false, day: DAY });
-    expect(finished?.observed_comparison_counts).toMatchObject({ matched: 1 });
+    expect(finished?.observed_comparison_counts).toMatchObject({
+      matched: 1,
+      queue_stage_receipts: 1,
+      queue_stage_unobserved: 0,
+    });
     expect(finished?.incomplete_reasons).toContain('queue_evidence_unavailable');
     expect(finished?.incomplete_reasons).toContain('dlq_evidence_unavailable');
     expect(finished?.incomplete_reasons).toContain('batch_index_returns_one_candidate');
@@ -204,6 +219,82 @@ describe('resumable browser archive audit jobs', () => {
       .all();
     expect(JSON.stringify(persisted.results)).not.toContain(batch.batch_id);
     expect(JSON.stringify(persisted.results)).not.toContain(batch.visitor_hash);
+  });
+
+  it('reports a staged batch with no archived fact without certifying completeness', async () => {
+    const missingArchive = {
+      getByName(_name: string) {
+        return {
+          archiveSegmentForBatch: async () => null,
+          archiveSegmentsForEventDay: async (_day: string) => ({
+            segments: [],
+            next_cursor: null,
+            snapshot_sequence: 1,
+          }),
+        };
+      },
+    };
+    await db
+      .prepare(
+        `INSERT INTO browser_queue_stage_receipts
+         (workspace_id, app_id, environment_id, batch_id, staged_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(WORKSPACE, batch.app_id, batch.environment_id, batch.batch_id, 150, 35_000_000_000)
+      .run();
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    for (let tick = 0; tick < 5; tick++)
+      await processPendingBrowserArchiveAuditJobs(
+        { db, archive: missingArchive, history },
+        200 + tick * 100,
+      );
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1_000);
+    expect(finished).toMatchObject({
+      status: 'finished',
+      complete: false,
+      observed_comparison_counts: {
+        no_archive_candidate: 1,
+        queue_stage_receipts: 1,
+        queue_stage_unobserved: 0,
+      },
+    });
+    expect(finished?.incomplete_reasons).toContain('queue_evidence_unavailable');
+  });
+
+  it('reports absent stage evidence as unobserved even when archive facts match', async () => {
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    for (let tick = 0; tick < 5; tick++)
+      await processPendingBrowserArchiveAuditJobs({ db, archive, history }, 200 + tick * 100);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1_000);
+    expect(finished).toMatchObject({
+      status: 'finished',
+      complete: false,
+      observed_comparison_counts: {
+        matched: 1,
+        queue_stage_receipts: 0,
+        queue_stage_unobserved: 1,
+      },
+    });
+    expect(finished?.incomplete_reasons).toContain('queue_stage_receipt_unobserved');
+  });
+
+  it('does not count an expired stage receipt when retention cleanup is behind', async () => {
+    await db
+      .prepare(
+        `INSERT INTO browser_queue_stage_receipts
+         (workspace_id, app_id, environment_id, batch_id, staged_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(WORKSPACE, batch.app_id, batch.environment_id, batch.batch_id, 150, 199)
+      .run();
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob({ db, archive, history }, WORKSPACE, started.job_id, 200);
+    const current = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 201);
+    expect(current?.observed_comparison_counts).toMatchObject({
+      queue_stage_receipts: 0,
+      queue_stage_unobserved: 1,
+    });
+    expect(current?.complete).toBe(false);
   });
 
   it('requires a full workspace owner and hides jobs from another workspace', async () => {

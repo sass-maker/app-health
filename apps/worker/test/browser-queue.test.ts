@@ -5,6 +5,19 @@ import {
   lookupBrowserStagingReceipts,
 } from '../src/browser-queue.js';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
+import type { D1DatabaseLike } from '../src/d1-adapter.js';
+
+function receiptDb(
+  batch = vi.fn(async (statements: unknown[]) =>
+    statements.map(() => ({ success: true, meta: {} })),
+  ),
+) {
+  const db = {
+    prepare: vi.fn(() => ({ bind: vi.fn().mockReturnThis() })),
+    batch,
+  } as unknown as D1DatabaseLike;
+  return { db, batch };
+}
 
 function message(workspace = 'workspace', batch_id = 'batch'): Message<CollectedBrowserBatch> {
   return {
@@ -29,8 +42,10 @@ describe('durable browser queue staging', () => {
   it('acks newly accepted and identical duplicate deliveries only after atomic staging', async () => {
     const first = message();
     const duplicate = message();
+    const { db, batch } = receiptDb();
     const stage = vi.fn(async (batches: CollectedBrowserBatch[]) => {
       expect(first.ack).not.toHaveBeenCalled();
+      expect(batch).not.toHaveBeenCalled();
       return { accepted: [batches[0]], duplicates: 1 };
     });
     const writeDataPoint = vi.fn();
@@ -39,6 +54,7 @@ describe('durable browser queue staging', () => {
       lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
     }));
     await consumeBrowserBatches([first, duplicate], {
+      DB: db,
       BROWSER_ARCHIVE: { getByName },
       BROWSER_ANALYTICS: { writeDataPoint },
     });
@@ -47,6 +63,8 @@ describe('durable browser queue staging', () => {
     expect(duplicate.ack).toHaveBeenCalledTimes(1);
     expect(writeDataPoint).not.toHaveBeenCalled();
     expect(first.retry).not.toHaveBeenCalled();
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(batch.mock.calls)).not.toContain('visitor_hash');
     expect(await browserArchiveShard({ ...first.body, received_at: 0 })).toBe(
       await browserArchiveShard(first.body),
     );
@@ -55,6 +73,7 @@ describe('durable browser queue staging', () => {
     );
     stage.mockResolvedValueOnce({ accepted: [], duplicates: 1 });
     await consumeBrowserBatches([message()], {
+      DB: db,
       BROWSER_ARCHIVE: { getByName },
       BROWSER_ANALYTICS: { writeDataPoint },
     });
@@ -101,6 +120,7 @@ describe('durable browser queue staging', () => {
   it('retries failed groups while acknowledging unrelated work and bounds staging calls', async () => {
     const failed = message('failed');
     const successful = Array.from({ length: 101 }, () => message());
+    const { db } = receiptDb();
     const stage = vi.fn(async (batches: CollectedBrowserBatch[]) => ({
       accepted: [],
       duplicates: batches.length,
@@ -109,7 +129,10 @@ describe('durable browser queue staging', () => {
       stage: name.startsWith('failed:') ? vi.fn().mockRejectedValue(new Error('full')) : stage,
       lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
     });
-    await consumeBrowserBatches([failed, ...successful], { BROWSER_ARCHIVE: { getByName } });
+    await consumeBrowserBatches([failed, ...successful], {
+      DB: db,
+      BROWSER_ARCHIVE: { getByName },
+    });
     expect(failed.ack).not.toHaveBeenCalled();
     expect(failed.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
     expect(stage.mock.calls.map(([batches]) => batches.length)).toEqual([100, 1]);
@@ -118,5 +141,32 @@ describe('durable browser queue staging', () => {
     await consumeBrowserBatches([unconfigured], {});
     expect(unconfigured.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
     await consumeBrowserBatches([], {});
+  });
+
+  it('retries after a receipt write failure and safely redelivers already staged messages', async () => {
+    const item = message();
+    const { db, batch } = receiptDb(
+      vi
+        .fn()
+        .mockRejectedValueOnce(new Error('D1 unavailable'))
+        .mockImplementation(async (statements: unknown[]) =>
+          statements.map(() => ({ success: true, meta: {} })),
+        ),
+    );
+    const stage = vi.fn(async () => ({ accepted: [item.body], duplicates: 0 }));
+    const getByName = vi.fn(() => ({
+      stage,
+      lookupStaged: vi.fn().mockResolvedValue({ staged: [], missing: 0 }),
+    }));
+    await consumeBrowserBatches([item], { DB: db, BROWSER_ARCHIVE: { getByName } });
+    expect(item.ack).not.toHaveBeenCalled();
+    expect(item.retry).toHaveBeenCalledWith({ delaySeconds: 30 });
+
+    await consumeBrowserBatches([item], { DB: db, BROWSER_ARCHIVE: { getByName } });
+    expect(stage).toHaveBeenCalledTimes(2);
+    expect(item.ack).toHaveBeenCalledTimes(1);
+    expect(batch).toHaveBeenCalledTimes(2);
+    const insert = vi.mocked(db.prepare).mock.calls[0]?.[0];
+    expect(insert).toContain('ON CONFLICT (workspace_id, app_id, environment_id, batch_id)');
   });
 });

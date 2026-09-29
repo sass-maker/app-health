@@ -65,6 +65,7 @@ type ReceiptRow = {
   batch_id: string;
   facts_digest_version: number | null;
   facts_digest: string | null;
+  queue_stage_observed: number;
 };
 type AuditArchive = {
   getByName(name: string): {
@@ -113,6 +114,7 @@ function jobPublicState(row: JobRow, counts: AuditCounts) {
     ...JSON.parse(row.incomplete_reasons_json),
   ]);
   if (row.status === 'finished') reasons.add('archive_day_index_snapshot_only');
+  if (counts.queue_stage_unobserved > 0) reasons.add('queue_stage_receipt_unobserved');
   return {
     job_id: row.job_id,
     day: row.india_day,
@@ -141,6 +143,8 @@ type AuditCounts = {
   archive_only_facts: number;
   duplicate_archive_candidates: number;
   missing_archive_digests: number;
+  queue_stage_receipts: number;
+  queue_stage_unobserved: number;
 };
 
 class AuditLeaseError extends Error {
@@ -160,11 +164,14 @@ const zeroCounts = (): AuditCounts => ({
   archive_only_facts: 0,
   duplicate_archive_candidates: 0,
   missing_archive_digests: 0,
+  queue_stage_receipts: 0,
+  queue_stage_unobserved: 0,
 });
 
 type AuditFactRow = {
   identity_hash: string;
   has_receipt: number;
+  queue_stage_observed: number;
   receipt_digest_version: number | null;
   receipt_digest: string | null;
   archive_count: number;
@@ -174,6 +181,10 @@ type AuditFactRow = {
 };
 
 function countAuditFact(counts: AuditCounts, row: AuditFactRow) {
+  if (row.has_receipt) {
+    if (row.queue_stage_observed) counts.queue_stage_receipts++;
+    else counts.queue_stage_unobserved++;
+  }
   if (!row.has_receipt) {
     countArchiveOnlyFact(counts, row);
     return;
@@ -220,7 +231,8 @@ function archiveDigestsMatch(row: AuditFactRow) {
 async function countsForJob(db: D1DatabaseLike, jobId: string): Promise<AuditCounts> {
   const result = await db
     .prepare(
-      `SELECT identity_hash, has_receipt, receipt_digest_version, receipt_digest,
+      `SELECT identity_hash, has_receipt, queue_stage_observed,
+              receipt_digest_version, receipt_digest,
               archive_count, archive_digest_version, archive_digest, archive_in_day
        FROM browser_archive_audit_facts WHERE job_id = ? LIMIT ?`,
     )
@@ -374,15 +386,25 @@ function receiptQuery(
   return db
     .prepare(
       `INSERT INTO browser_archive_audit_facts
-       (job_id, identity_hash, has_receipt, receipt_digest_version, receipt_digest)
-       SELECT ?, ?, 1, ?, ? WHERE EXISTS (
+       (job_id, identity_hash, has_receipt, queue_stage_observed, receipt_digest_version, receipt_digest)
+       SELECT ?, ?, 1, ?, ?, ? WHERE EXISTS (
          SELECT 1 FROM browser_archive_audit_jobs WHERE job_id = ? AND lease_token = ?
        )
        ON CONFLICT(job_id, identity_hash) DO UPDATE SET
-         has_receipt = 1, receipt_digest_version = excluded.receipt_digest_version,
+         has_receipt = 1,
+         queue_stage_observed = MAX(browser_archive_audit_facts.queue_stage_observed, excluded.queue_stage_observed),
+         receipt_digest_version = excluded.receipt_digest_version,
          receipt_digest = excluded.receipt_digest`,
     )
-    .bind(jobId, identityHash, row.facts_digest_version, row.facts_digest, jobId, leaseToken);
+    .bind(
+      jobId,
+      identityHash,
+      row.queue_stage_observed,
+      row.facts_digest_version,
+      row.facts_digest,
+      jobId,
+      leaseToken,
+    );
 }
 
 function appendReason(reasons: string[], reason: string): string[] {
@@ -430,11 +452,23 @@ async function countFactRows(db: D1DatabaseLike, jobId: string): Promise<number>
   return count?.count ?? 0;
 }
 
-async function readReceiptSlice(db: D1DatabaseLike, job: JobRow): Promise<ReceiptRow[]> {
+async function readReceiptSlice(
+  db: D1DatabaseLike,
+  job: JobRow,
+  now: number,
+): Promise<ReceiptRow[]> {
   const page = await db
     .prepare(
       `SELECT receipt.rowid AS row_id, receipt.app_id, receipt.environment_id,
-              receipt.batch_id, receipt.facts_digest_version, receipt.facts_digest
+              receipt.batch_id, receipt.facts_digest_version, receipt.facts_digest,
+              EXISTS (
+                SELECT 1 FROM browser_queue_stage_receipts staged
+                WHERE staged.workspace_id = receipt.workspace_id
+                  AND staged.app_id = receipt.app_id
+                  AND staged.environment_id = receipt.environment_id
+                  AND staged.batch_id = receipt.batch_id
+                  AND staged.expires_at > ?
+              ) AS queue_stage_observed
        FROM browser_visitor_receipt_days day_receipt
        JOIN browser_visitor_batch_receipts receipt
          ON receipt.workspace_id = day_receipt.workspace_id
@@ -446,6 +480,7 @@ async function readReceiptSlice(db: D1DatabaseLike, job: JobRow): Promise<Receip
        ORDER BY receipt.rowid LIMIT ?`,
     )
     .bind(
+      now,
       job.workspace_id,
       job.india_day,
       job.receipt_cursor,
@@ -684,7 +719,7 @@ async function processReceiptSlice(
   leaseToken: string,
 ) {
   if (job.expected_receipts > MAX_FACT_ROWS) throw new Error('audit receipt cap');
-  const page = await readReceiptSlice(db, job);
+  const page = await readReceiptSlice(db, job, now);
   if (!page.length) {
     if (job.receipts_processed !== job.expected_receipts)
       throw new Error('receipt snapshot changed');

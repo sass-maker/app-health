@@ -460,6 +460,13 @@ export async function cleanupBrowserVisitorDays(
          )`,
       )
       .bind(now, boundedLimit),
+    db
+      .prepare(
+        `DELETE FROM browser_queue_stage_receipts WHERE rowid IN (
+           SELECT rowid FROM browser_queue_stage_receipts WHERE expires_at <= ? ORDER BY expires_at LIMIT ?
+         )`,
+      )
+      .bind(now, boundedLimit),
   ]);
   if (results.some((result) => !result.success))
     throw new Error('Browser visitor retention failed');
@@ -470,14 +477,16 @@ export async function cleanupBrowserVisitorDays(
       .first<{ expired: number }>(),
     db
       .prepare(
-        'SELECT 1 AS expired FROM browser_visitor_batch_receipts WHERE expires_at <= ? LIMIT 1',
+        `SELECT 1 AS expired FROM browser_visitor_batch_receipts WHERE expires_at <= ?
+         UNION ALL
+         SELECT 1 AS expired FROM browser_queue_stage_receipts WHERE expires_at <= ? LIMIT 1`,
       )
-      .bind(now)
+      .bind(now, now)
       .first<{ expired: number }>(),
   ]);
   return {
     visitors: results[0]?.meta.changes ?? 0,
-    receipts: results[2]?.meta.changes ?? 0,
+    receipts: (results[2]?.meta.changes ?? 0) + (results[3]?.meta.changes ?? 0),
     backlog: {
       visitors: expiredVisitors !== null,
       receipts: expiredReceipts !== null,
