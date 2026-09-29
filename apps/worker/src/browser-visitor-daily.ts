@@ -1,9 +1,9 @@
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 
-export const INDIA_OFFSET_MS = 5 * 60 * 60 * 1000 + 30 * 60 * 1000;
-export const BROWSER_VISITOR_DAY_MS = 86_400_000;
-export const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
+const INDIA_OFFSET_MS = 5 * 60 * 60 * 1000 + 30 * 60 * 1000;
+const BROWSER_VISITOR_DAY_MS = 86_400_000;
+const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
 export const BROWSER_VISITOR_MAX_FUTURE_SKEW_MS = 60_000;
 /** Provisional bounded retention; validate briefing lookback and D1 growth before release. */
 export const BROWSER_VISITOR_RETENTION_DAYS = 35;
@@ -13,7 +13,7 @@ const VISITOR_HASH = /^[a-f0-9]{64}$/i;
 const MAX_RETENTION_ROWS_PER_TABLE_PER_RUN = 10_000;
 export const MAX_EXACT_BROWSER_VISITOR_SCOPES = 128;
 
-export type ExactBrowserVisitorDay =
+type ExactBrowserVisitorDay =
   { complete: true; visitors: number } | { complete: false; visitors: null };
 export type ExactBrowserVisitorScope = { app_id: string; environment_id: string };
 export type ExactBrowserVisitorResult = ExactBrowserVisitorScope & ExactBrowserVisitorDay;
@@ -24,7 +24,7 @@ export function indiaDayForTimestamp(timestamp: number): string {
   return new Date(timestamp + INDIA_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-export function indiaDayBounds(day: string): { from: number; to: number } | null {
+function indiaDayBounds(day: string): { from: number; to: number } | null {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (!match) return null;
   const [year, month, date] = match.slice(1).map(Number);

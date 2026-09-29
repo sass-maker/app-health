@@ -8,8 +8,6 @@ import { acceptBrowser } from '../src/browser-routes.js';
 import type { AppHealthRepositories } from '../src/repository.js';
 import {
   acceptBrowserVisitorBatch,
-  BROWSER_VISITOR_DAY_MS,
-  BROWSER_VISITOR_MAX_LATENESS_MS,
   BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
   BROWSER_VISITOR_RETENTION_DAYS,
   MAX_EXACT_BROWSER_VISITOR_SCOPES,
@@ -18,6 +16,9 @@ import {
   indiaDayForTimestamp,
   readExactBrowserVisitorDays,
 } from '../src/browser-visitor-daily.js';
+
+const BROWSER_VISITOR_DAY_MS = 86_400_000;
+const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
 
 const mf = new Miniflare({
   modules: true,
