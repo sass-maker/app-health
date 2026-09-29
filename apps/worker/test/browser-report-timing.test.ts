@@ -36,9 +36,22 @@ it('reports private fixed-name report stages and preserves cached report behavio
   expect(first?.status).toBe(200);
   const firstTimed = withOwnerServerTiming(first!, firstTimings);
   const firstTiming = firstTimed.headers.get('server-timing') ?? '';
-  expect(firstTiming).toMatch(
-    /^analytics_cache_lookup;dur=\d+\.\d{2}, analytics_query_wait;dur=\d+\.\d{2}, analytics_report_assembly;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/,
-  );
+  for (const stage of [
+    'analytics_cache_lookup',
+    'analytics_query_wait',
+    'analytics_trend',
+    'analytics_pages',
+    'analytics_sources',
+    'analytics_events',
+    'analytics_audience',
+    'analytics_dimension_max',
+    'analytics_previous',
+    'analytics_report_assembly',
+    'route_read',
+  ])
+    expect(firstTiming).toMatch(new RegExp(`(?:^|, )${stage};dur=\\d+\\.\\d{2}(?:, |$)`));
+  expect(firstTiming).not.toContain('analytics_engagement');
+  expect(firstTiming).not.toContain('analytics_exits');
   for (const secret of [
     'filter-secret-marker',
     'private-token-marker',
@@ -61,4 +74,19 @@ it('reports private fixed-name report stages and preserves cached report behavio
   await expect(secondTimed.json()).resolves.toEqual(firstBody);
   expect(provider).toHaveBeenCalledTimes(queryCount);
   expect(cache.match).toHaveBeenCalledTimes(2);
+
+  const unfilteredTimings: OwnerRequestTimings = {};
+  const unfiltered = await handleBrowserOwner(
+    new Request('https://dashboard.example/v1/analytics/report?range=24h'),
+    env,
+    owner,
+    false,
+    unfilteredTimings,
+  );
+  expect(unfiltered?.status).toBe(200);
+  const unfilteredHeader = withOwnerServerTiming(unfiltered!, unfilteredTimings).headers.get(
+    'server-timing',
+  );
+  expect(unfilteredHeader).toContain('analytics_engagement;dur=');
+  expect(unfilteredHeader).toContain('analytics_exits;dur=');
 });
