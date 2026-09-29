@@ -117,9 +117,10 @@ the 202 response. Hashless accepted batches do not increment visitor counts.
 The Daily briefing remains on its existing Analytics Engine path until its
 consumer is separately qualified to use sealed D1 results.
 
-Migration `0026_browser_visitor_day_seals.sql` must be applied before deploying
-Worker code that reads or writes day fences. An authenticated full workspace
-owner can submit one bounded proof action at a time to
+Migrations `0025_browser_visitor_acceptance_coverage.sql` and
+`0026_browser_visitor_day_seals.sql` must be applied in order before deploying
+Worker code that reads or writes acceptance coverage or day fences. An
+authenticated full workspace owner can submit one bounded proof action at a time to
 `POST /v1/browser/visitor-coverage`; the endpoint derives workspace identity
 from the owner session, enforces same-origin requests and production app scope,
 and accepts only IDs, timestamps, source SHAs, and evidence SHA-256 digests.
