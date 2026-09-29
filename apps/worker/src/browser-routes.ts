@@ -1,4 +1,5 @@
 import { browserMetadata } from './browser-metadata.js';
+import { measureOwnerRouteRead, type OwnerRequestTimings } from './accounts.js';
 import { readPublicJson } from './public-body.js';
 import {
   BrowserReportFilter,
@@ -259,13 +260,15 @@ export async function handleBrowserOwner(
   env: BrowserEnvironment,
   owner: OwnerIdentity,
   local: boolean,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
   if (!['/v1/analytics', '/v1/analytics/live', '/v1/analytics/report'].includes(path)) return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
   const workspace = local ? 'local' : owner.workspaceId;
   if (!workspace) return json(403, { error: 'Sign in with Google to view workspace analytics.' });
-  if (path === '/v1/analytics/report') return browserReport(request, env, owner, local);
+  if (path === '/v1/analytics/report')
+    return measureOwnerRouteRead(timings, () => browserReport(request, env, owner, local));
   if (local) return json(200, localAnalytics.summary());
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
