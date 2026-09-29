@@ -270,7 +270,10 @@ export async function handleBrowserOwner(
   const auditStartPath = '/v1/browser/archive-audits';
   const auditStatusPrefix = `${auditStartPath}/`;
   if (path === auditStartPath || path.startsWith(auditStatusPrefix)) {
-    if (local || !owner.workspaceId || owner.appId || owner.appIds)
+    // Account owners carry appIds for downstream product filtering, but still
+    // own the complete server-resolved workspace. Product-scoped bearer owners
+    // have appId or lack a workspace id and must not start workspace audits.
+    if (local || !owner.workspaceId || owner.appId)
       return json(403, { error: 'Full workspace owner access is required.' });
     if (!env.DB) return json(503, { error: 'Archive audit storage is unavailable.' });
     const url = new URL(request.url);
