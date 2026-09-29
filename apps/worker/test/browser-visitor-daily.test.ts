@@ -8,8 +8,10 @@ import { acceptBrowser } from '../src/browser-routes.js';
 import type { AppHealthRepositories } from '../src/repository.js';
 import {
   acceptBrowserVisitorBatch,
+  readBrowserVisitorReceiptPage,
   BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
   BROWSER_VISITOR_RETENTION_DAYS,
+  MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE,
   MAX_EXACT_BROWSER_VISITOR_SCOPES,
   browserVisitorDayIsComplete,
   cleanupBrowserVisitorDays,
@@ -77,11 +79,18 @@ beforeAll(async () => {
   await apply(
     await readFile(new URL('../migrations/0019_browser_visitor_days.sql', import.meta.url), 'utf8'),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0020_browser_receipt_reconciliation.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
   await db.batch([
     db.prepare('DELETE FROM browser_visitor_days'),
+    db.prepare('DELETE FROM browser_visitor_receipt_days'),
     db.prepare('DELETE FROM browser_visitor_batch_receipts'),
     db.prepare('DELETE FROM browser_visitor_rollup_meta'),
   ]);
@@ -147,12 +156,187 @@ describe('exact browser visitor daily ledger', () => {
     expect(row?.india_day).toBe('2026-09-29');
   });
 
+  it('records receipt time, event count and every India event day idempotently across retries', async () => {
+    const receivedAt = toMs('2026-09-30T00:00:00Z');
+    const item = batch({
+      batch_id: 'multi-day-batch',
+      received_at: receivedAt,
+      events: [
+        {
+          event_id: 'first-event',
+          timestamp: toMs('2026-09-29T18:29:59.999Z'),
+          type: 'pageview',
+          path: '/before-midnight',
+          referrer: '',
+        },
+        {
+          event_id: 'second-event',
+          timestamp: toMs('2026-09-29T18:30:00.000Z'),
+          type: 'pageview',
+          path: '/after-midnight',
+          referrer: '',
+        },
+      ],
+    });
+    await acceptBrowserVisitorBatch(db, item, receivedAt);
+    await acceptBrowserVisitorBatch(db, item, receivedAt + 10_000);
+
+    expect(
+      await db
+        .prepare(
+          `SELECT batch_id, accepted_at, event_count, fingerprint
+           FROM browser_visitor_batch_receipts WHERE batch_id = ?`,
+        )
+        .bind(item.batch_id)
+        .all(),
+    ).toMatchObject({
+      results: [
+        {
+          batch_id: item.batch_id,
+          accepted_at: receivedAt,
+          event_count: 2,
+          fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+        },
+      ],
+    });
+    expect(
+      await db
+        .prepare(
+          'SELECT india_day FROM browser_visitor_receipt_days WHERE batch_id = ? ORDER BY india_day',
+        )
+        .bind(item.batch_id)
+        .all(),
+    ).toMatchObject({ results: [{ india_day: '2026-09-29' }, { india_day: '2026-09-30' }] });
+  });
+
+  it('leaves legacy 0019 receipts unindexed when retried with the same fingerprint', async () => {
+    const item = batch({ batch_id: 'legacy-0019-batch' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    await db.batch([
+      db
+        .prepare(
+          `UPDATE browser_visitor_batch_receipts SET accepted_at = NULL, event_count = NULL
+           WHERE batch_id = ?`,
+        )
+        .bind(item.batch_id),
+      db.prepare('DELETE FROM browser_visitor_receipt_days WHERE batch_id = ?').bind(item.batch_id),
+      db
+        .prepare(
+          `DELETE FROM browser_visitor_days
+           WHERE app_id = ? AND environment_id = ? AND visitor_hash = ?`,
+        )
+        .bind(item.app_id, item.environment_id, item.visitor_hash),
+    ]);
+
+    await acceptBrowserVisitorBatch(db, item, item.received_at + 10_000);
+
+    expect(
+      await db
+        .prepare(
+          'SELECT accepted_at, event_count FROM browser_visitor_batch_receipts WHERE batch_id = ?',
+        )
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ accepted_at: null, event_count: null });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days WHERE batch_id = ?')
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ n: 0 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_days WHERE app_id = ?')
+        .bind(item.app_id)
+        .first(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('indexes accepted batches without a visitor hash and rejects changed event counts on retry', async () => {
+    const item = batch({ batch_id: 'hashless-batch', visitor_hash: undefined });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    expect(
+      await db
+        .prepare('SELECT event_count FROM browser_visitor_batch_receipts WHERE batch_id = ?')
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ event_count: 1 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days WHERE batch_id = ?')
+        .bind(item.batch_id)
+        .first(),
+    ).toEqual({ n: 1 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_days WHERE app_id = ?')
+        .bind(item.app_id)
+        .first(),
+    ).toEqual({ n: 0 });
+
+    const changed = batch({ ...item, events: [...item.events, ...item.events] });
+    await expect(acceptBrowserVisitorBatch(db, changed, changed.received_at)).rejects.toThrow(
+      'Browser batch identity reused with different facts',
+    );
+  });
+
+  it('returns bounded, stable per-day receipt pages without exposing visitor hashes', async () => {
+    const day = '2026-09-30';
+    for (const batchId of ['receipt-c', 'receipt-a', 'receipt-b']) {
+      const item = batch({ batch_id: batchId });
+      await acceptBrowserVisitorBatch(db, item, item.received_at);
+    }
+    const first = await readBrowserVisitorReceiptPage(db, firstApp.workspace, [firstApp], day, 2);
+    expect(first.receipts.map((receipt) => receipt.batch_id)).toEqual(['receipt-a', 'receipt-b']);
+    expect(first.next_cursor).toEqual({
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      batch_id: 'receipt-b',
+    });
+    expect(first.receipts[0]).toMatchObject({
+      accepted_at: toMs('2026-09-30T00:00:00Z'),
+      event_count: 1,
+      fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(first.receipts[0]).not.toHaveProperty('visitor_hash');
+    const second = await readBrowserVisitorReceiptPage(
+      db,
+      firstApp.workspace,
+      [firstApp],
+      day,
+      2,
+      first.next_cursor ?? undefined,
+    );
+    expect(second.receipts.map((receipt) => receipt.batch_id)).toEqual(['receipt-c']);
+    expect(second.next_cursor).toBeNull();
+
+    await expect(
+      readBrowserVisitorReceiptPage(
+        db,
+        firstApp.workspace,
+        [firstApp],
+        day,
+        MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE + 1,
+      ),
+    ).rejects.toThrow('bounded query limit');
+  });
+
   it('does not invent a visitor for a missing hash and rejects a reused batch id with changed facts', async () => {
     const noHash = batch({ visitor_hash: undefined });
     await acceptBrowserVisitorBatch(db, noHash, noHash.received_at);
     expect(
       await db.prepare('SELECT COUNT(*) AS n FROM browser_visitor_days').first<{ n: number }>(),
     ).toEqual({ n: 0 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_batch_receipts')
+        .first<{ n: number }>(),
+    ).toEqual({ n: 1 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days')
+        .first<{ n: number }>(),
+    ).toEqual({ n: 1 });
 
     const original = batch({ batch_id: 'same-batch' });
     await acceptBrowserVisitorBatch(db, original, original.received_at);
@@ -177,6 +361,16 @@ describe('exact browser visitor daily ledger', () => {
     ).toEqual({ n: 0 });
     expect(
       await db.prepare('SELECT COUNT(*) AS n FROM browser_visitor_days').first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_batch_receipts')
+        .first<{ n: number }>(),
+    ).toEqual({ n: 0 });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days')
+        .first<{ n: number }>(),
     ).toEqual({ n: 0 });
   });
 
@@ -350,7 +544,7 @@ describe('exact browser visitor daily ledger', () => {
     });
   });
 
-  it('does not return 202 when D1 exact acceptance fails after Queue.send', async () => {
+  it('does not return 202 when D1 receipt acceptance fails for a hashless batch after Queue.send', async () => {
     const failedDb = {
       prepare: vi.fn(),
       batch: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
@@ -365,7 +559,7 @@ describe('exact browser visitor daily ledger', () => {
       WORKSPACE_PRESENCE: { getByName: () => ({ heartbeat: vi.fn() }) },
     } as unknown as BrowserEnvironment;
     const response = await acceptBrowser(
-      batch(),
+      batch({ visitor_hash: undefined }),
       undefined,
       env,
       {} as AppHealthRepositories,
