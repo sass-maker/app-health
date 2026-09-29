@@ -113,8 +113,10 @@ function withAuthReadTiming(db: D1Database, timings: OwnerRequestTimings): D1Dat
             try {
               return await value.apply(target, args);
             } finally {
-              if (read === 'session') timings.sessionDbReadMs = performance.now() - started;
-              else timings.userDbReadMs = performance.now() - started;
+              const elapsed = performance.now() - started;
+              if (read === 'session')
+                timings.sessionDbReadMs = (timings.sessionDbReadMs ?? 0) + elapsed;
+              else timings.userDbReadMs = (timings.userDbReadMs ?? 0) + elapsed;
             }
           };
         return typeof value === 'function' ? value.bind(target) : value;

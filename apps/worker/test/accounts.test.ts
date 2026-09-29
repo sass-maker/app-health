@@ -8,6 +8,7 @@ import {
   createAccountAuth,
   personalWorkspace,
   accountMutationAllowed,
+  type OwnerRequestTimings,
 } from '../src/accounts.js';
 import worker, { type Env } from '../src/index.js';
 import { D1ControlPlane } from '../src/d1-adapter.js';
@@ -190,6 +191,18 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(unauthenticated.status).toBe(401);
     expect(unauthenticated.headers.get('server-timing')).toBeNull();
     expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
+  });
+
+  it('accumulates repeated Better Auth session and user D1 read timings', async () => {
+    const timings: OwnerRequestTimings = {};
+    const auth = createAccountAuth(env, timings)!;
+    const headers = new Headers({ cookie: aliceCookie });
+    await auth.api.getSession({ headers });
+    const firstSessionReadMs = timings.sessionDbReadMs;
+    const firstUserReadMs = timings.userDbReadMs;
+    await auth.api.getSession({ headers });
+    expect(timings.sessionDbReadMs).toBeGreaterThan(firstSessionReadMs ?? 0);
+    expect(timings.userDbReadMs).toBeGreaterThan(firstUserReadMs ?? 0);
   });
 
   it('keeps the public get-session D1 limit while owner reads do not consume it', async () => {
