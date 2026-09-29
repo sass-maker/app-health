@@ -9,6 +9,8 @@ const INDIA_OFFSET_MS = 5 * 60 * 60 * 1000 + 30 * 60 * 1000;
 const BROWSER_VISITOR_DAY_MS = 86_400_000;
 const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
 export const BROWSER_VISITOR_MAX_FUTURE_SKEW_MS = 60_000;
+/** Let requests that crossed the late-event boundary finish their D1 receipt commit. */
+export const BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS = 60_000;
 /** Provisional bounded retention; validate briefing lookback and D1 growth before release. */
 export const BROWSER_VISITOR_RETENTION_DAYS = 35;
 const BROWSER_VISITOR_RETENTION_MS = BROWSER_VISITOR_RETENTION_DAYS * BROWSER_VISITOR_DAY_MS;
@@ -23,6 +25,15 @@ type ExactBrowserVisitorDay =
   { complete: true; visitors: number } | { complete: false; visitors: null };
 export type ExactBrowserVisitorScope = { app_id: string; environment_id: string };
 export type ExactBrowserVisitorResult = ExactBrowserVisitorScope & ExactBrowserVisitorDay;
+export type BrowserVisitorRolloutProof = {
+  workspace_id: string;
+  generation_id: string;
+  worker_version_id: string;
+  source_sha: string;
+  rollout_started_at: number;
+  rollout_observed_at: number;
+  rollout_traffic_percent: number;
+};
 type BrowserVisitorReceiptScope = ExactBrowserVisitorScope & { batch_id: string };
 export type BrowserVisitorReceiptCursor = BrowserVisitorReceiptScope;
 export type BrowserVisitorReceiptPage = {
@@ -57,6 +68,192 @@ function indiaDayBounds(day: string): { from: number; to: number } | null {
     return null;
   const from = parsed.getTime() - INDIA_OFFSET_MS;
   return { from, to: from + BROWSER_VISITOR_DAY_MS };
+}
+
+function validProofTimestamp(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function validateRolloutProof(proof: BrowserVisitorRolloutProof): void {
+  if (
+    !proof.workspace_id ||
+    !proof.generation_id ||
+    !proof.worker_version_id ||
+    !/^[a-f0-9]{40}$/i.test(proof.source_sha) ||
+    !validProofTimestamp(proof.rollout_started_at) ||
+    !validProofTimestamp(proof.rollout_observed_at) ||
+    proof.rollout_observed_at < proof.rollout_started_at ||
+    !Number.isInteger(proof.rollout_traffic_percent) ||
+    proof.rollout_traffic_percent < 0 ||
+    proof.rollout_traffic_percent > 100
+  )
+    throw new Error('Invalid browser visitor rollout proof');
+}
+
+/** Record the provider-observed start of a Worker rollout; this invalidates prior proof after this time. */
+export async function recordBrowserVisitorRolloutStart(
+  db: D1DatabaseLike,
+  proof: BrowserVisitorRolloutProof,
+): Promise<void> {
+  validateRolloutProof(proof);
+  const result = await db
+    .prepare(
+      `INSERT INTO browser_visitor_acceptance_rollouts
+         (workspace_id, generation_id, worker_version_id, source_sha,
+          rollout_started_at, rollout_observed_at, rollout_traffic_percent)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      proof.workspace_id,
+      proof.generation_id,
+      proof.worker_version_id,
+      proof.source_sha.toLowerCase(),
+      proof.rollout_started_at,
+      proof.rollout_observed_at,
+      proof.rollout_traffic_percent,
+    )
+    .run();
+  if (!result.success || result.meta.changes !== 1)
+    throw new Error('Browser visitor rollout start was not recorded');
+}
+
+/** Confirm exact 100% traffic only after the provider reports this version/SHA fully active. */
+export async function confirmBrowserVisitorRolloutFullTraffic(
+  db: D1DatabaseLike,
+  input: {
+    workspace_id: string;
+    generation_id: string;
+    worker_version_id: string;
+    source_sha: string;
+    full_traffic_at: number;
+    observed_at: number;
+    traffic_percent: number;
+  },
+): Promise<void> {
+  if (
+    !input.workspace_id ||
+    !input.generation_id ||
+    !input.worker_version_id ||
+    !/^[a-f0-9]{40}$/i.test(input.source_sha) ||
+    !validProofTimestamp(input.full_traffic_at) ||
+    !validProofTimestamp(input.observed_at) ||
+    input.observed_at < input.full_traffic_at ||
+    input.traffic_percent !== 100
+  )
+    throw new Error('Browser visitor 100% rollout proof is invalid');
+  const result = await db
+    .prepare(
+      `UPDATE browser_visitor_acceptance_rollouts
+       SET full_traffic_at = ?, full_traffic_observed_at = ?, full_traffic_percent = 100
+       WHERE workspace_id = ? AND generation_id = ? AND worker_version_id = ?
+         AND source_sha = ? AND rollout_started_at <= ? AND full_traffic_percent IS NULL`,
+    )
+    .bind(
+      input.full_traffic_at,
+      input.observed_at,
+      input.workspace_id,
+      input.generation_id,
+      input.worker_version_id,
+      input.source_sha.toLowerCase(),
+      input.full_traffic_at,
+    )
+    .run();
+  if (!result.success || result.meta.changes !== 1)
+    throw new Error('Browser visitor 100% rollout proof did not match its start record');
+}
+
+/** Record owner-verified production tracker activation for one app/environment scope. */
+export async function recordBrowserVisitorScopeActivation(
+  db: D1DatabaseLike,
+  input: {
+    workspace_id: string;
+    app_id: string;
+    environment_id: string;
+    activated_at: number;
+    verified_at: number;
+    tracker_source_sha: string;
+  },
+): Promise<void> {
+  if (
+    !input.workspace_id ||
+    !input.app_id ||
+    !input.environment_id ||
+    !validProofTimestamp(input.activated_at) ||
+    !validProofTimestamp(input.verified_at) ||
+    input.verified_at < input.activated_at ||
+    !/^[a-f0-9]{40}$/i.test(input.tracker_source_sha)
+  )
+    throw new Error('Browser visitor scope activation proof is invalid');
+  const environment = await db
+    .prepare(
+      `SELECT e.app_id, lower(e.name) AS name FROM environments e
+       JOIN workspace_apps wa ON wa.app_id = e.app_id AND wa.workspace_id = ?
+       WHERE e.id = ? AND e.app_id = ?`,
+    )
+    .bind(input.workspace_id, input.environment_id, input.app_id)
+    .first<{ app_id: string; name: string }>();
+  if (environment?.app_id !== input.app_id || environment.name !== 'production')
+    throw new Error('Browser visitor activation must identify a production app environment');
+  const result = await db
+    .prepare(
+      `INSERT INTO browser_visitor_scope_activations
+         (workspace_id, app_id, environment_id, activated_at, verified_at, tracker_source_sha)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (workspace_id, app_id, environment_id, activated_at, tracker_source_sha)
+       DO NOTHING`,
+    )
+    .bind(
+      input.workspace_id,
+      input.app_id,
+      input.environment_id,
+      input.activated_at,
+      input.verified_at,
+      input.tracker_source_sha.toLowerCase(),
+    )
+    .run();
+  if (!result.success || result.meta.changes !== 1)
+    throw new Error('Browser visitor scope activation was not recorded');
+}
+
+/** Close an attested tracker interval; days intersecting the interval end stay Unknown. */
+export async function deactivateBrowserVisitorScope(
+  db: D1DatabaseLike,
+  input: {
+    workspace_id: string;
+    app_id: string;
+    environment_id: string;
+    activated_at: number;
+    tracker_source_sha: string;
+    deactivated_at: number;
+  },
+): Promise<void> {
+  if (
+    !input.workspace_id ||
+    !input.app_id ||
+    !input.environment_id ||
+    !validProofTimestamp(input.activated_at) ||
+    !validProofTimestamp(input.deactivated_at) ||
+    input.deactivated_at < input.activated_at ||
+    !/^[a-f0-9]{40}$/i.test(input.tracker_source_sha)
+  )
+    throw new Error('Browser visitor scope deactivation proof is invalid');
+  const result = await db
+    .prepare(
+      `UPDATE browser_visitor_scope_activations SET deactivated_at = ?
+       WHERE workspace_id = ? AND app_id = ? AND environment_id = ?
+         AND activated_at = ? AND tracker_source_sha = ? AND deactivated_at IS NULL`,
+    )
+    .bind(
+      input.deactivated_at,
+      input.workspace_id,
+      input.app_id,
+      input.environment_id,
+      input.activated_at,
+      input.tracker_source_sha.toLowerCase(),
+    )
+    .run();
+  if (!result.success || result.meta.changes !== 1)
+    throw new Error('Browser visitor scope activation was not open');
 }
 
 export function browserVisitorDayIsComplete(
@@ -353,9 +550,12 @@ export async function readExactBrowserVisitorDays(
   if (scopes.length > MAX_EXACT_BROWSER_VISITOR_SCOPES)
     throw new Error('Exact browser visitor scope exceeds the bounded query limit');
   if (!scopes.length) return [];
+  if (!validProofTimestamp(now)) throw new Error('Invalid exact browser visitor read time');
   const scopeKeys = scopes.map((scope) => JSON.stringify([scope.app_id, scope.environment_id]));
   if (new Set(scopeKeys).size !== scopeKeys.length)
     throw new Error('Duplicate exact browser visitor scope');
+  const lateClosureAt =
+    bounds.to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
   const result = await db
     .prepare(
       `WITH requested AS (
@@ -364,31 +564,59 @@ export async function readExactBrowserVisitorDays(
          FROM json_each(?)
        )
        SELECT requested.app_id, requested.environment_id,
-         meta.source_cutover_at, meta.reconciled_through, meta.verified_at,
+         (SELECT rollout.generation_id
+          FROM browser_visitor_acceptance_rollouts rollout
+          WHERE rollout.workspace_id = ?
+            AND rollout.full_traffic_percent = 100
+            AND rollout.full_traffic_at <= ?
+            AND rollout.full_traffic_observed_at <= ?
+            AND NOT EXISTS (
+              SELECT 1 FROM browser_visitor_acceptance_rollouts interrupted
+              WHERE interrupted.workspace_id = rollout.workspace_id
+                AND interrupted.generation_id != rollout.generation_id
+                AND interrupted.rollout_started_at >= rollout.full_traffic_at
+                AND interrupted.rollout_started_at <= ?
+            )
+          ORDER BY rollout.full_traffic_at DESC, rollout.generation_id DESC LIMIT 1) AS covered_generation,
+         EXISTS (
+           SELECT 1 FROM browser_visitor_scope_activations activation
+           WHERE activation.workspace_id = ?
+             AND activation.app_id = requested.app_id
+             AND activation.environment_id = requested.environment_id
+             AND activation.activated_at <= ?
+             AND activation.verified_at <= ?
+             AND (activation.deactivated_at IS NULL OR activation.deactivated_at >= ?)
+         ) AS scope_active,
          COUNT(visitors.visitor_hash) AS visitors
        FROM requested
-       LEFT JOIN browser_visitor_rollup_meta meta ON meta.workspace_id = ?
        LEFT JOIN browser_visitor_days visitors ON visitors.workspace_id = ?
          AND visitors.app_id = requested.app_id
          AND visitors.environment_id = requested.environment_id
          AND visitors.india_day = ?
-       GROUP BY requested.app_id, requested.environment_id,
-         meta.source_cutover_at, meta.reconciled_through, meta.verified_at
+         AND visitors.expires_at > ?
+       GROUP BY requested.app_id, requested.environment_id
        ORDER BY requested.app_id, requested.environment_id
        LIMIT ${MAX_EXACT_BROWSER_VISITOR_SCOPES + 1}`,
     )
     .bind(
       JSON.stringify(scopes.map((scope) => [scope.app_id, scope.environment_id])),
       workspace,
+      bounds.from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+      now,
+      lateClosureAt,
+      workspace,
+      bounds.from,
+      now,
+      lateClosureAt,
       workspace,
       day,
+      now,
     )
     .all<{
       app_id: string;
       environment_id: string;
-      source_cutover_at: number | null;
-      reconciled_through: number | null;
-      verified_at: number | null;
+      covered_generation: string | null;
+      scope_active: number;
       visitors: number;
     }>();
   const allowed = new Set(scopeKeys);
@@ -405,17 +633,10 @@ export async function readExactBrowserVisitorDays(
       throw new Error('Invalid exact browser visitor result');
     seen.add(key);
     const isComplete =
-      row.verified_at !== null &&
-      row.verified_at <= now &&
-      row.verified_at >= bounds.to + BROWSER_VISITOR_MAX_LATENESS_MS &&
-      browserVisitorDayIsComplete(
-        day,
-        {
-          sourceCutoverAt: row.source_cutover_at,
-          reconciledThrough: row.reconciled_through,
-        },
-        now,
-      );
+      row.covered_generation !== null &&
+      row.scope_active === 1 &&
+      now >= lateClosureAt &&
+      now < bounds.to + BROWSER_VISITOR_RETENTION_MS;
     return isComplete
       ? { app_id: row.app_id, environment_id: row.environment_id, complete: true, visitors: count }
       : { app_id: row.app_id, environment_id: row.environment_id, complete: false, visitors: null };

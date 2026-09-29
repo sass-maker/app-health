@@ -10,7 +10,12 @@ import type { AppHealthRepositories } from '../src/repository.js';
 import { recordBrowserQueueStageReceipts } from '../src/browser-queue.js';
 import {
   acceptBrowserVisitorBatch,
+  confirmBrowserVisitorRolloutFullTraffic,
+  deactivateBrowserVisitorScope,
   readBrowserVisitorReceiptPage,
+  recordBrowserVisitorRolloutStart,
+  recordBrowserVisitorScopeActivation,
+  BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
   BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
   BROWSER_VISITOR_RETENTION_DAYS,
   MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE,
@@ -23,6 +28,8 @@ import {
 
 const BROWSER_VISITOR_DAY_MS = 86_400_000;
 const BROWSER_VISITOR_MAX_LATENESS_MS = BROWSER_VISITOR_DAY_MS;
+const WORKER_SHA = 'c'.repeat(40);
+const TRACKER_SHA = 'd'.repeat(40);
 
 const mf = new Miniflare({
   modules: true,
@@ -58,6 +65,49 @@ function batch(overrides: Partial<CollectedBrowserBatch> = {}): CollectedBrowser
   };
 }
 
+async function attestRollout(
+  workspace: string,
+  generation: string,
+  cutoverAt: number,
+  options: { sha?: string; version?: string } = {},
+) {
+  const sha = options.sha ?? WORKER_SHA;
+  const version = options.version ?? `version-${generation}`;
+  await recordBrowserVisitorRolloutStart(db, {
+    workspace_id: workspace,
+    generation_id: generation,
+    worker_version_id: version,
+    source_sha: sha,
+    rollout_started_at: cutoverAt - 1_000,
+    rollout_observed_at: cutoverAt - 500,
+    rollout_traffic_percent: 0,
+  });
+  await confirmBrowserVisitorRolloutFullTraffic(db, {
+    workspace_id: workspace,
+    generation_id: generation,
+    worker_version_id: version,
+    source_sha: sha,
+    full_traffic_at: cutoverAt,
+    observed_at: cutoverAt + 500,
+    traffic_percent: 100,
+  });
+}
+
+async function activateScope(
+  scope: typeof firstApp | typeof otherApp,
+  activatedAt: number,
+  verifiedAt = activatedAt,
+) {
+  await recordBrowserVisitorScopeActivation(db, {
+    workspace_id: scope.workspace,
+    app_id: scope.app_id,
+    environment_id: scope.environment_id,
+    activated_at: activatedAt,
+    verified_at: verifiedAt,
+    tracker_source_sha: TRACKER_SHA,
+  });
+}
+
 async function apply(sql: string) {
   for (const statement of sql
     .replace(/--[^\n]*/g, '')
@@ -70,13 +120,33 @@ beforeAll(async () => {
   db = await mf.getD1Database('DB');
   await db
     .prepare(
-      'CREATE TABLE environments (id TEXT NOT NULL, app_id TEXT NOT NULL, PRIMARY KEY (id, app_id))',
+      'CREATE TABLE environments (id TEXT NOT NULL, app_id TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (id, app_id))',
     )
     .run();
+  await db
+    .prepare('CREATE TABLE workspace_apps (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL)')
+    .run();
   await db.batch([
-    db.prepare('INSERT INTO environments (id, app_id) VALUES (?, ?)').bind('prod-a', 'app-a'),
-    db.prepare('INSERT INTO environments (id, app_id) VALUES (?, ?)').bind('stage-a', 'app-a'),
-    db.prepare('INSERT INTO environments (id, app_id) VALUES (?, ?)').bind('prod-b', 'app-b'),
+    db
+      .prepare('INSERT INTO environments (id, app_id, name) VALUES (?, ?, ?)')
+      .bind('prod-a', 'app-a', 'production'),
+    db
+      .prepare('INSERT INTO environments (id, app_id, name) VALUES (?, ?, ?)')
+      .bind('stage-a', 'app-a', 'staging'),
+    db
+      .prepare('INSERT INTO environments (id, app_id, name) VALUES (?, ?, ?)')
+      .bind('prod-b', 'app-b', 'production'),
+  ]);
+  await db.batch([
+    db
+      .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+      .bind('app-a', 'workspace-a'),
+    db
+      .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+      .bind('app-b', 'workspace-a'),
+    db
+      .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+      .bind('app-a', 'workspace-cutover'),
   ]);
   await apply(
     await readFile(new URL('../migrations/0019_browser_visitor_days.sql', import.meta.url), 'utf8'),
@@ -99,6 +169,12 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0025_browser_visitor_acceptance_coverage.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
@@ -107,6 +183,8 @@ beforeEach(async () => {
     db.prepare('DELETE FROM browser_visitor_receipt_days'),
     db.prepare('DELETE FROM browser_visitor_batch_receipts'),
     db.prepare('DELETE FROM browser_queue_stage_receipts'),
+    db.prepare('DELETE FROM browser_visitor_scope_activations'),
+    db.prepare('DELETE FROM browser_visitor_acceptance_rollouts'),
     db.prepare('DELETE FROM browser_visitor_rollup_meta'),
   ]);
 });
@@ -507,14 +585,16 @@ describe('exact browser visitor daily ledger', () => {
     ).toEqual({ n: 0 });
   });
 
-  it('keeps rows Unknown until explicit cutover and reconciliation evidence proves a full day', async () => {
+  it('keeps rows Unknown until 100% rollout, scope activation and full-day closure are proven', async () => {
     const day = '2026-09-28';
     const bounds = { from: toMs('2026-09-27T18:30:00Z'), to: toMs('2026-09-28T18:30:00Z') };
-    const now = bounds.to + BROWSER_VISITOR_MAX_LATENESS_MS;
+    const now =
+      bounds.to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    const acceptedAt = bounds.to + BROWSER_VISITOR_MAX_LATENESS_MS - 1_500;
     await acceptBrowserVisitorBatch(
       db,
       batch({
-        received_at: now,
+        received_at: acceptedAt,
         events: [
           {
             event_id: crypto.randomUUID(),
@@ -525,30 +605,30 @@ describe('exact browser visitor daily ledger', () => {
           },
         ],
       }),
-      now,
+      acceptedAt,
     );
-    const scopes = [firstApp, otherEnvironment];
+    const scopes = [firstApp, otherApp];
     expect(await readExactBrowserVisitorDays(db, firstApp.workspace, scopes, day, now)).toEqual(
-      scopes
-        .slice()
-        .sort((left, right) => left.environment_id.localeCompare(right.environment_id))
-        .map((scope) => ({
-          app_id: scope.app_id,
-          environment_id: scope.environment_id,
-          complete: false,
-          visitors: null,
-        })),
+      [firstApp, otherApp].map((scope) => ({
+        app_id: scope.app_id,
+        environment_id: scope.environment_id,
+        complete: false,
+        visitors: null,
+      })),
     );
 
-    const sourceCutoverAt = bounds.from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS;
-    await db
-      .prepare(
-        `UPDATE browser_visitor_rollup_meta
-         SET source_cutover_at = ?, reconciled_through = ?, verified_at = ?
-         WHERE workspace_id = ?`,
-      )
-      .bind(sourceCutoverAt, bounds.to, now, firstApp.workspace)
-      .run();
+    const fullTrafficAt = bounds.from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS;
+    await attestRollout(firstApp.workspace, 'generation-one', fullTrafficAt);
+    await activateScope(firstApp, bounds.from, now);
+    await activateScope(otherApp, bounds.from, now);
+    const beforeSettlement = await readExactBrowserVisitorDays(
+      db,
+      firstApp.workspace,
+      scopes,
+      day,
+      now - 1,
+    );
+    expect(beforeSettlement.every((row) => !row.complete && row.visitors === null)).toBe(true);
     expect(await readExactBrowserVisitorDays(db, firstApp.workspace, scopes, day, now)).toEqual([
       {
         app_id: firstApp.app_id,
@@ -557,15 +637,12 @@ describe('exact browser visitor daily ledger', () => {
         visitors: 1,
       },
       {
-        app_id: firstApp.app_id,
-        environment_id: 'stage-a',
+        app_id: otherApp.app_id,
+        environment_id: otherApp.environment_id,
         complete: true,
         visitors: 0,
       },
     ]);
-    expect(
-      browserVisitorDayIsComplete(day, { sourceCutoverAt, reconciledThrough: bounds.to }, now),
-    ).toBe(true);
     expect(
       await readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], '2026-09-29', now),
     ).toEqual([
@@ -601,6 +678,194 @@ describe('exact browser visitor daily ledger', () => {
         toMs('2026-10-01T00:00:00Z'),
       ),
     ).rejects.toThrow('bounded query limit');
+  });
+
+  it('requires 100% source SHA evidence and the cutover future-skew fence', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const now =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    const unsafeCutover = from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS + 1;
+    await attestRollout('workspace-cutover', 'unsafe-generation', unsafeCutover);
+    await recordBrowserVisitorScopeActivation(db, {
+      workspace_id: 'workspace-cutover',
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      activated_at: from,
+      verified_at: now,
+      tracker_source_sha: TRACKER_SHA,
+    });
+
+    await expect(
+      confirmBrowserVisitorRolloutFullTraffic(db, {
+        workspace_id: 'workspace-cutover',
+        generation_id: 'missing-generation',
+        worker_version_id: 'missing-version',
+        source_sha: WORKER_SHA,
+        full_traffic_at: from,
+        observed_at: from,
+        traffic_percent: 99,
+      }),
+    ).rejects.toThrow('100%');
+    await expect(
+      readExactBrowserVisitorDays(db, 'workspace-cutover', [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+  });
+
+  it('invalidates a day intersecting a partial rollout and qualifies only a later full day', async () => {
+    const day = '2026-09-28';
+    const bounds = { from: toMs('2026-09-27T18:30:00Z'), to: toMs('2026-09-28T18:30:00Z') };
+    const nextDayFrom = bounds.to;
+    const fullTrafficAt = nextDayFrom - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS;
+    await attestRollout(
+      firstApp.workspace,
+      'generation-before-partial',
+      bounds.from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, bounds.from - BROWSER_VISITOR_DAY_MS, bounds.from);
+    await recordBrowserVisitorRolloutStart(db, {
+      workspace_id: firstApp.workspace,
+      generation_id: 'generation-partial',
+      worker_version_id: 'version-partial',
+      source_sha: WORKER_SHA,
+      rollout_started_at: bounds.from + 1_000,
+      rollout_observed_at: bounds.from + 1_500,
+      rollout_traffic_percent: 10,
+    });
+    await expect(
+      readExactBrowserVisitorDays(
+        db,
+        firstApp.workspace,
+        [firstApp],
+        day,
+        bounds.to +
+          BROWSER_VISITOR_MAX_LATENESS_MS +
+          BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
+      ),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+
+    await confirmBrowserVisitorRolloutFullTraffic(db, {
+      workspace_id: firstApp.workspace,
+      generation_id: 'generation-partial',
+      worker_version_id: 'version-partial',
+      source_sha: WORKER_SHA,
+      full_traffic_at: fullTrafficAt,
+      observed_at: fullTrafficAt + 500,
+      traffic_percent: 100,
+    });
+    const nextDay = '2026-09-29';
+    const nextDayTo = nextDayFrom + BROWSER_VISITOR_DAY_MS;
+    const nextDayNow =
+      nextDayTo + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], nextDay, nextDayNow),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: true,
+        visitors: 0,
+      },
+    ]);
+  });
+
+  it('qualifies an activated zero for hashless accepted batches without calling it people', async () => {
+    const day = '2026-09-28';
+    const from = toMs('2026-09-27T18:30:00Z');
+    const to = from + BROWSER_VISITOR_DAY_MS;
+    const acceptedAt = from + 1_000;
+    const now =
+      to + BROWSER_VISITOR_MAX_LATENESS_MS + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS;
+    await attestRollout(
+      firstApp.workspace,
+      'generation-hashless',
+      from - BROWSER_VISITOR_MAX_FUTURE_SKEW_MS,
+    );
+    await activateScope(firstApp, from, now);
+    await acceptBrowserVisitorBatch(
+      db,
+      batch({
+        batch_id: 'accepted-hashless',
+        received_at: acceptedAt,
+        visitor_hash: undefined,
+        events: [
+          {
+            event_id: 'event-hashless',
+            timestamp: from + 2_000,
+            type: 'pageview',
+            path: '/',
+            referrer: '',
+          },
+        ],
+      }),
+      acceptedAt,
+    );
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: true,
+        visitors: 0,
+      },
+    ]);
+    await deactivateBrowserVisitorScope(db, {
+      workspace_id: firstApp.workspace,
+      app_id: firstApp.app_id,
+      environment_id: firstApp.environment_id,
+      activated_at: from,
+      tracker_source_sha: TRACKER_SHA,
+      deactivated_at: to - 1,
+    });
+    await expect(
+      readExactBrowserVisitorDays(db, firstApp.workspace, [firstApp], day, now),
+    ).resolves.toEqual([
+      {
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        complete: false,
+        visitors: null,
+      },
+    ]);
+  });
+
+  it('requires production environment activation and rejects unverified scopes', async () => {
+    await expect(
+      recordBrowserVisitorScopeActivation(db, {
+        workspace_id: firstApp.workspace,
+        app_id: firstApp.app_id,
+        environment_id: otherEnvironment.environment_id,
+        activated_at: 1,
+        verified_at: 1,
+        tracker_source_sha: TRACKER_SHA,
+      }),
+    ).rejects.toThrow('production');
+    await expect(
+      recordBrowserVisitorScopeActivation(db, {
+        workspace_id: firstApp.workspace,
+        app_id: firstApp.app_id,
+        environment_id: firstApp.environment_id,
+        activated_at: 2,
+        verified_at: 1,
+        tracker_source_sha: TRACKER_SHA,
+      }),
+    ).rejects.toThrow('activation proof');
   });
 
   it('closes a day only after the full late-event window and returns Unknown after retained coverage expires', () => {
