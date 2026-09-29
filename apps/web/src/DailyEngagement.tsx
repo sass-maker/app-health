@@ -239,8 +239,8 @@ function ProductActions({
     <ul className="space-y-1 text-xs">
       {events.map((event) => (
         <li key={event.name} className="flex justify-between gap-3">
-          <span className="font-mono">{event.name}</span>
-          <span className="tabular-nums">
+          <span className="min-w-0 break-words font-mono">{event.name}</span>
+          <span className="shrink-0 text-right tabular-nums">
             {event.unique_browsers === null
               ? 'Unknown browsers'
               : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}
@@ -312,16 +312,16 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
   return (
     <div className="hidden max-w-full rounded-md border xl:block">
       <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-        Scroll horizontally to view all report sources.
+        Scroll horizontally if needed to view all report sources.
       </p>
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead className="whitespace-normal">Product</TableHead>
-            <TableHead className="whitespace-normal">Visits</TableHead>
-            <TableHead className="whitespace-normal">Primary actions</TableHead>
-            <TableHead className="whitespace-normal">Responses</TableHead>
-            <TableHead className="whitespace-normal text-right">Server requests</TableHead>
+            <TableHead className="w-[16%] whitespace-normal">Product</TableHead>
+            <TableHead className="w-[21%] whitespace-normal">Visits</TableHead>
+            <TableHead className="w-[27%] whitespace-normal">Primary actions</TableHead>
+            <TableHead className="w-[24%] whitespace-normal">Responses</TableHead>
+            <TableHead className="w-[12%] whitespace-normal text-right">Server requests</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -331,7 +331,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                 <span className="font-medium">{product.name}</span>
                 <span className="block text-xs text-muted-foreground">{product.catalog_id}</span>
               </TableCell>
-              <TableCell className="min-w-40">
+              <TableCell>
                 <dl className="space-y-1.5 text-xs">
                   <div className="flex justify-between gap-3">
                     <dt className="text-muted-foreground">Browser visitors</dt>
@@ -355,7 +355,7 @@ function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
                   </span>
                 ) : null}
               </TableCell>
-              <TableCell className="min-w-52">
+              <TableCell>
                 <ProductActions events={product.cta_events} status={product.cta_status} />
               </TableCell>
               <TableCell>
