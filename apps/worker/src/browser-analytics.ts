@@ -10,6 +10,7 @@ import { localBrowserReport } from './browser-reports.js';
 import type { AnalyticsEngineDatasetLike } from './analytics-engine.js';
 import type { BrowserArchiveStageResult, BrowserArchiveStagingLookup } from './browser-archive.js';
 import type { BROWSER_EVENT_FACTS_DIGEST_VERSION } from './browser-facts-digest.js';
+import type { D1DatabaseLike } from './d1-adapter.js';
 
 export async function browserSessionScope(
   appId: string,
@@ -41,6 +42,7 @@ export interface CollectedBrowserBatch {
   metadata?: { channel: string; device: string; browser: string; country: string };
 }
 export interface BrowserBindings {
+  DB?: D1DatabaseLike;
   BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
   BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'> & Partial<Pick<R2Bucket, 'get'>>;
   BROWSER_ARCHIVE?: {

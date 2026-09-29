@@ -137,6 +137,17 @@ Pending rows remain visible while R2 retries; successfully archived rows remain
 visible for the 31-day dedupe window, then lookups report them missing. The result
 contains app, environment, and batch IDs only. It proves a local stage receipt,
 not Queue/DLQ exhaustion, successful R2 archival, or day completeness.
+After staging, the Queue consumer also stores an identity-only D1 receipt before
+acknowledging the message. A D1 write failure retries the message; redelivery
+safely repeats staging and the receipt write. Receipts expire on the existing
+35-day visitor-ledger schedule. They are not backfilled: batches whose Queue
+delivery completed before migration `0023_browser_queue_stage_receipts.sql` was
+applied remain unobserved, even when their archive facts match. Audit counts
+report `queue_stage_receipts` and `queue_stage_unobserved`; unobserved is not
+proof of delivery failure. A stage receipt proves only that the consumer staged
+the batch and committed its identity to D1. It does not prove R2 archival, an
+empty Queue or DLQ, provider retention, or a complete India-day window. Audits
+remain `complete: false` and do not set a report watermark.
 R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
 queried with `_sample_interval` weighting. A durable bounded outbox retries failed

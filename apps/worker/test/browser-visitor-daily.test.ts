@@ -7,6 +7,7 @@ import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { acceptBrowser } from '../src/browser-routes.js';
 import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import type { AppHealthRepositories } from '../src/repository.js';
+import { recordBrowserQueueStageReceipts } from '../src/browser-queue.js';
 import {
   acceptBrowserVisitorBatch,
   readBrowserVisitorReceiptPage,
@@ -92,6 +93,12 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0023_browser_queue_stage_receipts.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
@@ -99,6 +106,7 @@ beforeEach(async () => {
     db.prepare('DELETE FROM browser_visitor_days'),
     db.prepare('DELETE FROM browser_visitor_receipt_days'),
     db.prepare('DELETE FROM browser_visitor_batch_receipts'),
+    db.prepare('DELETE FROM browser_queue_stage_receipts'),
     db.prepare('DELETE FROM browser_visitor_rollup_meta'),
   ]);
 });
@@ -667,6 +675,67 @@ describe('exact browser visitor daily ledger', () => {
       receipts: 1,
       backlog: { visitors: false, receipts: false },
     });
+  });
+
+  it('prunes stage receipts in bounded batches and reports their cleanup backlog', async () => {
+    const now = toMs('2026-09-30T00:00:00Z');
+    await db.batch(
+      ['batch-a', 'batch-b', 'batch-c'].map((batchId) =>
+        db
+          .prepare(
+            `INSERT INTO browser_queue_stage_receipts
+             (workspace_id, app_id, environment_id, batch_id, staged_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+          )
+          .bind('workspace-a', 'app-a', 'prod-a', batchId, now - 10, now - 1),
+      ),
+    );
+
+    expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
+      visitors: 0,
+      receipts: 2,
+      backlog: { visitors: false, receipts: true },
+    });
+    expect(await cleanupBrowserVisitorDays(db, now, 2)).toEqual({
+      visitors: 0,
+      receipts: 1,
+      backlog: { visitors: false, receipts: false },
+    });
+    expect(
+      await db
+        .prepare('SELECT COUNT(*) AS count FROM browser_queue_stage_receipts')
+        .first<{ count: number }>(),
+    ).toEqual({ count: 0 });
+  });
+
+  it('upserts stage receipts idempotently in real D1 when a Queue message is redelivered', async () => {
+    const firstSeenAt = toMs('2026-09-30T00:00:00Z');
+    const batchIdentity = {
+      workspace: 'workspace-a',
+      app_id: 'app-a',
+      environment_id: 'prod-a',
+      batch_id: 'redelivered-batch',
+    };
+
+    await recordBrowserQueueStageReceipts(db, [batchIdentity], firstSeenAt);
+    await recordBrowserQueueStageReceipts(db, [batchIdentity], firstSeenAt + 1_000);
+
+    const receipt = await db
+      .prepare(
+        `SELECT workspace_id, app_id, environment_id, batch_id, staged_at, expires_at
+         FROM browser_queue_stage_receipts WHERE batch_id = ?`,
+      )
+      .bind(batchIdentity.batch_id)
+      .first();
+    expect(receipt).toEqual({
+      workspace_id: batchIdentity.workspace,
+      app_id: batchIdentity.app_id,
+      environment_id: batchIdentity.environment_id,
+      batch_id: batchIdentity.batch_id,
+      staged_at: firstSeenAt,
+      expires_at: firstSeenAt + 1_000 + BROWSER_VISITOR_RETENTION_DAYS * BROWSER_VISITOR_DAY_MS,
+    });
+    expect(JSON.stringify(receipt)).not.toContain('events');
   });
 
   it('does not return 202 when D1 receipt acceptance fails for a hashless batch after Queue.send', async () => {

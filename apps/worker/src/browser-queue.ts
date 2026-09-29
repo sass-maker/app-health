@@ -1,9 +1,16 @@
 import type { BrowserBindings, CollectedBrowserBatch } from './browser-analytics.js';
 import type { BrowserArchiveStagingLookup } from './browser-archive.js';
+import { BROWSER_VISITOR_RETENTION_DAYS } from './browser-visitor-daily.js';
+
+const QUEUE_STAGE_RECEIPT_RETENTION_MS = BROWSER_VISITOR_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 
 export type BrowserArchiveBatchIdentity = Pick<
   CollectedBrowserBatch,
   'app_id' | 'environment_id' | 'batch_id'
+>;
+type BrowserQueueStageReceiptIdentity = Pick<
+  CollectedBrowserBatch,
+  'workspace' | 'app_id' | 'environment_id' | 'batch_id'
 >;
 
 /** Fixed shard count is part of the dedupe contract; do not change inside its retention window. */
@@ -78,14 +85,45 @@ async function stageGroup(
 ) {
   try {
     if (!env.BROWSER_ARCHIVE) throw new Error('browser archive binding missing');
+    if (!env.DB) throw new Error('browser queue receipt database missing');
     await env.BROWSER_ARCHIVE.getByName(shard).stage(messages.map((message) => message.body));
-    // stage() is atomic: every input is either newly accepted or an identical
-    // previously staged batch. Conflicts/capacity failures throw, so the full
-    // group is safe to ack here; accepted lists only the newly inserted rows.
+    await recordBrowserQueueStageReceipts(
+      env.DB,
+      messages.map((message) => message.body),
+    );
+    // stage() is atomic and delivery receipts are idempotent. If D1 fails, retry
+    // the Queue messages; staging the same bodies again is safe.
     for (const message of messages) {
       message.ack();
     }
   } catch {
     for (const message of messages) message.retry({ delaySeconds: 30 });
   }
+}
+
+/** Persist positive queue delivery evidence only after durable archive staging. */
+export async function recordBrowserQueueStageReceipts(
+  db: NonNullable<BrowserBindings['DB']>,
+  batches: readonly BrowserQueueStageReceiptIdentity[],
+  now = Date.now(),
+): Promise<void> {
+  if (!batches.length) return;
+  if (!Number.isSafeInteger(now) || now < 0) throw new Error('Invalid queue receipt time');
+  const expiresAt = now + QUEUE_STAGE_RECEIPT_RETENTION_MS;
+  const results = await db.batch(
+    batches.map((batch) =>
+      db
+        .prepare(
+          `INSERT INTO browser_queue_stage_receipts
+           (workspace_id, app_id, environment_id, batch_id, staged_at, expires_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT (workspace_id, app_id, environment_id, batch_id)
+           DO UPDATE SET staged_at = MIN(browser_queue_stage_receipts.staged_at, excluded.staged_at),
+                         expires_at = MAX(browser_queue_stage_receipts.expires_at, excluded.expires_at)`,
+        )
+        .bind(batch.workspace, batch.app_id, batch.environment_id, batch.batch_id, now, expiresAt),
+    ),
+  );
+  if (results.length !== batches.length || results.some((result) => !result.success))
+    throw new Error('Browser queue delivery receipts could not be committed');
 }
