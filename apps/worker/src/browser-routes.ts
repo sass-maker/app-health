@@ -52,14 +52,18 @@ function cors(request: Request, response: Response): Response {
   return response;
 }
 
+function validBrowserEventTimes(events: BrowserBatchV1['events'], now: number): boolean {
+  return !events.some(
+    (event) => event.timestamp < now - 86_400_000 || event.timestamp > now + 60_000,
+  );
+}
+
 function validBrowserEvents(input: BrowserBatchV1, now: number): boolean {
   if (input.attribution && /[@?#\\\s]/.test(decodeURIComponent(input.attribution.entry_path)))
     return false;
-  return !input.events.some(
-    (event) =>
-      event.timestamp < now - 86_400_000 ||
-      event.timestamp > now + 60_000 ||
-      /[@?#\\\s]/.test(decodeURIComponent(event.path)),
+  return (
+    validBrowserEventTimes(input.events, now) &&
+    !input.events.some((event) => /[@?#\\\s]/.test(decodeURIComponent(event.path)))
   );
 }
 async function browserContext(
@@ -164,7 +168,12 @@ export async function acceptBrowser(
     if (!local) {
       try {
         if (!env.DB) throw new Error('Browser visitor ledger unavailable');
-        await acceptBrowserVisitorBatch(env.DB, durableBatch, durableBatch.received_at);
+        // Queue and presence work can outlast the initial request validation.
+        // A 202 must never make an event older than the late window exact.
+        const persistenceNow = Date.now();
+        if (!validBrowserEventTimes(durableBatch.events, persistenceNow))
+          throw new Error('Browser event timestamp expired before durable acceptance');
+        await acceptBrowserVisitorBatch(env.DB, durableBatch, persistenceNow);
       } catch {
         // Queue.send alone does not qualify as a 202: exact acceptance must also
         // commit before returning success. The queue may contain this failed
