@@ -31,3 +31,29 @@ prove that every accepted batch was delivered from Queue or staged before
 upload. Neither lookup verifies current R2 availability, acquires bytes,
 reconciles facts, or advances a watermark. Queue/DLQ reconciliation remains
 separate work.
+
+## Offline day auditor
+
+`auditBrowserArchiveDay` in `apps/worker/src/browser-archive-day-audit.ts` is
+an internal/offline acquisition helper. Given an owned workspace, India day,
+D1 handle, archive namespace, and R2 bucket, it discovers at most 128
+app/environment scopes, pages the D1 receipt selector, visits the event-day
+index on all 16 archive shards with stable snapshot cursors, and looks up each
+selected receipt in its identity shard. It fetches each unique referenced R2
+object within per-object and global byte limits, validates its manifest,
+compressed SHA-256, gzip contents, row/event counts, and event-time bounds, then
+passes the verified facts to `reconcileBrowserArchiveDay`.
+
+The returned object contains only the day, aggregate state counts, bounded work
+counts, and reason codes; it does not return receipt IDs, visitor hashes,
+archived events, object keys, or provider errors. Any missing/corrupt evidence,
+page or fact cap, RPC failure, or comparison cap remains incomplete. It always
+reports `complete: false`: Queue and DLQ reconciliation, D1/R2 retention, and a
+current-state ingestion barrier are not inputs to this offline helper. Exhausted
+snapshot pages do not close those proof gates and never advance visitor-day
+coverage metadata.
+
+The helper does not call external provider APIs or read Queue/DLQ state. Its
+result is useful for bounded evidence collection and comparison only. It is
+not a production completeness certificate, a retention claim, a coverage
+watermark, or a Daily briefing fallback.

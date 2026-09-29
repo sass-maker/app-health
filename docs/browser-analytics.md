@@ -141,8 +141,9 @@ R2 is authoritative;
 Analytics Engine is an eventually available, best-effort sampled projection,
 queried with `_sample_interval` weighting. A durable bounded outbox retries failed
 projections independently of archival. A crash after append but before clearing
-the outbox can still duplicate an analytical projection. Replay/export and reconciliation tools are not implemented yet. This is
-not exactly-once end-to-end analytics.
+the outbox can still duplicate an analytical projection. Queue replay/export
+and production completeness reconciliation are not implemented. This is not
+exactly-once end-to-end analytics.
 
 ### Offline receipt-to-archive comparison prerequisite
 
@@ -164,12 +165,17 @@ include archive candidates with the same batch identity even when changed event
 timestamps place them outside the selected day. The result must not be
 interpreted as a production coverage watermark.
 
-There is not yet a durable day-to-R2 index. R2 segment keys use upload date,
-while manifests carry min/max event timestamps, so resolving a complete event
-day still needs a bounded, paged manifest inventory (or a durable event-day
-index) that includes late-delivered batches. Queue/DLQ delivery and provider
-retention evidence also remain external inputs. No production watermark or
-Daily briefing fallback is enabled by this comparison code.
+Each archive shard now has a bounded event-day index and batch-to-segment
+lookup. `auditBrowserArchiveDay` acquires the selected D1 receipt pages,
+queries all 16 shard indexes, follows each selected batch lookup, fetches
+referenced R2 objects, verifies manifest metadata and bytes, extracts facts,
+and calls the comparator. Per-shard page, receipt, object, and byte caps return
+explicit incomplete reason codes. Its result contains aggregate counts only;
+it never returns raw receipt identifiers, visitor hashes, or event fields.
+Snapshot exhaustion is not a Queue/DLQ barrier or current-state completeness
+proof. Queue/DLQ delivery and provider-retention evidence remain external and
+are unavailable to this offline helper, so it always returns incomplete. No
+production watermark or Daily briefing fallback is enabled.
 
 New segments also carry the versioned archive manifest in R2 custom metadata,
 committed atomically with the gzip bytes. It records the compressed-content
