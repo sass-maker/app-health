@@ -70,6 +70,7 @@ import {
   accountIdentity,
   accountMutationAllowed,
   createAccountAuth,
+  measureOwnerRouteRead,
   type AccountBindings,
   type OwnerRequestTimings,
   withOwnerServerTiming,
@@ -562,6 +563,7 @@ async function handleInstallationStatusRoute(
   bundle: AdapterBundle,
   owner: OwnerIdentity,
   url: URL,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/installation/status') return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
@@ -569,11 +571,10 @@ async function handleInstallationStatusRoute(
   const envId = url.searchParams.get('environment_id');
   if (!appId || !envId) return json(400, { error: 'app_id and environment_id are required' });
   if (!ownerCanAccessApp(owner, appId)) return productScopeForbidden();
-  return json(
-    200,
-    InstallationStatusV1.parse(await bundle.service.installationStatus(appId, envId, Date.now())),
-    true,
+  const status = await measureOwnerRouteRead(timings, () =>
+    bundle.service.installationStatus(appId, envId, Date.now()),
   );
+  return json(200, InstallationStatusV1.parse(status), true);
 }
 
 async function handleEndpointsRoute(
@@ -581,6 +582,7 @@ async function handleEndpointsRoute(
   bundle: AdapterBundle,
   owner: OwnerIdentity,
   url: URL,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/endpoints') return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
@@ -594,16 +596,15 @@ async function handleEndpointsRoute(
   });
   if (!parsed.success) return json(400, { error: 'invalid query' });
   if (!ownerCanAccessApp(owner, parsed.data.app_id)) return productScopeForbidden();
-  return json(
-    200,
-    await bundle.service.queryEndpoints(
+  const endpoints = await measureOwnerRouteRead(timings, () =>
+    bundle.service.queryEndpoints(
       parsed.data.app_id,
       parsed.data.environment_id,
       parsed.data.window,
       Date.now(),
     ),
-    true,
   );
+  return json(200, endpoints, true);
 }
 
 async function handleWorkspaceHealthRoute(
@@ -782,17 +783,25 @@ async function handleOwnerRoutes(
   if (nativeResponse) return nativeResponse;
   const projectResponse = await handleProjectRoutes(request, bundle.repos, owner, options?.timings);
   if (projectResponse) return projectResponse;
-  const browserResponse = await handleBrowserOwner(request, env, owner, bundle.local);
+  const browserResponse = await handleBrowserOwner(
+    request,
+    env,
+    owner,
+    bundle.local,
+    options?.timings,
+  );
   if (browserResponse) return browserResponse;
   const appsResponse = await handleAppsRoute(request, bundle, owner, url, env, options);
   if (appsResponse) return appsResponse;
   const handlers = [
     handleRevokeRoute,
-    handleInstallationStatusRoute,
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
+      handleInstallationStatusRoute(req, current, identity, target, options?.timings),
     handleWorkspaceHealthRoute,
     handleDailyEngagementRoute,
     handleOwnerAlertsRoute,
-    handleEndpointsRoute,
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
+      handleEndpointsRoute(req, current, identity, target, options?.timings),
     handleFailuresRoute,
     handleLogsQueryRoute,
     handlePublicKeysRoute,
@@ -860,7 +869,14 @@ async function handleAccountOwner(
     return json(403, { error: 'same-origin request required' }, true);
   const path = new URL(request.url).pathname;
   const measureOwnerRead =
-    request.method === 'GET' && ['/v1/apps', '/v1/capabilities'].includes(path);
+    request.method === 'GET' &&
+    [
+      '/v1/apps',
+      '/v1/capabilities',
+      '/v1/endpoints',
+      '/v1/installation/status',
+      '/v1/analytics/report',
+    ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
   const account = await accountIdentity(
     request,

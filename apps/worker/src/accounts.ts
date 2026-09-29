@@ -90,6 +90,19 @@ export interface OwnerRequestTimings {
   routeReadMs?: number;
 }
 
+export async function measureOwnerRouteRead<T>(
+  timings: OwnerRequestTimings | undefined,
+  read: () => Promise<T>,
+): Promise<T> {
+  if (!timings) return read();
+  const started = performance.now();
+  try {
+    return await read();
+  } finally {
+    timings.routeReadMs = performance.now() - started;
+  }
+}
+
 /**
  * Measures Better Auth's session and user D1 reads separately. SQL is used
  * transiently for classification and is never retained or emitted.

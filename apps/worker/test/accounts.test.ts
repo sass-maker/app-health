@@ -35,6 +35,8 @@ describe('Google account boundary with real D1 SQL', () => {
       '0007_accounts.sql',
       '0008_environment_capabilities.sql',
       '0013_archive_projects.sql',
+      '0014_endpoint_rollups.sql',
+      '0015_response_payload_bytes.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql
@@ -174,10 +176,31 @@ describe('Google account boundary with real D1 SQL', () => {
     const capabilities = await request(
       `/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
     );
+    const provider = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ data: [] }));
+    let endpoints: Response;
+    try {
+      endpoints = await request(
+        `/v1/endpoints?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+      );
+    } finally {
+      provider.mockRestore();
+    }
+    const installation = await request(
+      `/v1/installation/status?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+    );
+    const analyticsReport = await request('/v1/analytics/report');
     const timingPattern =
       /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, user_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/;
-    for (const response of [apps, capabilities]) {
-      expect(response.status).toBe(200);
+    for (const [response, status] of [
+      [apps, 200],
+      [capabilities, 200],
+      [endpoints, 200],
+      [installation, 200],
+      [analyticsReport, 503],
+    ] as const) {
+      expect(response.status).toBe(status);
       const header = response.headers.get('server-timing') ?? '';
       expect(header).toMatch(timingPattern);
       expect(header).not.toContain('auth_db');
@@ -192,6 +215,11 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(unauthenticated.status).toBe(401);
     expect(unauthenticated.headers.get('server-timing')).toBeNull();
     expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
+    for (const path of ['/v1/endpoints', '/v1/installation/status', '/v1/analytics/report']) {
+      const response = await worker.fetch(new Request(`https://dashboard.example.com${path}`), env);
+      expect(response.status).toBe(401);
+      expect(response.headers.get('server-timing')).toBeNull();
+    }
   });
 
   it('accumulates repeated Better Auth session and user D1 read timings', async () => {
