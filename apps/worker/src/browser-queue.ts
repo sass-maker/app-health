@@ -23,9 +23,14 @@ export async function lookupBrowserStagingReceipts(
   if (!env.BROWSER_ARCHIVE) throw new Error('browser archive binding missing');
   const groups = new Map<string, BrowserArchiveBatchIdentity[]>();
   for (const batch of batches) {
-    const shard = await browserArchiveShard({ ...batch, workspace } as CollectedBrowserBatch);
+    const identity = {
+      app_id: batch.app_id,
+      environment_id: batch.environment_id,
+      batch_id: batch.batch_id,
+    };
+    const shard = await browserArchiveShard({ ...identity, workspace } as CollectedBrowserBatch);
     const group = groups.get(shard) ?? [];
-    group.push(batch);
+    group.push(identity);
     groups.set(shard, group);
   }
   const staged: BrowserArchiveBatchIdentity[] = [];

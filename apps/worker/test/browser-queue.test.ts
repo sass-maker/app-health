@@ -83,6 +83,14 @@ describe('durable browser queue staging', () => {
     expect(getByName).toHaveBeenCalledTimes(expectedShards.size);
     expect(lookupStaged).toHaveBeenCalledTimes(expectedShards.size);
     expect(result.staged.length + result.missing).toBe(2);
+    expect(
+      lookupStaged.mock.calls.flatMap(([group]) =>
+        group.map((identity) => Object.keys(identity).sort()),
+      ),
+    ).toEqual([
+      ['app_id', 'batch_id', 'environment_id'],
+      ['app_id', 'batch_id', 'environment_id'],
+    ]);
     expect(JSON.stringify(result)).not.toContain('visitor_hash');
     await expect(
       lookupBrowserStagingReceipts('workspace', Array(1001).fill(first.body), {
