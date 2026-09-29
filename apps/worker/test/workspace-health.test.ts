@@ -6,11 +6,11 @@ import { workspaceEndpointState } from '../src/workspace-health.js';
 describe('workspace Watchtower health', () => {
   it('classifies setup and freshness states without inventing traffic', () => {
     const now = 1_800_000_000_000;
-    expect(workspaceEndpointState(false, null, null, false, now)).toBe('unconfigured');
-    expect(workspaceEndpointState(false, null, null, true, now)).toBe('waiting');
-    expect(workspaceEndpointState(true, now - 1_000, now - 1_000, false, now)).toBe('revoked');
-    expect(workspaceEndpointState(true, now - 1_000, now - 16 * 60_000, true, now)).toBe('stale');
-    expect(workspaceEndpointState(true, now - 1_000, now - 60_000, true, now)).toBe('connected');
+    expect(workspaceEndpointState(null, null, false, now)).toBe('unconfigured');
+    expect(workspaceEndpointState(null, null, true, now)).toBe('waiting');
+    expect(workspaceEndpointState(now - 1_000, now - 1_000, false, now)).toBe('revoked');
+    expect(workspaceEndpointState(now - 1_000, now - 16 * 60_000, true, now)).toBe('stale');
+    expect(workspaceEndpointState(now - 1_000, now - 60_000, true, now)).toBe('connected');
   });
 
   it('aggregates the local portfolio into one validated 24-hour response', async () => {
