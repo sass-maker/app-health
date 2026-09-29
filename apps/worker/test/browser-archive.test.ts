@@ -48,8 +48,19 @@ export class TestArchive extends BrowserArchive {
   async inspect() {
     return { ...this.status(), alarm: await this.testCtx.storage.getAlarm(),
       segments: this.testCtx.storage.sql.exec('SELECT * FROM archive_segments').toArray(),
+      dayIndex: this.testCtx.storage.sql.exec('SELECT * FROM archive_day_segments ORDER BY event_day, object_key').toArray(),
+      batchIndex: this.testCtx.storage.sql.exec('SELECT * FROM archive_batch_segments ORDER BY app_id, environment_id, batch_id').toArray(),
       expiry: this.testCtx.storage.sql.exec('SELECT MIN(expires_at) AS value FROM archive_seen').one().value,
       lastPutCreated: await this.testCtx.storage.get('lastPutCreated') };
+  }
+  listDay(value) { return this.archiveSegmentsForEventDay(value.day, value.cursor ?? null, value.limit); }
+  lookupBatch(value) { return this.archiveSegmentForBatch(value.app_id, value.environment_id, value.batch_id); }
+  expireDayIndex() { this.testCtx.storage.sql.exec('UPDATE archive_day_segments SET indexed_at = 1'); }
+  expireBatchIndex() { this.testCtx.storage.sql.exec('UPDATE archive_batch_segments SET indexed_at = 1'); }
+  insertConcurrentDaySegment(day) {
+    this.testCtx.storage.sql.exec(
+      'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+      day, 'concurrent-segment', '!concurrent-after-first-page', Date.now());
   }
   expire() { this.testCtx.storage.sql.exec('UPDATE archive_seen SET expires_at = 1 WHERE expires_at IS NOT NULL'); }
   fillLedger() {
@@ -267,6 +278,104 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     ).toBe(503);
   });
 
+  it('indexes event India days only after verified upload, including late and multi-day facts', async () => {
+    app = await harness();
+    const first = Date.UTC(2026, 0, 1, 18, 29);
+    const second = Date.UTC(2026, 0, 1, 18, 30);
+    const multiDay = {
+      ...batch('multi-day'),
+      events: [
+        { ...batch('multi-day').events[0], timestamp: first },
+        {
+          ...batch('multi-day').events[0],
+          event_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+          timestamp: second,
+        },
+      ],
+    };
+    expect((await app.call('stage', [multiDay])).status).toBe(200);
+    expect((await app.call('listDay', { day: '2026-01-01', limit: 10 })).body.segments).toEqual([]);
+    expect(
+      (
+        await app.call('lookupBatch', {
+          app_id: 'app-one',
+          environment_id: 'production',
+          batch_id: 'multi-day',
+        })
+      ).body,
+    ).toBeNull();
+    await app.call('fault', 'before');
+    expect((await app.call('flush')).status).toBe(503);
+    expect((await app.call('listDay', { day: '2026-01-01', limit: 10 })).body.segments).toEqual([]);
+    await app.call('fault', 'none');
+    expect((await app.call('flush')).status).toBe(200);
+    const dayOne = (await app.call('listDay', { day: '2026-01-01', limit: 10 })).body;
+    const dayTwo = (await app.call('listDay', { day: '2026-01-02', limit: 10 })).body;
+    expect(dayOne.segments).toHaveLength(1);
+    expect(dayTwo.segments).toEqual(dayOne.segments);
+    expect(
+      (
+        await app.call('lookupBatch', {
+          app_id: 'app-one',
+          environment_id: 'production',
+          batch_id: 'multi-day',
+        })
+      ).body,
+    ).toMatchObject((dayOne.segments as Array<{ segment_id: string; object_key: string }>)[0]);
+    expect((dayOne.segments as Array<{ object_key: string }>)[0]!.object_key).toMatch(
+      /^browser-v2\/\d{4}\/\d{2}\/\d{2}\//,
+    );
+  });
+
+  it('paginates index reads at a hard limit and expires old lookup rows', async () => {
+    app = await harness();
+    const lateTimestamp = Date.UTC(2026, 0, 1, 18, 30);
+    for (const id of ['one', 'two']) {
+      const source = batch(id);
+      source.events[0]!.timestamp = lateTimestamp;
+      await app.call('stage', [source]);
+      await app.call('flush');
+    }
+    const first = (await app.call('listDay', { day: '2026-01-02', limit: 1 })).body;
+    expect(first.segments).toHaveLength(1);
+    expect(first.next_cursor).toEqual({
+      event_day: '2026-01-02',
+      object_key: (first.segments as Array<{ object_key: string }>)[0]!.object_key,
+      snapshot_sequence: first.snapshot_sequence,
+    });
+    await app.call('insertConcurrentDaySegment', '2026-01-02');
+    const second = (
+      await app.call('listDay', { day: '2026-01-02', cursor: first.next_cursor, limit: 1 })
+    ).body;
+    expect(second.segments).toHaveLength(1);
+    expect(second.segments).not.toContainEqual({
+      segment_id: 'concurrent-segment',
+      object_key: '!concurrent-after-first-page',
+    });
+    expect(second.snapshot_sequence).toBe(first.snapshot_sequence);
+    expect(second.next_cursor).toBeNull();
+    const refreshed = (await app.call('listDay', { day: '2026-01-02', limit: 1 })).body;
+    expect(Number(refreshed.snapshot_sequence)).toBeGreaterThan(Number(first.snapshot_sequence));
+    expect(refreshed.segments).toEqual([
+      { segment_id: 'concurrent-segment', object_key: '!concurrent-after-first-page' },
+    ]);
+    expect((await app.call('listDay', { day: '2026-01-02', limit: 101 })).status).toBe(503);
+    expect((await app.call('listDay', { day: '2026-02-30', limit: 1 })).status).toBe(503);
+    await app.call('expireDayIndex');
+    expect((await app.call('listDay', { day: '2026-01-02', limit: 1 })).body.segments).toEqual([]);
+    expect((await app.call('inspect')).body.dayIndex).toEqual([]);
+    await app.call('expireBatchIndex');
+    expect(
+      (
+        await app.call('lookupBatch', {
+          app_id: 'app-one',
+          environment_id: 'production',
+          batch_id: 'one',
+        })
+      ).body,
+    ).toBeNull();
+  });
+
   it('preserves sealed membership across upload failure and process restart', async () => {
     app = await harness();
     await app.call('stage', [batch('one')]);
@@ -324,6 +433,8 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     const state = (await app.call('inspect')).body;
     expect(state).toMatchObject({ pending_batches: 0, ledger_batches: 1, segments: [] });
     expect(state.lastPutCreated).toBe(false);
+    expect(state.dayIndex).toHaveLength(1);
+    expect(state.batchIndex).toHaveLength(1);
     expect(state.expiry).toBeGreaterThan(Date.now() + 30 * 86_400_000);
     expect((await app.call('stage', [batch('one')])).body.duplicates).toBe(1);
     await app.call('expire');

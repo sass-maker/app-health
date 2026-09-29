@@ -17,6 +17,10 @@ const FLUSH_DELAY = 60_000;
 const DEDUPE_RETENTION = 31 * 86_400_000;
 const PROJECTION_BATCHES = 50;
 const PROJECTION_MAX_BACKOFF = 60 * 60_000;
+const ARCHIVE_DAY_INDEX_RETENTION_MS = 35 * 86_400_000;
+const ARCHIVE_DAY_INDEX_PRUNE_BATCH = 1000;
+const MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE = 100;
+const INDIA_OFFSET_MS = 5 * 60 * 60_000 + 30 * 60_000;
 
 export interface BrowserArchiveEnvironment {
   BROWSER_HISTORY: Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>;
@@ -52,6 +56,48 @@ type ArchiveStats = {
   pending_bytes: number;
   ledger_batches: number;
 };
+export type ArchiveDayIndexCursor = {
+  event_day: string;
+  object_key: string;
+  snapshot_sequence: number;
+};
+export type ArchiveDayIndexPage = {
+  /** Segment references observed in this shard; this is not a coverage receipt. */
+  segments: Array<{ segment_id: string; object_key: string }>;
+  next_cursor: ArchiveDayIndexCursor | null;
+  /** Monotonic index high-water captured by the first page of this listing. */
+  snapshot_sequence: number;
+};
+type ArchiveBatchIndexEntry = { segment_id: string; object_key: string };
+
+function eventIndiaDay(timestamp: number): string {
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0)
+    throw new Error('Invalid browser event timestamp');
+  return new Date(timestamp + INDIA_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function validIndiaDay(day: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  if (!match) return false;
+  const [year, month, date] = match.slice(1).map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, date));
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === date
+  );
+}
+
+function validDayIndexCursor(day: string, cursor: ArchiveDayIndexCursor | null): boolean {
+  return (
+    cursor === null ||
+    (cursor.event_day === day &&
+      typeof cursor.object_key === 'string' &&
+      cursor.object_key.length <= 1024 &&
+      Number.isSafeInteger(cursor.snapshot_sequence) &&
+      cursor.snapshot_sequence >= 0)
+  );
+}
 
 async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch> {
   const names = [batch.workspace, batch.app_id, batch.environment_id, batch.batch_id];
@@ -135,6 +181,18 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
           pending_bytes = pending_bytes - OLD.bytes WHERE id = 1;
       END;
       CREATE TABLE IF NOT EXISTS archive_segments (id TEXT PRIMARY KEY, object_key TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS archive_day_segments (
+        index_seq INTEGER PRIMARY KEY AUTOINCREMENT, event_day TEXT NOT NULL,
+        segment_id TEXT NOT NULL, object_key TEXT NOT NULL, indexed_at INTEGER NOT NULL,
+        UNIQUE (event_day, object_key)
+      );
+      CREATE INDEX IF NOT EXISTS archive_day_segments_expiry ON archive_day_segments(indexed_at);
+      CREATE TABLE IF NOT EXISTS archive_batch_segments (
+        app_id TEXT NOT NULL, environment_id TEXT NOT NULL, batch_id TEXT NOT NULL,
+        segment_id TEXT NOT NULL, object_key TEXT NOT NULL, indexed_at INTEGER NOT NULL,
+        PRIMARY KEY (app_id, environment_id, batch_id)
+      );
+      CREATE INDEX IF NOT EXISTS archive_batch_segments_expiry ON archive_batch_segments(indexed_at);
       CREATE TABLE IF NOT EXISTS archive_counts (
         id INTEGER PRIMARY KEY CHECK (id = 1), pending_batches INTEGER NOT NULL,
         pending_bytes INTEGER NOT NULL, ledger_batches INTEGER NOT NULL
@@ -250,6 +308,88 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       .one();
   }
 
+  /** Return bounded segment references for one event day in this archive shard.
+   * A missing or empty page does not imply that the day is fully archived.
+   */
+  archiveSegmentsForEventDay(
+    day: string,
+    cursor: ArchiveDayIndexCursor | null = null,
+    limit = MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE,
+  ): ArchiveDayIndexPage {
+    if (!validIndiaDay(day)) throw new Error('Invalid India calendar day');
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE)
+      throw new Error('Archive day index page exceeds limit');
+    if (!validDayIndexCursor(day, cursor)) throw new Error('Invalid archive day index cursor');
+    const now = Date.now();
+    const snapshotSequence =
+      cursor?.snapshot_sequence ??
+      this.ctx.storage.sql
+        .exec<{ high_water: number }>(
+          'SELECT COALESCE(MAX(index_seq), 0) AS high_water FROM archive_day_segments WHERE event_day = ? AND indexed_at > ?',
+          day,
+          now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        )
+        .one().high_water;
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_day_segments WHERE rowid IN (SELECT rowid FROM archive_day_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
+    const rows = this.ctx.storage.sql
+      .exec<{ segment_id: string; object_key: string }>(
+        `SELECT segment_id, object_key FROM archive_day_segments
+         WHERE event_day = ? AND index_seq <= ? AND indexed_at > ? AND (? IS NULL OR object_key > ?)
+         ORDER BY object_key LIMIT ?`,
+        day,
+        snapshotSequence,
+        now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        cursor?.object_key ?? null,
+        cursor?.object_key ?? null,
+        limit + 1,
+      )
+      .toArray();
+    const hasMore = rows.length > limit;
+    const segments = rows.slice(0, limit);
+    return {
+      segments,
+      next_cursor:
+        hasMore && segments.length
+          ? {
+              event_day: day,
+              object_key: segments[segments.length - 1]!.object_key,
+              snapshot_sequence: snapshotSequence,
+            }
+          : null,
+      snapshot_sequence: snapshotSequence,
+    };
+  }
+
+  /** A successful archive receipt candidate for one batch identity in this shard. */
+  archiveSegmentForBatch(
+    appId: string,
+    environmentId: string,
+    batchId: string,
+  ): ArchiveBatchIndexEntry | null {
+    if ([appId, environmentId, batchId].some((value) => !value || value.length > 200))
+      throw new Error('Invalid archive batch identity');
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_batch_segments WHERE rowid IN (SELECT rowid FROM archive_batch_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
+    const row = this.ctx.storage.sql
+      .exec<{ segment_id: string; object_key: string }>(
+        `SELECT segment_id, object_key FROM archive_batch_segments
+         WHERE app_id = ? AND environment_id = ? AND batch_id = ? AND indexed_at > ?`,
+        appId,
+        environmentId,
+        batchId,
+        Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      )
+      .toArray()[0];
+    return row ?? null;
+  }
+
   private prune(): void {
     this.ctx.storage.sql.exec(
       'DELETE FROM archive_seen WHERE identity IN (SELECT seen.identity FROM archive_seen seen LEFT JOIN projection_pending projection ON projection.identity = seen.identity WHERE seen.expires_at <= ? AND projection.identity IS NULL ORDER BY seen.expires_at LIMIT 1000)',
@@ -344,7 +484,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       // R2 requires known-length bodies; the sealed segment is capped at 1 MiB.
       const compressed = await new Response(gzip).arrayBuffer();
       await persistArchiveSegment(this.env.BROWSER_HISTORY, segment.object_key, body, compressed);
-      this.ctx.storage.transactionSync(() => this.complete(segment.id));
+      this.ctx.storage.transactionSync(() => this.complete(segment.id, rows));
     } catch (error) {
       this.ctx.storage.sql.exec(
         'UPDATE archive_meta SET retry_after = ? WHERE id = 1',
@@ -357,7 +497,48 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     }
   }
 
-  private complete(segment: string): void {
+  private complete(segment: string, rows: PendingRow[]): void {
+    const now = Date.now();
+    const days = new Set<string>();
+    const batches: CollectedBrowserBatch[] = [];
+    for (const row of rows) {
+      const batch = JSON.parse(row.payload) as CollectedBrowserBatch;
+      batches.push(batch);
+      for (const event of batch.events) days.add(eventIndiaDay(event.timestamp));
+    }
+    const objectKey = this.ctx.storage.sql
+      .exec<{ object_key: string }>('SELECT object_key FROM archive_segments WHERE id = ?', segment)
+      .one().object_key;
+    for (const day of days) {
+      this.ctx.storage.sql.exec(
+        'INSERT OR IGNORE INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+        day,
+        segment,
+        objectKey,
+        now,
+      );
+    }
+    for (const batch of batches) {
+      this.ctx.storage.sql.exec(
+        'INSERT OR IGNORE INTO archive_batch_segments (app_id, environment_id, batch_id, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?, ?, ?)',
+        batch.app_id,
+        batch.environment_id,
+        batch.batch_id,
+        segment,
+        objectKey,
+        now,
+      );
+    }
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_day_segments WHERE rowid IN (SELECT rowid FROM archive_day_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_batch_segments WHERE rowid IN (SELECT rowid FROM archive_batch_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
     this.ctx.storage.sql.exec(
       'UPDATE archive_seen SET expires_at = ? WHERE identity IN (SELECT identity FROM archive_pending WHERE segment_id = ?)',
       Date.now() + DEDUPE_RETENTION,
