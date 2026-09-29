@@ -32,7 +32,6 @@ interface EnvironmentMetadata {
   analytics_enabled: number | null;
   analytics_first_received_at: number | null;
   analytics_last_received_at: number | null;
-  endpoints_enabled: number | null;
   endpoints_first_received_at: number | null;
   endpoints_last_received_at: number | null;
 }
@@ -48,14 +47,13 @@ interface WorkspaceMetricRow extends Record<string, unknown> {
 }
 
 export function workspaceEndpointState(
-  enabled: boolean,
   firstReceivedAt: number | null,
   lastReceivedAt: number | null,
   hasActiveKey: boolean,
   now: number,
 ): WorkspaceEndpointStateV1 {
   if (!hasActiveKey && firstReceivedAt !== null) return 'revoked';
-  if (!enabled && firstReceivedAt === null && !hasActiveKey) return 'unconfigured';
+  if (!hasActiveKey) return 'unconfigured';
   if (lastReceivedAt === null) return 'waiting';
   return now - lastReceivedAt > STALE_THRESHOLD_MS ? 'stale' : 'connected';
 }
@@ -136,7 +134,6 @@ export function buildWorkspaceHealthSummary(
       ),
       endpoints: {
         state: workspaceEndpointState(
-          Boolean(row.endpoints_enabled),
           row.endpoints_first_received_at,
           row.endpoints_last_received_at,
           Boolean(row.has_active_key),
@@ -208,7 +205,6 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
           ac.enabled AS analytics_enabled,
           ac.first_received_at AS analytics_first_received_at,
           ac.last_received_at AS analytics_last_received_at,
-          ec.enabled AS endpoints_enabled,
           ec.first_received_at AS endpoints_first_received_at,
           ec.last_received_at AS endpoints_last_received_at
         FROM apps a
@@ -315,7 +311,6 @@ export function memoryEnvironmentMetadata(input: {
     analytics_enabled: analytics?.enabled ? 1 : 0,
     analytics_first_received_at: analytics?.first_received_at ?? null,
     analytics_last_received_at: analytics?.last_received_at ?? null,
-    endpoints_enabled: endpoints?.enabled ? 1 : 0,
     endpoints_first_received_at: endpoints?.first_received_at ?? null,
     endpoints_last_received_at: endpoints?.last_received_at ?? null,
   };
