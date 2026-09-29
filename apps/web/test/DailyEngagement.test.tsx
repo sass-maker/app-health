@@ -132,8 +132,8 @@ it('keeps unknown separate from zero and flags incomplete 55-product scope', asy
   expect(screen.getByText('2/55 imported')).toBeTruthy();
   const summary = screen.getByLabelText('Daily evidence summary');
   expect(within(summary).getAllByText('1')).toHaveLength(2);
-  expect(within(summary).getByText('product with browser visitor evidence')).toBeTruthy();
-  expect(within(summary).getByText('product with measured primary actions')).toBeTruthy();
+  expect(within(summary).getByText('product with a reportable browser count')).toBeTruthy();
+  expect(within(summary).getByText('product with reportable primary action counts')).toBeTruthy();
   expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('Feedback: 0');
   expect(screen.getByLabelText('Daily evidence summary')).toHaveTextContent('Waitlist: 2');
   expect(screen.getByText(/cannot show products that have not been imported/)).toBeTruthy();
@@ -186,8 +186,8 @@ it('opens a source summary on its measured product rows and restores the full in
   render(<DailyEngagement ownerToken="owner" />);
   const table = await screen.findByRole('table');
 
-  fireEvent.click(screen.getByRole('button', { name: /Visited/ }));
-  expect(screen.getByText(/Showing 1 of 2 products with browser visitor evidence/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: /Visitor counts available/ }));
+  expect(screen.getByText(/Showing 1 of 2 products with reportable browser counts/)).toBeTruthy();
   expect(within(table).getByText('atlas')).toBeTruthy();
   expect(within(table).queryByText('beacon')).toBeNull();
 

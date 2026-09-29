@@ -127,11 +127,13 @@ for (const width of [390, 768, 1440]) {
     await expect(page.getByText('55/55 imported')).toBeVisible();
     const report = page.locator('#daily-engagement');
     await expect(
-      report.getByRole('button', { name: /Visited 32 products with browser visitor evidence/ }),
+      report.getByRole('button', {
+        name: /Visitor counts available 32 products with a reportable browser count/,
+      }),
     ).toBeVisible();
     await expect(
       report.getByRole('button', {
-        name: /Chose an action 35 products with measured primary actions/,
+        name: /Action counts available 35 products with reportable primary action counts/,
       }),
     ).toBeVisible();
     await expect(report.getByText('Feedback: 8')).toBeVisible();
@@ -207,9 +209,9 @@ for (const width of [390, 768, 1440]) {
       path: fileURLToPath(new URL(`after-${width}.jpg`, evidence)),
     });
 
-    await report.getByRole('button', { name: /Chose an action/ }).click();
+    await report.getByRole('button', { name: /Action counts available/ }).click();
     await expect(
-      report.getByText(/Showing 35 of 55 products with measured primary actions/),
+      report.getByText(/Showing 35 of 55 products with reportable primary action counts/),
     ).toBeVisible();
     await expect(report.getByText(/Unknown sources remain in the full inventory/)).toBeVisible();
     await report.getByRole('button', { name: 'Show all products' }).click();
