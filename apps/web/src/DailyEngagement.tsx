@@ -177,12 +177,12 @@ function ReportSummary({
           onClick={() => onSourceView(sourceView === 'visitors' ? 'all' : 'visitors')}
           className="min-h-28 rounded-lg border border-sky-500/20 bg-sky-500/5 p-4 text-left transition-colors hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <p className="text-xs font-medium text-muted-foreground">Visited</p>
+          <p className="text-xs font-medium text-muted-foreground">Visitor counts available</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-sky-600 dark:text-sky-300">
             {visitors}
           </p>
           <p className="text-xs text-muted-foreground">
-            {visitors === 1 ? 'product' : 'products'} with browser visitor evidence
+            {visitors === 1 ? 'product' : 'products'} with a reportable browser count
           </p>
         </button>
         <button
@@ -191,12 +191,12 @@ function ReportSummary({
           onClick={() => onSourceView(sourceView === 'actions' ? 'all' : 'actions')}
           className="min-h-28 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-left transition-colors hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <p className="text-xs font-medium text-muted-foreground">Chose an action</p>
+          <p className="text-xs font-medium text-muted-foreground">Action counts available</p>
           <p className="mt-2 text-2xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
             {actions}
           </p>
           <p className="text-xs text-muted-foreground">
-            {actions === 1 ? 'product' : 'products'} with measured primary actions
+            {actions === 1 ? 'product' : 'products'} with reportable primary action counts
           </p>
         </button>
         <button
@@ -452,8 +452,8 @@ function ReportResults({
   );
   const sourceViewLabel = {
     all: 'all products',
-    visitors: 'products with browser visitor evidence',
-    actions: 'products with measured primary actions',
+    visitors: 'products with reportable browser counts',
+    actions: 'products with reportable primary action counts',
     responses: 'products with stored response receipts',
   }[sourceView];
   return (
