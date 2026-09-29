@@ -29,8 +29,10 @@ export type BrowserVisitorReceiptPage = {
   receipts: Array<
     BrowserVisitorReceiptScope & {
       fingerprint: string;
-      accepted_at: number;
-      event_count: number;
+      accepted_at: number | null;
+      event_count: number | null;
+      facts_digest_version: number | null;
+      facts_digest: string | null;
     }
   >;
   next_cursor: BrowserVisitorReceiptCursor | null;
@@ -293,7 +295,8 @@ export async function readBrowserVisitorReceiptPage(
          FROM json_each(?)
        )
        SELECT receipt.app_id, receipt.environment_id, receipt.batch_id,
-              receipt.fingerprint, receipt.accepted_at, receipt.event_count
+              receipt.fingerprint, receipt.accepted_at, receipt.event_count,
+              receipt.facts_digest_version, receipt.facts_digest
        FROM requested
        JOIN browser_visitor_receipt_days day_receipt
          ON day_receipt.workspace_id = ?
@@ -317,14 +320,12 @@ export async function readBrowserVisitorReceiptPage(
       fingerprint: string;
       accepted_at: number | null;
       event_count: number | null;
+      facts_digest_version: number | null;
+      facts_digest: string | null;
     }>();
   if (result.results.length > limit)
     return {
-      receipts: result.results.slice(0, limit).map((row) => {
-        if (row.accepted_at === null || row.event_count === null)
-          throw new Error('Browser receipt is missing reconciliation metadata');
-        return { ...row, accepted_at: row.accepted_at, event_count: row.event_count };
-      }),
+      receipts: result.results.slice(0, limit),
       next_cursor: (() => {
         const last = result.results[limit - 1];
         return last
@@ -332,11 +333,7 @@ export async function readBrowserVisitorReceiptPage(
           : null;
       })(),
     };
-  const receipts = result.results.map((row) => {
-    if (row.accepted_at === null || row.event_count === null)
-      throw new Error('Browser receipt is missing reconciliation metadata');
-    return { ...row, accepted_at: row.accepted_at, event_count: row.event_count };
-  });
+  const receipts = result.results;
   return { receipts, next_cursor: null };
 }
 

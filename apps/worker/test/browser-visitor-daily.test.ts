@@ -391,6 +391,8 @@ describe('exact browser visitor daily ledger', () => {
       accepted_at: toMs('2026-09-30T00:00:00Z'),
       event_count: 1,
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+      facts_digest_version: 1,
+      facts_digest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(first.receipts[0]).not.toHaveProperty('visitor_hash');
     const second = await readBrowserVisitorReceiptPage(
@@ -413,6 +415,35 @@ describe('exact browser visitor daily ledger', () => {
         MAX_BROWSER_VISITOR_RECEIPT_PAGE_SIZE + 1,
       ),
     ).rejects.toThrow('bounded query limit');
+  });
+
+  it('exposes legacy receipt metadata as null so offline audits can report it incomplete', async () => {
+    const item = batch({ batch_id: 'legacy-page-receipt' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    await db
+      .prepare(
+        `UPDATE browser_visitor_batch_receipts
+         SET accepted_at = NULL, event_count = NULL, facts_digest_version = NULL, facts_digest = NULL
+         WHERE batch_id = ?`,
+      )
+      .bind(item.batch_id)
+      .run();
+
+    const page = await readBrowserVisitorReceiptPage(
+      db,
+      firstApp.workspace,
+      [firstApp],
+      '2026-09-30',
+    );
+    expect(page.receipts).toMatchObject([
+      {
+        batch_id: item.batch_id,
+        accepted_at: null,
+        event_count: null,
+        facts_digest_version: null,
+        facts_digest: null,
+      },
+    ]);
   });
 
   it('does not invent a visitor for a missing hash and rejects a reused batch id with changed facts', async () => {

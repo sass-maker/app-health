@@ -136,6 +136,30 @@ projections independently of archival. A crash after append but before clearing
 the outbox can still duplicate an analytical projection. Replay/export and reconciliation tools are not implemented yet. This is
 not exactly-once end-to-end analytics.
 
+### Offline receipt-to-archive comparison prerequisite
+
+`readBrowserVisitorReceiptPage` is the bounded D1 selector for one India event
+day. It pages in stable app/environment/batch order, accepts at most 128 scopes
+and 500 rows per page, and returns the v1 facts digest alongside the receipt;
+legacy null digests stay null. `reconcileBrowserArchiveDay` compares up to
+10,000 selected D1 receipts and 10,000 caller-supplied archived batch facts. It
+recomputes each archived fact digest and reports matches, missing archive facts,
+legacy receipts, missing archive digests, mismatches, duplicate facts, and
+archive facts without a D1 receipt. Its overall result remains incomplete when
+the R2 lookup is incomplete, D1 or R2 retention is expired/unknown, or Queue
+and DLQ reconciliation are pending/unverified. This is a pure offline
+comparison prerequisite: callers must verify object bytes/manifests and must
+include archive candidates with the same batch identity even when changed event
+timestamps place them outside the selected day. The result must not be
+interpreted as a production coverage watermark.
+
+There is not yet a durable day-to-R2 index. R2 segment keys use upload date,
+while manifests carry min/max event timestamps, so resolving a complete event
+day still needs a bounded, paged manifest inventory (or a durable event-day
+index) that includes late-delivered batches. Queue/DLQ delivery and provider
+retention evidence also remain external inputs. No production watermark or
+Daily briefing fallback is enabled by this comparison code.
+
 New segments also carry the versioned archive manifest in R2 custom metadata,
 committed atomically with the gzip bytes. It records the compressed-content
 SHA-256, batch and event counts, actual UTF-8/compressed byte lengths, workspace,
