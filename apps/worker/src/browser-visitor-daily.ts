@@ -239,12 +239,17 @@ export async function acceptBrowserVisitorBatch(
         facts_digest: string | null;
       }
     | undefined;
-  const legacyReceipt = receipt?.accepted_at === null && receipt.event_count === null;
+  const legacyUnverifiedReceipt =
+    receipt?.facts_digest_version === null && receipt.facts_digest === null;
+  const matchingLegacyReceipt =
+    legacyUnverifiedReceipt &&
+    receipt.fingerprint === fingerprint &&
+    (receipt.event_count === null || receipt.event_count === batch.events.length);
   const indexedReceipt =
     receipt?.accepted_at !== null && receipt?.event_count === batch.events.length;
   if (
     receipt?.fingerprint !== fingerprint ||
-    (!legacyReceipt &&
+    (!matchingLegacyReceipt &&
       (!indexedReceipt ||
         receipt.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION ||
         receipt.facts_digest !== factsDigest))
