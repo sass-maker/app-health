@@ -90,8 +90,33 @@ count as acknowledgements. Events can still be lost if the page closes offline.
 `POST /v1/browser` bounds the body to 32 KiB and 25 events, checks timestamps,
 validates the public key and origin, and limits each key to 6,000 event/heartbeat
 units per minute. Production awaits Queue acceptance before returning 202 for
-non-empty batches. An unavailable presence service does not undo accepted
-events. Heartbeats never enter the queue or archive.
+non-empty batches, then commits recognized visitor/day facts and a scoped batch
+receipt to D1 before returning 202. A D1 failure returns 503 even if Queue
+accepted the message; that attempt is not represented in the exact set. Batches
+without a visitor hash do not create a visitor or a D1 visitor receipt.
+Heartbeats never enter the queue or archive.
+
+Migration `0019_browser_visitor_days.sql` adds one row per scoped visitor hash,
+environment, and India calendar day, plus bounded batch receipts. Event dates
+use `[start, end)` UTC bounds for Asia/Kolkata days, so late arrivals repair the
+original day. The provisional retention is 35 days after day end and receipts
+expire 35 days after acceptance; scheduled cleanup deletes at most 10,000 rows
+from each table per hourly run and logs whether an indexed backlog remains.
+Exact daily reads use one grouped D1 query capped at 128 app/environment scopes.
+Confirm the 35-day product lookback and D1 row growth before production release;
+the time bound is finite, but row volume and cost still scale with traffic.
+
+The exact reader returns Unknown until workspace coverage metadata explicitly
+records provider cutover, a reconciled-through watermark, and verification. A
+complete day must start at least 60 seconds after cutover, be at least 24 hours
+past day end, fall within retained coverage, and be within the reconciliation
+watermark. These fields are not inferred from the first D1 write and remain
+unset until an operator records evidence for the cutover and reconciliation.
+Before using exact counts in the Daily briefing, verify 100% provider cutover, let the full
+24-hour event-lateness window close, replay/reconcile Queue and DLQ deliveries,
+and compare with unsampled Analytics Engine groups and archived facts. The
+Daily briefing remains on its existing Analytics Engine path; this D1 ledger
+does not claim historical backfill or current production completeness.
 
 Queue consumers route batches to one of 16 stable per-workspace archive shards.
 Each shard durably stages accepted batches in SQLite before the Queue message is

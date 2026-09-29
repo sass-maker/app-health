@@ -2,6 +2,7 @@ import { readEndpointBuckets } from './endpoint-read.js';
 import { D1EndpointWriter } from './endpoint-durable.js';
 import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
+import { cleanupBrowserVisitorDays } from './browser-visitor-daily.js';
 import {
   selfAnalyticsConfig,
   scheduleProductMilestone,
@@ -987,6 +988,18 @@ const unmonitoredWorker = {
     const control = new D1ControlPlane(env.DB);
     await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);
     await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());
+    try {
+      const visitorRetention = await cleanupBrowserVisitorDays(env.DB, Date.now(), 10_000);
+      if (visitorRetention.backlog.visitors || visitorRetention.backlog.receipts)
+        console.warn(
+          JSON.stringify({
+            event: 'browser_visitor_retention_backlog',
+            ...visitorRetention.backlog,
+          }),
+        );
+    } catch {
+      console.warn(JSON.stringify({ event: 'browser_visitor_retention_failed' }));
+    }
     await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupLogsExpired(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupBrowserQuotaExpired(Date.now() - 60 * 60 * 1000);

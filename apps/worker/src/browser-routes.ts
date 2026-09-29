@@ -18,6 +18,7 @@ import {
 } from './browser-analytics.js';
 import { queryBrowserReport } from './browser-reports.js';
 import { telemetryScope } from './analytics-engine.js';
+import { acceptBrowserVisitorBatch } from './browser-visitor-daily.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import type { SharedAnalytics } from '@app-health/contracts';
 import {
@@ -142,12 +143,29 @@ export async function acceptBrowser(
     response = json(202, { accepted: batch.events.length, presence: !!activeSession });
   } else response = await enqueueBrowser(durableBatch, activeSession, env);
   if (response.status === 202 && durableBatch.events.length) {
-    await repos.capabilities?.recordCapability(
-      durableBatch.app_id,
-      durableBatch.environment_id,
-      'analytics',
-      durableBatch.received_at,
-    );
+    if (!local && durableBatch.visitor_hash) {
+      try {
+        if (!env.DB) throw new Error('Browser visitor ledger unavailable');
+        await acceptBrowserVisitorBatch(env.DB, durableBatch, durableBatch.received_at);
+      } catch {
+        // Queue.send alone does not qualify as a 202: exact acceptance must also
+        // commit before returning success. The queue may contain this failed
+        // attempt; it is not represented in the exact ledger here.
+        return json(503, { error: 'browser analytics persistence unavailable' });
+      }
+    }
+    try {
+      await repos.capabilities?.recordCapability(
+        durableBatch.app_id,
+        durableBatch.environment_id,
+        'analytics',
+        durableBatch.received_at,
+      );
+    } catch {
+      // Capability inventory is auxiliary. Once Queue and the exact ledger
+      // commit, an inventory outage must not turn accepted telemetry into 503.
+      console.warn(JSON.stringify({ event: 'browser_capability_record_failed' }));
+    }
   }
   return response;
 }
