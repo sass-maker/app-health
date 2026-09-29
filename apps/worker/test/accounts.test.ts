@@ -55,6 +55,7 @@ describe('Google account boundary with real D1 SQL', () => {
     for (const file of [
       '0019_browser_visitor_days.sql',
       '0020_browser_receipt_reconciliation.sql',
+      '0021_browser_event_facts_digest.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql

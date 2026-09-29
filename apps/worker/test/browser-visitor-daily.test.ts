@@ -5,6 +5,7 @@ import { Miniflare } from 'miniflare';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
 import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { acceptBrowser } from '../src/browser-routes.js';
+import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import type { AppHealthRepositories } from '../src/repository.js';
 import {
   acceptBrowserVisitorBatch,
@@ -82,6 +83,12 @@ beforeAll(async () => {
   await apply(
     await readFile(
       new URL('../migrations/0020_browser_receipt_reconciliation.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  await apply(
+    await readFile(
+      new URL('../migrations/0021_browser_event_facts_digest.sql', import.meta.url),
       'utf8',
     ),
   );
@@ -184,7 +191,7 @@ describe('exact browser visitor daily ledger', () => {
     expect(
       await db
         .prepare(
-          `SELECT batch_id, accepted_at, event_count, fingerprint
+          `SELECT batch_id, accepted_at, event_count, fingerprint, facts_digest_version, facts_digest
            FROM browser_visitor_batch_receipts WHERE batch_id = ?`,
         )
         .bind(item.batch_id)
@@ -196,6 +203,8 @@ describe('exact browser visitor daily ledger', () => {
           accepted_at: receivedAt,
           event_count: 2,
           fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/),
+          facts_digest_version: 1,
+          facts_digest: expect.stringMatching(/^[a-f0-9]{64}$/),
         },
       ],
     });
@@ -215,7 +224,8 @@ describe('exact browser visitor daily ledger', () => {
     await db.batch([
       db
         .prepare(
-          `UPDATE browser_visitor_batch_receipts SET accepted_at = NULL, event_count = NULL
+          `UPDATE browser_visitor_batch_receipts
+           SET accepted_at = NULL, event_count = NULL, facts_digest_version = NULL, facts_digest = NULL
            WHERE batch_id = ?`,
         )
         .bind(item.batch_id),
@@ -233,11 +243,16 @@ describe('exact browser visitor daily ledger', () => {
     expect(
       await db
         .prepare(
-          'SELECT accepted_at, event_count FROM browser_visitor_batch_receipts WHERE batch_id = ?',
+          'SELECT accepted_at, event_count, facts_digest_version, facts_digest FROM browser_visitor_batch_receipts WHERE batch_id = ?',
         )
         .bind(item.batch_id)
         .first(),
-    ).toEqual({ accepted_at: null, event_count: null });
+    ).toEqual({
+      accepted_at: null,
+      event_count: null,
+      facts_digest_version: null,
+      facts_digest: null,
+    });
     expect(
       await db
         .prepare('SELECT COUNT(*) AS n FROM browser_visitor_receipt_days WHERE batch_id = ?')
@@ -250,6 +265,85 @@ describe('exact browser visitor daily ledger', () => {
         .bind(item.app_id)
         .first(),
     ).toEqual({ n: 0 });
+  });
+
+  it('accepts matching 0020 retries without promoting their null digest to verified', async () => {
+    const item = batch({ batch_id: 'legacy-0020-batch' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    await db
+      .prepare(
+        'UPDATE browser_visitor_batch_receipts SET facts_digest_version = NULL, facts_digest = NULL WHERE batch_id = ?',
+      )
+      .bind(item.batch_id)
+      .run();
+
+    await expect(
+      acceptBrowserVisitorBatch(db, item, item.received_at + 10_000),
+    ).resolves.toBeUndefined();
+    expect(
+      await db
+        .prepare(
+          'SELECT accepted_at, event_count, facts_digest_version, facts_digest FROM browser_visitor_batch_receipts WHERE batch_id = ?',
+        )
+        .bind(item.batch_id)
+        .first(),
+    ).toMatchObject({
+      accepted_at: item.received_at,
+      event_count: item.events.length,
+      facts_digest_version: null,
+      facts_digest: null,
+    });
+  });
+
+  it('rejects changed event facts when a batch id keeps the same count and India day', async () => {
+    const item = batch({ batch_id: 'same-count-day' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    const changed = {
+      ...item,
+      events: [{ ...item.events[0]!, path: '/different-path' }],
+    };
+    await expect(acceptBrowserVisitorBatch(db, changed, changed.received_at)).rejects.toThrow(
+      'Browser batch identity reused with different facts',
+    );
+  });
+
+  it('binds the scoped visitor hash, including its absent state, into the canonical digest', async () => {
+    const item = batch({ batch_id: 'visitor-digest-binding' });
+    const originalDigest = await digestBrowserEventFacts(item);
+    const changedHashDigest = await digestBrowserEventFacts({ ...item, visitor_hash: VISITOR_B });
+    const missingHashDigest = await digestBrowserEventFacts({ ...item, visitor_hash: undefined });
+    const uppercaseHashDigest = await digestBrowserEventFacts({
+      ...item,
+      visitor_hash: VISITOR_A.toUpperCase(),
+    });
+
+    expect(changedHashDigest).not.toBe(originalDigest);
+    expect(missingHashDigest).not.toBe(originalDigest);
+    expect(uppercaseHashDigest).toBe(originalDigest);
+    expect(originalDigest).not.toContain(VISITOR_A);
+  });
+
+  it('stores only a versioned digest of event facts in D1 and leaves historical rows unverified', async () => {
+    const item = batch({ batch_id: 'privacy-digest' });
+    await acceptBrowserVisitorBatch(db, item, item.received_at);
+    const legacy = batch({ batch_id: 'legacy-null-digest' });
+    await acceptBrowserVisitorBatch(db, legacy, legacy.received_at);
+    await db
+      .prepare(
+        'UPDATE browser_visitor_batch_receipts SET facts_digest_version = NULL, facts_digest = NULL WHERE batch_id = ?',
+      )
+      .bind(legacy.batch_id)
+      .run();
+    const rows = await db
+      .prepare(
+        'SELECT facts_digest_version, facts_digest FROM browser_visitor_batch_receipts ORDER BY batch_id',
+      )
+      .all<{ facts_digest_version: number | null; facts_digest: string | null }>();
+    expect(rows.results).toEqual([
+      { facts_digest_version: null, facts_digest: null },
+      { facts_digest_version: 1, facts_digest: expect.stringMatching(/^[a-f0-9]{64}$/) },
+    ]);
+    expect(JSON.stringify(rows.results)).not.toContain(item.events[0]!.path);
   });
 
   it('indexes accepted batches without a visitor hash and rejects changed event counts on retry', async () => {

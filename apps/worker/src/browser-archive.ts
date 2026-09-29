@@ -2,6 +2,10 @@ import { projectBrowserBatch } from './browser-projection.js';
 import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
+import {
+  BROWSER_EVENT_FACTS_DIGEST_VERSION,
+  digestBrowserEventFacts,
+} from './browser-facts-digest.js';
 
 const FLUSH_BYTES = 1024 * 1024;
 const MAX_PENDING_BYTES = 8 * FLUSH_BYTES;
@@ -55,7 +59,18 @@ async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch
     throw new Error('Invalid archive identity');
   if (!Array.isArray(batch.events) || !batch.events.length)
     throw new Error('Archive batches must contain events');
-  const payload = JSON.stringify(batch);
+  const factsDigest = await digestBrowserEventFacts(batch);
+  if (
+    (batch.facts_digest_version !== undefined &&
+      batch.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION) ||
+    (batch.facts_digest !== undefined && batch.facts_digest !== factsDigest)
+  )
+    throw new Error('Browser event facts digest mismatch');
+  const payload = JSON.stringify({
+    ...batch,
+    facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+    facts_digest: factsDigest,
+  });
   const bytes = new TextEncoder().encode(`${payload}\n`).byteLength;
   if (bytes > MAX_BATCH_BYTES) throw new Error('Archive batch exceeds 64 KiB');
   // Collector retries may update received_at without changing the accepted events.

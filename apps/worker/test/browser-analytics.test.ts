@@ -62,7 +62,14 @@ function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
         meta: {},
         ...(index === statements.length - 1
           ? {
-              results: [{ fingerprint: receipt?.values[4], event_count: receipt?.values[7] }],
+              results: [
+                {
+                  fingerprint: receipt?.values[4],
+                  event_count: receipt?.values[7],
+                  facts_digest_version: receipt?.values[8],
+                  facts_digest: receipt?.values[9],
+                },
+              ],
             }
           : {}),
       }));
@@ -173,6 +180,8 @@ describe('browser analytical data', () => {
     );
     expect(response.status).toBe(202);
     expect(sent[0].session_hash).toMatch(/^[a-f0-9]{64}$/);
+    expect(sent[0].facts_digest_version).toBe(1);
+    expect(sent[0].facts_digest).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(sent[0])).not.toContain('raw-session-secret');
   });
   it('stores delayed events without reviving presence and preserves explicit missing sources', async () => {

@@ -5,6 +5,10 @@ import { URL } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { ArchiveSegmentManifestV1 } from '@app-health/contracts';
+import {
+  BROWSER_EVENT_FACTS_DIGEST_VERSION,
+  digestBrowserEventFacts,
+} from '../src/browser-facts-digest.js';
 import { DatabaseSync } from 'node:sqlite';
 import { Miniflare } from 'miniflare';
 import ts from 'typescript';
@@ -69,7 +73,15 @@ function batch(id: string, extra = '') {
     environment_id: 'production',
     batch_id: id,
     received_at: 123,
-    events: [{ type: 'pageview', timestamp: 123, url: 'https://sample.test/', extra }],
+    events: [
+      {
+        event_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        type: 'pageview',
+        timestamp: 123,
+        path: `/${extra}`,
+        referrer: '',
+      },
+    ],
   };
 }
 
@@ -81,13 +93,26 @@ async function harness() {
     'utf8',
   );
   const segment = await readFile(new URL('../src/archive-segment.ts', import.meta.url), 'utf8');
+  const digest = await readFile(new URL('../src/browser-facts-digest.ts', import.meta.url), 'utf8');
   const archiveSource = source
     .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
-    .replace("import { persistArchiveSegment } from './archive-segment.js';", '');
+    .replace("import { persistArchiveSegment } from './archive-segment.js';", '')
+    .replace(
+      /import \{\s*BROWSER_EVENT_FACTS_DIGEST_VERSION,\s*digestBrowserEventFacts,?\s*\} from '.\/browser-facts-digest.js';/,
+      '',
+    );
   const script =
     ts.transpileModule(segment, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
     }).outputText +
+    ts.transpileModule(
+      digest
+        .replaceAll('export const ', 'const ')
+        .replaceAll('export async function ', 'async function '),
+      {
+        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+      },
+    ).outputText +
     ts.transpileModule(projection, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
     }).outputText +
@@ -207,6 +232,41 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     expect((await app.call('inspect')).body.pending_batches).toBe(2);
   });
 
+  it('reproduces the accepted facts digest into the R2 archive and rejects a mismatched queue digest', async () => {
+    app = await harness();
+    const source = batch('digest-parity');
+    const expected = await digestBrowserEventFacts(
+      source as unknown as Parameters<typeof digestBrowserEventFacts>[0],
+    );
+    const result = await app.call('stage', [source]);
+    expect(result.status).toBe(200);
+    await app.call('flush');
+    const objects = (await (await app.bucket()).list()).objects;
+    const archived = gunzipSync(
+      Buffer.from(await (await (await app.bucket()).get(objects[0]!.key))!.arrayBuffer()),
+    )
+      .toString()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    expect(archived[0]).toMatchObject({
+      facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+      facts_digest: expected,
+    });
+    expect(
+      (
+        await app.call('stage', [
+          {
+            ...source,
+            batch_id: 'mismatched-digest',
+            facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+            facts_digest: '0'.repeat(64),
+          },
+        ])
+      ).status,
+    ).toBe(503);
+  });
+
   it('preserves sealed membership across upload failure and process restart', async () => {
     app = await harness();
     await app.call('stage', [batch('one')]);
@@ -226,9 +286,14 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     const object = await bucket.get(
       (failed.segments as Array<{ object_key: string }>)[0].object_key,
     );
-    expect(JSON.parse(gunzipSync(Buffer.from(await object!.arrayBuffer())).toString())).toEqual(
-      batch('one'),
-    );
+    const firstBatch = batch('one');
+    expect(JSON.parse(gunzipSync(Buffer.from(await object!.arrayBuffer())).toString())).toEqual({
+      ...firstBatch,
+      facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+      facts_digest: await digestBrowserEventFacts(
+        firstBatch as unknown as Parameters<typeof digestBrowserEventFacts>[0],
+      ),
+    });
     expect(object!.httpMetadata).toMatchObject({
       contentType: 'application/x-ndjson',
       contentEncoding: 'gzip',
@@ -456,7 +521,16 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     await unit.archive.stage([collected('a'), collected('a')]);
     const staged = unit.archive.status();
     expect(staged).toMatchObject({ pending_batches: 1, ledger_batches: 1 });
-    expect(staged.pending_bytes).toBe(Buffer.byteLength(JSON.stringify(collected('a')) + '\n'));
+    const archivedBatch = collected('a');
+    expect(staged.pending_bytes).toBe(
+      Buffer.byteLength(
+        JSON.stringify({
+          ...archivedBatch,
+          facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: await digestBrowserEventFacts(archivedBatch),
+        }) + '\n',
+      ),
+    );
     await expect(
       unit.archive.stage([
         collected('b'),
@@ -604,17 +678,48 @@ describe('BrowserArchive projection outbox', () => {
   it('deduplicates metadata changes but rejects immutable visitor changes', async () => {
     const unit = unitArchive(true);
     await unit.ready();
-    const original = collected('fingerprint');
+    const original = { ...collected('fingerprint'), visitor_hash: 'a'.repeat(64) };
+    const digest = await digestBrowserEventFacts(original);
     await unit.archive.stage([
-      { ...original, metadata: { channel: '', device: 'mobile', browser: '', country: '' } },
+      {
+        ...original,
+        facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+        facts_digest: digest,
+        metadata: { channel: '', device: 'mobile', browser: '', country: '' },
+      },
     ]);
     expect(
       (
         await unit.archive.stage([
-          { ...original, metadata: { channel: '', device: 'desktop', browser: '', country: '' } },
+          {
+            ...original,
+            facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+            facts_digest: digest,
+            metadata: { channel: '', device: 'desktop', browser: '', country: '' },
+          },
         ])
       ).duplicates,
     ).toBe(1);
+    const changedHash = { ...original, visitor_hash: 'c'.repeat(64) };
+    const missingHash = { ...original, visitor_hash: undefined };
+    await expect(
+      unit.archive.stage([
+        {
+          ...changedHash,
+          facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: digest,
+        },
+      ]),
+    ).rejects.toThrow('digest mismatch');
+    await expect(
+      unit.archive.stage([
+        {
+          ...missingHash,
+          facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+          facts_digest: digest,
+        },
+      ]),
+    ).rejects.toThrow('digest mismatch');
     await expect(
       unit.archive.stage([{ ...original, visitor_hash: 'changed-visitor' }]),
     ).rejects.toThrow('identity reused');
