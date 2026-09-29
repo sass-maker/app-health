@@ -106,17 +106,33 @@ Exact daily reads use one grouped D1 query capped at 128 app/environment scopes.
 Confirm the 35-day product lookback and D1 row growth before production release;
 the time bound is finite, but row volume and cost still scale with traffic.
 
-The exact reader returns Unknown until workspace coverage metadata explicitly
-records provider cutover, a reconciled-through watermark, and verification. A
-complete day must start at least 60 seconds after cutover, be at least 24 hours
-past day end, fall within retained coverage, and be within the reconciliation
-watermark. These fields are not inferred from the first D1 write and remain
-unset until an operator records evidence for the cutover and reconciliation.
-Before using exact counts in the Daily briefing, verify 100% provider cutover, let the full
-24-hour event-lateness window close, replay/reconcile Queue and DLQ deliveries,
-and compare with unsampled Analytics Engine groups and archived facts. The
-Daily briefing remains on its existing Analytics Engine path; this D1 ledger
-does not claim historical backfill or current production completeness.
+The exact reader returns Unknown until a sealed per-app production day has a
+continuous tracker activation, the Worker release is proven at 100% traffic,
+and workspace rollout plus app-scope audits cover the complete late-event
+closure window. Missing, stale, overlapping, or interrupted proof remains
+Unknown; a sealed zero is meaningful only after these checks pass. The
+acceptance ledger is independent of Queue/R2 archival reconciliation: it counts
+visitor facts only for batches whose D1 acceptance transaction completed before
+the 202 response. Hashless accepted batches do not increment visitor counts.
+The Daily briefing remains on its existing Analytics Engine path until its
+consumer is separately qualified to use sealed D1 results.
+
+Migrations `0025_browser_visitor_acceptance_coverage.sql` and
+`0026_browser_visitor_day_seals.sql` must be applied in order before deploying
+Worker code that reads or writes acceptance coverage or day fences. An
+authenticated full workspace owner can submit one bounded proof action at a time to
+`POST /v1/browser/visitor-coverage`; the endpoint derives workspace identity
+from the owner session, enforces same-origin requests and production app scope,
+and accepts only IDs, timestamps, source SHAs, and evidence SHA-256 digests.
+Keep the provider exports and their exact source/time/redaction notes in the
+private operator record; never send raw exports, credentials, or secret values
+to this endpoint. Record each rollout start before treating it as coverage,
+confirm its exact version/source SHA only after provider traffic reports 100%,
+and record tracker activation/deactivation and both audit watermarks from
+reviewed provider evidence. Seal a day only after its end plus 24 hours and the
+settlement grace. A later rollout invalidates future seals when it interrupts
+the audited interval; already sealed days remain immutable. No production
+cutover, backfill, or exact-count claim is implied by the migration or code.
 
 Queue consumers route batches to one of 16 stable per-workspace archive shards.
 Each shard durably stages accepted batches in SQLite before the Queue message is

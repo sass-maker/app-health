@@ -14,7 +14,10 @@ import {
   type EngagementLogRow,
 } from '../src/daily-engagement-report.js';
 import type { D1DatabaseLike, D1PreparedStatement, D1RunResult } from '../src/d1-adapter.js';
-import type { ExactBrowserVisitorResult } from '../src/browser-visitor-daily.js';
+import {
+  BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
+  type ExactBrowserVisitorResult,
+} from '../src/browser-visitor-daily.js';
 import { endpointReadRanges } from '../src/endpoint-read.js';
 
 // 2026-09-27 is a completed India day when "now" is 2026-09-28 noon UTC.
@@ -818,9 +821,7 @@ class MockStatement implements D1PreparedStatement {
           return {
             app_id: appId,
             environment_id: environmentId,
-            source_cutover_at: row?.complete ? 0 : null,
-            reconciled_through: row?.complete ? TO : null,
-            verified_at: row?.complete ? TO + 86_400_000 : null,
+            coverage_sealed: row?.complete ? 1 : 0,
             visitors: row?.complete ? row.visitors : 0,
           };
         }) as T[],
@@ -928,7 +929,7 @@ describe('composeDailyEngagementReport', () => {
       db,
       workspaceId: 'ws-1',
       date: DAY,
-      now: TO + 86_400_000,
+      now: TO + 86_400_000 + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
       query: async (sql) =>
         sql.includes('AS visitors')
           ? products.map((row) => ({
@@ -978,7 +979,35 @@ describe('composeDailyEngagementReport', () => {
     expect(report.sampled).toBe(true);
   });
 
-  it('keeps exact workspace coverage Unknown for a product with no tracker evidence', async () => {
+  it('keeps exact workspace coverage Unknown for a product without activation evidence', async () => {
+    const products = catalog(1);
+    const db = new MockDatabase(
+      products,
+      [],
+      [
+        {
+          app_id: products[0]!.app_id,
+          environment_id: products[0]!.environment_id!,
+          complete: false,
+          visitors: null,
+        },
+      ],
+    );
+    const report = await composeDailyEngagementReport({
+      db,
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: TO + 86_400_000 + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
+      query: async () => [],
+    });
+
+    expect(report.products[0]?.browser_visitors).toBeNull();
+    expect(report.products[0]?.browser_visitors_unknown_reason).toBe(
+      'no_qualifying_analytics_receipt',
+    );
+  });
+
+  it('uses exact zero for an established tracker scope with no recognized visitor hashes', async () => {
     const products = catalog(1);
     const db = new MockDatabase(
       products,
@@ -996,35 +1025,7 @@ describe('composeDailyEngagementReport', () => {
       db,
       workspaceId: 'ws-1',
       date: DAY,
-      now: TO + 86_400_000,
-      query: async () => [],
-    });
-
-    expect(report.products[0]?.browser_visitors).toBeNull();
-    expect(report.products[0]?.browser_visitors_unknown_reason).toBe(
-      'no_qualifying_analytics_receipt',
-    );
-  });
-
-  it('uses exact zero for an established tracker scope with no recognized visitor hashes', async () => {
-    const products = catalog(1).map((row) => ({ ...row, analytics_first_received_at: FROM }));
-    const db = new MockDatabase(
-      products,
-      [],
-      [
-        {
-          app_id: products[0]!.app_id,
-          environment_id: products[0]!.environment_id!,
-          complete: true,
-          visitors: 0,
-        },
-      ],
-    );
-    const report = await composeDailyEngagementReport({
-      db,
-      workspaceId: 'ws-1',
-      date: DAY,
-      now: TO + 86_400_000,
+      now: TO + 86_400_000 + BROWSER_VISITOR_ACCEPTANCE_SETTLEMENT_GRACE_MS,
     });
 
     expect(report.products[0]?.browser_visitors).toBe(0);

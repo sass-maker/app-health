@@ -54,6 +54,9 @@ function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
       return statement;
     },
     async batch(statements) {
+      const indexedDays = statements.filter((statement) =>
+        (statement as Prepared).sql.includes('INSERT INTO browser_visitor_acceptance_day_fences'),
+      ).length;
       const receipt = statements.find((statement) =>
         (statement as Prepared).sql.includes('INSERT INTO browser_visitor_batch_receipts'),
       ) as Prepared | undefined;
@@ -68,6 +71,8 @@ function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
                   event_count: receipt?.values[7],
                   facts_digest_version: receipt?.values[8],
                   facts_digest: receipt?.values[9],
+                  indexed_days: indexedDays,
+                  open_fence_count: indexedDays,
                 },
               ],
             }

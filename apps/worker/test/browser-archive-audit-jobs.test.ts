@@ -139,6 +139,8 @@ beforeAll(async () => {
   await applyMigration('0022_browser_archive_audit_jobs.sql');
   await applyMigration('0023_browser_queue_stage_receipts.sql');
   await applyMigration('0024_browser_archive_queue_evidence.sql');
+  await applyMigration('0025_browser_visitor_acceptance_coverage.sql');
+  await applyMigration('0026_browser_visitor_day_seals.sql');
   body = await archiveBody();
 });
 
@@ -332,6 +334,35 @@ describe('resumable browser archive audit jobs', () => {
       false,
     );
     expect(invalid?.status).toBe(400);
+  });
+
+  it('restricts visitor proof writes to same-origin full workspace owners and strict fields', async () => {
+    const env = { DB: db } as unknown as BrowserEnvironment;
+    const path = 'https://health.test/v1/browser/visitor-coverage';
+    const body = JSON.stringify({ action: 'rollout-start', generation_id: 'g', extra: 'no' });
+    const scoped = await handleBrowserOwner(
+      new Request(path, { method: 'POST', headers: { origin: 'https://health.test' }, body }),
+      env,
+      { id: 'scoped', label: 'Scoped', workspaceId: WORKSPACE, appId: batch.app_id },
+      false,
+    );
+    expect(scoped?.status).toBe(403);
+
+    const crossOrigin = await handleBrowserOwner(
+      new Request(path, { method: 'POST', headers: { origin: 'https://attacker.test' }, body }),
+      env,
+      { id: 'owner', label: 'Owner', workspaceId: WORKSPACE },
+      false,
+    );
+    expect(crossOrigin?.status).toBe(403);
+
+    const extra = await handleBrowserOwner(
+      new Request(path, { method: 'POST', headers: { origin: 'https://health.test' }, body }),
+      env,
+      { id: 'owner', label: 'Owner', workspaceId: WORKSPACE },
+      false,
+    );
+    expect(extra?.status).toBe(400);
   });
 
   it('stops incomplete when a resumed shard cursor observes a changed snapshot', async () => {
