@@ -5,29 +5,12 @@ import {
   type BucketV1,
 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
+import { endpointReadRanges } from './endpoint-read-ranges.js';
+import { readEndpointHistory } from './endpoint-cold-read.js';
+export { endpointReadRanges } from './endpoint-read-ranges.js';
 
 const HISTOGRAM = Array.from({ length: LATENCY_HISTOGRAM_BUCKETS }, (_, i) => `h${i}`);
 const MAX_ROWS = 10_000;
-
-// Cover the interval with disjoint ranges. Daily/hourly interiors avoid reading
-// every minute; minute edges keep the requested boundaries exact.
-export function endpointReadRanges(from: number, to: number) {
-  let ranges = [{ from, to, resolution: 60_000 }];
-  for (const resolution of [86_400_000, 3_600_000]) {
-    ranges = ranges.flatMap((range) => {
-      if (range.resolution !== 60_000) return [range];
-      const start = Math.ceil(range.from / resolution) * resolution;
-      const end = Math.floor(range.to / resolution) * resolution;
-      if (start >= end) return [range];
-      return [
-        ...(range.from < start ? [{ ...range, to: start }] : []),
-        { from: start, to: end, resolution },
-        ...(end < range.to ? [{ ...range, from: end }] : []),
-      ];
-    });
-  }
-  return ranges;
-}
 
 /** Read completed UTC minutes; indexed scope/range filtering precedes aggregation. */
 export async function readEndpointBuckets(
@@ -36,6 +19,7 @@ export async function readEndpointBuckets(
   envId: string,
   from: number,
   to: number,
+  coldBucket?: Pick<R2Bucket, 'get'>,
 ): Promise<BucketV1[]> {
   if (from % 60_000 || to % 60_000 || to <= from)
     throw new Error('Endpoint reads require completed minute boundaries');
@@ -49,7 +33,7 @@ export async function readEndpointBuckets(
       AND resolution_ms = ${range.resolution} AND bucket_start >= ?${offset + 1}
       AND bucket_start < ?${offset + 2}`;
   });
-  const result = await db
+  const hot = db
     .prepare(
       `SELECT method, route, histogram_bounds_ms,
     SUM(request_count) AS request_count, SUM(error_count) AS error_count,
@@ -62,10 +46,72 @@ export async function readEndpointBuckets(
     FROM (${sources.join(' UNION ALL ')})
     GROUP BY method, route, histogram_bounds_ms ORDER BY method, route LIMIT ${MAX_ROWS + 1}`,
     )
-    .bind(...values)
-    .all<Record<string, unknown>>();
-  if (result.results.length > MAX_ROWS) throw new Error('Endpoint query exceeded row limit');
-  return result.results.map((row) => decodeEndpointBucket(row, appId, envId, from));
+    .bind(...values);
+  const { hotRows, coldRows } = await readEndpointHistory({
+    hot,
+    db,
+    bucket: coldBucket,
+    scopes: [{ app_id: appId, environment_id: envId }],
+    from,
+    to,
+    now: Date.now(),
+  });
+  if (hotRows.length > MAX_ROWS) throw new Error('Endpoint query exceeded row limit');
+  const hotBuckets = hotRows.map((row) => decodeEndpointBucket(row, appId, envId, from));
+  if (!coldRows.length) return hotBuckets;
+  return mergeReadBuckets([
+    ...hotBuckets,
+    ...coldRows.map((row) => decodeEndpointBucket(row, appId, envId, from)),
+  ]);
+}
+
+function mergeReadBuckets(buckets: BucketV1[]): BucketV1[] {
+  const grouped = new Map<string, BucketV1>();
+  for (const bucket of buckets) {
+    const key = JSON.stringify([bucket.method, bucket.route]);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...bucket, histogram: [...bucket.histogram] });
+      continue;
+    }
+    existing.request_count += bucket.request_count;
+    existing.error_count += bucket.error_count;
+    existing.duration_sum_ms += bucket.duration_sum_ms;
+    existing.response_bytes_sum =
+      (existing.response_bytes_sum ?? 0) + (bucket.response_bytes_sum ?? 0);
+    existing.response_bytes_measured =
+      (existing.response_bytes_measured ?? 0) + (bucket.response_bytes_measured ?? 0);
+    existing.last_seen = Math.max(existing.last_seen ?? 0, bucket.last_seen ?? 0);
+    existing.upstream_sampled ||= bucket.upstream_sampled;
+    if (bucket.legacy_ambiguous_latency_count)
+      existing.legacy_ambiguous_latency_count =
+        (existing.legacy_ambiguous_latency_count ?? 0) + bucket.legacy_ambiguous_latency_count;
+    for (let index = 0; index < HISTOGRAM.length; index += 1)
+      existing.histogram[index] += bucket.histogram[index];
+  }
+  if (grouped.size > MAX_ROWS) throw new Error('Endpoint query exceeded row limit');
+  for (const bucket of grouped.values()) validateCombinedBucket(bucket);
+  return [...grouped.values()].sort((a, b) => {
+    const first = JSON.stringify([a.method, a.route]);
+    const second = JSON.stringify([b.method, b.route]);
+    return first < second ? -1 : first > second ? 1 : 0;
+  });
+}
+
+function validateCombinedBucket(bucket: BucketV1) {
+  const counters = [
+    bucket.request_count,
+    bucket.error_count,
+    bucket.response_bytes_measured ?? 0,
+    bucket.legacy_ambiguous_latency_count ?? 0,
+    ...bucket.histogram,
+  ];
+  if (
+    !counters.every((value) => Number.isSafeInteger(value) && value >= 0) ||
+    !Number.isFinite(bucket.duration_sum_ms) ||
+    !Number.isFinite(bucket.response_bytes_sum ?? 0)
+  )
+    throw new Error('Combined endpoint aggregate exceeds numeric bounds');
 }
 
 function decodeEndpointBucket(
