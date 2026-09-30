@@ -180,6 +180,100 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   });
 
+  it('matches the two-read app inventory for multiple ordered environments in one scoped read', async () => {
+    const secondProjectResponse = await request('/v1/apps', aliceCookie, {
+      name: 'Alice older API',
+      environment: 'production',
+    });
+    expect(secondProjectResponse.status).toBe(201);
+    const secondProject = (await secondProjectResponse.json()) as typeof aliceApp;
+    const extraEnvironmentId = 'env-alice-staging';
+    await env
+      .DB!.prepare('UPDATE apps SET created_at = 2000 WHERE id = ?')
+      .bind(aliceApp.app.id)
+      .run();
+    await env
+      .DB!.prepare('UPDATE environments SET created_at = 30 WHERE id = ?')
+      .bind(aliceApp.environment.id)
+      .run();
+    await env
+      .DB!.prepare('UPDATE apps SET created_at = 1000 WHERE id = ?')
+      .bind(secondProject.app.id)
+      .run();
+    await env
+      .DB!.prepare('UPDATE environments SET created_at = 40 WHERE id = ?')
+      .bind(secondProject.environment.id)
+      .run();
+    await env
+      .DB!.prepare('INSERT INTO environments (id, app_id, name, created_at) VALUES (?, ?, ?, ?)')
+      .bind(extraEnvironmentId, aliceApp.app.id, 'staging', 20)
+      .run();
+
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/apps', { headers: { cookie: aliceCookie } }),
+      env,
+    );
+    expect(identity).not.toBeNull();
+    const baselineRepos = new D1ControlPlane(env.DB!, identity!.workspace.id).asRepositories(
+      {} as never,
+    );
+    const baselineApps = await baselineRepos.apps.listApps();
+    const baselineEnvironments = await baselineRepos.environments.listEnvironmentsForApps(
+      baselineApps.map((app) => app.id),
+    );
+    const environmentsByApp = new Map<string, typeof baselineEnvironments>();
+    for (const environment of baselineEnvironments) {
+      const group = environmentsByApp.get(environment.app_id) ?? [];
+      group.push(environment);
+      environmentsByApp.set(environment.app_id, group);
+    }
+    const baseline = baselineApps.map((app) => ({
+      app,
+      environments: environmentsByApp.get(app.id) ?? [],
+    }));
+
+    const statements: string[] = [];
+    const db = env.DB!;
+    const countedDb = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            statements.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const response = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/apps', { headers: { cookie: aliceCookie } }),
+      { ...env, DB: countedDb },
+    );
+    expect(response.status).toBe(200);
+    const listed = (await response.json()) as {
+      apps: Array<{ app: { id: string }; environments: Array<{ id: string }> }>;
+    };
+    expect(listed.apps).toEqual(baseline);
+    expect(listed.apps.map(({ app }) => app.id)).toEqual([aliceApp.app.id, secondProject.app.id]);
+    expect(listed.apps[0].environments.map(({ id }) => id)).toEqual([
+      extraEnvironmentId,
+      aliceApp.environment.id,
+    ]);
+    expect(listed.apps[1].environments.map(({ id }) => id)).toEqual([secondProject.environment.id]);
+    expect(listed.apps.filter(({ app }) => app.id === aliceApp.app.id)).toHaveLength(1);
+    expect(await (await request('/v1/apps', bobCookie)).json()).toEqual({ apps: [] });
+    const sessionReads = statements.filter((sql) => /from "session"/i.test(sql));
+    const workspaceReads = statements.filter((sql) => /FROM workspaces w/.test(sql));
+    expect(sessionReads).toHaveLength(1);
+    expect(sessionReads[0]).toMatch(/join "user"/i);
+    expect(workspaceReads).toHaveLength(1);
+    expect(workspaceReads[0]).toContain(
+      'LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL',
+    );
+    expect(workspaceReads[0]).toContain('LEFT JOIN environments e ON e.app_id = a.id');
+    expect(statements.some((sql) => /FROM apps a/.test(sql))).toBe(false);
+  });
+
   it('lets the cookie-authenticated workspace owner start and poll an archive audit', async () => {
     const created = await request('/v1/apps', aliceCookie, {
       name: 'Archive audit owner fixture',
@@ -876,8 +970,10 @@ describe('Google account boundary with real D1 SQL', () => {
       .DB!.prepare('UPDATE apps SET archived_at = 100 WHERE id = ?')
       .bind(project.app.id)
       .run();
-    const listed = (await (await request('/v1/apps')).json()) as { apps: Array<{ id: string }> };
-    expect(listed.apps.some((app) => app.id === project.app.id)).toBe(false);
+    const listed = (await (await request('/v1/apps')).json()) as {
+      apps: Array<{ app: { id: string } }>;
+    };
+    expect(listed.apps.some(({ app }) => app.id === project.app.id)).toBe(false);
     const identity = await accountIdentity(
       new Request('https://dashboard.example.com/v1/apps', {
         headers: { cookie: aliceCookie },
