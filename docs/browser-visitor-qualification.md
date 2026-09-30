@@ -69,19 +69,32 @@ anonymous reads of `https://codevetter.com/` and
 only status, observed time, deployment/source SHA, and tracker configuration.
 Do not save visitor IDs, cookies, or request payloads.
 
-`queues info` verifies topology and the configured consumer/DLQ relationship;
-it does not prove queue drain. In Cloudflare Queues metrics, export the main
-queue and DLQ backlog and message-operation series across the target day and
-late window. Include backlog messages/bytes, oldest-message time, retries, and
-delete outcomes (`success`, `dlq`, `fail`); also capture point-in-time backlog
-at the end of the window. A zero backlog snapshot alone does not prove that
-all day receipts were processed. Cloudflare documents the time-series and
-point-in-time metrics in [Queues metrics](https://developers.cloudflare.com/queues/observability/metrics/).
+`queues info` verifies queue and consumer topology, but separate main-queue and
+DLQ listings do not prove that the consumer is bound to that DLQ. The
+2026-09-30 08:21:51 UTC inspection showed one `worker:app-health-worker`
+consumer on `app-health-browser-events` and zero consumers on
+`app-health-browser-events-dlq`; the CLI output did not expose a
+`dead_letter_queue` field. Verify the binding independently from provider
+configuration/API evidence. This still does not prove queue drain. In
+Cloudflare Queues metrics, export the main queue and DLQ backlog and
+message-operation series across the target day and late window. Include
+backlog messages/bytes, oldest-message time, retries, and delete outcomes
+(`success`, `dlq`, `fail`); also capture point-in-time backlog at the end of the
+window. A zero backlog snapshot alone does not prove that all day receipts
+were processed. Cloudflare documents the time-series and point-in-time metrics
+in [Queues metrics](https://developers.cloudflare.com/queues/observability/metrics/).
 
-The R2 lifecycle command is read-only. Confirm no age-based expiration can
-remove relevant source segments during the visitor-ledger retention window.
-The owner archive-audit job below verifies manifests and bytes for acquired
-segments, but it cannot establish provider retention on its own.
+The 2026-09-30 R2 lifecycle inspection showed enabled all-prefix object
+expiration after **30 days** and incomplete multipart-upload abort rules after
+one and seven days, while the D1 visitor ledger retains rows for 35 days
+([provider snapshot](https://github.com/sass-maker/app-health/issues/96#issuecomment-5907199109)).
+Bound archive-parity eligibility by the age of the source bytes that still
+survive in R2; D1 retention does not extend the source-byte horizon. The
+October 1 candidate's October 3 audit fits within the observed 30-day window,
+but do not claim 35-day historical source parity. Recheck lifecycle state at
+qualification time. The owner archive-audit job below verifies manifests and
+bytes for acquired segments, but it cannot establish provider retention on
+its own.
 
 Keep provider exports in the private operator record. Redact credentials and
 message contents before hashing evidence; never put raw exports or secrets in
