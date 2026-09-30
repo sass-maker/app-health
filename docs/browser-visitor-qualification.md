@@ -1,9 +1,9 @@
 # Operator qualification for exact browser visitor days
 
-This procedure qualifies one CodeVetter production day before an exact visitor
-count can replace `Unknown` in the Daily engagement report. It is manually
-invoked and owner-reviewed. Provider history, not elapsed time or an empty
-query, is the evidence source.
+This procedure gathers evidence to qualify one CodeVetter production day for
+an exact visitor count. It is manually invoked and reviewed by an authenticated
+operator. Provider history, not elapsed time or an empty query, is the evidence
+source.
 
 ## Current candidate
 
@@ -148,12 +148,16 @@ not proof that a message failed. A staging receipt proves durable DO staging,
 not successful R2 archival. R2 parity must come from the archive audit's
 verified comparisons plus reviewed Queue/DLQ evidence.
 
-## Check unsampled Analytics Engine parity before sealing
+## Check Analytics Engine and archive parity before consumer cutover
 
-Capture the Daily engagement report **before** sealing. While the fence is
-open, exact D1 visitors remain `Unknown`, so this request can show the existing
-Analytics Engine result and its sampling reason without returning visitor
-identifiers:
+Issue #96's acceptance check compares the exact source with unsampled
+Analytics Engine groups and archived facts before changing the Daily briefing
+consumer. This is a separate consumer-cutover gate; it is not a typed
+precondition in `sealExactBrowserVisitorDay` or the owner `seal-day` action.
+Capture the report with the audited historical date explicitly **before**
+sealing. While the fence is open, CodeVetter's exact D1 count remains
+`Unknown`; this read shows the current Analytics Engine count and sampling
+reason without returning visitor identifiers:
 
 ```js
 const report = await fetch(
@@ -163,12 +167,25 @@ const report = await fetch(
 report.products.filter((row) => row.catalog_id === 'codevetter');
 ```
 
-Require a numeric `browser_visitors`, no
-`sampled_visitor_group` reason, and equality with the aggregate D1 count above.
-If the field is null, the sample interval is greater than one, the query is
-unavailable, or counts differ, this unsampled-AE parity gate is not met. Keep
-`Unknown` and do not seal. The report uses the configured Analytics Engine
-query internally; no token should be copied into a shell or browser command.
+If CodeVetter has a numeric unsampled `browser_visitors` count, compare it with
+the aggregate D1 visitor count. A mismatch blocks consumer cutover and
+requires investigation. If CodeVetter is sampled, that group cannot provide
+an exact parity control; do not scale its estimate or block source-day
+qualification solely because it is sampled.
+
+Issue #96 also requires comparison with unsampled AE groups and archived facts.
+The current bounded archive audit compares accepted batch facts and reports
+aggregate match/mismatch counts; it does not return a distinct-visitor total
+by product for independently comparing an arbitrary unsampled control group.
+Compare CodeVetter's accepted D1 receipts with verified archive facts using
+the audit, and record any available unsampled AE controls. If no valid control
+comparison can be produced from reviewed aggregate evidence, mark this issue
+acceptance gate incomplete. Keep the Fleet Daily briefing AE-backed and retain
+`Unknown` for CodeVetter until the consumer-cutover acceptance is satisfied.
+This parity acceptance is separate from the source's typed proof and does not
+replace rollout, tracker, late-window, or source-ledger gates. The report uses
+the configured Analytics Engine query internally; no token should be copied
+into a shell or browser command.
 Cloudflare describes `_sample_interval` and the SQL API in the [Analytics
 Engine SQL API documentation](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/).
 
@@ -202,15 +219,16 @@ blindly replay a proof action.
 
 **The seal endpoint checks only its D1 rollout/scope rows, their audits, the
 late-event cutoff, and overlapping intervals. It does not check Queue/DLQ,
-R2 retention/parity, or Analytics Engine parity.** Complete and retain those
-external checks first; they have no typed fields in the current proof endpoint.
-If any external gate is unavailable, do not call `seal-day` even if the
-endpoint would accept it. The endpoint returns 409 when its own checks fail;
-that response is a stop condition, not a reason to edit or fabricate evidence.
+R2 retention/parity, or Analytics Engine parity.** The external gates have no
+typed fields in the current proof endpoint, so retain their reviewed evidence
+with the operator record. Do not represent a successful source seal as proof
+that these consumer-cutover gates passed. The endpoint returns 409 when its own
+checks fail; that response is a stop condition, not a reason to edit or
+fabricate evidence.
 
-After a successful seal, fetch the report again with the same explicit
-`?date=2026-10-01` and verify the App Health source response for CodeVetter
-against the recorded aggregate counts. A seal qualifies this source day only;
+After a successful seal, fetch the source endpoint again with the same explicit
+`?date=2026-10-01` and verify its CodeVetter row against the recorded aggregate
+count. A seal qualifies this source day only;
 it does not switch the Fleet Daily/portfolio briefing to D1 counts. That
 consumer remains AE-backed until its separate qualified-consumer wiring is
 reviewed and released. Preserve `Unknown` in that report until then. An empty
@@ -224,7 +242,8 @@ bounded to ten recent Worker deployments; current Queue backlog is a point-in-
 time view; the archive audit is deliberately incomplete; and the owner proof
 endpoint cannot receive Queue, R2-retention, or AE-parity evidence. The future
 operator tool must obtain complete provider history, retain a reviewed
-redacted evidence artifact, stop on unsupported or sampled data, and require
-an explicit owner action before any audit or seal. Until those provider APIs
-and durable evidence fields exist, the safe workflow is this manual runbook;
-missing evidence keeps the report `Unknown`.
+redacted evidence artifact and require reviewed gate evidence before
+submitting audit or seal actions. Until
+those provider APIs and durable evidence fields exist, the safe workflow is
+this manual runbook; missing evidence keeps the report `Unknown`. This
+describes an authenticated operator workflow, not a new approval step.
