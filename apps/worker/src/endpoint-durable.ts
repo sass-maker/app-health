@@ -121,7 +121,7 @@ export class D1EndpointWriter implements DurableEndpointWriter {
 
   async cleanupReceipts(now: number): Promise<void> {
     // Ingest rejects events outside five minutes, so a 24-hour receipt is safely
-    // older than any valid retry. Aggregate history has no age-based deletion.
+    // older than any valid retry. Verified compaction preserves aggregate history.
     await this.db
       .prepare(
         `DELETE FROM endpoint_receipts WHERE rowid IN (
