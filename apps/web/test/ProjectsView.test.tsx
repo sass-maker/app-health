@@ -85,7 +85,10 @@ const health = {
   ],
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 function installFetch(options?: { healthResponse?: Response; reportResponse?: Response }) {
   const fetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -178,6 +181,8 @@ it('uses catalog server applicability without hiding measured or out-of-report e
 });
 
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-09-29T12:00:00.000Z'));
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
 
