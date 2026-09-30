@@ -11,7 +11,11 @@ import {
   type OwnerRequestTimings,
 } from '../src/accounts.js';
 import worker, { type Env } from '../src/index.js';
-import { D1ControlPlane } from '../src/d1-adapter.js';
+import {
+  D1ControlPlane,
+  type D1DatabaseLike,
+  type D1PreparedStatement,
+} from '../src/d1-adapter.js';
 
 describe('Google account boundary with real D1 SQL', () => {
   const mf = new Miniflare({
@@ -146,6 +150,126 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(await (await request('/v1/apps', bobCookie)).json()).toMatchObject({ apps: [] });
   });
 
+  it('joins live account scope and capability setup while preserving route authorization and key semantics', async () => {
+    expect(
+      (
+        await request(
+          `/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+          bobCookie,
+        )
+      ).status,
+    ).toBe(403);
+    const aliceCreated = await request('/v1/apps', aliceCookie, {
+      name: 'Alice capability setup API',
+      environment: 'production',
+    });
+    expect(aliceCreated.status).toBe(201);
+    const ownedApp = (await aliceCreated.json()) as typeof aliceApp;
+    const bobCreated = await request('/v1/apps', bobCookie, {
+      name: 'Bob API',
+      environment: 'production',
+    });
+    expect(bobCreated.status).toBe(201);
+    const bobApp = (await bobCreated.json()) as typeof aliceApp;
+    const path = (appId: string, environmentId: string) =>
+      `/v1/capabilities?app_id=${appId}&environment_id=${environmentId}`;
+
+    const initial = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(initial.status).toBe(200);
+    const initialBody = (await initial.json()) as {
+      capabilities: { id: string; enabled: boolean }[];
+    };
+    expect(initialBody.capabilities.every((capability) => !capability.enabled)).toBe(true);
+
+    await env.DB!.prepare('DELETE FROM keys WHERE app_id = ?').bind(ownedApp.app.id).run();
+    await env.DB!.prepare('DELETE FROM product_keys WHERE app_id = ?').bind(ownedApp.app.id).run();
+    await env
+      .DB!.prepare(
+        'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
+      )
+      .bind('alice-environment-key', ownedApp.app.id, ownedApp.environment.id, 'hash-env', 10)
+      .run();
+    await env
+      .DB!.prepare(
+        'INSERT INTO product_keys (id, app_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, NULL)',
+      )
+      .bind('alice-product-key', ownedApp.app.id, 'hash-product', 20)
+      .run();
+    const productKey = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(((await productKey.json()) as { private_key: unknown }).private_key).toMatchObject({
+      id: 'alice-product-key',
+      environment_id: null,
+    });
+
+    await env
+      .DB!.prepare(
+        'INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, NULL)',
+      )
+      .bind(
+        'alice-newer-environment-key',
+        ownedApp.app.id,
+        ownedApp.environment.id,
+        'hash-env-new',
+        30,
+      )
+      .run();
+    const environmentKey = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(((await environmentKey.json()) as { private_key: unknown }).private_key).toMatchObject({
+      id: 'alice-newer-environment-key',
+      environment_id: ownedApp.environment.id,
+    });
+    await env
+      .DB!.prepare('UPDATE keys SET revoked_at = 40 WHERE id = ?')
+      .bind('alice-newer-environment-key')
+      .run();
+    const fallbackKey = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(((await fallbackKey.json()) as { private_key: unknown }).private_key).toMatchObject({
+      id: 'alice-product-key',
+    });
+    await env
+      .DB!.prepare('UPDATE product_keys SET revoked_at = 50 WHERE id = ?')
+      .bind('alice-product-key')
+      .run();
+    await env
+      .DB!.prepare('UPDATE keys SET revoked_at = 60 WHERE id = ?')
+      .bind('alice-environment-key')
+      .run();
+    const noActiveKey = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(((await noActiveKey.json()) as { private_key: unknown }).private_key).toBeNull();
+
+    await env
+      .DB!.prepare(
+        'INSERT INTO environment_capabilities (app_id, environment_id, capability, enabled, first_received_at, last_received_at) VALUES (?, ?, ?, ?, ?, ?)',
+      )
+      .bind(ownedApp.app.id, ownedApp.environment.id, 'analytics', 1, 101, 202)
+      .run();
+    const withCapability = await request(path(ownedApp.app.id, ownedApp.environment.id));
+    expect(
+      ((await withCapability.json()) as { capabilities: unknown[] }).capabilities,
+    ).toContainEqual({
+      id: 'analytics',
+      enabled: true,
+      first_received_at: 101,
+      last_received_at: 202,
+    });
+
+    expect((await request(path(ownedApp.app.id, ownedApp.environment.id), bobCookie)).status).toBe(
+      403,
+    );
+    expect((await request(path(ownedApp.app.id, bobApp.environment.id))).status).toBe(404);
+    expect((await request(path(ownedApp.app.id, 'missing-environment'))).status).toBe(404);
+
+    await env
+      .DB!.prepare('UPDATE apps SET archived_at = ? WHERE id = ?')
+      .bind(Date.now(), ownedApp.app.id)
+      .run();
+    expect((await request(path(ownedApp.app.id, ownedApp.environment.id))).status).toBe(403);
+    await env
+      .DB!.prepare('UPDATE apps SET archived_at = ? WHERE id = ?')
+      .bind(Date.now(), bobApp.app.id)
+      .run();
+  });
+
   it('loads the live session and user in one read before the joined workspace scope', async () => {
     const statements: string[] = [];
     const db = env.DB!;
@@ -178,6 +302,75 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(workspaceReads[0]).toContain(
       'LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL',
     );
+  });
+
+  it('loads capability scope and setup with one D1 read after live session validation', async () => {
+    const expectedIdentity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/account', {
+        headers: { cookie: aliceCookie },
+      }),
+      env,
+    );
+    expect(expectedIdentity).not.toBeNull();
+    const expected = await new D1ControlPlane(
+      env.DB!,
+      expectedIdentity!.workspace.id,
+    ).getCapabilitySetup(aliceApp.app.id, aliceApp.environment.id);
+    expect(expected).not.toBeNull();
+
+    let roundTrips = 0;
+    const originals = new WeakMap<object, D1PreparedStatement>();
+    const countedDb = new Proxy(env.DB! as D1DatabaseLike, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            let statement = target.prepare(sql);
+            const proxy = new Proxy(statement, {
+              get(_prepared, method) {
+                if (method === 'bind')
+                  return (...values: unknown[]) => {
+                    statement = statement.bind(...values);
+                    originals.set(proxy, statement);
+                    return proxy;
+                  };
+                const value = Reflect.get(statement, method, statement);
+                if (['first', 'all', 'run'].includes(String(method)))
+                  return (...args: unknown[]) => {
+                    roundTrips += 1;
+                    return value.apply(statement, args);
+                  };
+                return typeof value === 'function' ? value.bind(statement) : value;
+              },
+            });
+            originals.set(proxy, statement);
+            return proxy;
+          };
+        if (key === 'batch')
+          return (statements: D1PreparedStatement[]) => {
+            roundTrips += 1;
+            return target.batch(
+              statements.map((statement) => originals.get(statement) ?? statement),
+            );
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const response = await worker.fetch(
+      new Request(
+        `https://dashboard.example.com/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+        { headers: { cookie: aliceCookie } },
+      ),
+      { ...env, DB: countedDb },
+    );
+    expect(response.status).toBe(200);
+    expect(roundTrips).toBe(2);
+    const actual = (await response.json()) as {
+      capabilities: unknown[];
+      private_key: unknown;
+    };
+    expect(actual.capabilities).toEqual(expected!.capabilities);
+    expect(actual.private_key).toEqual(expected!.private_key);
   });
 
   it('matches the two-read app inventory for multiple ordered environments in one scoped read', async () => {
@@ -335,7 +528,7 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     const analyticsReport = await request('/v1/analytics/report');
     const timingPattern =
-      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
+      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, (?:workspace_scope;dur=\d+\.\d{2}|workspace_capability_setup_read;dur=\d+\.\d{2})(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
     for (const [response, status] of [
       [apps, 200],
       [capabilities, 200],
@@ -351,7 +544,10 @@ describe('Google account boundary with real D1 SQL', () => {
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
     }
-    expect(capabilities.headers.get('server-timing')).toContain('capability_setup_read;dur=');
+    expect(capabilities.headers.get('server-timing')).toContain(
+      'workspace_capability_setup_read;dur=',
+    );
+    expect(capabilities.headers.get('server-timing')).not.toMatch(/, capability_setup_read;/);
     expect(apps.headers.get('server-timing')).not.toContain('capability_setup_read');
 
     const unauthenticated = await worker.fetch(
@@ -995,6 +1191,14 @@ describe('Google account boundary with real D1 SQL', () => {
   });
 
   it('revokes the actual session on sign-out', async () => {
+    const created = await request('/v1/apps', bobCookie, {
+      name: 'Bob revocation API',
+      environment: 'production',
+    });
+    expect(created.status).toBe(201);
+    const project = (await created.json()) as typeof aliceApp;
+    const capabilitiesPath = `/v1/capabilities?app_id=${project.app.id}&environment_id=${project.environment.id}`;
+    expect((await request(capabilitiesPath, bobCookie)).status).toBe(200);
     const beforeSignOut = await request('/v1/auth/get-session', bobCookie);
     expect(beforeSignOut.status).toBe(200);
     expect(await beforeSignOut.json()).toMatchObject({ user: { name: 'bob' } });
@@ -1003,6 +1207,11 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(response.status).toBe(200);
     expect(await (await request('/v1/auth/get-session', bobCookie)).json()).toBeNull();
     expect((await request('/v1/apps', bobCookie)).status).toBe(401);
+    expect((await request(capabilitiesPath, bobCookie)).status).toBe(401);
+    await env
+      .DB!.prepare('UPDATE apps SET archived_at = ? WHERE id = ?')
+      .bind(Date.now(), project.app.id)
+      .run();
   });
 
   it('starts Google OAuth with state and PKCE and blocks foreign callbacks', async () => {
@@ -1046,11 +1255,22 @@ describe('Google account boundary with real D1 SQL', () => {
     expect((await request('/v1/apps', cookie)).status).toBe(401);
     await env.DB!.prepare('UPDATE "user" SET emailVerified = 1 WHERE id = ?').bind(user.id).run();
     expect((await request('/v1/apps', cookie)).status).toBe(200);
+    const created = await request('/v1/apps', cookie, {
+      name: 'Verification state API',
+      environment: 'production',
+    });
+    expect(created.status).toBe(201);
+    const project = (await created.json()) as typeof aliceApp;
+    const capabilitiesPath = `/v1/capabilities?app_id=${project.app.id}&environment_id=${project.environment.id}`;
+    expect((await request(capabilitiesPath, cookie)).status).toBe(200);
     await env.DB!.prepare('UPDATE "user" SET emailVerified = 0 WHERE id = ?').bind(user.id).run();
     expect((await request('/v1/apps', cookie)).status).toBe(401);
+    expect((await request(capabilitiesPath, cookie)).status).toBe(401);
     await env.DB!.prepare('UPDATE "user" SET emailVerified = 1 WHERE id = ?').bind(user.id).run();
+    expect((await request(capabilitiesPath, cookie)).status).toBe(200);
     await ctx.internalAdapter.updateSession(session.token, { expiresAt: new Date(0) });
     expect((await request('/v1/apps', cookie)).status).toBe(401);
+    expect((await request(capabilitiesPath, cookie)).status).toBe(401);
   });
 
   it('fails closed when Google configuration is incomplete and rejects ingest-host auth', async () => {

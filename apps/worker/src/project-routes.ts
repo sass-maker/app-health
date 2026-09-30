@@ -4,7 +4,7 @@ import {
   CreateEnvironmentRequest,
   type EnvironmentV1,
 } from '@app-health/contracts';
-import type { AppHealthRepositories } from './repository.js';
+import type { AppHealthRepositories, CapabilitySetup } from './repository.js';
 import type { OwnerRequestTimings } from './accounts.js';
 import type { OwnerIdentity } from './identity.js';
 import { capabilityLedger } from './capability-ledger.js';
@@ -63,13 +63,22 @@ async function capabilities(
   owner: OwnerIdentity,
   url: URL,
   timings?: OwnerRequestTimings,
+  preloadedCapabilitySetup?: CapabilitySetup | null,
 ) {
   const app = url.searchParams.get('app_id') ?? '';
   const env = url.searchParams.get('environment_id') ?? '';
   if (!app || !env) return json(400, { error: 'Project and environment are required' });
   if (!canManage(owner, app)) return json(403, { error: 'Project access denied' });
   const routeReadStarted = performance.now();
-  const fastResponse = await capabilitySetupResponse(request, repos, url, app, env, timings);
+  const fastResponse = await capabilitySetupResponse({
+    request,
+    repos,
+    url,
+    app,
+    env,
+    timings,
+    preloadedCapabilitySetup,
+  });
   if (fastResponse) {
     if (timings) timings.routeReadMs = performance.now() - routeReadStarted;
     return fastResponse;
@@ -79,31 +88,36 @@ async function capabilities(
   return response;
 }
 
-async function capabilitySetupResponse(
-  request: Request,
-  repos: AppHealthRepositories,
-  url: URL,
-  app: string,
-  env: string,
-  timings?: OwnerRequestTimings,
-): Promise<Response | null> {
+async function capabilitySetupResponse(options: {
+  request: Request;
+  repos: AppHealthRepositories;
+  url: URL;
+  app: string;
+  env: string;
+  timings?: OwnerRequestTimings;
+  preloadedCapabilitySetup?: CapabilitySetup | null;
+}): Promise<Response | null> {
   if (
-    url.pathname === '/v1/capabilities' &&
-    request.method === 'GET' &&
-    repos.capabilities &&
-    repos.capabilitySetup
+    options.url.pathname === '/v1/capabilities' &&
+    options.request.method === 'GET' &&
+    options.repos.capabilities &&
+    options.repos.capabilitySetup
   ) {
     const started = performance.now();
-    let setup: Awaited<ReturnType<typeof repos.capabilitySetup.getCapabilitySetup>>;
+    let setup: CapabilitySetup | null;
     try {
-      setup = await repos.capabilitySetup.getCapabilitySetup(app, env);
+      setup =
+        options.preloadedCapabilitySetup !== undefined
+          ? options.preloadedCapabilitySetup
+          : await options.repos.capabilitySetup.getCapabilitySetup(options.app, options.env);
     } finally {
-      if (timings) timings.capabilitySetupReadMs = performance.now() - started;
+      if (options.timings && options.preloadedCapabilitySetup === undefined)
+        options.timings.capabilitySetupReadMs = performance.now() - started;
     }
     if (!setup) return json(404, { error: 'Environment not found' });
     return json(200, {
-      app_id: app,
-      environment_id: env,
+      app_id: options.app,
+      environment_id: options.env,
       capabilities: setup.capabilities,
       private_key: setup.private_key,
     });
@@ -171,13 +185,15 @@ export async function handleProjectRoutes(
   repos: AppHealthRepositories,
   owner: OwnerIdentity,
   timings?: OwnerRequestTimings,
+  preloadedCapabilitySetup?: CapabilitySetup | null,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   const match = url.pathname.match(/^\/v1\/apps\/([^/]+)\/environments(?:\/([^/]+)\/keys)?$/);
   if (!['/v1/capabilities', '/v1/capabilities/ledger'].includes(url.pathname) && !match)
     return null;
   try {
-    if (!match) return await capabilities(request, repos, owner, url, timings);
+    if (!match)
+      return await capabilities(request, repos, owner, url, timings, preloadedCapabilitySetup);
     if (!canManage(owner, match[1])) return json(403, { error: 'Project access denied' });
     if (request.method !== 'POST') return json(405, { error: 'Method not allowed' });
     if (!match[2]) return await addEnvironment(request, repos, match[1]);

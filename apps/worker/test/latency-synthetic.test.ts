@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { URL } from 'node:url';
 import { expect, it } from 'vitest';
-import { D1ControlPlane } from '../src/d1-adapter.js';
+import { D1ControlPlane, getAccountCapabilitySetup } from '../src/d1-adapter.js';
 import type { D1DatabaseLike, D1PreparedStatement, D1RunResult } from '../src/d1-adapter.js';
 
 interface Counters {
@@ -187,5 +187,30 @@ it('counts D1 round-trips for GET /v1/capabilities getCapabilitySetup', async ()
   console.log(
     `getCapabilitySetup: prepareCalls=${counters.prepareCalls} batchCalls=${counters.batchCalls} roundTrips=${counters.roundTrips}`,
   );
+  sql.close();
+});
+
+it('joins an already-resolved account scope and capability setup in one D1 round-trip', async () => {
+  const sql = new DatabaseSync(':memory:');
+  applyMigrations(sql);
+  const workspaceId = seed55(sql);
+  const counters: Counters = { prepareCalls: 0, batchCalls: 0, roundTrips: 0 };
+  const db = makeCountingDb(sql, counters);
+
+  const joined = await getAccountCapabilitySetup(db, 'owner-probe', 'app-1', 'env-1-0');
+  expect(joined).not.toBeNull();
+  expect(joined).toMatchObject({
+    workspace: { id: workspaceId },
+    appIds: ['app-1'],
+    setup: {
+      capabilities: [
+        { id: 'analytics', enabled: false, first_received_at: null, last_received_at: null },
+        { id: 'endpoints', enabled: true, first_received_at: 1, last_received_at: 101 },
+        { id: 'logs', enabled: false, first_received_at: null, last_received_at: null },
+      ],
+    },
+  });
+  expect(counters.roundTrips).toBe(1);
+  expect(counters.batchCalls).toBe(0);
   sql.close();
 });

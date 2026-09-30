@@ -59,6 +59,120 @@ export interface D1DatabaseLike {
   batch(statements: D1PreparedStatement[]): Promise<D1RunResult[]>;
 }
 
+interface AccountCapabilitySetup {
+  workspace: { id: string; name: string };
+  appIds: string[];
+  setup: CapabilitySetup | null;
+}
+
+interface AccountCapabilitySetupRow {
+  workspace_id: string;
+  workspace_name: string;
+  app_id: string | null;
+  environment_id: string | null;
+  capability_id: (typeof CAPABILITY_IDS)[number] | null;
+  enabled: number | null;
+  first_received_at: number | null;
+  last_received_at: number | null;
+  key_id: string | null;
+  key_environment_id: string | null;
+  key_created_at: number | null;
+  key_revoked_at: number | null;
+}
+
+const ACCOUNT_CAPABILITY_SETUP_QUERY = `WITH candidate_keys AS (
+  SELECT id, environment_id, created_at, revoked_at
+  FROM keys
+  WHERE app_id = ? AND environment_id = ? AND revoked_at IS NULL
+  UNION ALL
+  SELECT id, NULL AS environment_id, created_at, revoked_at
+  FROM product_keys
+  WHERE app_id = ? AND revoked_at IS NULL
+), latest_key AS (
+  SELECT id, environment_id, created_at, revoked_at
+  FROM candidate_keys
+  ORDER BY created_at DESC
+  LIMIT 1
+)
+SELECT w.id AS workspace_id, w.name AS workspace_name,
+       a.id AS app_id, e.id AS environment_id,
+       c.capability AS capability_id, c.enabled,
+       c.first_received_at, c.last_received_at,
+       k.id AS key_id, k.environment_id AS key_environment_id,
+       k.created_at AS key_created_at, k.revoked_at AS key_revoked_at
+FROM workspaces w
+LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id AND wa.app_id = ?
+LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
+LEFT JOIN environments e ON e.id = ? AND e.app_id = a.id
+LEFT JOIN environment_capabilities c
+  ON c.app_id = a.id AND c.environment_id = e.id
+LEFT JOIN latest_key k ON e.id IS NOT NULL
+WHERE w.owner_id = ?
+ORDER BY c.capability`;
+
+/** Reads one requested app's account scope and capability setup in one D1 round-trip. */
+export async function getAccountCapabilitySetup(
+  db: D1DatabaseLike,
+  ownerId: string,
+  appId: string,
+  environmentId: string,
+): Promise<AccountCapabilitySetup | null> {
+  const { results } = await db
+    .prepare(ACCOUNT_CAPABILITY_SETUP_QUERY)
+    .bind(appId, environmentId, appId, appId, environmentId, ownerId)
+    .all<AccountCapabilitySetupRow>();
+  if (!results.length) return null;
+
+  const firstRow = results[0];
+  const appIds = firstRow.app_id === null ? [] : [firstRow.app_id];
+  let setup: CapabilitySetup | null = null;
+  if (firstRow.app_id === appId && firstRow.environment_id === environmentId) {
+    const capabilities = new Map(
+      results.flatMap((row) =>
+        row.capability_id === null
+          ? []
+          : [
+              [
+                row.capability_id,
+                {
+                  id: row.capability_id,
+                  enabled: Boolean(row.enabled),
+                  first_received_at: row.first_received_at,
+                  last_received_at: row.last_received_at,
+                },
+              ] as const,
+            ],
+      ),
+    );
+    const key = firstRow.key_id
+      ? {
+          id: firstRow.key_id,
+          environment_id: firstRow.key_environment_id,
+          created_at: firstRow.key_created_at ?? 0,
+          revoked_at: firstRow.key_revoked_at,
+        }
+      : null;
+    setup = {
+      capabilities: CAPABILITY_IDS.map(
+        (id) =>
+          capabilities.get(id) ?? {
+            id,
+            enabled: false,
+            first_received_at: null,
+            last_received_at: null,
+          },
+      ),
+      private_key: key,
+    };
+  }
+
+  return {
+    workspace: { id: firstRow.workspace_id, name: firstRow.workspace_name },
+    appIds,
+    setup,
+  };
+}
+
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
 const ENVIRONMENT_APP_QUERY_CHUNK_SIZE = 90;
 
