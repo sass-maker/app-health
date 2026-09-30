@@ -49,7 +49,10 @@
       },
     ],
   },
-  "r2_buckets": [{ "binding": "BROWSER_HISTORY", "bucket_name": "app-health-browser-history" }],
+  "r2_buckets": [
+    { "binding": "BROWSER_HISTORY", "bucket_name": "app-health-browser-history" },
+    { "binding": "ENDPOINT_HISTORY", "bucket_name": "app-health-endpoint-history" },
+  ],
   "d1_databases": [
     {
       "binding": "DB",
