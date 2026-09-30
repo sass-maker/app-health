@@ -123,13 +123,13 @@ export function browserReportPlan(
     ranking('blob4', pageSource),
     ranking(analyticsSourceSql(), filter.source ? pageSource : analyticsSourceFrom(pageSource)),
     `SELECT blob5 AS name, SUM(_sample_interval) AS count, MAX(double2) AS last_seen, ${sample} ${source} AND blob3 = 'event' GROUP BY name ORDER BY count DESC LIMIT 100`,
-    `SELECT ${identities}, ${visits}, ${sample} ${source}`,
+    // Group disjoint current/previous windows in one scan and provider call.
+    `SELECT IF(double2 >= ${from}, 1, 0) AS period, ${totals}, ${identities}, ${visits}, ${sample} ${scopedSource(workspace, filter, from - (to - from), to, appIds)} GROUP BY period`,
     ...dimensionBlobs.map(([key, blob]) => {
       const expression = key === 'countries' ? "IF(blob16 = '', 'Unknown', blob16)" : blob;
       const dimensionSource = key === 'countries' ? pageSource : `${pageSource} AND ${blob} != ''`;
       return ranking(expression, dimensionSource);
     }),
-    `SELECT ${totals}, ${identities}, ${sample} ${scopedSource(workspace, filter, from - (to - from), from, appIds)}`,
   ];
   if (!filter.event && !hasSegmentFilter(filter)) sql.push(engagement, exits);
   return { sql, dimensionBlobs };

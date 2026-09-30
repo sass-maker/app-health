@@ -264,7 +264,7 @@ describe('browser segment filters', () => {
     expect(
       browserReportPlan('workspace', { ...filter, medium: 'email' }, now - 7 * day, now, day / 3)
         .sql,
-    ).toHaveLength(11);
+    ).toHaveLength(10);
     expect((await remoteReport(rows, { ...filter, medium: 'email' })).pages).toHaveLength(3);
     expect((await remoteReport(rows, { ...filter, content: 'hero' })).pages).toHaveLength(3);
     expect((await remoteReport(rows, { ...filter, term: 'alpha' })).pages).toHaveLength(3);

@@ -85,6 +85,7 @@ describe('browser reports', () => {
         Response.json({
           data: [
             {
+              period: 1,
               sessions: 1,
               visitors: 1,
               new_sessions: 1,
@@ -92,6 +93,7 @@ describe('browser reports', () => {
               unidentified_sessions: 0,
               sample_interval: 2,
             },
+            { period: 0, pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 },
           ],
         }),
       );
@@ -102,11 +104,6 @@ describe('browser reports', () => {
       .mockResolvedValueOnce(Response.json({ data: [{ name: '/', count: 4, sample_interval: 2 }] }))
       .mockResolvedValueOnce(
         Response.json({ data: [{ name: 'IN', count: 4, sample_interval: 2 }] }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({
-          data: [{ pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 }],
-        }),
       );
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
     const timings: {
@@ -129,7 +126,7 @@ describe('browser reports', () => {
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
     expect(report.sessions).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();
@@ -171,7 +168,9 @@ describe('browser reports', () => {
     const row = { bucket: 0, pageviews: 1, events: 0, sample_interval: 1 };
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockImplementation(async () => Response.json({ data: [row, row] }));
+      .mockImplementation(async (_url, init) =>
+        Response.json({ data: String(init?.body).includes('GROUP BY bucket') ? [row, row] : [] }),
+      );
     await expect(
       queryBrowserReport(
         'w-one',
@@ -184,6 +183,49 @@ describe('browser reports', () => {
       ),
     ).rejects.toThrow('bucket');
   });
+});
+
+it.each([null, '', ' ', true, 2, -1, 1.5])('rejects invalid combined period %s', async (period) => {
+  const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
+    Response.json({
+      data: String(init?.body).includes('GROUP BY period') ? [{ period, sample_interval: 1 }] : [],
+    }),
+  );
+  await expect(
+    queryBrowserReport(
+      'workspace',
+      { range: '24h' },
+      {
+        accountId: 'a'.repeat(32),
+        token: 'fixture',
+        fetchImpl,
+      },
+    ),
+  ).rejects.toThrow(/period|analytical response/);
+});
+
+it('rejects duplicate combined periods rather than silently choosing one', async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async (_url, init) =>
+    Response.json({
+      data: String(init?.body).includes('GROUP BY period')
+        ? [
+            { period: 1, sample_interval: 1 },
+            { period: 1, sample_interval: 1 },
+          ]
+        : [],
+    }),
+  );
+  await expect(
+    queryBrowserReport(
+      'workspace',
+      { range: '24h' },
+      {
+        accountId: 'a'.repeat(32),
+        token: 'fixture',
+        fetchImpl,
+      },
+    ),
+  ).rejects.toThrow('period');
 });
 
 it.each([

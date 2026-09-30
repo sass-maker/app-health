@@ -11,9 +11,8 @@ type AnalyticsQueryStage =
   | 'analyticsPagesMs'
   | 'analyticsSourcesMs'
   | 'analyticsEventsMs'
-  | 'analyticsAudienceMs'
+  | 'analyticsAudiencePreviousMs'
   | 'analyticsDimensionMaxMs'
-  | 'analyticsPreviousMs'
   | 'analyticsEngagementMs'
   | 'analyticsExitsMs';
 type AnalyticsReportTimings = {
@@ -32,6 +31,7 @@ interface QueryResponse {
   data: QueryRow[];
 }
 interface QueryRow {
+  period?: number | string;
   name?: string;
   count?: number | string;
   last_seen?: number | string;
@@ -247,12 +247,11 @@ async function loadReport(
     'analyticsPagesMs',
     'analyticsSourcesMs',
     'analyticsEventsMs',
-    'analyticsAudienceMs',
+    'analyticsAudiencePreviousMs',
   ];
   const coreStage = (index: number): AnalyticsQueryStage => {
     if (index < fixedStages.length) return fixedStages[index];
-    if (index < fixedStages.length + plan.dimensionBlobs.length) return 'analyticsDimensionMaxMs';
-    return 'analyticsPreviousMs';
+    return 'analyticsDimensionMaxMs';
   };
   const timedQuery = async (sql: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
     const started = options.timings ? performance.now() : undefined;
@@ -283,10 +282,12 @@ async function loadReport(
     if (options.timings && queryWaitStarted !== undefined)
       options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
   }
-  const [trend, pages, sources, events, audienceRows, ...rest] = results;
+  const [trend, pages, sources, events, periodRows, ...rest] = results;
+  validateReportPeriods(periodRows);
+  const audienceRows = periodRows.filter((row) => number(row.period) === 1);
   const engagementRows = optional[0]?.status === 'fulfilled' ? optional[0].value : [];
   const exitRows = optional[1]?.status === 'fulfilled' ? optional[1].value : [];
-  const previousRows = rest.pop() ?? [];
+  const previousRows = periodRows.filter((row) => number(row.period) === 0);
   return {
     trend,
     pages,
@@ -300,4 +301,14 @@ async function loadReport(
     engagementAvailable: optional.every((result) => result.status === 'fulfilled'),
     dimensionBlobs: plan.dimensionBlobs,
   };
+}
+
+function validateReportPeriods(rows: QueryRow[]): void {
+  const seenPeriods = new Set<number>();
+  for (const row of rows) {
+    const period = number(row.period);
+    if ((period !== 0 && period !== 1) || seenPeriods.has(period))
+      throw new Error('Invalid analytics report periods');
+    seenPeriods.add(period);
+  }
 }

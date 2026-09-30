@@ -14,7 +14,7 @@ import {
   type WorkspaceHealthEnvironmentV1,
   type WorkspaceHealthSummaryV1 as WorkspaceHealthSummary,
 } from '@app-health/contracts';
-import type { D1DatabaseLike } from './d1-adapter.js';
+import type { D1DatabaseLike, D1PreparedStatement } from './d1-adapter.js';
 import { endpointReadRanges } from './endpoint-read.js';
 import type { WorkspaceHealthRepository } from './repository.js';
 
@@ -22,7 +22,7 @@ const HISTOGRAM = Array.from({ length: LATENCY_HISTOGRAM_BUCKETS }, (_, index) =
 const MAX_ENVIRONMENTS = 1000;
 const STALE_THRESHOLD_MS = 15 * 60 * 1000;
 
-interface EnvironmentMetadata {
+interface EnvironmentMetadata extends Record<string, unknown> {
   app_id: string;
   app_name: string;
   environment_id: string;
@@ -170,8 +170,21 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
   async queryWorkspaceHealth(now: number): Promise<WorkspaceHealthSummary> {
     const windowEnd = Math.floor(now / 60_000) * 60_000;
     const from = windowEnd - WINDOW_MS['24h'];
-    const metadata = await this.readMetadata();
-    const buckets = await this.readMetrics(from, windowEnd);
+    // Both reads share scope and window, but neither depends on the other.
+    // One batch avoids a second network round trip without caching auth or data.
+    const results = await this.db.batch([
+      this.metadataStatement(),
+      this.metricsStatement(from, windowEnd),
+    ]);
+    if (
+      results.length !== 2 ||
+      results.some((result) => !result.success || !Array.isArray(result.results))
+    )
+      throw new Error('Workspace health read failed');
+    const metadata = results[0].results as EnvironmentMetadata[];
+    if (metadata.length > MAX_ENVIRONMENTS)
+      throw new Error('Workspace health exceeded environment limit');
+    const buckets = this.parseMetrics(results[1].results as WorkspaceMetricRow[], from);
     return buildWorkspaceHealthSummary(metadata, buckets, now, windowEnd);
   }
 
@@ -191,9 +204,9 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
     return { join: '', predicate: '1 = 1', values: [] as unknown[] };
   }
 
-  private async readMetadata(): Promise<EnvironmentMetadata[]> {
+  private metadataStatement(): D1PreparedStatement {
     const scope = this.scope();
-    const result = await this.db
+    return this.db
       .prepare(
         `SELECT a.id AS app_id, a.name AS app_name, e.id AS environment_id,
           e.name AS environment_name, i.runtime,
@@ -216,14 +229,10 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
         WHERE a.archived_at IS NULL AND ${scope.predicate}
         ORDER BY a.name, e.name LIMIT ${MAX_ENVIRONMENTS + 1}`,
       )
-      .bind(...scope.values)
-      .all<EnvironmentMetadata>();
-    if (result.results.length > MAX_ENVIRONMENTS)
-      throw new Error('Workspace health exceeded environment limit');
-    return result.results;
+      .bind(...scope.values);
   }
 
-  private async readMetrics(from: number, to: number): Promise<BucketV1[]> {
+  private metricsStatement(from: number, to: number): D1PreparedStatement {
     const scope = this.scope();
     const ranges = endpointReadRanges(from, to);
     const values: unknown[] = [];
@@ -232,7 +241,7 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
       return '(?, ?, ?)';
     });
     values.push(...scope.values);
-    const result = await this.db
+    return this.db
       .prepare(
         `WITH ranges(resolution_ms, range_from, range_to) AS (VALUES ${rangeRows.join(',')})
         SELECT r.app_id, r.environment_id, r.histogram_bounds_ms,
@@ -250,11 +259,13 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
         GROUP BY r.app_id, r.environment_id, r.histogram_bounds_ms
         ORDER BY r.app_id, r.environment_id LIMIT ${MAX_ENVIRONMENTS + 1}`,
       )
-      .bind(...values)
-      .all<WorkspaceMetricRow>();
-    if (result.results.length > MAX_ENVIRONMENTS)
+      .bind(...values);
+  }
+
+  private parseMetrics(rows: WorkspaceMetricRow[], from: number): BucketV1[] {
+    if (rows.length > MAX_ENVIRONMENTS)
       throw new Error('Workspace health metrics exceeded environment limit');
-    return result.results.map((row) => {
+    return rows.map((row) => {
       const schema = latencyHistogramSchemaFromBounds(String(row.histogram_bounds_ms));
       const rawHistogram = HISTOGRAM.map((name) => Number(row[name]));
       const requestCount = Number(row.request_count);
