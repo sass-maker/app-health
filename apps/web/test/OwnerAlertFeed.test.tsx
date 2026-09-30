@@ -1,8 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OwnerAlertFeed } from '../src/OwnerAlertFeed.js';
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 const feed = {
   generated_at: Date.UTC(2026, 8, 28),
@@ -65,4 +68,94 @@ it('refreshes the feed and gives a retryable error when unavailable', async () =
   expect(await screen.findByRole('alert')).toHaveTextContent('503');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
   await waitFor(() => expect(screen.getByText('9 in retention')).toBeTruthy());
+});
+
+it('times out a hung fetch, recovers on manual retry, and ignores its late response', async () => {
+  vi.useFakeTimers();
+  let resolveHungFetch!: (response: Response) => void;
+  const hungResponse = new Promise<Response>((resolve) => {
+    resolveHungFetch = resolve;
+  });
+  const fetch = vi
+    .fn((_input: RequestInfo | URL, _init?: RequestInit) => hungResponse)
+    .mockReturnValueOnce(hungResponse)
+    .mockResolvedValueOnce({ ok: true, json: async () => feed } as Response);
+  vi.stubGlobal('fetch', fetch);
+  const view = render(<OwnerAlertFeed ownerToken="owner-token" />);
+
+  expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeTruthy();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  expect((fetch.mock.calls[0]?.[1] as RequestInit).signal?.aborted).toBe(true);
+  expect(screen.queryByRole('status', { name: 'Loading alerts' })).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent(/timed out/i);
+
+  await act(async () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  });
+  expect(screen.getByText('9 in retention')).toBeTruthy();
+  expect(vi.getTimerCount()).toBe(1);
+
+  resolveHungFetch({
+    ok: true,
+    json: async () => ({
+      ...feed,
+      entries: [{ ...feed.entries[0], project_name: 'Late response' }],
+    }),
+  } as Response);
+  await act(async () => {
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  });
+  expect(screen.getByText(/Atlas/)).toBeTruthy();
+  expect(screen.queryByText(/Late response/)).toBeNull();
+
+  view.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
+});
+
+it('times out while reading a response body and aborts the request', async () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
+    Promise.resolve({
+      ok: true,
+      json: () => new Promise<unknown>(() => {}),
+    } as Response),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const view = render(<OwnerAlertFeed ownerToken="owner-token" />);
+  await act(async () => {
+    await Promise.resolve();
+  });
+  const signal = (fetch.mock.calls[0]?.[1] as RequestInit).signal;
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+
+  expect(signal?.aborted).toBe(true);
+  expect(screen.queryByRole('status', { name: 'Loading alerts' })).toBeNull();
+  expect(screen.getByRole('alert')).toHaveTextContent(/timed out/i);
+  view.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
+});
+
+it('aborts a pending request and clears its timeout when unmounted', () => {
+  vi.useFakeTimers();
+  const fetch = vi.fn(
+    (_input: RequestInfo | URL, _init?: RequestInit) => new Promise<Response>(() => {}),
+  );
+  vi.stubGlobal('fetch', fetch);
+  const view = render(<OwnerAlertFeed ownerToken="owner-token" />);
+  const signal = (fetch.mock.calls[0]?.[1] as RequestInit).signal;
+
+  expect(vi.getTimerCount()).toBe(2);
+  view.unmount();
+  expect(signal?.aborted).toBe(true);
+  expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
 });

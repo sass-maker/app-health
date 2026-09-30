@@ -4,6 +4,8 @@ import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
 import { Skeleton } from './components/ui/skeleton.js';
 
+const ALERT_FEED_TIMEOUT_MS = 10_000;
+
 interface AlertEntry {
   id: string;
   app_id: string;
@@ -137,8 +139,18 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): JSX.Elem
 
   useEffect(() => {
     const controller = new AbortController();
+    let disposed = false;
+    let timedOut = false;
     setLoading(true);
     setError('');
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      if (!disposed) {
+        setError('Alerts request timed out after 10 seconds. Try again.');
+        setLoading(false);
+      }
+    }, ALERT_FEED_TIMEOUT_MS);
     void fetch('/v1/workspace/alerts', {
       signal: controller.signal,
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
@@ -148,16 +160,21 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): JSX.Elem
         return (await response.json()) as Feed;
       })
       .then((next) => {
-        if (!controller.signal.aborted) setFeed(next);
+        if (!disposed && !timedOut) setFeed(next);
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted)
+        if (!disposed && !timedOut)
           setError(cause instanceof Error ? cause.message : 'Alerts are unavailable');
       })
       .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+        window.clearTimeout(timeout);
+        if (!disposed && !timedOut) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      disposed = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [ownerToken, retry]);
 
   useEffect(() => {
