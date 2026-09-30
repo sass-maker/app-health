@@ -66,7 +66,7 @@ export function createAccountAuth(env: AccountBindings, timings?: OwnerRequestTi
     rateLimit: { enabled: true, storage: 'database', window: 60, max: 60 },
     advanced: {
       // Account tables are migration-managed; avoid introspecting D1 per auth context.
-      database: { validateSchema: false },
+      database: { validateSchema: false, joins: true },
       disableOriginCheck: false,
       disableCSRFCheck: false,
       useSecureCookies: true,
@@ -117,8 +117,8 @@ export async function measureOwnerRouteRead<T>(
 }
 
 /**
- * Measures Better Auth's session and user D1 reads separately. SQL is used
- * transiently for classification and is never retained or emitted.
+ * Classifies D1 reads by their base table; a session join includes its user read.
+ * SQL is used transiently and is never retained or emitted.
  */
 function withAuthReadTiming(db: D1Database, timings: OwnerRequestTimings): D1Database {
   const readTimingFor = (query: string): 'session' | 'user' | undefined => {

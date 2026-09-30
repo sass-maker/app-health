@@ -146,7 +146,7 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(await (await request('/v1/apps', bobCookie)).json()).toMatchObject({ apps: [] });
   });
 
-  it('loads workspace and owned app scope with one joined D1 read', async () => {
+  it('loads the live session and user in one read before the joined workspace scope', async () => {
     const statements: string[] = [];
     const db = env.DB!;
     const countedDb = new Proxy(db, {
@@ -168,6 +168,10 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     expect(identity?.workspace.id).toBeTruthy();
     expect(identity?.owner.appIds).toContain(aliceApp.app.id);
+    const sessionReads = statements.filter((sql) => /from "session"/i.test(sql));
+    expect(sessionReads).toHaveLength(1);
+    expect(sessionReads[0]).toMatch(/join "user"/i);
+    expect(statements.filter((sql) => /from "user"/i.test(sql))).toHaveLength(0);
     const workspaceReads = statements.filter((sql) => /FROM workspaces w/.test(sql));
     expect(workspaceReads).toHaveLength(1);
     expect(workspaceReads[0]).toContain('LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id');
@@ -237,7 +241,7 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     const analyticsReport = await request('/v1/analytics/report');
     const timingPattern =
-      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, user_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
+      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
     for (const [response, status] of [
       [apps, 200],
       [capabilities, 200],
@@ -249,6 +253,7 @@ describe('Google account boundary with real D1 SQL', () => {
       const header = response.headers.get('server-timing') ?? '';
       expect(header).toMatch(timingPattern);
       expect(header).not.toContain('auth_db');
+      expect(header).not.toContain('user_db_read');
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
     }
@@ -269,15 +274,20 @@ describe('Google account boundary with real D1 SQL', () => {
     }
   });
 
-  it('accumulates repeated Better Auth session and user D1 read timings', async () => {
+  it('accumulates timings for actual joined session and direct user reads', async () => {
     const timings: OwnerRequestTimings = {};
     const auth = createAccountAuth(env, timings)!;
     const headers = new Headers({ cookie: aliceCookie });
     await auth.api.getSession({ headers });
     const firstSessionReadMs = timings.sessionDbReadMs;
-    const firstUserReadMs = timings.userDbReadMs;
     await auth.api.getSession({ headers });
     expect(timings.sessionDbReadMs).toBeGreaterThan(firstSessionReadMs ?? 0);
+    expect(timings.userDbReadMs).toBeUndefined();
+    const ctx = await auth.$context;
+    await ctx.internalAdapter.findUserByEmail('alice@example.com');
+    const firstUserReadMs = timings.userDbReadMs;
+    expect(firstUserReadMs).toBeGreaterThan(0);
+    await ctx.internalAdapter.findUserByEmail('alice@example.com');
     expect(timings.userDbReadMs).toBeGreaterThan(firstUserReadMs ?? 0);
   });
 
@@ -928,7 +938,7 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(invalidCallback.headers.get('location')).toContain('error=');
   });
 
-  it('rejects expired sessions and unverified accounts', async () => {
+  it('reads current verification state on every request and rejects expired sessions', async () => {
     const ctx = await createAccountAuth(env)!.$context;
     const user = await ctx.internalAdapter.createUser(
       { name: 'unverified', email: 'unverified@example.com', emailVerified: false },
@@ -937,6 +947,10 @@ describe('Google account boundary with real D1 SQL', () => {
     const session = await ctx.internalAdapter.createSession(user.id, false);
     const signature = await makeSignature(session.token, env.BETTER_AUTH_SECRET!);
     const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`;
+    expect((await request('/v1/apps', cookie)).status).toBe(401);
+    await env.DB!.prepare('UPDATE "user" SET emailVerified = 1 WHERE id = ?').bind(user.id).run();
+    expect((await request('/v1/apps', cookie)).status).toBe(200);
+    await env.DB!.prepare('UPDATE "user" SET emailVerified = 0 WHERE id = ?').bind(user.id).run();
     expect((await request('/v1/apps', cookie)).status).toBe(401);
     await env.DB!.prepare('UPDATE "user" SET emailVerified = 1 WHERE id = ?').bind(user.id).run();
     await ctx.internalAdapter.updateSession(session.token, { expiresAt: new Date(0) });
