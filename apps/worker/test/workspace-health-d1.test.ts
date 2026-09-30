@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { URL } from 'node:url';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { D1ControlPlane } from '../src/d1-adapter.js';
 import { D1EndpointWriter } from '../src/endpoint-durable.js';
@@ -104,7 +104,19 @@ describe('workspace health D1 aggregation', () => {
       );
     }
 
-    const response = await one.queryWorkspaceHealth(now + 30_000);
+    const batchRead = vi.fn((statements: Parameters<typeof db.batch>[0]) =>
+      db.batch<Record<string, unknown>>(statements),
+    );
+    const response = await new D1ControlPlane(
+      { prepare: db.prepare.bind(db), batch: batchRead },
+      'workspace-one',
+    ).queryWorkspaceHealth(now + 30_000);
+    expect(batchRead).toHaveBeenCalledTimes(1);
+    expect(batchRead.mock.calls[0][0]).toHaveLength(2);
+    for (const result of await batchRead.mock.results[0].value) {
+      expect(result.success).toBe(true);
+      expect(result.meta.rows_written).toBe(0);
+    }
     expect(response.environments).toHaveLength(1);
     expect(response.environments[0]).toMatchObject({
       app_name: 'Atlas',

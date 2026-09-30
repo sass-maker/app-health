@@ -43,9 +43,8 @@ it('reports private fixed-name report stages and preserves cached report behavio
     'analytics_pages',
     'analytics_sources',
     'analytics_events',
-    'analytics_audience',
+    'analytics_audience_previous',
     'analytics_dimension_max',
-    'analytics_previous',
     'analytics_report_assembly',
     'route_read',
   ])

@@ -97,9 +97,8 @@ export interface OwnerRequestTimings {
   analyticsPagesMs?: number;
   analyticsSourcesMs?: number;
   analyticsEventsMs?: number;
-  analyticsAudienceMs?: number;
+  analyticsAudiencePreviousMs?: number;
   analyticsDimensionMaxMs?: number;
-  analyticsPreviousMs?: number;
   analyticsEngagementMs?: number;
   analyticsExitsMs?: number;
   analyticsReportAssemblyMs?: number;
@@ -178,9 +177,8 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['analytics_pages', timings.analyticsPagesMs],
     ['analytics_sources', timings.analyticsSourcesMs],
     ['analytics_events', timings.analyticsEventsMs],
-    ['analytics_audience', timings.analyticsAudienceMs],
+    ['analytics_audience_previous', timings.analyticsAudiencePreviousMs],
     ['analytics_dimension_max', timings.analyticsDimensionMaxMs],
-    ['analytics_previous', timings.analyticsPreviousMs],
     ['analytics_engagement', timings.analyticsEngagementMs],
     ['analytics_exits', timings.analyticsExitsMs],
     ['analytics_report_assembly', timings.analyticsReportAssemblyMs],

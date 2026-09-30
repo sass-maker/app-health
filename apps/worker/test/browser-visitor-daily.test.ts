@@ -240,6 +240,46 @@ beforeEach(async () => {
 afterAll(() => mf.dispose());
 
 describe('exact browser visitor daily ledger', () => {
+  it('does not rewrite an existing visitor unless its expiry needs extending', async () => {
+    await db.prepare('CREATE TABLE visitor_update_audit (count INTEGER NOT NULL)').run();
+    await db.prepare('INSERT INTO visitor_update_audit VALUES (0)').run();
+    await db
+      .prepare(
+        `CREATE TRIGGER audit_visitor_updates AFTER UPDATE ON browser_visitor_days
+      BEGIN UPDATE visitor_update_audit SET count = count + 1; END`,
+      )
+      .run();
+    try {
+      const first = batch();
+      await acceptBrowserVisitorBatch(db, first, first.received_at);
+      const original = await db.prepare('SELECT expires_at FROM browser_visitor_days').first();
+      await acceptBrowserVisitorBatch(db, first, first.received_at + 1);
+      await acceptBrowserVisitorBatch(db, batch(), first.received_at + 2);
+      expect(await db.prepare('SELECT count FROM visitor_update_audit').first()).toEqual({
+        count: 0,
+      });
+      expect(await db.prepare('SELECT expires_at FROM browser_visitor_days').first()).toEqual(
+        original,
+      );
+      expect(
+        await db.prepare('SELECT COUNT(*) AS count FROM browser_visitor_days').first(),
+      ).toEqual({ count: 1 });
+
+      await db.prepare('UPDATE browser_visitor_days SET expires_at = expires_at - 1').run();
+      await db.prepare('UPDATE visitor_update_audit SET count = 0').run();
+      await acceptBrowserVisitorBatch(db, batch(), first.received_at + 3);
+      expect(await db.prepare('SELECT count FROM visitor_update_audit').first()).toEqual({
+        count: 1,
+      });
+      expect(await db.prepare('SELECT expires_at FROM browser_visitor_days').first()).toEqual(
+        original,
+      );
+    } finally {
+      await db.prepare('DROP TRIGGER audit_visitor_updates').run();
+      await db.prepare('DROP TABLE visitor_update_audit').run();
+    }
+  });
+
   it('deduplicates a scoped visitor on an India day and keeps app/environment scopes separate', async () => {
     const first = batch();
     await acceptBrowserVisitorBatch(db, first, first.received_at);

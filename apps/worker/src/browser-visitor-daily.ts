@@ -612,7 +612,8 @@ export async function acceptBrowserVisitorBatch(
            )
            AND ${openFencesSql}
            ON CONFLICT (workspace_id, app_id, environment_id, india_day, visitor_hash)
-           DO UPDATE SET expires_at = MAX(browser_visitor_days.expires_at, excluded.expires_at)`,
+           DO UPDATE SET expires_at = excluded.expires_at
+           WHERE excluded.expires_at > browser_visitor_days.expires_at`,
         )
         .bind(
           batch.workspace,
