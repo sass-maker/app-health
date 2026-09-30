@@ -21,11 +21,14 @@ qualification. Passing the Oct 1 cutoff does not make the default/latest day
 exact; each day has its own cutoff and evidence review.
 
 The currently recorded tracker activation is 2026-09-30 06:43:32 UTC. The
-current App Health Worker rollout is version `a33b8880-92d4-4428-977a-7a8c37224a83`,
-source tag `9e36675a6a2179e134d09215a05d285108ac584b`, activated at
-2026-09-30 07:14:58.815 UTC and provider-verified at 100%. Recheck provider
-history at qualification time; these values are the starting evidence, not
-proof of continuity through the cutoff.
+current App Health Worker rollout is version
+`48944ec2-a5bc-49f2-9a3f-b00a20cce468`, source tag
+`da7270d12e8b0f17bf69bcb3f4af5c20e7784d47`, activated at 2026-09-30
+08:59:50.293 UTC and provider-verified at 100% in deployment
+`16af810d-3f49-496f-9523-afe5c1197e7b`. Its rollout proof was recorded and
+read back at `1790759466629` ([issue #92 receipt](https://github.com/sass-maker/app-health/issues/92#issuecomment-5908063899)).
+Recheck provider history at qualification time; these values are the starting
+evidence, not proof of continuity through the cutoff.
 
 If a Worker rollout starts during this candidate interval, the current seal
 query rejects the day even if the later version reaches 100%. A tracker source
