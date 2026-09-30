@@ -1,7 +1,8 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import type { AppEnvironmentV1 } from '@app-health/contracts';
-import type { D1DatabaseLike } from './d1-adapter.js';
+import { getAccountCapabilitySetup, type D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
+import type { CapabilitySetup } from './repository.js';
 
 export interface AccountBindings {
   APP_HEALTH_ACCOUNTS?: string;
@@ -88,6 +89,7 @@ export interface OwnerRequestTimings {
   sessionDbReadMs?: number;
   userDbReadMs?: number;
   workspaceScopeMs?: number;
+  workspaceCapabilitySetupReadMs?: number;
   capabilitySetupReadMs?: number;
   analyticsCacheLookupMs?: number;
   analyticsQueryWaitMs?: number;
@@ -168,6 +170,7 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['session_db_read', timings.sessionDbReadMs],
     ['user_db_read', timings.userDbReadMs],
     ['workspace_scope', timings.workspaceScopeMs],
+    ['workspace_capability_setup_read', timings.workspaceCapabilitySetupReadMs],
     ['capability_setup_read', timings.capabilitySetupReadMs],
     ['analytics_cache_lookup', timings.analyticsCacheLookupMs],
     ['analytics_query_wait', timings.analyticsQueryWaitMs],
@@ -255,7 +258,13 @@ export async function accountIdentity(
   onSignup?: (id: string) => void,
   timings?: OwnerRequestTimings,
   includeApps = false,
-): Promise<{ owner: OwnerIdentity; workspace: Workspace; apps?: AppEnvironmentV1[] } | null> {
+  capabilityScope?: { appId: string; environmentId: string },
+): Promise<{
+  owner: OwnerIdentity;
+  workspace: Workspace;
+  apps?: AppEnvironmentV1[];
+  capabilitySetup?: CapabilitySetup | null;
+} | null> {
   const authSetupStarted = performance.now();
   const auth = createAccountAuth(env, timings);
   if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
@@ -264,6 +273,39 @@ export async function accountIdentity(
   const session = await auth.api.getSession({ headers: request.headers });
   if (timings) timings.sessionLookupMs = performance.now() - sessionLookupStarted;
   if (!session || !session.user.emailVerified) return null;
+
+  if (capabilityScope) {
+    const capabilityScopeStarted = performance.now();
+    let scoped = await getAccountCapabilitySetup(
+      env.DB,
+      session.user.id,
+      capabilityScope.appId,
+      capabilityScope.environmentId,
+    );
+    if (!scoped) {
+      await personalWorkspace(env.DB, session.user.id, () => onSignup?.(session.user.id));
+      scoped = await getAccountCapabilitySetup(
+        env.DB,
+        session.user.id,
+        capabilityScope.appId,
+        capabilityScope.environmentId,
+      );
+    }
+    if (timings)
+      timings.workspaceCapabilitySetupReadMs = performance.now() - capabilityScopeStarted;
+    if (!scoped) throw new Error('Workspace could not be read');
+    return {
+      workspace: scoped.workspace,
+      owner: {
+        id: session.user.id,
+        label: session.user.name,
+        workspaceId: scoped.workspace.id,
+        appIds: scoped.appIds,
+      },
+      capabilitySetup: scoped.setup,
+    };
+  }
+
   const workspaceScopeStarted = performance.now();
   let rows = await workspaceAndApps(env.DB, session.user.id, includeApps);
   if (!rows.length) {

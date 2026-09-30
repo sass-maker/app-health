@@ -778,6 +778,7 @@ async function handleOwnerRoutes(
     ctx?: WorkerContext;
     timings?: OwnerRequestTimings;
     preloadedApps?: AppEnvironmentV1[];
+    preloadedCapabilitySetup?: import('./repository.js').CapabilitySetup | null;
   },
 ): Promise<Response> {
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
@@ -797,7 +798,13 @@ async function handleOwnerRoutes(
     bundle.local,
   );
   if (nativeResponse) return nativeResponse;
-  const projectResponse = await handleProjectRoutes(request, bundle.repos, owner, options?.timings);
+  const projectResponse = await handleProjectRoutes(
+    request,
+    bundle.repos,
+    owner,
+    options?.timings,
+    options?.preloadedCapabilitySetup,
+  );
   if (projectResponse) return projectResponse;
   const browserResponse = await handleBrowserOwner(
     request,
@@ -895,6 +902,7 @@ async function handleAccountOwner(
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';
+  const capabilityScope = requestedCapabilityScope(request, path, url);
   const account = await accountIdentity(
     request,
     env,
@@ -905,6 +913,7 @@ async function handleAccountOwner(
     },
     timings,
     includeApps,
+    capabilityScope,
   );
   if (!account || !env.DB) return json(401, { error: 'sign in required' }, true);
   if (url.pathname === '/v1/account' && request.method === 'GET')
@@ -915,9 +924,22 @@ async function handleAccountOwner(
     account.owner,
     url,
     env,
-    { ctx, timings, ...(includeApps ? { preloadedApps: account.apps ?? [] } : {}) },
+    {
+      ctx,
+      timings,
+      ...(includeApps ? { preloadedApps: account.apps ?? [] } : {}),
+      ...(capabilityScope ? { preloadedCapabilitySetup: account.capabilitySetup ?? null } : {}),
+    },
   );
   return withOwnerServerTiming(response, timings);
+}
+
+function requestedCapabilityScope(request: Request, path: string, url: URL) {
+  const appId = url.searchParams.get('app_id') ?? '';
+  const environmentId = url.searchParams.get('environment_id') ?? '';
+  if (request.method !== 'GET' || path !== '/v1/capabilities' || !appId || !environmentId)
+    return undefined;
+  return { appId, environmentId };
 }
 
 function workspaceBundle(
