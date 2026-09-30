@@ -180,6 +180,45 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   });
 
+  it('loads authenticated app inventory in the live workspace-membership query', async () => {
+    const statements: string[] = [];
+    const db = env.DB!;
+    const countedDb = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            statements.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const response = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/apps', { headers: { cookie: aliceCookie } }),
+      { ...env, DB: countedDb },
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      apps: [
+        {
+          app: { id: aliceApp.app.id },
+          environments: [{ id: aliceApp.environment.id }],
+        },
+      ],
+    });
+    const sessionReads = statements.filter((sql) => /from "session"/i.test(sql));
+    const workspaceReads = statements.filter((sql) => /FROM workspaces w/.test(sql));
+    expect(sessionReads).toHaveLength(1);
+    expect(sessionReads[0]).toMatch(/join "user"/i);
+    expect(workspaceReads).toHaveLength(1);
+    expect(workspaceReads[0]).toContain(
+      'LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL',
+    );
+    expect(workspaceReads[0]).toContain('LEFT JOIN environments e ON e.app_id = a.id');
+    expect(statements.some((sql) => /FROM apps a/.test(sql))).toBe(false);
+  });
+
   it('lets the cookie-authenticated workspace owner start and poll an archive audit', async () => {
     const created = await request('/v1/apps', aliceCookie, {
       name: 'Archive audit owner fixture',

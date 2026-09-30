@@ -44,6 +44,7 @@ import {
   FailureQueryRequestV1,
   InstallationStatusV1,
   ListAppsResponseV1,
+  type AppEnvironmentV1,
   CreatePublicLogKeyRequestV1,
   LOG_RETENTION_DAYS,
   ListPublicLogKeysResponseV1,
@@ -517,13 +518,19 @@ async function handleAppsRoute(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
-  options?: { ctx?: WorkerContext; timings?: OwnerRequestTimings },
+  options?: {
+    ctx?: WorkerContext;
+    timings?: OwnerRequestTimings;
+    preloadedApps?: AppEnvironmentV1[];
+  },
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/apps') return null;
   const { service } = bundle;
   if (request.method === 'GET') {
     const routeReadStarted = performance.now();
-    const listed = await service.listApps(owner.appId);
+    const listed = options?.preloadedApps
+      ? { apps: options.preloadedApps }
+      : await service.listApps(owner.appId);
     if (options?.timings) options.timings.routeReadMs = performance.now() - routeReadStarted;
     return json(200, ListAppsResponseV1.parse(listed), true);
   }
@@ -767,7 +774,11 @@ async function handleOwnerRoutes(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
-  options?: { ctx?: WorkerContext; timings?: OwnerRequestTimings },
+  options?: {
+    ctx?: WorkerContext;
+    timings?: OwnerRequestTimings;
+    preloadedApps?: AppEnvironmentV1[];
+  },
 ): Promise<Response> {
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const shareResponse = await handleAnalyticsShareOwner(
@@ -883,6 +894,7 @@ async function handleAccountOwner(
       '/v1/analytics/report',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
+  const includeApps = request.method === 'GET' && path === '/v1/apps';
   const account = await accountIdentity(
     request,
     env,
@@ -892,6 +904,7 @@ async function handleAccountOwner(
       else void delivery;
     },
     timings,
+    includeApps,
   );
   if (!account || !env.DB) return json(401, { error: 'sign in required' }, true);
   if (url.pathname === '/v1/account' && request.method === 'GET')
@@ -902,7 +915,7 @@ async function handleAccountOwner(
     account.owner,
     url,
     env,
-    { ctx, timings },
+    { ctx, timings, ...(includeApps ? { preloadedApps: account.apps ?? [] } : {}) },
   );
   return withOwnerServerTiming(response, timings);
 }

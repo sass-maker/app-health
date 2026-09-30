@@ -1,4 +1,5 @@
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
+import type { AppEnvironmentV1 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 
@@ -220,18 +221,31 @@ export async function personalWorkspace(
   return workspace;
 }
 
-async function workspaceAndApps(db: D1DatabaseLike, userId: string) {
+async function workspaceAndApps(db: D1DatabaseLike, userId: string, includeEnvironments = false) {
   const { results } = await db
     .prepare(
-      `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id
+      `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id,
+              ${includeEnvironments ? 'a.name AS app_name, a.created_at AS app_created_at,' : ''}
+              ${includeEnvironments ? 'e.id AS env_id, e.app_id AS env_app_id, e.name AS env_name, e.created_at AS env_created_at' : 'NULL AS env_id, NULL AS env_app_id, NULL AS env_name, NULL AS env_created_at'}
        FROM workspaces w
        LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id
        LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
+       ${includeEnvironments ? 'LEFT JOIN environments e ON e.app_id = a.id' : ''}
        WHERE w.owner_id = ?
-       ORDER BY a.id`,
+       ORDER BY ${includeEnvironments ? 'a.created_at DESC, e.created_at' : 'a.id'}`,
     )
     .bind(userId)
-    .all<{ workspace_id: string; workspace_name: string; app_id: string | null }>();
+    .all<{
+      workspace_id: string;
+      workspace_name: string;
+      app_id: string | null;
+      app_name?: string | null;
+      app_created_at?: number | null;
+      env_id: string | null;
+      env_app_id: string | null;
+      env_name: string | null;
+      env_created_at: number | null;
+    }>();
   return results;
 }
 
@@ -240,7 +254,8 @@ export async function accountIdentity(
   env: AccountBindings,
   onSignup?: (id: string) => void,
   timings?: OwnerRequestTimings,
-): Promise<{ owner: OwnerIdentity; workspace: Workspace } | null> {
+  includeApps = false,
+): Promise<{ owner: OwnerIdentity; workspace: Workspace; apps?: AppEnvironmentV1[] } | null> {
   const authSetupStarted = performance.now();
   const auth = createAccountAuth(env, timings);
   if (timings) timings.authSetupMs = performance.now() - authSetupStarted;
@@ -250,22 +265,44 @@ export async function accountIdentity(
   if (timings) timings.sessionLookupMs = performance.now() - sessionLookupStarted;
   if (!session || !session.user.emailVerified) return null;
   const workspaceScopeStarted = performance.now();
-  let rows = await workspaceAndApps(env.DB, session.user.id);
+  let rows = await workspaceAndApps(env.DB, session.user.id, includeApps);
   if (!rows.length) {
     await personalWorkspace(env.DB, session.user.id, () => onSignup?.(session.user.id));
-    rows = await workspaceAndApps(env.DB, session.user.id);
+    rows = await workspaceAndApps(env.DB, session.user.id, includeApps);
   }
   if (timings) timings.workspaceScopeMs = performance.now() - workspaceScopeStarted;
   const workspaceRow = rows[0];
   if (!workspaceRow) throw new Error('Workspace could not be read');
+  const appsById = new Map<string, AppEnvironmentV1>();
+  if (includeApps) {
+    for (const row of rows) {
+      if (!row.app_id || row.app_name === null || row.app_name === undefined) continue;
+      let entry = appsById.get(row.app_id);
+      if (!entry) {
+        entry = {
+          app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at ?? 0 },
+          environments: [],
+        };
+        appsById.set(row.app_id, entry);
+      }
+      if (row.env_id !== null)
+        entry.environments.push({
+          id: row.env_id,
+          app_id: row.env_app_id ?? row.app_id,
+          name: row.env_name ?? '',
+          created_at: row.env_created_at ?? 0,
+        });
+    }
+  }
   return {
     workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
     owner: {
       id: session.user.id,
       label: session.user.name,
       workspaceId: workspaceRow.workspace_id,
-      appIds: rows.flatMap((row) => (row.app_id === null ? [] : [row.app_id])),
+      appIds: [...new Set(rows.flatMap((row) => (row.app_id === null ? [] : [row.app_id])))],
     },
+    ...(includeApps ? { apps: [...appsById.values()] } : {}),
   };
 }
 
