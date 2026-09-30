@@ -148,16 +148,21 @@ not proof that a message failed. A staging receipt proves durable DO staging,
 not successful R2 archival. R2 parity must come from the archive audit's
 verified comparisons plus reviewed Queue/DLQ evidence.
 
-## Check Analytics Engine and archive parity before consumer cutover
+## Verify the report inputs before sealing
 
-Issue #96's acceptance check compares the exact source with unsampled
-Analytics Engine groups and archived facts before changing the Daily briefing
-consumer. This is a separate consumer-cutover gate; it is not a typed
-precondition in `sealExactBrowserVisitorDay` or the owner `seal-day` action.
-Capture the report with the audited historical date explicitly **before**
-sealing. While the fence is open, CodeVetter's exact D1 count remains
-`Unknown`; this read shows the current Analytics Engine count and sampling
-reason without returning visitor identifiers:
+The deployed `/v1/reports/daily-engagement` route reads exact D1 visitor rows
+and prefers them for scopes whose day is complete and sealed; otherwise it
+uses Analytics Engine or reports `Unknown`. The authenticated Daily page reads
+this route directly. Therefore a successful seal can change the next report
+response without a separate consumer deployment. The report tests cover
+complete exact counts and exact zeroes, while incomplete and unactivated scopes
+remain `Unknown` (`apps/worker/test/daily-engagement-report.test.ts`).
+
+Complete the external acceptance review before sealing because the seal is
+immediately visible to this report path. Capture the report with the audited
+historical date explicitly while the fence is open; this records Analytics
+Engine's current CodeVetter count and sampling reason without returning
+visitor identifiers:
 
 ```js
 const report = await fetch(
@@ -167,25 +172,18 @@ const report = await fetch(
 report.products.filter((row) => row.catalog_id === 'codevetter');
 ```
 
-If CodeVetter has a numeric unsampled `browser_visitors` count, compare it with
-the aggregate D1 visitor count. A mismatch blocks consumer cutover and
-requires investigation. If CodeVetter is sampled, that group cannot provide
-an exact parity control; do not scale its estimate or block source-day
-qualification solely because it is sampled.
-
-Issue #96 also requires comparison with unsampled AE groups and archived facts.
-The current bounded archive audit compares accepted batch facts and reports
-aggregate match/mismatch counts; it does not return a distinct-visitor total
-by product for independently comparing an arbitrary unsampled control group.
-Compare CodeVetter's accepted D1 receipts with verified archive facts using
-the audit, and record any available unsampled AE controls. If no valid control
-comparison can be produced from reviewed aggregate evidence, mark this issue
-acceptance gate incomplete. Keep the Fleet Daily briefing AE-backed and retain
-`Unknown` for CodeVetter until the consumer-cutover acceptance is satisfied.
-This parity acceptance is separate from the source's typed proof and does not
-replace rollout, tracker, late-window, or source-ledger gates. The report uses
-the configured Analytics Engine query internally; no token should be copied
-into a shell or browser command.
+Compare CodeVetter's aggregate D1 visitor count with AE when its group is
+numeric and unsampled; investigate any mismatch. A sampled CodeVetter group
+cannot supply an exact parity control. Do not scale it or require it to equal
+the exact count. Instead, use reviewed unsampled product/day control groups
+and their archived facts for the issue's representative AE/archive parity
+check, and compare CodeVetter's accepted receipts against its verified archive
+facts using the bounded audit above. Record the selected controls and
+aggregate results. If no valid unsampled control or archive comparison is
+available, keep the day unsealed and the report's CodeVetter value `Unknown`;
+do not expose an exact D1 fallback before the issue's acceptance gates pass.
+The report uses the configured Analytics Engine query internally; no token
+should be copied into a shell or browser command.
 Cloudflare describes `_sample_interval` and the SQL API in the [Analytics
 Engine SQL API documentation](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/).
 
@@ -219,21 +217,18 @@ blindly replay a proof action.
 
 **The seal endpoint checks only its D1 rollout/scope rows, their audits, the
 late-event cutoff, and overlapping intervals. It does not check Queue/DLQ,
-R2 retention/parity, or Analytics Engine parity.** The external gates have no
-typed fields in the current proof endpoint, so retain their reviewed evidence
-with the operator record. Do not represent a successful source seal as proof
-that these consumer-cutover gates passed. The endpoint returns 409 when its own
-checks fail; that response is a stop condition, not a reason to edit or
-fabricate evidence.
+R2 retention/parity, or Analytics Engine parity.** Those external acceptance
+gates have no typed fields in the proof endpoint, so retain their reviewed
+evidence in the operator record and satisfy them before submitting `seal-day`;
+the report can consume a newly sealed exact value immediately. The endpoint
+returns 409 when its own checks fail; that response is a stop condition, not a
+reason to edit or fabricate evidence.
 
-After a successful seal, fetch the source endpoint again with the same explicit
-`?date=2026-10-01` and verify its CodeVetter row against the recorded aggregate
-count. A seal qualifies this source day only;
-it does not switch the Fleet Daily/portfolio briefing to D1 counts. That
-consumer remains AE-backed until its separate qualified-consumer wiring is
-reviewed and released. Preserve `Unknown` in that report until then. An empty
-unsealed day remains `Unknown`; never turn missing, sampled, or unqualified
-data into an automatic zero.
+After a successful seal, fetch `/v1/reports/daily-engagement` again with the
+same explicit `?date=2026-10-01`. Verify CodeVetter's row uses the exact count
+and matches the previously reviewed aggregate D1 count. The Daily page reads
+this same report route. An empty unsealed day remains `Unknown`; missing,
+sampled, or unqualified data must never become an automatic zero.
 
 ## Remaining automation gap
 
