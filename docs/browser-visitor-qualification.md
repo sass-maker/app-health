@@ -49,6 +49,7 @@ pnpm --filter @app-health/worker exec wrangler versions view <version-id>
 pnpm --filter @app-health/worker exec wrangler pages deployment list --project-name codevetter --environment production --json
 pnpm --filter @app-health/worker exec wrangler queues info app-health-browser-events
 pnpm --filter @app-health/worker exec wrangler queues info app-health-browser-events-dlq
+pnpm --filter @app-health/worker exec wrangler queues consumer worker list app-health-browser-events --json --env=
 pnpm --filter @app-health/worker exec wrangler r2 bucket lifecycle list app-health-browser-history
 ```
 
@@ -69,14 +70,14 @@ anonymous reads of `https://codevetter.com/` and
 only status, observed time, deployment/source SHA, and tracker configuration.
 Do not save visitor IDs, cookies, or request payloads.
 
-`queues info` verifies queue and consumer topology, but separate main-queue and
-DLQ listings do not prove that the consumer is bound to that DLQ. The
-2026-09-30 08:21:51 UTC inspection showed one `worker:app-health-worker`
-consumer on `app-health-browser-events` and zero consumers on
-`app-health-browser-events-dlq`; the CLI output did not expose a
-`dead_letter_queue` field. Verify the binding independently from provider
-configuration/API evidence. This still does not prove queue drain. In
-Cloudflare Queues metrics, export the main queue and DLQ backlog and
+`queues info` verifies queue topology, but separate main-queue and DLQ
+listings do not show whether the consumer is bound to that DLQ. The consumer
+list command showed one `app-health-worker` consumer for
+`app-health-browser-events`, `dead_letter_queue` set to
+`app-health-browser-events-dlq`, and `max_retries` 3 in the 2026-09-30
+09:40:40–09:40:42 UTC read. This verifies the binding at that observation
+time, not across the target day or late window, and does not prove queue drain.
+In Cloudflare Queues metrics, export the main queue and DLQ backlog and
 message-operation series across the target day and late window. Include
 backlog messages/bytes, oldest-message time, retries, and delete outcomes
 (`success`, `dlq`, `fail`); also capture point-in-time backlog at the end of the
