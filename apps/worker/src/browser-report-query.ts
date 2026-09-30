@@ -283,13 +283,7 @@ async function loadReport(
       options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
   }
   const [trend, pages, sources, events, periodRows, ...rest] = results;
-  const seenPeriods = new Set<number>();
-  for (const row of periodRows) {
-    const period = number(row.period);
-    if ((period !== 0 && period !== 1) || seenPeriods.has(period))
-      throw new Error('Invalid analytics report periods');
-    seenPeriods.add(period);
-  }
+  validateReportPeriods(periodRows);
   const audienceRows = periodRows.filter((row) => number(row.period) === 1);
   const engagementRows = optional[0]?.status === 'fulfilled' ? optional[0].value : [];
   const exitRows = optional[1]?.status === 'fulfilled' ? optional[1].value : [];
@@ -307,4 +301,14 @@ async function loadReport(
     engagementAvailable: optional.every((result) => result.status === 'fulfilled'),
     dimensionBlobs: plan.dimensionBlobs,
   };
+}
+
+function validateReportPeriods(rows: QueryRow[]): void {
+  const seenPeriods = new Set<number>();
+  for (const row of rows) {
+    const period = number(row.period);
+    if ((period !== 0 && period !== 1) || seenPeriods.has(period))
+      throw new Error('Invalid analytics report periods');
+    seenPeriods.add(period);
+  }
 }
