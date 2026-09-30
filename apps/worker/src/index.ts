@@ -14,6 +14,7 @@ import {
   type SelfAnalyticsBindings,
 } from './self-analytics.js';
 import { handleAnalyticsShareOwner, handlePublicAnalytics } from './analytics-share-routes.js';
+import { compactEndpointRollupPartition } from './endpoint-compaction.js';
 import { handleNativeIngest, handleNativeKeyOwner } from './native-routes.js';
 import { handleProjectRoutes } from './project-routes.js';
 import { importCatalogProjects, CatalogImportConflict } from './catalog-import.js';
@@ -103,6 +104,10 @@ export interface Env
   DB?: D1DatabaseLike;
   /** Private SaaS Maker aggregate RPC; invoked only from owner-authenticated routes. */
   SAASMAKER_METRICS?: DailyCaptureCountsService;
+  /** Dedicated non-expiring cold store; never use the browser bucket's age-expiring namespace. */
+  ENDPOINT_HISTORY?: Pick<R2Bucket, 'put' | 'get'>;
+  /** Explicitly activated only after schema, retention and recovery qualification. */
+  ENDPOINT_COMPACTION_ENABLED?: string;
   TELEMETRY?: AnalyticsEngineDatasetLike;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 }
@@ -160,7 +165,8 @@ async function resolveAdapter(env: Env): Promise<AdapterBundle | null> {
       accountId: env.CLOUDFLARE_ACCOUNT_ID,
       token: env.ANALYTICS_ENGINE_QUERY_TOKEN,
     }),
-    (appId, envId, from, to) => readEndpointBuckets(db, appId, envId, from, to),
+    (appId, envId, from, to) =>
+      readEndpointBuckets(db, appId, envId, from, to, env.ENDPOINT_HISTORY),
   );
   const control = new D1ControlPlane(env.DB);
   const repos = control.asRepositories(buckets);
@@ -669,6 +675,7 @@ async function handleDailyEngagementRoute(
       ctaFullDayStart: DAILY_CTA_FULL_DAY_START,
       ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
       captureCountsService: env.SAASMAKER_METRICS,
+      endpointColdBucket: env.ENDPOINT_HISTORY,
     });
     return json(
       200,
@@ -1006,6 +1013,36 @@ async function publicAnalyticsPage(
   return response;
 }
 
+async function compactEndpointHistoryIfEnabled(env: Env): Promise<void> {
+  if (!env.DB || env.ENDPOINT_COMPACTION_ENABLED !== 'enabled' || !env.ENDPOINT_HISTORY) return;
+  const deadline = performance.now() + 10_000;
+  let partitions = 0;
+  let rows = 0;
+  let state = 'bounded';
+  try {
+    for (let index = 0; index < 32; index += 1) {
+      const remaining = Math.floor(deadline - performance.now());
+      if (remaining < 1) break;
+      const result = await compactEndpointRollupPartition({
+        db: env.DB,
+        bucket: env.ENDPOINT_HISTORY,
+        now: Date.now(),
+        retire: true,
+        maxRuntimeMs: remaining,
+      });
+      if (result.state !== 'retired') {
+        state = result.state;
+        break;
+      }
+      partitions += 1;
+      rows += result.rows;
+    }
+    console.info(JSON.stringify({ event: 'endpoint_compaction', state, partitions, rows }));
+  } catch {
+    console.warn(JSON.stringify({ event: 'endpoint_compaction_failed', partitions, rows }));
+  }
+}
+
 const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1041,6 +1078,7 @@ const unmonitoredWorker = {
 
   async scheduled(_controller: unknown, env: Env): Promise<void> {
     if (!env.DB) return;
+    await compactEndpointHistoryIfEnabled(env);
     const control = new D1ControlPlane(env.DB);
     await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);
     await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());

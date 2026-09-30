@@ -26,6 +26,7 @@ import {
   type ExactBrowserVisitorResult,
 } from './browser-visitor-daily.js';
 import { endpointReadRanges } from './endpoint-read.js';
+import { readEndpointHistory } from './endpoint-cold-read.js';
 
 /** SaaS Maker centralized log events that map to engagement metrics. */
 const FEEDBACK_EVENT = 'feedback.submitted';
@@ -66,7 +67,7 @@ interface NativeSessionRow {
   sample_interval: number;
 }
 
-interface ApiActivityRow {
+interface ApiActivityRow extends Record<string, unknown> {
   app_id: string;
   request_count: number;
   upstream_sampled: number;
@@ -933,6 +934,7 @@ export async function readDailyApiActivity(
   from: number,
   to: number,
   catalog: readonly CatalogProductRow[],
+  coldBucket?: Pick<R2Bucket, 'get'>,
 ): Promise<ApiActivityRow[]> {
   if (catalog.length === 0) return [];
   const ranges = endpointReadRanges(from, to);
@@ -942,7 +944,7 @@ export async function readDailyApiActivity(
     (_, index) => `(?${index * 3 + 1}, ?${index * 3 + 2}, ?${index * 3 + 3})`,
   );
   const workspaceIndex = values.length;
-  const result = await db
+  const hot = db
     .prepare(
       `WITH ranges(resolution_ms, range_from, range_to) AS (VALUES ${rangeValues.join(',')})
      SELECT r.app_id, SUM(r.request_count) AS request_count,
@@ -956,12 +958,22 @@ export async function readDailyApiActivity(
        AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
      GROUP BY r.app_id LIMIT 56`,
     )
-    .bind(...values)
-    .all<ApiActivityRow>();
-  if (result.results.length > 55) throw new Error('Daily endpoint query exceeded row limit');
+    .bind(...values);
+  const { hotRows: historyRows, coldRows } = await readEndpointHistory<ApiActivityRow>({
+    hot,
+    db,
+    bucket: coldBucket,
+    scopes: catalog.flatMap((row) =>
+      row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
+    ),
+    from,
+    to,
+    now: Date.now(),
+  });
+  if (historyRows.length > 55) throw new Error('Daily endpoint query exceeded row limit');
   const allowedApps = new Set(catalog.flatMap((row) => (row.environment_id ? [row.app_id] : [])));
   const seen = new Set<string>();
-  return result.results.map((row) => {
+  const hotRows = historyRows.map((row) => {
     const count = Number(row.request_count);
     const sampled = Number(row.upstream_sampled);
     if (
@@ -975,6 +987,20 @@ export async function readDailyApiActivity(
     seen.add(row.app_id);
     return { app_id: row.app_id, request_count: count, upstream_sampled: sampled };
   });
+  if (!coldRows.length) return hotRows;
+  const merged = new Map(hotRows.map((row) => [row.app_id, row]));
+  for (const row of coldRows) {
+    const previous = merged.get(row.app_id);
+    const count = (previous?.request_count ?? 0) + row.request_count;
+    if (!allowedApps.has(row.app_id) || !Number.isSafeInteger(count))
+      throw new Error('Invalid combined daily endpoint aggregate');
+    merged.set(row.app_id, {
+      app_id: row.app_id,
+      request_count: count,
+      upstream_sampled: Math.max(previous?.upstream_sampled ?? 0, row.upstream_sampled),
+    });
+  }
+  return [...merged.values()];
 }
 
 /** Grouped D1 log_events query for feedback / waitlist / newsletter joins. */
@@ -1174,6 +1200,18 @@ async function readDailyEngagementNativeSessions(
   }
 }
 
+function nativeSessionsForReport(
+  query: AnalyticsEngineQuery | undefined,
+  workspace: string,
+  catalog: readonly CatalogProductRow[],
+  from: number,
+  to: number,
+) {
+  return query
+    ? readDailyEngagementNativeSessions(workspace, catalog, from, to, query)
+    : Promise.resolve({ rows: [] as NativeSessionRow[], measured: false });
+}
+
 /** Compose the full report by reading catalog, browser, and log aggregates. */
 export async function composeDailyEngagementReport(args: {
   db: D1DatabaseLike;
@@ -1186,6 +1224,7 @@ export async function composeDailyEngagementReport(args: {
   ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
   captureCountsService?: DailyCaptureCountsService;
+  endpointColdBucket?: Pick<R2Bucket, 'get'>;
 }): Promise<DailyEngagementReportV1> {
   const window = dailyEngagementWindow(args.date, args.now);
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
@@ -1217,16 +1256,15 @@ export async function composeDailyEngagementReport(args: {
           visitorsMeasured: false,
           ctaMeasured: false,
         }),
-    args.query
-      ? readDailyEngagementNativeSessions(
-          args.workspaceId,
-          catalog,
-          window.from,
-          window.to,
-          args.query,
-        )
-      : Promise.resolve({ rows: [] as NativeSessionRow[], measured: false }),
-    readDailyApiActivity(args.db, args.workspaceId, window.from, window.to, catalog)
+    nativeSessionsForReport(args.query, args.workspaceId, catalog, window.from, window.to),
+    readDailyApiActivity(
+      args.db,
+      args.workspaceId,
+      window.from,
+      window.to,
+      catalog,
+      args.endpointColdBucket,
+    )
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as ApiActivityRow[], measured: false })),
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
