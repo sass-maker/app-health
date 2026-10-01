@@ -186,10 +186,13 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
 
-  const daily = await screen.findByRole('heading', { name: 'Monday, 28 Sept 2026' });
+  const daily = await screen.findByRole('heading', {
+    name: /Monday, 28 Sept 2026/,
+  });
   const alerts = screen.getByText('Feedback and consented joins · separate from the selected day', {
     selector: '[data-slot="card-title"]',
   });
+  fireEvent.click(screen.getByText('Request health and collection details'));
   const requestHealth = screen.getByRole('heading', { name: 'Request health' });
   const issues = screen.getByText('Request issues', { selector: '[data-slot="card-title"]' });
   const inventory = screen.getByText('Complete inventory', {

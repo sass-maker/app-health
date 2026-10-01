@@ -1,6 +1,6 @@
 # app-health — PROJECT STATUS
 
-Last updated: 2026-09-14
+Last updated: 2026-10-01
 
 ## Why / What
 
@@ -44,14 +44,27 @@ error rates and histogram-based p50/p95 latency. Cloudflare public fetch routing
 is explicitly enabled for same-Worker delivery. See
 [activation and verification](docs/backend-dogfooding.md) and issue #63.
 
-## Pending activation — server-side browser bot filtering
+## Browser bot filtering — released 2026-10-01
 
-The Worker source prototype for [issue #135](https://github.com/sass-maker/app-health/issues/135)
-uses trusted Cloudflare verified-bot metadata and the pinned `isbot` matcher
-before browser quota or analytics writes. Focused collector tests and Worker
-typecheck pass. This is source-prepared only: production behavior is unchanged
-pending review and release, and no historical visitor day is retroactively
-classified.
+[PR #136](https://github.com/sass-maker/app-health/pull/136) deployed source
+`ed327e92d3e8a88ada8d12a5bd83fc152eee685a` at 100% traffic, Worker
+`9bddaa59-6bc0-4f4d-a7fc-2139783d35cd`. Verified bots are ignored before
+quota or storage; ordinary browser QA was accepted and persisted. Oct 1 is a
+mixed day; first complete filtered India day is Oct 2. Exact visitor-day
+qualification remains separately tracked in #96. Historical counts are preserved.
+
+## Two-minute portfolio briefing — verified source
+
+Tracked in [#137](https://github.com/sass-maker/app-health/issues/137). The owner
+explicitly delegated the visual choice; Morning briefing leads with browser
+activity, download intent, confirmed responses, source drivers and comparable
+breakouts. A searchable ledger preserves all 55 projects and opens product,
+source and completed India-day context. Health uses an independently labeled
+recent window. Workspace-scoped caches and two parallel bounded aggregate queries avoid a
+per-product request waterfall. No new infrastructure or dependencies.
+Local responsive and behavior evidence is recorded in `.fleet/design-review.json`;
+Full local code-health gate and 131 browser tests pass. Production release
+evidence will be recorded in #137 after exact-main CI and deployment.
 
 ## Dependencies
 

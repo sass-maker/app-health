@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ReportDate } from './daily-engagement.js';
 
 /** Opt-in browser analytics is separate from request/endpoint telemetry. */
 export const PRESENCE_TTL_MS = 45_000;
@@ -120,6 +121,8 @@ export type BrowserSummary = z.infer<typeof BrowserSummary>;
 export const BrowserReportFilter = z
   .object({
     range: z.enum(['1h', '24h', '7d', '30d']).default('24h'),
+    /** Completed Asia/Kolkata day, for briefing drill-downs. */
+    date: ReportDate.optional(),
     breakdown: z.enum(['audience', 'acquisition', 'technology']).optional(),
     app_id: z
       .string()
@@ -182,7 +185,14 @@ export const BrowserReportFilter = z
       .regex(/^[a-zA-Z0-9 _.,:+/-]*$/)
       .optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (filter) =>
+      !filter.date ||
+      (filter.range === '24h' &&
+        Date.parse(`${filter.date}T00:00:00+05:30`) + 86_400_000 <= Date.now()),
+    { message: 'Choose a completed India day with the 24h range.' },
+  );
 export type BrowserReportFilter = z.infer<typeof BrowserReportFilter>;
 export type BrowserSegmentFilter = Pick<
   BrowserReportFilter,

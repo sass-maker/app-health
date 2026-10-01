@@ -1,0 +1,127 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "55-product daily briefing dashboard",
+  "surfaceMode": "operate",
+  "mode": "overhaul",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": [
+      "PRODUCT.md",
+      "DESIGN.md",
+      "docs/design-previews/dashboard-directions-2026-09-29.md"
+    ],
+    "probes": [
+      {
+        "id": "daily-briefing",
+        "path": "docs/design-previews/dashboard-directions-2026-09-29.png"
+      },
+      {
+        "id": "evidence-matrix",
+        "path": "docs/design-previews/dashboard-directions-2026-09-29.png"
+      },
+      {
+        "id": "split-command",
+        "path": "docs/design-previews/dashboard-directions-2026-09-29.png"
+      }
+    ],
+    "selected": "daily-briefing",
+    "approval": "approved",
+    "before": ".fleet/evidence/analytics/overview-local-1440.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json"
+      ],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md and SaaS Maker catalog purposeContract, verified 2026-09-22.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
+      "job": "Start with the latest completed Asia/Kolkata day across all 55 active products, inspect independent visitor, action, and submission evidence, then review alerts and request health.",
+      "thesis": "An editorial daily briefing leads with three independent source summaries and the dated per-product evidence; owner alerts, measured request issues, and the full inventory follow.",
+      "system": "Preserve the existing graphite shadcn workspace and sans typography. Use sky for browser evidence, emerald for chosen actions, amber for stored receipts and attention, red for measured failure, and neutral gray for unknown or not applicable. Stack evidence cards beside the sidebar until there is room for three columns.",
+      "signature": "A completed India day with separate Visited, Chose an action, and Replied or joined evidence cards, followed by the full 55-row source ledger.",
+      "risk": "Older partial days can show many unknowns, so the report states source limitations and never turns missing evidence into zero. The complete inventory and real slow-request issue remain visible."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "path": ".fleet/evidence/daily-briefing-2026-09-29/after-390.jpg"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/daily-briefing-2026-09-29/after-768.jpg"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/daily-briefing-2026-09-29/after-1440.jpg"
+      }
+    ],
+    "projectCheck": {
+      "command": "Focused web tests, typecheck, Prettier, ESLint, and production build",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 35,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 18,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    }
+  },
+  "ownerFeedback": {
+    "decision": "keep",
+    "note": "Owner selected A — Daily briefing on 2026-09-29. The prior 2026-09-22 Watchtower selection and receipt are archived under .fleet/evidence/daily-briefing-2026-09-29/watchtower-receipt-2026-09-22.json; measured request health remains below the report. after-*.jpg are local QA captures with synthetic counts and an in-image QA label; the owner will add signed-in production screenshots after review and deployment."
+  }
+}

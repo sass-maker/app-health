@@ -42,6 +42,7 @@ function install() {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  history.replaceState(null, '', '/');
 });
 it('shows focused project traffic, sources and events without a duplicate project roster', async () => {
   const fetch = install();
@@ -231,4 +232,38 @@ it('uses the matching prior-period counts in the main KPI cards', async () => {
     'No change vs previous period',
   );
   expect(screen.queryByLabelText('Active now comparison')).toBeNull();
+});
+
+it('keeps briefing source and completed India day in the focused report, then permits rolling periods', async () => {
+  history.replaceState(null, '', '/app?briefing_date=2026-09-30&briefing_source=Google#analytics');
+  const mock = install();
+  render(
+    <AnalyticsView project={project} projects={[project]} ownerToken="owner" onSelect={() => {}} />,
+  );
+  await waitFor(() =>
+    expect(
+      mock.mock.calls.some(
+        ([url]) =>
+          url.includes('source=Google') &&
+          url.includes('date=2026-09-30') &&
+          url.includes('app_id=one'),
+      ),
+    ).toBe(true),
+  );
+  expect(screen.getByRole('combobox', { name: 'Analytics period' })).toHaveTextContent(
+    '2026-09-30 · India day',
+  );
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
+    key: 'ArrowDown',
+  });
+  fireEvent.click(await screen.findByRole('option', { name: 'Last 7 days' }));
+  await waitFor(() =>
+    expect(
+      mock.mock.calls.some(
+        ([url]) =>
+          url.includes('range=7d') && url.includes('source=Google') && !url.includes('date='),
+      ),
+    ).toBe(true),
+  );
+  expect(location.search).not.toContain('briefing_date');
 });

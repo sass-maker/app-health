@@ -1,4 +1,4 @@
-import type { BrowserSegmentFilter } from '@app-health/contracts';
+import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
 import { useState } from 'react';
 import { Activity, ArrowRight, RefreshCw, X } from 'lucide-react';
@@ -42,26 +42,40 @@ interface AnalyticsViewProps {
   onInstall?: () => void;
 }
 
+function briefingSelection() {
+  const params = new URLSearchParams(location.search);
+  const parsed = BrowserReportFilter.safeParse({
+    range: '24h',
+    date: params.get('briefing_date') ?? undefined,
+    source: params.get('briefing_source') ?? undefined,
+  });
+  return parsed.success
+    ? parsed.data
+    : { range: '24h' as const, date: undefined, source: undefined };
+}
+
 interface ReportFiltersProps {
   mode: 'web' | 'events';
   range: string;
   selected: string;
   onRange: (value: string) => void;
   onClearEvent: () => void;
+  date?: string;
   onInstall?: () => void;
 }
 
 function ReportFilters(props: ReportFiltersProps): JSX.Element {
-  const { mode, range, selected, onRange, onClearEvent, onInstall } = props;
+  const { mode, range, selected, onRange, onClearEvent, onInstall, date } = props;
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
       <div className="flex flex-1 flex-col gap-2 sm:flex-row">
         <ReportSelect
           label="Analytics period"
-          value={range}
+          value={date ? 'briefing' : range}
           onValueChange={onRange}
           triggerClassName="h-10 min-w-40"
           options={[
+            ...(date ? [{ value: 'briefing', label: `${date} · India day` }] : []),
             { value: '24h', label: 'Last 24 hours' },
             { value: '1h', label: 'Last hour' },
             { value: '7d', label: 'Last 7 days' },
@@ -159,15 +173,24 @@ function reportTotals(report: ReturnType<typeof useBrowserReport>['report']) {
 }
 
 function useReportSelection(project: Project) {
-  const [segments, setSegments] = useState<BrowserSegmentFilter>({});
+  const [segments, setSegments] = useState<BrowserSegmentFilter>(() => {
+    const selected = briefingSelection();
+    return selected.source ? { source: selected.source } : {};
+  });
   const { appId, environmentId } = project;
   const [selected, setSelected] = useState('');
-  const removeSegment = (key: keyof BrowserSegmentFilter) =>
+  const removeSegment = (key: keyof BrowserSegmentFilter) => {
+    if (key === 'source') {
+      const url = new URL(location.href);
+      url.searchParams.delete('briefing_source');
+      history.replaceState(null, '', url);
+    }
     setSegments((current) => {
       const next = { ...current };
       delete next[key];
       return next;
     });
+  };
   return {
     segments,
     setSegments,
@@ -184,10 +207,13 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
   const { segments, setSegments, appId, environmentId, selected, setSelected, removeSegment } =
     useReportSelection(project);
   const [range, setRange] = useState('24h');
+  const [date, setDate] = useState<string | undefined>(() => briefingSelection().date);
   const [metric, setMetric] = useState<'pageviews' | 'events'>(
     mode === 'events' ? 'events' : 'pageviews',
   );
-  const [breakdown, setBreakdown] = useState<'audience' | 'acquisition' | 'technology'>('audience');
+  const [breakdown, setBreakdown] = useState<'audience' | 'acquisition' | 'technology'>(() =>
+    briefingSelection().source ? 'acquisition' : 'audience',
+  );
   const workspace = useWorkspaceAnalytics(ownerToken);
   const detail = useBrowserReport(
     ownerToken,
@@ -195,7 +221,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
     appId === 'all' ? '' : appId,
     appId === 'all' ? '' : environmentId,
     selected,
-    { breakdown, segments },
+    { breakdown, segments, date },
   );
   const report = detail.report;
   const totalsValue = reportTotals(report);
@@ -211,7 +237,15 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         mode={mode}
         range={range}
         selected={selected}
-        onRange={setRange}
+        date={date}
+        onRange={(next) => {
+          if (next === 'briefing') return;
+          setDate(undefined);
+          const url = new URL(location.href);
+          url.searchParams.delete('briefing_date');
+          history.replaceState(null, '', url);
+          setRange(next);
+        }}
         onClearEvent={() => {
           setSelected('');
           setMetric(mode === 'events' ? 'events' : 'pageviews');
@@ -227,6 +261,9 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
             : undefined
         }
         onClear={() => {
+          const url = new URL(location.href);
+          url.searchParams.delete('briefing_source');
+          history.replaceState(null, '', url);
           setSegments({});
           setSelected('');
           setMetric(mode === 'events' ? 'events' : 'pageviews');

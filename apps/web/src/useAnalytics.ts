@@ -280,6 +280,7 @@ type ReportOptions =
   | {
       breakdown: 'audience' | 'acquisition' | 'technology';
       segments: BrowserSegmentFilter;
+      date?: string;
     };
 
 function reportParameters(
@@ -329,10 +330,13 @@ function reportConfiguration(
   options: ReportOptions,
 ) {
   const breakdown = typeof options === 'string' ? options : options.breakdown;
+  const date = typeof options === 'string' ? undefined : options.date;
   const segmentQuery = new URLSearchParams(
     typeof options === 'string' ? [] : Object.entries(options.segments).sort(),
   ).toString();
-  return reportParameters(range, appId, environmentId, event, breakdown, segmentQuery);
+  const params = reportParameters(range, appId, environmentId, event, breakdown, segmentQuery);
+  if (date) params.set('date', date);
+  return params;
 }
 
 export function useBrowserReport(

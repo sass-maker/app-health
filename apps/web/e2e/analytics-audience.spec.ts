@@ -136,6 +136,10 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
   const briefingDay = page.getByRole('region').filter({ hasText: 'Completed India day' });
   await expect(briefingDay.getByRole('heading', { level: 2 })).toBeVisible();
+  await page
+    .locator('summary')
+    .filter({ hasText: 'Request health and collection details' })
+    .click();
   await expect(page.getByText('Complete inventory', { exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
   for (const theme of ['dark', 'light']) {

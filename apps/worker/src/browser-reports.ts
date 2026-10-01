@@ -182,7 +182,7 @@ export function localBrowserReport(
       : summarizeEngagement(engagementSessions.values(), rank),
   } as BrowserReport;
   if (includePrevious) {
-    const previous = localBrowserReport(batchList, filter, from, false);
+    const previous = localBrowserReport(batchList, { ...filter, date: undefined }, from, false);
     report.previous = {
       pageviews: previous.series.reduce((sum, row) => sum + row.pageviews, 0),
       events: previous.series.reduce((sum, row) => sum + row.events, 0),

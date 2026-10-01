@@ -3233,9 +3233,18 @@ function DashboardManagement(props: DashboardContentProps): JSX.Element {
       <ProjectsView
         projects={projects}
         ownerToken={ownerToken}
-        onOpen={(selected) => {
+        onOpen={(selected, focus = 'analytics', source, date) => {
+          const url = new URL(location.href);
+          url.searchParams.set('project', selected.appId);
+          url.searchParams.set('environment', selected.environmentId);
+          url.searchParams.delete('briefing_source');
+          url.searchParams.delete('briefing_date');
+          if (source)
+            url.searchParams.set('briefing_source', source === 'No referrer' ? 'Unknown' : source);
+          if (date && focus !== 'backend') url.searchParams.set('briefing_date', date);
+          history.replaceState(null, '', url);
           handlers.onProjectChange(selected);
-          props.onView('analytics');
+          props.onView(focus);
         }}
       />
     );

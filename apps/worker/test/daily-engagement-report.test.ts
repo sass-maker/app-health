@@ -1578,81 +1578,84 @@ describe('composeDailyEngagementReport', () => {
   });
 });
 
-describe('worker /v1/reports/daily-engagement route', () => {
-  function routeEnv(): Env {
-    return {
-      DB: new MockDatabase(catalog(2), [
-        {
-          app_id: 'app-000',
-          event: 'feedback.submitted',
-          project_id: null,
-          project: null,
-          type: null,
-          kind: null,
-          count: 1,
-          last_seen: FROM,
+describe.each(['/v1/reports/daily-engagement', '/v1/reports/portfolio-briefing'])(
+  'worker %s route',
+  (routePath) => {
+    function routeEnv(): Env {
+      return {
+        DB: new MockDatabase(catalog(2), [
+          {
+            app_id: 'app-000',
+            event: 'feedback.submitted',
+            project_id: null,
+            project: null,
+            type: null,
+            kind: null,
+            count: 1,
+            last_seen: FROM,
+          },
+        ]),
+        TELEMETRY: { writeDataPoint() {} },
+        OWNER_AUTH_TOKEN: 'aho_production-owner',
+        CLOUDFLARE_ACCOUNT_ID: '0123456789abcdef0123456789abcdef',
+        ANALYTICS_ENGINE_QUERY_TOKEN: 'query-token',
+        APP_HEALTH_DASHBOARD_HOST: 'health.sassmaker.com',
+        APP_HEALTH_INGEST_HOST: 'ingest.sassmaker.com',
+        APP_HEALTH_INGEST_ORIGIN: 'https://ingest.sassmaker.com',
+      };
+    }
+
+    it('requires a workspace owner and serves no-store JSON', async () => {
+      // Bearer owner has no workspaceId -> 403 (consistent with catalog import).
+      let rpcCalls = 0;
+      const env = routeEnv();
+      env.SAASMAKER_METRICS = {
+        async getDailyCaptureCounts() {
+          rpcCalls += 1;
+          return { coverageStart: DAY, rows: [] };
         },
-      ]),
-      TELEMETRY: { writeDataPoint() {} },
-      OWNER_AUTH_TOKEN: 'aho_production-owner',
-      CLOUDFLARE_ACCOUNT_ID: '0123456789abcdef0123456789abcdef',
-      ANALYTICS_ENGINE_QUERY_TOKEN: 'query-token',
-      APP_HEALTH_DASHBOARD_HOST: 'health.sassmaker.com',
-      APP_HEALTH_INGEST_HOST: 'ingest.sassmaker.com',
-      APP_HEALTH_INGEST_ORIGIN: 'https://ingest.sassmaker.com',
-    };
-  }
+      };
+      const res = await worker.fetch(
+        new Request(`https://health.sassmaker.com${routePath}`, {
+          headers: { authorization: 'Bearer aho_production-owner' },
+        }),
+        env,
+      );
+      expect(res.status).toBe(403);
+      expect(res.headers.get('cache-control')).toBe('no-store');
+      expect(rpcCalls).toBe(0);
+    });
 
-  it('requires a workspace owner and serves no-store JSON', async () => {
-    // Bearer owner has no workspaceId -> 403 (consistent with catalog import).
-    let rpcCalls = 0;
-    const env = routeEnv();
-    env.SAASMAKER_METRICS = {
-      async getDailyCaptureCounts() {
-        rpcCalls += 1;
-        return { coverageStart: DAY, rows: [] };
-      },
-    };
-    const res = await worker.fetch(
-      new Request('https://health.sassmaker.com/v1/reports/daily-engagement', {
-        headers: { authorization: 'Bearer aho_production-owner' },
-      }),
-      env,
-    );
-    expect(res.status).toBe(403);
-    expect(res.headers.get('cache-control')).toBe('no-store');
-    expect(rpcCalls).toBe(0);
-  });
+    it('forbids product-scoped keys', async () => {
+      const env = routeEnv();
+      const res = await worker.fetch(
+        new Request(`https://health.sassmaker.com${routePath}`, {
+          headers: { authorization: 'Bearer ahk_polaris-product' },
+        }),
+        env,
+      );
+      expect(res.status).toBe(403);
+    });
 
-  it('forbids product-scoped keys', async () => {
-    const env = routeEnv();
-    const res = await worker.fetch(
-      new Request('https://health.sassmaker.com/v1/reports/daily-engagement', {
-        headers: { authorization: 'Bearer ahk_polaris-product' },
-      }),
-      env,
-    );
-    expect(res.status).toBe(403);
-  });
+    it('rejects bad date queries with 400', async () => {
+      // Use an account-style owner by enabling accounts and providing a session.
+      // Simpler: call compose via a workspace-bearing owner is not reachable
+      // through bearer in this harness, so verify the date validation directly.
+      const window = dailyEngagementWindow('not-a-date', NOW);
+      expect(window).toEqual({ error: 'date must be YYYY-MM-DD' });
+    });
 
-  it('rejects bad date queries with 400', async () => {
-    // Use an account-style owner by enabling accounts and providing a session.
-    // Simpler: call compose via a workspace-bearing owner is not reachable
-    // through bearer in this harness, so verify the date validation directly.
-    const window = dailyEngagementWindow('not-a-date', NOW);
-    expect(window).toEqual({ error: 'date must be YYYY-MM-DD' });
-  });
-
-  it('returns 405 for non-GET methods', async () => {
-    const res = await worker.fetch(
-      new Request('https://health.sassmaker.com/v1/reports/daily-engagement', {
-        method: 'POST',
-        headers: { authorization: 'Bearer aho_production-owner' },
-      }),
-      routeEnv(),
-    );
-    // Bearer owner has no workspace -> 403 before method check is unreachable;
-    // the method guard runs first and returns 405.
-    expect(res.status).toBe(405);
-  });
-});
+    it('returns 405 for non-GET methods', async () => {
+      const res = await worker.fetch(
+        new Request(`https://health.sassmaker.com${routePath}`, {
+          method: 'POST',
+          headers: { authorization: 'Bearer aho_production-owner' },
+        }),
+        routeEnv(),
+      );
+      // Bearer owner has no workspace -> 403 before method check is unreachable;
+      // the method guard runs first and returns 405.
+      expect(res.status).toBe(405);
+    });
+  },
+);
