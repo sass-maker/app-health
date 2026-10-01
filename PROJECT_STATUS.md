@@ -44,6 +44,15 @@ error rates and histogram-based p50/p95 latency. Cloudflare public fetch routing
 is explicitly enabled for same-Worker delivery. See
 [activation and verification](docs/backend-dogfooding.md) and issue #63.
 
+## Pending activation — server-side browser bot filtering
+
+The Worker source prototype for [issue #135](https://github.com/sass-maker/app-health/issues/135)
+uses trusted Cloudflare verified-bot metadata and the pinned `isbot` matcher
+before browser quota or analytics writes. Focused collector tests and Worker
+typecheck pass. This is source-prepared only: production behavior is unchanged
+pending review and release, and no historical visitor day is retroactively
+classified.
+
 ## Dependencies
 
 ### External

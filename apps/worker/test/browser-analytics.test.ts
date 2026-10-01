@@ -7,7 +7,12 @@ import {
   type CollectedBrowserBatch,
 } from '../src/browser-analytics.js';
 import { localBrowserReport } from '../src/browser-reports.js';
-import { acceptBrowser, handleBrowserIngest, handleBrowserOwner } from '../src/browser-routes.js';
+import {
+  acceptBrowser,
+  handleBrowserIngest,
+  handleBrowserOwner,
+  type BrowserEnvironment,
+} from '../src/browser-routes.js';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
 import type { AppHealthRepositories } from '../src/repository.js';
 import type { D1DatabaseLike, D1PreparedStatement } from '../src/d1-adapter.js';
@@ -373,6 +378,54 @@ describe('browser collector boundary', () => {
       headers: { origin },
       body: JSON.stringify(body),
     });
+  function withRequestSignals(
+    body: unknown,
+    options: { origin?: string; userAgent?: string; cf?: unknown } = {},
+  ): Request {
+    const origin = options.origin ?? 'http://localhost:5173';
+    const headers = new Headers({ origin });
+    if (options.userAgent) headers.set('user-agent', options.userAgent);
+    const request = new Request('http://localhost/v1/browser', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+    if (options.cf) Object.defineProperty(request, 'cf', { value: options.cf });
+    return request;
+  }
+  function productionIngestFixture(repos: AppHealthRepositories) {
+    const dbPrepare = vi.fn(() => {
+      throw new Error('bot request reached D1');
+    });
+    const quota = vi.spyOn(repos.publicKeys!, 'consumeBrowserQuota');
+    const capability = vi.spyOn(repos.capabilities!, 'recordCapability');
+    const send = vi.fn(async () => {});
+    const heartbeat = vi.fn(async () => {});
+    const writeDataPoint = vi.fn(() => {});
+    return {
+      quota,
+      capability,
+      send,
+      heartbeat,
+      writeDataPoint,
+      dbPrepare,
+      env: {
+        APP_HEALTH_INGEST_HOST: 'localhost',
+        DB: { prepare: dbPrepare } as unknown as D1DatabaseLike,
+        BROWSER_EVENTS: { send },
+        WORKSPACE_PRESENCE: {
+          getByName: () => ({ heartbeat }),
+        },
+        BROWSER_HISTORY: {
+          put: vi.fn(),
+          list: vi.fn(),
+          delete: vi.fn(),
+        },
+        BROWSER_ARCHIVE: { getByName: vi.fn() },
+        BROWSER_ANALYTICS: { writeDataPoint },
+      } as unknown as BrowserEnvironment,
+    };
+  }
   it('preserves legacy event referrer and entry path when attribution is omitted', async () => {
     const repos = await fixture();
     const sent: CollectedBrowserBatch[] = [];
@@ -447,6 +500,91 @@ describe('browser collector boundary', () => {
     const key = await repos.publicKeys!.verifyPublicKey(SEED_PUBLIC_KEY);
     await repos.publicKeys!.revokePublicKey(key!.id, Date.now());
     expect((await handleBrowserIngest(request(body), {}, repos, true))?.status).toBe(403);
+  });
+  it.each([
+    'Googlebot/2.1 (+http://www.google.com/bot.html)',
+    'Mozilla/5.0 HeadlessChrome/138.0.0.0 Safari/537.36',
+  ])('ignores known bot user-agent %s before quota or projections', async (userAgent) => {
+    const repos = await fixture();
+    const fixtureState = productionIngestFixture(repos);
+    const response = await handleBrowserIngest(
+      withRequestSignals(input(), { userAgent }),
+      fixtureState.env,
+      repos,
+      false,
+    );
+    expect(response?.status).toBe(200);
+    expect(await response?.json()).toEqual({ ignored: true });
+    expect(fixtureState.quota).not.toHaveBeenCalled();
+    expect(fixtureState.dbPrepare).not.toHaveBeenCalled();
+    expect(fixtureState.send).not.toHaveBeenCalled();
+    expect(fixtureState.heartbeat).not.toHaveBeenCalled();
+    expect(fixtureState.writeDataPoint).not.toHaveBeenCalled();
+    expect(fixtureState.capability).not.toHaveBeenCalled();
+  });
+  it.each([
+    { signal: 'verifiedBot', cf: { botManagement: { verifiedBot: true } } },
+    { signal: 'verifiedBotCategory', cf: { verifiedBotCategory: 'Search Engine Crawler' } },
+  ])('gives Cloudflare $signal metadata precedence over a browser user agent', async ({ cf }) => {
+    const repos = await fixture();
+    const fixtureState = productionIngestFixture(repos);
+    const response = await handleBrowserIngest(
+      withRequestSignals(input(), {
+        userAgent: 'Mozilla/5.0 Chrome/131.0.0.0 Safari/537.36',
+        cf,
+      }),
+      fixtureState.env,
+      repos,
+      false,
+    );
+    expect(response?.status).toBe(200);
+    expect(fixtureState.quota).not.toHaveBeenCalled();
+    expect(fixtureState.send).not.toHaveBeenCalled();
+    expect(fixtureState.dbPrepare).not.toHaveBeenCalled();
+  });
+  it('keeps real browsers and missing user agents on the existing acceptance path', async () => {
+    const repos = await fixture();
+    const quota = vi.spyOn(repos.publicKeys!, 'consumeBrowserQuota');
+    const browser = await handleBrowserIngest(
+      withRequestSignals(input(), {
+        userAgent:
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+      }),
+      {},
+      repos,
+      true,
+    );
+    const missingAgent = await handleBrowserIngest(request(input()), {}, repos, true);
+    expect(browser?.status).toBe(202);
+    expect(missingAgent?.status).toBe(202);
+    expect(quota).toHaveBeenCalledTimes(2);
+  });
+  it('still rejects bot requests with an invalid public key or origin', async () => {
+    const repos = await fixture();
+    const quota = vi.spyOn(repos.publicKeys!, 'consumeBrowserQuota');
+    const invalidKey = await handleBrowserIngest(
+      withRequestSignals(
+        { ...input(), public_key: 'ahk_pub_invalid' },
+        {
+          userAgent: 'Googlebot/2.1',
+        },
+      ),
+      {},
+      repos,
+      true,
+    );
+    const invalidOrigin = await handleBrowserIngest(
+      withRequestSignals(input(), {
+        origin: 'https://evil.example',
+        userAgent: 'Googlebot/2.1',
+      }),
+      {},
+      repos,
+      true,
+    );
+    expect(invalidKey?.status).toBe(403);
+    expect(invalidOrigin?.status).toBe(403);
+    expect(quota).not.toHaveBeenCalled();
   });
   it('accepts persistent visitors without exposing raw identities in reports', async () => {
     const repos = await fixture();

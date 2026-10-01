@@ -80,6 +80,20 @@ To publish aggregate live counts on a product website, use
 
 ## Delivery and efficiency boundaries
 
+### Server-side bot filtering
+
+The Worker source is prepared to ignore recognized bot batches using trusted
+Cloudflare verified-bot metadata or the pinned `isbot` user-agent matcher. This
+runs after payload, timestamp, public-key, and Origin checks, and before quota,
+session/presence, queue, archive, D1 visitor-ledger, or capability updates. The
+user-agent is inspected transiently and is never stored. Missing user-agent
+values and ordinary browsers keep the current acceptance path. Endpoint health
+continues to measure all HTTP requests; explicit application logs and feedback
+are unchanged. Production activation is pending review and release. The first
+complete India calendar day after activation is the earliest bot-filtered
+visitor qualification candidate; historical days, including October 1, are not
+retroactively classified.
+
 The standalone script has no runtime dependencies and a tested **3 KB gzip**
 budget. It queues at most 100 events, sends at most 25 per batch, flushes after
 1.5 seconds, and reuses its batch ID on retry. A request times out after ten

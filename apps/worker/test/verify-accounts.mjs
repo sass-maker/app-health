@@ -440,7 +440,14 @@ try {
   const collect = (body, origin = 'https://website.example.com') =>
     mf.dispatchFetch('https://ingest.example.com/v1/browser', {
       method: 'POST',
-      headers: { origin, 'content-type': 'text/plain' },
+      // Miniflare's default agent is not a browser; this fixture exercises a
+      // genuine browser batch accepted by the collector.
+      headers: {
+        origin,
+        'content-type': 'text/plain',
+        'user-agent':
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      },
       body: JSON.stringify(body),
     });
   assert.equal((await collect(batch, 'https://evil.example.com')).status, 403);
