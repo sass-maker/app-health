@@ -30,6 +30,8 @@ import {
   dailyCtaEventNamesForDate,
 } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
+import { readPortfolioBriefing } from './portfolio-briefing.js';
+import { cachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
 import {
@@ -639,6 +641,29 @@ async function handleWorkspaceHealthRoute(
   return json(200, await bundle.service.queryWorkspaceHealth(Date.now()), true);
 }
 
+function dailyAnalyticsQuery(env: Env): ((sql: string) => Promise<unknown[]>) | undefined {
+  if (!env.CLOUDFLARE_ACCOUNT_ID || !env.ANALYTICS_ENGINE_QUERY_TOKEN) return undefined;
+  try {
+    return createAnalyticsQuery({
+      accountId: env.CLOUDFLARE_ACCOUNT_ID,
+      token: env.ANALYTICS_ENGINE_QUERY_TOKEN,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function dailyReportError(error: unknown): Response {
+  const status = error instanceof Error && 'status' in error && error.status === 400 ? 400 : 503;
+  return json(
+    status,
+    {
+      error: status === 400 ? (error as Error).message : 'portfolio report is unavailable',
+    },
+    true,
+  );
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -646,37 +671,54 @@ async function handleDailyEngagementRoute(
   url: URL,
   env: Env,
 ): Promise<Response | null> {
-  if (url.pathname !== '/v1/reports/daily-engagement') return null;
+  if (!['/v1/reports/daily-engagement', '/v1/reports/portfolio-briefing'].includes(url.pathname))
+    return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
   if (owner.appId) return productScopeForbidden();
   if (!owner.workspaceId) return productScopeForbidden();
   if (!env.DB) return json(503, { error: 'daily engagement storage is unavailable' }, true);
-  let query;
-  if (env.CLOUDFLARE_ACCOUNT_ID && env.ANALYTICS_ENGINE_QUERY_TOKEN) {
-    try {
-      query = createAnalyticsQuery({
-        accountId: env.CLOUDFLARE_ACCOUNT_ID,
-        token: env.ANALYTICS_ENGINE_QUERY_TOKEN,
-      });
-    } catch {
-      query = undefined;
-    }
-  }
+  const db = env.DB;
+  const workspaceId = owner.workspaceId;
+  const query = dailyAnalyticsQuery(env);
   try {
     const now = Date.now();
     const day = dailyEngagementWindow(url.searchParams.get('date'), now);
-    const report = await composeDailyEngagementReport({
-      db: env.DB,
-      workspaceId: owner.workspaceId,
-      query,
-      date: url.searchParams.get('date'),
-      now,
-      ctaEventNamesByCatalogId: 'error' in day ? {} : dailyCtaEventNamesForDate(day.date),
-      ctaFullDayStart: DAILY_CTA_FULL_DAY_START,
-      ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
-      captureCountsService: env.SAASMAKER_METRICS,
-      endpointColdBucket: env.ENDPOINT_HISTORY,
-    });
+    if ('error' in day) throw Object.assign(new Error(day.error), { status: 400 });
+    const report = await cachedAnalytics(
+      env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+      workspaceId,
+      `daily-briefing-v2:${day.date}`,
+      () =>
+        composeDailyEngagementReport({
+          db,
+          workspaceId,
+          query,
+          date: url.searchParams.get('date'),
+          now,
+          ctaEventNamesByCatalogId: dailyCtaEventNamesForDate(day.date),
+          ctaFullDayStart: DAILY_CTA_FULL_DAY_START,
+          ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
+          captureCountsService: env.SAASMAKER_METRICS,
+          endpointColdBucket: env.ENDPOINT_HISTORY,
+        }),
+    );
+    if (url.pathname === '/v1/reports/portfolio-briefing') {
+      const briefing = await cachedAnalytics(
+        env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+        workspaceId,
+        `portfolio-briefing-v1:${day.date}`,
+        () =>
+          readPortfolioBriefing({
+            db,
+            workspaceId,
+            date: day.date,
+            now,
+            currentReport: report,
+            query,
+          }),
+      );
+      return json(200, briefing, true);
+    }
     return json(
       200,
       dailyEngagementClientPayload(
@@ -687,17 +729,7 @@ async function handleDailyEngagementRoute(
       true,
     );
   } catch (error) {
-    const status =
-      error instanceof Error && 'status' in error && (error as { status: number }).status === 400
-        ? 400
-        : 503;
-    return json(
-      status,
-      {
-        error: status === 400 ? (error as Error).message : 'daily engagement report is unavailable',
-      },
-      true,
-    );
+    return dailyReportError(error);
   }
 }
 

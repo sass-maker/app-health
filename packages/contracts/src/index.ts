@@ -23,3 +23,4 @@ export * from './product-event.js';
 export * from './timeseries.js';
 export * from './catalog-import.js';
 export * from './daily-engagement.js';
+export * from './portfolio-briefing.js';

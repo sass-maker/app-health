@@ -10,8 +10,7 @@ export const DASHBOARD_PAGES = {
   overview: {
     eyebrow: 'Workspace',
     title: 'Daily briefing',
-    description:
-      'A completed India day across your products, followed by recent receipts and measured request health.',
+    description: 'Activity, acquisition and meaningful changes across your portfolio.',
   },
   analytics: {
     eyebrow: 'Product',

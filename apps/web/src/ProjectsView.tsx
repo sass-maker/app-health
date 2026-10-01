@@ -51,7 +51,12 @@ interface ProjectsViewProject {
 interface ProjectsViewProps {
   projects: ProjectsViewProject[];
   ownerToken: string;
-  onOpen: (project: ProjectsViewProject) => void;
+  onOpen: (
+    project: ProjectsViewProject,
+    focus?: 'analytics' | 'events' | 'backend',
+    source?: string,
+    date?: string,
+  ) => void;
 }
 
 type AnalyticsProject = BrowserSummary['projects'][number];
@@ -163,7 +168,12 @@ function statusBadge(row: WatchtowerRow) {
   if (endpointNotApplicable(row)) return <Badge variant="secondary">Not applicable</Badge>;
   if (!endpoints) return <Badge variant="outline">Unknown</Badge>;
   const requestHealth = endpoints.metrics?.health_state;
-  if (requestHealth === 'unhealthy') return <Badge variant="destructive">Unhealthy</Badge>;
+  if (requestHealth === 'unhealthy')
+    return (
+      <Badge variant="destructive" className="transition-none">
+        Unhealthy
+      </Badge>
+    );
   if (requestHealth === 'degraded')
     return <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300">Degraded</Badge>;
   if (endpoints.state !== 'connected')
@@ -618,6 +628,63 @@ function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
   );
 }
 
+function briefingHealth(rows: WatchtowerRow[]) {
+  const byApp = new Map<string, WatchtowerRow>();
+  for (const row of rows) {
+    if (!byApp.has(row.project.appId) || row.project.environment === 'production')
+      byApp.set(row.project.appId, row);
+  }
+  const scoped = [...byApp.values()];
+  const projectHealth = Object.fromEntries(
+    scoped.map((row) => {
+      const endpoints = row.health?.endpoints;
+      const state = endpoints?.metrics?.health_state;
+      const issue = isAttention(row);
+      const label = endpointNotApplicable(row)
+        ? 'Not applicable'
+        : issue
+          ? attentionLabel(row)
+          : !endpoints
+            ? 'Unknown'
+            : endpoints.state !== 'connected'
+              ? stateLabels[endpoints.state]
+              : state === 'healthy'
+                ? 'Healthy'
+                : 'Low volume';
+      return [
+        row.project.appId,
+        {
+          label,
+          tone: issue
+            ? ('attention' as const)
+            : label === 'Healthy'
+              ? ('healthy' as const)
+              : ('muted' as const),
+        },
+      ];
+    }),
+  );
+  return {
+    projectHealth,
+    attentionItems: scoped.filter(isAttention).map((row) => ({
+      app_id: row.project.appId,
+      name: row.project.name,
+      label: attentionLabel(row),
+      p95_ms: row.health?.endpoints.metrics?.p95_ms ?? null,
+      error_rate: row.health?.endpoints.metrics?.error_rate ?? null,
+    })),
+    healthCoverage: {
+      measured: scoped.filter((row) =>
+        ['healthy', 'degraded', 'unhealthy'].includes(
+          row.health?.endpoints.metrics?.health_state ?? '',
+        ),
+      ).length,
+      applicable: scoped.filter((row) => !endpointNotApplicable(row)).length,
+      total: scoped.length,
+    },
+  };
+}
+
 export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
@@ -643,6 +710,8 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
   );
   const now = health.data?.refreshed_at ?? analytics.data?.live.measured_at ?? Date.now();
 
+  const briefing = useMemo(() => briefingHealth(rows), [rows]);
+
   if (!projects.length) return <EmptyProjectsView />;
 
   const error = health.error || analytics.error;
@@ -663,17 +732,37 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
           </CardContent>
         </Card>
       ) : null}
-      <DailyEngagement ownerToken={ownerToken} onReport={onDailyReport} />
-      <OwnerAlertFeed ownerToken={ownerToken} />
-      <RequestHealthSection
-        rows={rows}
-        health={health}
-        analytics={analytics}
-        loading={loading}
-        error={error}
-        onOpen={onOpen}
+      <DailyEngagement
+        ownerToken={ownerToken}
+        onReport={onDailyReport}
+        {...briefing}
+        onOpenProduct={(appId, focus, source, date) => {
+          const project =
+            projects.find((item) => item.appId === appId && item.environment === 'production') ??
+            projects.find((item) => item.appId === appId);
+          if (project) onOpen(project, focus, source, date);
+        }}
       />
-      <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
+      <OwnerAlertFeed ownerToken={ownerToken} />
+      <details className="group rounded-xl border bg-card/40">
+        <summary className="flex min-h-12 cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium">
+          Request health and collection details
+          <span className="text-xs font-normal text-muted-foreground">
+            Last 24 hours · expand to investigate
+          </span>
+        </summary>
+        <div className="space-y-5 border-t p-4 sm:p-5">
+          <RequestHealthSection
+            rows={rows}
+            health={health}
+            analytics={analytics}
+            loading={loading}
+            error={error}
+            onOpen={onOpen}
+          />
+          <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
+        </div>
+      </details>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <Activity className="size-3" /> Requests are server or function calls, never a count of
         people. Missing data is shown as unknown.

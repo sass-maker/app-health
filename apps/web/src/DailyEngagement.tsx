@@ -2,62 +2,20 @@ import {
   DailyEngagementReportV1,
   type DailyEngagementReportV1 as Report,
 } from '@app-health/contracts';
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarDays, RefreshCw, Search } from 'lucide-react';
-import { Badge } from './components/ui/badge.js';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, CalendarDays, RefreshCw } from 'lucide-react';
 import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
+import { CardContent } from './components/ui/card.js';
 import { Input } from './components/ui/input.js';
 import { Skeleton } from './components/ui/skeleton.js';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './components/ui/table.js';
+  PortfolioBriefing,
+  type PortfolioAttentionItem,
+  type PortfolioHealthCoverage,
+  type PortfolioHealthState,
+} from './PortfolioBriefing.js';
 
-type Product = Report['products'][number];
-
-function count(value: number | string | null): string {
-  if (value === null) return 'Unknown';
-  return typeof value === 'string' ? value : value.toLocaleString();
-}
-
-function captureCount(
-  value: number | null,
-  applicability:
-    | Product['newsletter_applicability']
-    | Product['native_sessions_applicability']
-    | Product['browser_visitors_applicability']
-    | Product['server_requests_applicability'],
-): string {
-  if (value !== null && value > 0) return count(value);
-  if (applicability === 'not_applicable') return 'Not applicable';
-  return count(value);
-}
-
-function browserVisitorReason(product: Product): string | null {
-  if (product.browser_visitors !== null || product.browser_visitors_applicability !== 'applicable')
-    return null;
-  switch (product.browser_visitors_unknown_reason) {
-    case 'source_query_unavailable':
-      return 'Visitor source query unavailable';
-    case 'no_production_environment':
-      return 'No production environment';
-    case 'sampled_visitor_group':
-      return 'Visitor group was sampled';
-    case 'telemetry_started_partway_through_day':
-      return 'Telemetry began partway through the day';
-    case 'telemetry_started_after_day':
-      return 'Telemetry began after this day';
-    case 'no_qualifying_analytics_receipt':
-      return 'No qualifying analytics receipt';
-    default:
-      return null;
-  }
-}
+type ProductFocus = 'analytics' | 'events' | 'backend';
 
 function previousReportDay(): string {
   return new Date(Date.now() + 330 * 60_000 - 86_400_000).toISOString().slice(0, 10);
@@ -87,21 +45,17 @@ function ReportHeader({
     timeZone: 'Asia/Kolkata',
   });
   return (
-    <CardHeader className="gap-4 border-b px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
-      <div>
+    <header className="flex flex-col gap-4 border-b px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+      <div className="min-w-0">
         <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
           Completed India day
         </p>
-        <CardTitle
-          id="daily-engagement-title"
-          role="heading"
-          aria-level={2}
-          className="mt-1 text-lg"
-        >
+        <h2 id="daily-engagement-title" className="mt-1 text-xl font-semibold tracking-tight">
           {dayLabel}
-        </CardTitle>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Independent browser, action, and response signals across the product inventory.
+        </h2>
+        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <CalendarDays className="size-3.5" /> What moved, where it came from, and what needs
+          attention.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
@@ -112,457 +66,117 @@ function ReportHeader({
             value={date}
             max={previousReportDay()}
             onChange={(event) => onDateChange(event.target.value)}
-            className="mt-1 h-10 w-42"
+            className="mt-1 h-11 w-42"
           />
         </label>
         <Button
           type="button"
           variant="outline"
-          size="sm"
           onClick={onLatest}
           aria-label="Show latest completed day"
-          className="h-10"
+          className="min-h-11"
         >
           Latest
         </Button>
         <Button
           type="button"
           variant="outline"
-          size="sm"
           onClick={onRefresh}
           aria-label="Refresh daily engagement"
-          className="h-10"
+          className="min-h-11"
         >
           <RefreshCw className="size-4" /> Refresh
         </Button>
       </div>
-    </CardHeader>
-  );
-}
-
-type SourceView = 'all' | 'visitors' | 'actions' | 'responses';
-
-function ReportSummary({
-  report,
-  sourceView,
-  onSourceView,
-}: {
-  report: Report;
-  sourceView: SourceView;
-  onSourceView: (sourceView: SourceView) => void;
-}): JSX.Element {
-  const visitors = report.products.filter((row) => row.browser_visitors !== null).length;
-  const actions = report.products.filter((row) => row.cta_status === 'measured').length;
-  const feedback = report.products.reduce((total, row) => total + (row.feedback_submitted ?? 0), 0);
-  const newsletter = report.products.reduce((total, row) => total + (row.newsletter_joins ?? 0), 0);
-  const waitlist = report.products.reduce((total, row) => total + (row.waitlist_joins ?? 0), 0);
-  const waitlistApplies = report.products.some(
-    (row) => row.waitlist_applicability === 'applicable',
-  );
-  const receipts = feedback + newsletter + waitlist;
-  const missingScope = report.product_count !== 55;
-  return (
-    <>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant={missingScope ? 'destructive' : 'secondary'}>
-          {report.product_count}/55 imported
-        </Badge>
-        {report.sampled ? <Badge variant="outline">Sampled</Badge> : null}
-        <span>Unknown means the source has no verified value for this day.</span>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-3" aria-label="Daily evidence summary">
-        <button
-          type="button"
-          aria-pressed={sourceView === 'visitors'}
-          onClick={() => onSourceView(sourceView === 'visitors' ? 'all' : 'visitors')}
-          className="min-h-28 rounded-lg border border-sky-500/20 bg-sky-500/5 p-4 text-left transition-colors hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <p className="text-xs font-medium text-muted-foreground">Visitor counts available</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-sky-600 dark:text-sky-300">
-            {visitors}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {visitors === 1 ? 'product' : 'products'} with a reportable browser count
-          </p>
-        </button>
-        <button
-          type="button"
-          aria-pressed={sourceView === 'actions'}
-          onClick={() => onSourceView(sourceView === 'actions' ? 'all' : 'actions')}
-          className="min-h-28 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-4 text-left transition-colors hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <p className="text-xs font-medium text-muted-foreground">Action counts available</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">
-            {actions}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {actions === 1 ? 'product' : 'products'} with reportable primary action counts
-          </p>
-        </button>
-        <button
-          type="button"
-          aria-pressed={sourceView === 'responses'}
-          onClick={() => onSourceView(sourceView === 'responses' ? 'all' : 'responses')}
-          className="min-h-28 rounded-lg border border-amber-500/20 bg-amber-500/5 p-4 text-left transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <p className="text-xs font-medium text-muted-foreground">Replied or joined</p>
-          <p className="mt-2 text-2xl font-semibold tabular-nums text-amber-700 dark:text-amber-300">
-            {receipts}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            Observed receipts · Feedback: {feedback} · Newsletter joins: {newsletter} · Waitlist:{' '}
-            {waitlistApplies ? waitlist : 'not applicable'}
-          </p>
-        </button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Source counts are separate; they are not a conversion funnel. Submission receipts may
-        include qualification and QA activity, so they do not establish organic demand.
-      </p>
-      {missingScope ? (
-        <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
-          This report cannot show products that have not been imported into App Health.
-        </p>
-      ) : null}
-    </>
-  );
-}
-
-function ProductActions({
-  events,
-  status,
-}: {
-  events: Product['cta_events'];
-  status: Product['cta_status'];
-}): JSX.Element {
-  return events.length ? (
-    <ul className="space-y-1 text-xs">
-      {events.map((event) => (
-        <li key={event.name} className="flex justify-between gap-3">
-          <span className="min-w-0 whitespace-normal break-words font-mono">{event.name}</span>
-          <span className="shrink-0 whitespace-nowrap text-right tabular-nums">
-            {event.unique_browsers === null
-              ? 'Unknown browsers'
-              : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}
-            {' · '}
-            {event.estimated ? 'Approx. ' : ''}
-            {event.count} {event.count === 1 ? 'action' : 'actions'}
-          </span>
-        </li>
-      ))}
-    </ul>
-  ) : (
-    <span className="text-muted-foreground">
-      {status === 'not_applicable' ? 'Not applicable' : 'Unknown'}
-    </span>
-  );
-}
-
-function MobileProductCard({ product }: { product: Product }): JSX.Element {
-  const metrics = [
-    [
-      'Browser visitors',
-      captureCount(product.browser_visitors, product.browser_visitors_applicability),
-    ],
-    ['Feedback', product.feedback_submitted],
-    ['Newsletter', captureCount(product.newsletter_joins, product.newsletter_applicability)],
-    ['Waitlist', captureCount(product.waitlist_joins, product.waitlist_applicability)],
-    [
-      'Native sessions',
-      captureCount(product.native_sessions, product.native_sessions_applicability),
-    ],
-    ['Server requests', captureCount(product.api_activity, product.server_requests_applicability)],
-  ] as const;
-  return (
-    <li className="rounded-lg border p-4">
-      <p className="font-medium">{product.name}</p>
-      <p className="text-xs text-muted-foreground">{product.catalog_id}</p>
-      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-xs">
-        {metrics.map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-muted-foreground">{label}</dt>
-            <dd className="mt-0.5 font-medium tabular-nums">{count(value)}</dd>
-            {label === 'Browser visitors' && browserVisitorReason(product) ? (
-              <dd className="mt-1 text-muted-foreground">{browserVisitorReason(product)}</dd>
-            ) : null}
-          </div>
-        ))}
-      </dl>
-      <div className="mt-3 border-t pt-3 text-xs">
-        <p className="text-muted-foreground">Primary actions</p>
-        <div className="mt-1">
-          <ProductActions events={product.cta_events} status={product.cta_status} />
-        </div>
-      </div>
-    </li>
-  );
-}
-
-function MobileProducts({ products }: { products: Product[] }): JSX.Element {
-  return (
-    <ul className="space-y-3 xl:hidden" aria-label="Daily engagement products">
-      {products.map((product) => (
-        <MobileProductCard key={product.catalog_id} product={product} />
-      ))}
-    </ul>
-  );
-}
-
-function DesktopProducts({ products }: { products: Product[] }): JSX.Element {
-  return (
-    <div className="hidden max-w-full rounded-md border xl:block">
-      <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-        Scroll horizontally if needed to view all report sources.
-      </p>
-      <Table className="table-fixed">
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-[16%] whitespace-normal">Product</TableHead>
-            <TableHead className="w-[21%] whitespace-normal">Visits</TableHead>
-            <TableHead className="w-[27%] whitespace-normal">Primary actions</TableHead>
-            <TableHead className="w-[24%] whitespace-normal">Responses</TableHead>
-            <TableHead className="w-[12%] whitespace-normal text-right">Server requests</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {products.map((product) => (
-            <TableRow key={product.catalog_id}>
-              <TableCell>
-                <span className="font-medium">{product.name}</span>
-                <span className="block text-xs text-muted-foreground">{product.catalog_id}</span>
-              </TableCell>
-              <TableCell>
-                <dl className="space-y-1.5 text-xs">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Browser visitors</dt>
-                    <dd className="shrink-0 text-right tabular-nums">
-                      {captureCount(
-                        product.browser_visitors,
-                        product.browser_visitors_applicability,
-                      )}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Native sessions</dt>
-                    <dd className="shrink-0 text-right tabular-nums">
-                      {captureCount(product.native_sessions, product.native_sessions_applicability)}
-                    </dd>
-                  </div>
-                </dl>
-                {browserVisitorReason(product) ? (
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {browserVisitorReason(product)}
-                  </span>
-                ) : null}
-              </TableCell>
-              <TableCell>
-                <ProductActions events={product.cta_events} status={product.cta_status} />
-              </TableCell>
-              <TableCell>
-                <dl className="space-y-1.5 text-xs">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Feedback</dt>
-                    <dd className="shrink-0 text-right tabular-nums">
-                      {count(product.feedback_submitted)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Newsletter</dt>
-                    <dd className="shrink-0 text-right tabular-nums">
-                      {captureCount(product.newsletter_joins, product.newsletter_applicability)}
-                    </dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Waitlist</dt>
-                    <dd className="shrink-0 text-right tabular-nums">
-                      {captureCount(product.waitlist_joins, product.waitlist_applicability)}
-                    </dd>
-                  </div>
-                </dl>
-              </TableCell>
-              <TableCell className="text-right tabular-nums">
-                {captureCount(product.api_activity, product.server_requests_applicability)}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {!products.length ? (
-        <p className="p-6 text-center text-sm text-muted-foreground">
-          No products match this search.
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function EmptyMobileProducts(): JSX.Element {
-  return (
-    <p className="rounded-md border p-6 text-center text-sm text-muted-foreground xl:hidden">
-      No products match this search.
-    </p>
-  );
-}
-
-function ReportNotes({ report }: { report: Report }): JSX.Element {
-  return (
-    <div className="space-y-1 text-xs leading-5 text-muted-foreground">
-      <p className="flex items-center gap-1.5">
-        <CalendarDays className="size-3.5" /> {report.date} {report.timezone} · Unknown means this
-        source was not verified for that product and day.
-      </p>
-      {report.notes.map((note) => (
-        <p key={note}>{note}</p>
-      ))}
-    </div>
-  );
-}
-
-function ReportResults({
-  report,
-  query,
-  onQueryChange,
-  sourceView,
-  onSourceView,
-}: {
-  report: Report;
-  query: string;
-  onQueryChange: (query: string) => void;
-  sourceView: SourceView;
-  onSourceView: (sourceView: SourceView) => void;
-}): JSX.Element {
-  const products = useMemo(
-    () =>
-      report.products.filter((product) => {
-        const matchesSearch = `${product.name} ${product.catalog_id}`
-          .toLowerCase()
-          .includes(query.trim().toLowerCase());
-        if (!matchesSearch) return false;
-        if (sourceView === 'visitors') return product.browser_visitors !== null;
-        if (sourceView === 'actions') return product.cta_status === 'measured';
-        if (sourceView === 'responses')
-          return (
-            (product.feedback_submitted ?? 0) > 0 ||
-            (product.newsletter_joins ?? 0) > 0 ||
-            (product.waitlist_joins ?? 0) > 0
-          );
-        return true;
-      }),
-    [report, query, sourceView],
-  );
-  const sourceViewLabel = {
-    all: 'all products',
-    visitors: 'products with reportable browser counts',
-    actions: 'products with reportable primary action counts',
-    responses: 'products with stored response receipts',
-  }[sourceView];
-  return (
-    <>
-      <ReportSummary report={report} sourceView={sourceView} onSourceView={onSourceView} />
-      <div
-        id="daily-product-evidence"
-        className="flex flex-wrap items-center justify-between gap-2 scroll-mt-24"
-      >
-        <p className="text-xs text-muted-foreground" aria-live="polite">
-          Showing {products.length} of {report.product_count} {sourceViewLabel}
-          {sourceView !== 'all' ? ' · Unknown sources remain in the full inventory.' : ''}
-        </p>
-        {sourceView !== 'all' ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              onQueryChange('');
-              onSourceView('all');
-            }}
-          >
-            Show all products
-          </Button>
-        ) : null}
-      </div>
-      <label className="relative block max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
-        <span className="sr-only">Search daily report products</span>
-        <Input
-          value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search products"
-          className="pl-9"
-        />
-      </label>
-      <MobileProducts products={products} />
-      <DesktopProducts products={products} />
-      {!products.length ? <EmptyMobileProducts /> : null}
-      <ReportNotes report={report} />
-    </>
+    </header>
   );
 }
 
 interface ReportBodyProps {
+  ownerToken: string;
   loading: boolean;
   error: string;
   report: Report | null;
-  query: string;
-  onQueryChange: (query: string) => void;
-  sourceView: SourceView;
-  onSourceView: (sourceView: SourceView) => void;
+  onRetry: () => void;
+  onOpenProduct?: (appId: string, focus?: ProductFocus, source?: string, date?: string) => void;
+  attentionItems: PortfolioAttentionItem[];
+  healthCoverage?: PortfolioHealthCoverage;
+  projectHealth?: Record<string, PortfolioHealthState>;
 }
 
-function ReportBody(props: ReportBodyProps): JSX.Element | null {
-  const { loading, error, report, query, onQueryChange, sourceView, onSourceView } = props;
+function ReportBody(props: ReportBodyProps): JSX.Element {
+  const {
+    ownerToken,
+    loading,
+    error,
+    report,
+    onRetry,
+    onOpenProduct,
+    attentionItems,
+    healthCoverage,
+    projectHealth,
+  } = props;
   if (loading)
     return (
-      <div role="status" aria-label="Loading daily engagement" className="space-y-2">
-        <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <div role="status" aria-label="Loading daily engagement" className="space-y-3">
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-52 w-full rounded-xl" />
+        <Skeleton className="h-80 w-full rounded-xl" />
       </div>
     );
   if (error)
     return (
-      <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
-        <AlertTriangle className="mt-0.5 size-4 shrink-0" /> {error}
+      <div
+        role="alert"
+        className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
+      >
+        <span className="flex items-start gap-2">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+          {error}
+        </span>
+        <Button type="button" variant="outline" className="min-h-11" onClick={onRetry}>
+          Retry daily report
+        </Button>
       </div>
     );
-  return report ? (
-    <ReportResults
+  if (!report) return <></>;
+  return (
+    <PortfolioBriefing
+      ownerToken={ownerToken}
+      date={report.date}
       report={report}
-      query={query}
-      onQueryChange={onQueryChange}
-      sourceView={sourceView}
-      onSourceView={onSourceView}
+      onOpenProduct={onOpenProduct}
+      attentionItems={attentionItems}
+      healthCoverage={healthCoverage}
+      projectHealth={projectHealth}
     />
-  ) : null;
+  );
 }
 
-export function DailyEngagement({
-  ownerToken,
-  onReport,
-}: {
+interface DailyEngagementProps {
   ownerToken: string;
   onReport?: (report: Report | null) => void;
-}): JSX.Element {
+  onOpenProduct?: (appId: string, focus?: ProductFocus, source?: string, date?: string) => void;
+  attentionItems?: PortfolioAttentionItem[];
+  healthCoverage?: PortfolioHealthCoverage;
+  projectHealth?: Record<string, PortfolioHealthState>;
+}
+
+export function DailyEngagement(props: DailyEngagementProps): JSX.Element {
+  const {
+    ownerToken,
+    onReport,
+    onOpenProduct,
+    attentionItems = [],
+    healthCoverage,
+    projectHealth,
+  } = props;
   const [date, setDate] = useState(previousReportDay);
   const [followsLatest, setFollowsLatest] = useState(true);
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
-  const [query, setQuery] = useState('');
-  const [sourceView, setSourceView] = useState<SourceView>('all');
-
-  const selectSourceView = (next: SourceView) => {
-    setSourceView(next);
-    if (next === 'all') return;
-    window.requestAnimationFrame?.(() => {
-      document.getElementById('daily-product-evidence')?.scrollIntoView({
-        block: 'start',
-        behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-          ? 'auto'
-          : 'smooth',
-      });
-    });
-  };
 
   useEffect(() => {
     if (!followsLatest) return;
@@ -617,10 +231,10 @@ export function DailyEngagement({
   }, [date, ownerToken, onReport, retry]);
 
   return (
-    <Card
+    <section
       id="daily-engagement"
       aria-labelledby="daily-engagement-title"
-      className="gap-0 py-0 shadow-none"
+      className="rounded-xl border bg-card text-card-foreground"
     >
       <ReportHeader
         date={date}
@@ -634,17 +248,19 @@ export function DailyEngagement({
         }}
         onRefresh={() => setRetry((value) => value + 1)}
       />
-      <CardContent className="space-y-4 p-5">
+      <CardContent className="space-y-6 p-4 sm:p-5 lg:p-6">
         <ReportBody
+          ownerToken={ownerToken}
           loading={loading}
           error={error}
           report={report}
-          query={query}
-          onQueryChange={setQuery}
-          sourceView={sourceView}
-          onSourceView={selectSourceView}
+          onRetry={() => setRetry((value) => value + 1)}
+          onOpenProduct={onOpenProduct}
+          attentionItems={attentionItems}
+          healthCoverage={healthCoverage}
+          projectHealth={projectHealth}
         />
       </CardContent>
-    </Card>
+    </section>
   );
 }

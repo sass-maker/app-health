@@ -1,6 +1,10 @@
 import type { BrowserReportFilter } from '@app-health/contracts';
 
 export function reportWindow(filter: BrowserReportFilter, now: number) {
+  if (filter.date) {
+    const from = Date.parse(`${filter.date}T00:00:00+05:30`);
+    return { from, to: from + 86_400_000, step: 3_600_000 };
+  }
   const duration =
     filter.range === '1h'
       ? 3_600_000

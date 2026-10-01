@@ -115,106 +115,136 @@ function fixtureReport() {
   };
 }
 
+function fixtureInsights(report: ReturnType<typeof fixtureReport>) {
+  return {
+    date: report.date,
+    timezone: 'Asia/Kolkata',
+    generated_at: Date.now(),
+    comparison_note: 'QA fixture: illustrative comparable gains, not live telemetry.',
+    filter_note: 'QA fixture: source attribution is illustrative.',
+    sources: [
+      { name: 'Google', pageviews: 240, share: 0.6 },
+      { name: 'github.com', pageviews: 100, share: 0.25 },
+      { name: 'No referrer', pageviews: 60, share: 0.15 },
+    ],
+    products: report.products.map((product, index) => ({
+      app_id: product.app_id,
+      catalog_id: product.catalog_id,
+      name: product.name,
+      pageviews: product.browser_visitors === null ? null : product.browser_visitors * 2,
+      top_sources: product.browser_visitors
+        ? [{ name: 'Google', pageviews: product.browser_visitors * 2, share: 1 }]
+        : [],
+      sources_status:
+        product.browser_visitors !== null
+          ? 'measured'
+          : product.browser_visitors_applicability === 'not_applicable'
+            ? 'not_applicable'
+            : 'unknown',
+      source_estimated: false,
+      previous_browser_visitors:
+        product.browser_visitors === null ? null : Math.max(0, product.browser_visitors - 12),
+      browser_change: product.browser_visitors === null ? null : 12,
+      breakout: index > 18 && index < 22 && product.browser_visitors !== null,
+      comparison_reason: 'QA fixture: illustrative comparison.',
+    })),
+  };
+}
+
 for (const width of [390, 768, 1440]) {
-  test(`daily briefing evidence and 55-product inventory fit ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.route('**/v1/reports/daily-engagement?**', (route) =>
-      route.fulfill({ json: fixtureReport() }),
-    );
-    await page.goto('/app?demo=populated#overview');
-
-    await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
-    await expect(page.getByText('55/55 imported')).toBeVisible();
-    const report = page.locator('#daily-engagement');
-    await expect(
-      report.getByRole('button', {
-        name: /Visitor counts available 32 products with a reportable browser count/,
-      }),
-    ).toBeVisible();
-    await expect(
-      report.getByRole('button', {
-        name: /Action counts available 35 products with reportable primary action counts/,
-      }),
-    ).toBeVisible();
-    await expect(report.getByText('Feedback: 8')).toBeVisible();
-    await expect(report.getByText('Newsletter joins: 1')).toBeVisible();
-    await expect(report.getByText('Not applicable').first()).toBeVisible();
-
-    await report.locator('[data-slot="card-content"]').evaluate((content) => {
-      const notice = document.createElement('p');
-      notice.setAttribute('role', 'note');
-      notice.className =
-        'rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300';
-      notice.textContent = 'QA preview · fixture counts for layout review, not live telemetry';
-      content.prepend(notice);
-    });
-    await expect(page.getByRole('note')).toContainText('not live telemetry');
-    await expect(report.locator('tbody tr')).toHaveCount(55);
-    const mobileProducts = report.locator('ul[aria-label="Daily engagement products"] > li');
-    await expect(mobileProducts).toHaveCount(55);
-    if (width < 1280) {
-      const firstMeasuredVisitor = catalogFixture.products.find((item) => item.browser_applicable)!;
-      const unknownVisitor = catalogFixture.products
-        .filter((item) => item.browser_applicable)
-        .slice(32)[0];
-      const zeroCard = mobileProducts.filter({ hasText: firstMeasuredVisitor.catalog_id });
-      await expect(zeroCard.locator('dd').filter({ hasText: /^0$/ }).first()).toBeVisible();
-      if (unknownVisitor) {
-        const unknownCard = mobileProducts.filter({ hasText: unknownVisitor.catalog_id });
-        await expect(unknownCard.getByText('Unknown', { exact: true }).first()).toBeVisible();
+  for (const theme of ['light', 'dark']) {
+    test(`two-minute briefing has truthful totals and all 55 projects at ${width}px ${theme}`, async ({
+      page,
+    }) => {
+      const daily = fixtureReport();
+      await page.setViewportSize({ width, height: 1000 });
+      await page.addInitScript(
+        (selectedTheme) => localStorage.setItem('app-health-theme', selectedTheme),
+        theme,
+      );
+      await page.route('**/v1/reports/daily-engagement?**', (route) =>
+        route.fulfill({ json: daily }),
+      );
+      await page.route('**/v1/reports/portfolio-briefing?**', (route) =>
+        route.fulfill({ json: fixtureInsights(daily) }),
+      );
+      await page.goto('/app?demo=populated#overview');
+      // Explicit QA label stays in the screenshot; fixtures are never presented as production evidence.
+      await expect(
+        page.getByRole('heading', { name: 'Daily briefing', exact: true }),
+      ).toBeVisible();
+      const report = page.locator('#daily-engagement');
+      await expect(report.getByRole('heading', { name: 'Where traffic came from' })).toBeVisible();
+      await expect(report.getByRole('heading', { name: 'What moved' })).toBeVisible();
+      const browserTotal = daily.products.reduce(
+        (sum, product) => sum + (product.browser_visitors ?? 0),
+        0,
+      );
+      await expect(
+        report.getByText('Known browser counts', { exact: true }).locator('..'),
+      ).toContainText(browserTotal.toLocaleString());
+      await expect(
+        report.getByText('Confirmed responses', { exact: true }).locator('..'),
+      ).toContainText('9');
+      await expect(
+        report.getByText('Measured health issues', { exact: true }).locator('..'),
+      ).toContainText('latest 24 hours');
+      await expect(report.locator('tbody tr')).toHaveCount(55);
+      const mobileProducts = report.locator('ul[aria-label="Portfolio project ledger"] > li');
+      await expect(mobileProducts).toHaveCount(55);
+      await expect(report.getByText('No referrer', { exact: true }).first()).toBeVisible();
+      await report.evaluate((content) => {
+        const notice = document.createElement('p');
+        notice.setAttribute('role', 'note');
+        notice.className = 'border-b px-5 py-2 text-xs text-amber-700 dark:text-amber-300';
+        notice.textContent = 'QA preview · fixture counts for layout review, not live telemetry';
+        content.prepend(notice);
+      });
+      if (width < 1024) {
+        await mobileProducts.last().scrollIntoViewIfNeeded();
+        await expect(mobileProducts.last()).toBeInViewport();
+        await page.evaluate(() => window.scrollTo(0, 0));
+      } else {
+        const overflow = await report
+          .locator('[data-slot="table-container"]')
+          .evaluate((node) => node.scrollWidth - node.clientWidth);
+        expect(overflow).toBeLessThanOrEqual(1);
       }
-      const lastCard = mobileProducts.last();
-      await lastCard.scrollIntoViewIfNeeded();
-      await expect(lastCard).toBeInViewport();
-      await page.evaluate(() => window.scrollTo(0, 0));
-    }
-    if (width === 1440) {
-      const table = report.locator('[data-slot="table-container"]');
-      const tableWidth = await table.evaluate((node) => ({
-        content: node.scrollWidth,
-        visible: node.clientWidth,
-      }));
-      expect(tableWidth.content).toBeLessThanOrEqual(tableWidth.visible);
-      await expect(report.getByRole('columnheader', { name: 'Server requests' })).toBeVisible();
-      const serverHeaderIsInView = await report
-        .getByRole('columnheader', { name: 'Server requests' })
-        .evaluate((header) => {
-          const headerBounds = header.getBoundingClientRect();
-          const containerBounds = header
-            .closest('[data-slot="table-container"]')!
-            .getBoundingClientRect();
-          return (
-            headerBounds.left >= containerBounds.left && headerBounds.right <= containerBounds.right
-          );
-        });
-      expect(serverHeaderIsInView).toBe(true);
-      const actionLabelsFit = await report
-        .locator('tbody li span:first-child')
-        .evaluateAll((labels) =>
-          labels.every((label) => label.scrollWidth <= label.clientWidth + 1),
-        );
-      expect(actionLabelsFit).toBe(true);
-    }
-    await checkReadability(page);
-
-    const evidence = new URL(
-      '../../../.fleet/evidence/daily-briefing-2026-09-29/',
-      import.meta.url,
-    );
-    mkdirSync(fileURLToPath(evidence), { recursive: true });
-    await page.screenshot({
-      fullPage: false,
-      type: 'jpeg',
-      quality: 88,
-      path: fileURLToPath(new URL(`after-${width}.jpg`, evidence)),
+      await checkReadability(page);
+      const evidence = new URL(
+        '../../../.fleet/evidence/two-minute-briefing-2026-10-01/',
+        import.meta.url,
+      );
+      mkdirSync(fileURLToPath(evidence), { recursive: true });
+      await page.screenshot({
+        fullPage: false,
+        type: 'jpeg',
+        quality: 88,
+        path: fileURLToPath(new URL(`after-${width}-${theme}.jpg`, evidence)),
+      });
+      const sources = report
+        .getByRole('heading', { name: 'Where traffic came from' })
+        .locator('..')
+        .locator('..')
+        .locator('..');
+      await sources
+        .getByRole('button', { name: `Filter projects by Google source for ${daily.date}` })
+        .click();
+      await expect(report.getByText(/Showing projects where/)).toBeVisible();
+      await expect(report.locator('tbody tr')).toHaveCount(
+        daily.products.filter((product) => Boolean(product.browser_visitors)).length,
+      );
+      await report.getByRole('button', { name: 'Clear source filter' }).click();
+      await expect(report.locator('tbody tr')).toHaveCount(55);
+      await report.getByRole('button', { name: 'Show all 3 breakouts' }).click();
+      await expect(report.getByText('Growth', { exact: true })).toHaveCount(3);
+      await report.getByRole('button', { name: 'Show the top two' }).click();
+      await expect(report.getByText('Growth', { exact: true })).toHaveCount(2);
+      const search = report.getByRole('textbox', { name: /Search projects/ });
+      await search.fill(daily.products[0].catalog_id);
+      await expect(report.locator('tbody tr')).toHaveCount(1);
+      await search.fill('');
+      await expect(report.locator('tbody tr')).toHaveCount(55);
     });
-
-    await report.getByRole('button', { name: /Action counts available/ }).click();
-    await expect(
-      report.getByText(/Showing 35 of 55 products with reportable primary action counts/),
-    ).toBeVisible();
-    await expect(report.getByText(/Unknown sources remain in the full inventory/)).toBeVisible();
-    await report.getByRole('button', { name: 'Show all products' }).click();
-    await expect(report.locator('tbody tr')).toHaveCount(55);
-  });
+  }
 }
