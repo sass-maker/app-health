@@ -106,6 +106,42 @@ it('shows browser counts, action intent, response receipts, sources, and applica
   expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('browser_visitor_unknown_reason=1');
 });
 
+it('makes every breakout available when more than two projects grow', async () => {
+  const products = [0, 1, 2].map((index) => ({
+    ...report.products[0],
+    app_id: `growth-${index}`,
+    catalog_id: `growth-${index}`,
+    name: `Growing product ${index}`,
+    browser_visitors: 30 + index * 10,
+  }));
+  const daily = { ...report, product_count: products.length, products };
+  const insights = {
+    ...briefing,
+    products: products.map((product) => ({
+      ...briefing.products[0],
+      app_id: product.app_id,
+      catalog_id: product.catalog_id,
+      name: product.name,
+      previous_browser_visitors: 10,
+      browser_change: product.browser_visitors - 10,
+      breakout: true,
+    })),
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) =>
+      Response.json(String(input).includes('/portfolio-briefing') ? insights : daily),
+    ),
+  );
+  render(<DailyEngagement ownerToken="owner" />);
+  const expand = await screen.findByRole('button', { name: 'Show all 3 breakouts' });
+  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(2);
+  fireEvent.click(expand);
+  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(3);
+  fireEvent.click(screen.getByRole('button', { name: 'Show the top two' }));
+  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(2);
+});
+
 it('labels missing health coverage separately from measured issue count', async () => {
   vi.stubGlobal(
     'fetch',
