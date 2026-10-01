@@ -1,3 +1,4 @@
+import { isBot } from 'isbot';
 import { browserMetadata } from './browser-metadata.js';
 import { measureOwnerRouteRead, type OwnerRequestTimings } from './accounts.js';
 import { readPublicJson } from './public-body.js';
@@ -53,6 +54,17 @@ const localAnalytics = new LocalBrowserAnalytics();
 const UNSAFE_BROWSER_PATH = /[@?#\\\s]/;
 const json = (status: number, body: unknown) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
+
+function isBrowserBot(request: Request): boolean {
+  const cloudflare = request.cf as
+    { botManagement?: { verifiedBot?: unknown }; verifiedBotCategory?: unknown } | undefined;
+  return (
+    cloudflare?.botManagement?.verifiedBot === true ||
+    (typeof cloudflare?.verifiedBotCategory === 'string' &&
+      cloudflare.verifiedBotCategory.length > 0) ||
+    isBot(request.headers.get('user-agent'))
+  );
+}
 
 function cors(request: Request, response: Response): Response {
   const origin = request.headers.get('origin');
@@ -120,6 +132,7 @@ async function collectBrowser(
   const key = await repos.publicKeys?.verifyPublicKey(input.public_key);
   if (!key || !key.allowed_origins.includes(request.headers.get('origin') ?? ''))
     return json(403, { error: 'browser key or origin rejected' });
+  if (isBrowserBot(request)) return json(200, { ignored: true });
   const quota = await repos.publicKeys!.consumeBrowserQuota(
     `analytics:${key.id}`,
     Math.floor(now / 60_000) * 60_000,

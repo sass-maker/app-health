@@ -74,7 +74,12 @@ try {
         },
       ],
     },
-    { origin: 'https://sample.test' },
+    // The Node fetch call stands in for an ordinary browser batch.
+    {
+      origin: 'https://sample.test',
+      'user-agent':
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    },
   );
   const sharing = await api(`/v1/analytics/shares?${scope}`, 'POST');
   host = httpServer((request, response) => {

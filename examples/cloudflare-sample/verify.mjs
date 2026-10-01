@@ -317,7 +317,12 @@ async function waitForReceipt(collectorOrigin, target) {
 }
 
 async function driveCheckout(browser, target) {
-  const page = await browser.newPage();
+  // This integration represents a human browser; Chromium's default
+  // HeadlessChrome agent is correctly ignored by the production collector.
+  const page = await browser.newPage({
+    userAgent:
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  });
   let networkRequests = 0;
   page.on('request', () => {
     networkRequests += 1;
