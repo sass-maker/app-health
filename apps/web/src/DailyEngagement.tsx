@@ -45,28 +45,31 @@ function ReportHeader({
     timeZone: 'Asia/Kolkata',
   });
   return (
-    <header className="flex flex-col gap-4 border-b px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+    <header className="flex flex-col gap-5 border-b border-border/70 pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
           Completed India day
         </p>
-        <h2 id="daily-engagement-title" className="mt-1 text-xl font-semibold tracking-tight">
+        <h2
+          id="daily-engagement-title"
+          className="mt-2 text-2xl font-semibold tracking-[-0.035em] sm:text-3xl"
+        >
           {dayLabel}
         </h2>
-        <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <p className="mt-2 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground">
           <CalendarDays className="size-3.5" /> What moved, where it came from, and what needs
           attention.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
-        <label className="block text-xs text-muted-foreground">
+        <label className="grid gap-1 text-xs text-muted-foreground">
           Report date
           <Input
             type="date"
             value={date}
             max={previousReportDay()}
             onChange={(event) => onDateChange(event.target.value)}
-            className="mt-1 h-11 w-42"
+            className="h-11 w-42"
           />
         </label>
         <Button
@@ -234,7 +237,7 @@ export function DailyEngagement(props: DailyEngagementProps): JSX.Element {
     <section
       id="daily-engagement"
       aria-labelledby="daily-engagement-title"
-      className="rounded-xl border bg-card text-card-foreground"
+      className="space-y-7 text-foreground"
     >
       <ReportHeader
         date={date}
@@ -248,7 +251,7 @@ export function DailyEngagement(props: DailyEngagementProps): JSX.Element {
         }}
         onRefresh={() => setRetry((value) => value + 1)}
       />
-      <CardContent className="space-y-6 p-4 sm:p-5 lg:p-6">
+      <CardContent className="space-y-6 p-0">
         <ReportBody
           ownerToken={ownerToken}
           loading={loading}

@@ -198,20 +198,24 @@ function Stat({
   className?: string;
 }): JSX.Element {
   const toneClass = {
-    neutral: 'border-border bg-card text-foreground',
-    sky: 'border-sky-500/20 bg-sky-500/[0.045] text-sky-700 dark:text-sky-300',
-    green: 'border-emerald-500/20 bg-emerald-500/[0.045] text-emerald-700 dark:text-emerald-300',
-    amber: 'border-amber-500/20 bg-amber-500/[0.045] text-amber-700 dark:text-amber-300',
+    neutral: 'border-t-border',
+    sky: 'border-t-sky-500',
+    green: 'border-t-emerald-500',
+    amber: 'border-t-amber-500',
   }[tone];
   return (
-    <div className={`min-w-0 rounded-xl border px-4 py-3.5 ${toneClass} ${className}`}>
-      <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="mt-2 truncate text-[1.7rem] font-semibold leading-none tracking-[-0.04em] tabular-nums text-foreground">
+    <div className={`min-w-0 border-t-2 py-3 ${toneClass} ${className}`}>
+      <p className="text-[11px] font-medium tracking-[0.03em] text-muted-foreground">{label}</p>
+      <p
+        className={`mt-3 break-words font-medium tabular-nums text-foreground ${
+          value.length > 12
+            ? 'text-xl leading-tight tracking-tight'
+            : 'text-[clamp(1.65rem,3vw,2.45rem)] leading-none tracking-[-0.055em]'
+        }`}
+      >
         {value}
       </p>
-      <p className="mt-2 text-xs leading-4 text-muted-foreground">{detail}</p>
+      <p className="mt-2 text-[11px] leading-[1.5] text-muted-foreground">{detail}</p>
     </div>
   );
 }
@@ -231,22 +235,22 @@ function BreakoutCard({
     <button
       type="button"
       onClick={onOpen}
-      className="group min-h-32 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group min-h-32 border-t border-border bg-transparent py-4 text-left transition-colors hover:bg-accent/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="flex items-center justify-between gap-3">
         <Badge
           variant="outline"
-          className={
+          className={`rounded-full px-2.5 ${
             tone === 'green'
               ? 'border-emerald-500/30 text-emerald-700 dark:text-emerald-300'
               : 'border-amber-500/30 text-amber-700 dark:text-amber-300'
-          }
+          }`}
         >
           {tone === 'green' ? 'Growth' : 'Down'}
         </Badge>
         <ExternalLink className="size-3.5 text-muted-foreground opacity-70 transition-opacity group-hover:opacity-100" />
       </span>
-      <span className="mt-3 block truncate text-base font-semibold tracking-tight text-foreground">
+      <span className="mt-4 block truncate text-lg font-medium tracking-tight text-foreground">
         {item.name}
       </span>
       <span className="mt-1 block text-sm font-medium tabular-nums text-foreground">
@@ -346,7 +350,7 @@ function SourcesPanel({
   return (
     <section
       aria-labelledby="briefing-sources-title"
-      className="rounded-xl border border-border bg-card p-4"
+      className="border-t-2 border-foreground/15 pt-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -603,7 +607,7 @@ function ProductLedger({
         </div>
       ) : null}
 
-      <div className="hidden overflow-hidden rounded-xl border border-border lg:block">
+      <div className="hidden overflow-hidden rounded-xl border border-border/70 bg-card lg:block">
         <Table className="w-full min-w-0 table-fixed">
           <TableHeader className="bg-muted/35">
             <TableRow className="hover:bg-transparent">
@@ -664,7 +668,7 @@ function ProductLedger({
                     ? `${product.cta_events.some((event) => event.estimated) ? 'Approx. ' : ''}${formatNumber(actionCount(product))} events`
                     : 'Unknown';
               return (
-                <TableRow key={product.app_id}>
+                <TableRow key={product.app_id} className="border-border/60">
                   <TableCell className="whitespace-normal">
                     <button
                       type="button"
@@ -985,7 +989,7 @@ function Summary({
 
   return (
     <section aria-label="Selected day summary" className="space-y-4">
-      <div className="grid grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-x-5 sm:grid-cols-3 xl:grid-cols-5">
         <Stat
           label="Known browser counts"
           value={browserProducts ? browserCounts.toLocaleString() : 'Unknown'}
@@ -1020,7 +1024,7 @@ function Summary({
           className="col-span-2 xl:col-span-1"
         />
       </div>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
         <span>{report.product_count}/55 products in scope</span>
         <span aria-hidden="true">·</span>
         <span>{browserProducts} products with reportable browser counts</span>
@@ -1028,14 +1032,17 @@ function Summary({
         <span>Browser counts are product-scoped, not portfolio-wide unique browsers</span>
         {report.sampled ? <Badge variant="outline">Some sources sampled</Badge> : null}
       </div>
-      <p className="text-xs text-muted-foreground">
-        Named action events:{' '}
-        {measuredActionProducts
-          ? `${actionEstimated ? 'approximately ' : ''}${namedActionCount.toLocaleString()}`
-          : 'Unknown'}{' '}
-        across {measuredActionProducts} products. These count instrumented clicks; download intent
-        above is one subset, not completed work.
-      </p>
+      <details className="text-xs text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-2 font-medium">Action coverage</summary>
+        <p className="pb-3">
+          Named action events:{' '}
+          {measuredActionProducts
+            ? `${actionEstimated ? 'approximately ' : ''}${namedActionCount.toLocaleString()}`
+            : 'Unknown'}{' '}
+          across {measuredActionProducts} products. These count instrumented clicks; download intent
+          above is one subset, not completed work.
+        </p>
+      </details>
     </section>
   );
 }
@@ -1064,7 +1071,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
     onOpenProduct?.(appId, focus, source, data?.date ?? date);
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 sm:space-y-10">
       <Summary
         report={report}
         data={data}
@@ -1072,7 +1079,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
         healthCoverage={healthCoverage}
       />
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.75fr)]">
+      <div className="grid gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.75fr)]">
         <section aria-labelledby="briefing-movement-title" className="space-y-3">
           <div className="flex items-end justify-between gap-3">
             <div>
@@ -1129,7 +1136,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
                 ) : null}
               </div>
             ) : (
-              <div className="rounded-xl border border-border bg-card px-4 py-5">
+              <div className="border-l-2 border-border py-2 pl-4">
                 <p className="text-sm font-medium">No comparable breakouts for this day</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">{comparisonHint}</p>
               </div>
