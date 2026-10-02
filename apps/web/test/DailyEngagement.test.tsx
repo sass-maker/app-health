@@ -154,8 +154,32 @@ it('labels missing health coverage separately from measured issue count', async 
   );
   render(<DailyEngagement ownerToken="owner" attentionItems={[]} />);
   await screen.findByRole('table');
-  expect(screen.getByText('No measured issues')).toBeTruthy();
+  expect(screen.queryByText('No measured issues')).toBeNull();
   expect(screen.getByText('Coverage unknown · latest 24 hours')).toBeTruthy();
+});
+
+it('does not claim a clear health result before measurements arrive', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => responseFor(input)),
+  );
+  const { rerender } = render(
+    <DailyEngagement
+      ownerToken="owner"
+      attentionItems={[]}
+      healthCoverage={{ measured: 0, applicable: 2, total: 2 }}
+    />,
+  );
+  await screen.findByRole('table');
+  expect(screen.queryByText('No measured issues')).toBeNull();
+  rerender(
+    <DailyEngagement
+      ownerToken="owner"
+      attentionItems={[]}
+      healthCoverage={{ measured: 2, applicable: 2, total: 2 }}
+    />,
+  );
+  expect(screen.getByText('No measured issues')).toBeTruthy();
 });
 
 it('times out a hung source response body without blocking the daily report, then retries', async () => {
