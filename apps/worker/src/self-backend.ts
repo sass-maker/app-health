@@ -27,7 +27,6 @@ const ROUTES = new Set([
   '/v1/shared/analytics',
   '/v1/reports/daily-engagement',
   '/v1/reports/portfolio-briefing',
-  '/v1/workspace/analytics',
   '/v1/workspace/health',
   '/v1/workspace/alerts',
   '/v1/auth/get-session',

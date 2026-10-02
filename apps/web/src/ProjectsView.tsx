@@ -650,7 +650,10 @@ function briefingHealth(rows: WatchtowerRow[]) {
               ? stateLabels[endpoints.state]
               : state === 'healthy'
                 ? 'Healthy'
-                : 'Low volume';
+                : endpoints.metrics &&
+                    endpoints.metrics.request_count >= INSUFFICIENT_DATA_MIN_REQUESTS
+                  ? 'Latency uncertain'
+                  : 'Low volume';
       return [
         row.project.appId,
         {
