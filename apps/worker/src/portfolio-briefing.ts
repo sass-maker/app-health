@@ -5,7 +5,6 @@ import {
   normalizeAnalyticsSource,
   type PortfolioBriefingV1 as PortfolioBriefing,
 } from '@app-health/contracts';
-import { analyticsSourceFrom, analyticsSourceSql } from './browser-source-sql.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import { dailyEngagementWindow, type CatalogProductRow } from './daily-engagement-report.js';
 
@@ -119,14 +118,12 @@ function sourceAggregateSql(
     .join(',');
   const allFrom = from - DAY_MS;
   const period = `IF(double2 >= ${from}, 1, 0)`;
-  // The built-in canonicalizer calls its empty bucket Unknown. At this surface
-  // empty attribution has the clearer, explicit No referrer meaning.
-  const sourceSql = analyticsSourceSql().replace("'Unknown'", "'No referrer'");
+  // Keep the SQL projection small enough for long imported environment IDs.
+  // Canonicalise and merge these bounded raw values in canonicalSourceName.
+  const sourceSql = `substring(lower(IF(blob17!='' OR blob10!='',blob10,blob6)),1,100)`;
   const filter = `index1 = ${quote(workspaceId)} AND double2 >= ${allFrom} AND double2 < ${to}
     AND blob2 IN (${environments})`;
-  const sourceFrom = analyticsSourceFrom(
-    `app_health_browser_v1 WHERE ${filter} AND blob3 = 'pageview'`,
-  );
+  const sourceFrom = `FROM app_health_browser_v1 WHERE ${filter} AND blob3 = 'pageview'`;
   // Keep one source aggregate query. AE does not support UNION, so the distinct
   // browser baseline is read by its own bounded grouped query below.
   const sql = `SELECT ${period} AS period, 'source' AS kind, blob1 AS app_id, ${sourceSql} AS name,

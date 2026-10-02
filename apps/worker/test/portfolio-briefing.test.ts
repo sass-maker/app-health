@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
 import { PortfolioBriefingV1 } from '@app-health/contracts';
+import { analyticsSourceFrom, analyticsSourceSql } from '../src/browser-source-sql.js';
 import { readPortfolioBriefing } from '../src/portfolio-briefing.js';
 import type { D1DatabaseLike, D1PreparedStatement } from '../src/d1-adapter.js';
 
@@ -82,7 +84,7 @@ describe('readPortfolioBriefing', () => {
     expect(sql.every((query) => !query.includes('UNION'))).toBe(true);
     expect(sql.every((query) => query.length <= 10_000)).toBe(true);
     expect(sql.every((query) => query.includes("index1 = 'workspace-1'"))).toBe(true);
-    expect(sql[0]).toContain("'No referrer'");
+    expect(sql[0]).toContain('substring(lower(IF(blob17');
     expect(result.products[0]).toMatchObject({
       pageviews: 25,
       sources_status: 'measured',
@@ -292,6 +294,140 @@ describe('readPortfolioBriefing', () => {
     expect(queries.every((sql) => !sql.includes('UNION'))).toBe(true);
     expect(result.products).toHaveLength(55);
     expect(result.products.every((row) => row.sources_status === 'measured')).toBe(true);
+  });
+
+  it.each([
+    ['workspace UUID', '123e4567-e89b-12d3-a456-426614174000'],
+    ['maximum workspace ID', 'w'.repeat(100)],
+  ])('keeps 55 imported 75-character scopes under budget for a %s', async (_label, workspaceId) => {
+    const manyCatalog = Array.from({ length: 55 }, (_, index) => ({
+      catalog_id: `catalog-${String(index).padStart(2, '0')}-${'c'.repeat(64)}`,
+      app_id: `app-${String(index).padStart(2, '0')}-${'a'.repeat(68)}`,
+      catalog_name: `Product ${index}`,
+      environment_id: `env-${String(index).padStart(2, '0')}-${'b'.repeat(68)}`,
+      analytics_first_received_at: CURRENT_FROM - 86_400_000,
+    }));
+    const environments = manyCatalog.map((row) => `'${row.environment_id}'`).join(',');
+    const filter = `index1 = '${workspaceId}' AND double2 >= ${CURRENT_FROM} AND double2 < ${CURRENT_FROM + 2 * 86_400_000}\n    AND blob2 IN (${environments})`;
+    const legacyProjection = analyticsSourceSql().replace("'Unknown'", "'No referrer'");
+    const legacyFrom = analyticsSourceFrom(
+      `app_health_browser_v1 WHERE ${filter} AND blob3 = 'pageview'`,
+    );
+    const legacyQuery = `SELECT IF(double2 >= ${CURRENT_FROM + 86_400_000}, 1, 0) AS period, 'source' AS kind, blob1 AS app_id, ${legacyProjection} AS name,\n      SUM(_sample_interval) AS pageviews, 0 AS visitors, MAX(_sample_interval) AS sample_interval\n      ${legacyFrom} GROUP BY period, app_id, name LIMIT 10001`;
+    expect(new TextEncoder().encode(legacyQuery).byteLength).toBeGreaterThan(10_000);
+    expect(manyCatalog.every((row) => row.environment_id.length === 75)).toBe(true);
+
+    const queries: string[] = [];
+    const result = await readPortfolioBriefing({
+      db: db(manyCatalog),
+      workspaceId,
+      date: '2026-10-03',
+      now: NOW,
+      currentReport: {
+        products: manyCatalog.map((row) => ({ app_id: row.app_id, browser_visitors: null })),
+      },
+      query: async (sql) => {
+        queries.push(sql);
+        return [];
+      },
+    });
+    expect(queries).toHaveLength(2);
+    expect(queries.every((sql) => new TextEncoder().encode(sql).byteLength <= 10_000)).toBe(true);
+    expect(queries[0]).toContain(`index1 = '${workspaceId}'`);
+    expect(queries[0]).toContain(`'${manyCatalog[0]!.environment_id}'`);
+    expect(queries[0]).toContain(`'${manyCatalog.at(-1)!.environment_id}'`);
+    expect(result.products).toHaveLength(55);
+    expect(result.products.every((row) => row.sources_status === 'measured')).toBe(true);
+  });
+
+  it('canonicalizes and merges raw sources after grouping bounded source values', async () => {
+    const result = await readPortfolioBriefing({
+      ...briefingArgs(),
+      query: queryWithRows([
+        sourceRow(1, 'www.google.com', 3),
+        sourceRow(1, 'google.com', 2),
+        sourceRow(1, 'google', 1),
+        sourceRow(1, 'news.ycombinator.com', 4),
+        sourceRow(1, 'hn', 2),
+        sourceRow(1, 'https://private.example/path?q=x', 5),
+        sourceRow(1, 'evil.example/.reddit.com', 7),
+      ]),
+    });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Google',
+      pageviews: 6,
+      share: 6 / 24,
+    });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Hacker News',
+      pageviews: 6,
+      share: 6 / 24,
+    });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Other referral',
+      pageviews: 12,
+      share: 12 / 24,
+    });
+    expect(JSON.stringify(result)).not.toContain('private.example');
+    expect(JSON.stringify(result)).not.toContain('evil.example');
+  });
+
+  it('executes the bounded source query and merges canonical sources in the briefing', async () => {
+    const database = new DatabaseSync(':memory:');
+    database.exec(`CREATE TABLE app_health_browser_v1 (
+      index1 TEXT, double2 INTEGER, blob1 TEXT, blob2 TEXT, blob3 TEXT,
+      blob6 TEXT, blob8 TEXT, blob10 TEXT, blob17 TEXT, _sample_interval INTEGER
+    )`);
+    const insert = database.prepare(
+      'INSERT INTO app_health_browser_v1 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    );
+    const sources = [
+      ['www.google.com', 3],
+      ['google.com', 2],
+      ['google', 1],
+      ['news.ycombinator.com', 4],
+      ['hn', 2],
+      ['https://private.example/path?q=x', 5],
+      ['evil.example/.reddit.com', 7],
+    ] as const;
+    let visitor = 0;
+    for (const [source, count] of sources) {
+      for (let index = 0; index < count; index++) {
+        insert.run(
+          'workspace-1',
+          CURRENT_FROM + 1_000,
+          catalog[0]!.app_id,
+          catalog[0]!.environment_id,
+          'pageview',
+          source,
+          `visitor-${visitor++}`,
+          '',
+          '',
+          1,
+        );
+      }
+    }
+    const result = await readPortfolioBriefing({
+      ...briefingArgs(),
+      query: async (sql) => database.prepare(sql).all(),
+    });
+    database.close();
+    expect(result.products[0]).toMatchObject({ pageviews: 24, sources_status: 'measured' });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Google',
+      pageviews: 6,
+      share: 6 / 24,
+    });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Hacker News',
+      pageviews: 6,
+      share: 6 / 24,
+    });
+    expect(result.products[0]?.top_sources).toContainEqual({
+      name: 'Other referral',
+      pageviews: 12,
+      share: 12 / 24,
+    });
   });
 
   it('retains measured current sources when the prior baseline query fails', async () => {
