@@ -125,6 +125,54 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   }
 
+  it('serves cached briefing after owner authentication without loading daily aggregates', async () => {
+    const cache = {
+      match: vi.fn(async (key: Request) =>
+        key.url.includes('portfolio-briefing-v1')
+          ? Response.json({ products: [], marker: 'cached-briefing' })
+          : undefined,
+      ),
+      put: vi.fn(async () => {}),
+    };
+    const captures = vi.fn(async () => ({ coverageStart: '2026-09-28', rows: [] }));
+    let catalogReads = 0;
+    const db = env.DB!;
+    const scopedEnv: Env = {
+      ...env,
+      DB: new Proxy(db, {
+        get(target, key, receiver) {
+          if (key === 'prepare')
+            return (sql: string) => {
+              if (sql.includes('catalog_project_imports')) catalogReads += 1;
+              return target.prepare(sql);
+            };
+          const value = Reflect.get(target, key, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }),
+      SAASMAKER_METRICS: { getDailyCaptureCounts: captures },
+    };
+    vi.stubGlobal('caches', { default: cache });
+    try {
+      const path = 'https://dashboard.example.com/v1/reports/portfolio-briefing?date=2026-09-28';
+      const anonymous = await worker.fetch(new Request(path), scopedEnv);
+      expect(anonymous.status).toBe(401);
+      expect(cache.match).not.toHaveBeenCalled();
+      const response = await worker.fetch(
+        new Request(path, { headers: { cookie: aliceCookie } }),
+        scopedEnv,
+      );
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      await expect(response.json()).resolves.toEqual({ products: [], marker: 'cached-briefing' });
+      expect(cache.match).toHaveBeenCalledTimes(1);
+      expect(catalogReads).toBe(0);
+      expect(captures).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('creates one workspace per account without claiming legacy projects', async () => {
     const account = await request('/v1/account');
     expect(account.status).toBe(200);

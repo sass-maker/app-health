@@ -439,20 +439,28 @@ export async function readPortfolioBriefing(args: {
   workspaceId: string;
   date: string | null;
   now: number;
-  currentReport: { products: readonly CurrentReportProduct[] };
+  currentReport:
+    | { products: readonly CurrentReportProduct[] }
+    | Promise<{ products: readonly CurrentReportProduct[] }>;
   query?: AnalyticsEngineQuery;
 }): Promise<PortfolioBriefing> {
   const window = dailyEngagementWindow(args.date, args.now);
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
-  const catalog = await readBriefingCatalog(args.db, args.workspaceId);
-  const aggregates = await loadSourceAggregates({
-    query: args.query,
-    workspaceId: args.workspaceId,
-    catalog,
-    from: window.from,
-    to: window.to,
-  });
-  const currentByApp = indexCurrentReport(args.currentReport.products, catalog);
+  const [sourceData, currentReport] = await Promise.all([
+    readBriefingCatalog(args.db, args.workspaceId).then(async (catalog) => ({
+      catalog,
+      aggregates: await loadSourceAggregates({
+        query: args.query,
+        workspaceId: args.workspaceId,
+        catalog,
+        from: window.from,
+        to: window.to,
+      }),
+    })),
+    args.currentReport,
+  ]);
+  const { catalog, aggregates } = sourceData;
+  const currentByApp = indexCurrentReport(currentReport.products, catalog);
   const priorFrom = window.from - DAY_MS;
   const comparisonsAllowed = window.to <= BOT_FILTER_CUTOVER || priorFrom >= BOT_FILTER_CUTOVER;
   const totals = portfolioSourceTotals(catalog, aggregates, window.from, currentByApp);
