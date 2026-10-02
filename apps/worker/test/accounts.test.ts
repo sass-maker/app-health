@@ -585,6 +585,7 @@ describe('Google account boundary with real D1 SQL', () => {
       `/v1/installation/status?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
     );
     const analyticsReport = await request('/v1/analytics/report');
+    const alerts = await request('/v1/workspace/alerts');
     const timingPattern =
       /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, (?:workspace_scope;dur=\d+\.\d{2}|workspace_capability_setup_read;dur=\d+\.\d{2})(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
     for (const [response, status] of [
@@ -593,6 +594,7 @@ describe('Google account boundary with real D1 SQL', () => {
       [endpoints, 200],
       [installation, 200],
       [analyticsReport, 503],
+      [alerts, 200],
     ] as const) {
       expect(response.status).toBe(status);
       const header = response.headers.get('server-timing') ?? '';
@@ -621,6 +623,7 @@ describe('Google account boundary with real D1 SQL', () => {
       '/v1/analytics/report',
       '/v1/reports/daily-engagement',
       '/v1/reports/portfolio-briefing',
+      '/v1/workspace/alerts',
     ]) {
       const response = await worker.fetch(new Request(`https://dashboard.example.com${path}`), env);
       expect(response.status).toBe(401);
