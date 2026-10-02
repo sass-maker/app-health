@@ -96,9 +96,11 @@ function installFetch(options?: {
   keyIssueInvalid?: boolean;
   endpointInvalid?: boolean;
   endpointPending?: boolean;
+  endpointFailWindow?: string;
   statusInvalid?: boolean;
 }) {
   const publicKeys = [...(options?.publicKeys ?? [])];
+  let failedWindow = options?.endpointFailWindow ?? null;
   let capabilityRows =
     options?.capabilityRows ??
     (['analytics', 'endpoints', 'logs'] as const).map((id) => ({
@@ -215,6 +217,10 @@ function installFetch(options?: {
     }
     if (url.pathname === '/v1/endpoints') {
       if (options?.endpointInvalid) return Response.json({ endpoints: [] });
+      if (url.searchParams.get('window') === failedWindow) {
+        failedWindow = null;
+        return new Response(null, { status: 503 });
+      }
       if (options?.endpointPending)
         return new Promise<Response>((_, reject) => {
           init?.signal?.addEventListener('abort', () =>
@@ -777,6 +783,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     const fetchMock = installFetch({ endpointPending: true });
     render(<App />);
+    expect(await screen.findByText('Loading endpoint count…')).toBeTruthy();
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(2));
     fireEvent.click(screen.getByRole('button', { name: '1h' }));
     await waitFor(() => {
@@ -891,6 +898,7 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
     expect(await screen.findByText('Waiting for traffic')).toBeTruthy();
+    expect(screen.getByRole('status')).toHaveTextContent(/^0 observed/);
     expect(screen.getByText('No endpoints observed yet')).toBeTruthy();
     expect(screen.getByText(/curl http:\/\/localhost:3000\/health/)).toBeTruthy();
   });
@@ -954,8 +962,31 @@ describe('App Health V0 UI', () => {
     installFetch({ fail: true });
     render(<App />);
     expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByText('Endpoint count unavailable')).toBeTruthy();
+    expect(screen.queryByText(/^0 observed/)).toBeNull();
     expect(screen.getByText(/application is unaffected/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('keeps a fresh-window endpoint count unknown on failure and restores it after recovery', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    installFetch({ endpointFailWindow: '24h' });
+    render(<App />);
+
+    expect(
+      await screen.findByText('2 observed · Measurements update after each complete minute'),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '24h' }));
+    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByText('Endpoint count unavailable')).toBeTruthy();
+    expect(screen.queryByText(/^0 observed/)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '1h' }));
+    expect(
+      await screen.findByText('2 observed · Measurements update after each complete minute'),
+    ).toBeTruthy();
+    expect(screen.queryByText('Endpoint count unavailable')).toBeNull();
+    expect(screen.queryByText('Can’t refresh endpoint data')).toBeNull();
   });
 
   it('shows a recoverable capability error instead of setup when status is unavailable', async () => {
