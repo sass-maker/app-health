@@ -20,7 +20,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('delivers actual SDK batches through authenticated collector without recursion', async () => {
+it.each([
+  '/v1/health',
+  '/v1/reports/daily-engagement',
+  '/v1/reports/portfolio-briefing',
+  '/v1/workspace/analytics',
+  '/v1/workspace/health',
+  '/v1/workspace/alerts',
+])('delivers %s SDK batches through authenticated collector without recursion', async (path) => {
   const ctx = context();
   const payloads: string[] = [];
   const transport = vi.fn(async (url: string, init: RequestInit) => {
@@ -35,16 +42,20 @@ it('delivers actual SDK batches through authenticated collector without recursio
   });
   vi.stubGlobal('fetch', transport);
   const response = await worker.fetch(
-    request('/v1/health?secret=private'),
+    request(`${path}?secret=private`),
     { ...env, APP_HEALTH_MODE: 'local' },
     ctx,
   );
-  expect(response.status).toBe(200);
+  if (path === '/v1/health') expect(response.status).toBe(200);
   await Promise.all(ctx.pending);
   expect(transport).toHaveBeenCalledTimes(1);
   const batch = JSON.parse(payloads[0]);
   expect(batch.events).toHaveLength(1);
-  expect(batch.events[0]).toMatchObject({ method: 'GET', route: '/v1/health', status_code: 200 });
+  expect(batch.events[0]).toMatchObject({
+    method: 'GET',
+    route: path,
+    status_code: response.status,
+  });
   expect(payloads[0]).not.toContain('private');
   expect(batch.events[0].duration_ms).toBeGreaterThanOrEqual(0);
 });
