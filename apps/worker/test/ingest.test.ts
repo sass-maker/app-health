@@ -287,6 +287,26 @@ describe('ingest idempotent batch handling', () => {
     expect(endpoint?.response_bytes_delta_pct).toBeCloseTo(100);
   });
 
+  it('reads observed endpoint inventory while the current metric window is pending', async () => {
+    const { service, adapter } = await freshService();
+    const repos = adapter.asRepositories();
+    let releaseMetrics!: () => void;
+    const metricsGate = new Promise<void>((resolve) => {
+      releaseMetrics = resolve;
+    });
+    const queryBuckets = repos.buckets.queryBuckets.bind(repos.buckets);
+    repos.buckets.queryBuckets = async (...args) => {
+      await metricsGate;
+      return queryBuckets(...args);
+    };
+    const inventory = vi.spyOn(repos.inventory!, 'listObserved');
+    const pending = service.queryEndpoints(SEED_APP_ID, SEED_ENV_ID, '15m', NOW);
+    expect(inventory).toHaveBeenCalledWith(SEED_APP_ID, SEED_ENV_ID);
+    releaseMetrics();
+    const response = await pending;
+    expect(response.endpoints.length).toBeGreaterThan(0);
+  });
+
   it('reads observed endpoint inventory while the previous byte window is pending', async () => {
     const { service, adapter } = await freshService();
     const repos = adapter.asRepositories();

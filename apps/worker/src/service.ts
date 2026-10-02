@@ -462,21 +462,34 @@ export class AppHealthService {
     // completed UTC window instead of including events outside the requested range.
     const queryNow = this.repos.durableEndpoints ? Math.floor(now / BUCKET_MS) * BUCKET_MS : now;
     const from = queryNow - WINDOW_MS[window];
-    const buckets = await this.repos.buckets.queryBuckets(appId, envId, from, queryNow);
-    // For the seeded demo app, include seeded buckets so the dashboard renders
-    // a populated table even before any real ingest traffic.
-    if (appId === SEED_APP_ID && envId === SEED_ENV_ID) {
-      const seedBuckets = buildSeedBuckets(now);
-      const existingKeys = new Set(buckets.map((b) => `${b.bucket_start}|${b.method}|${b.route}`));
-      for (const seed of seedBuckets) {
-        if (!existingKeys.has(`${seed.bucket_start}|${seed.method}|${seed.route}`)) {
-          buckets.push({ ...seed, histogram: [...seed.histogram] });
+    const metrics = this.repos.buckets
+      .queryBuckets(appId, envId, from, queryNow)
+      .then(async (buckets) => {
+        // For the seeded demo app, include seeded buckets so the dashboard renders
+        // a populated table even before any real ingest traffic.
+        if (appId === SEED_APP_ID && envId === SEED_ENV_ID) {
+          const seedBuckets = buildSeedBuckets(now);
+          const existingKeys = new Set(
+            buckets.map((b) => `${b.bucket_start}|${b.method}|${b.route}`),
+          );
+          for (const seed of seedBuckets) {
+            if (!existingKeys.has(`${seed.bucket_start}|${seed.method}|${seed.route}`)) {
+              buckets.push({ ...seed, histogram: [...seed.histogram] });
+            }
+          }
         }
-      }
-    }
-    const endpoints = mergeBuckets(buckets, window, queryNow);
-    const [byteDeltas, observedEndpoints] = await Promise.all([
-      this.responseBytesDeltas(appId, envId, from, queryNow - from, endpoints),
+        const endpoints = mergeBuckets(buckets, window, queryNow);
+        const byteDeltas = await this.responseBytesDeltas(
+          appId,
+          envId,
+          from,
+          queryNow - from,
+          endpoints,
+        );
+        return { endpoints, byteDeltas };
+      });
+    const [{ endpoints, byteDeltas }, observedEndpoints] = await Promise.all([
+      metrics,
       this.repos.inventory?.listObserved(appId, envId) ?? Promise.resolve([]),
     ]);
     for (const endpoint of endpoints) {
