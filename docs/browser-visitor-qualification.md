@@ -7,28 +7,30 @@ source.
 
 ## Current candidate
 
-The candidate is **2026-10-01 Asia/Kolkata** for the CodeVetter production
-app/environment. Its UTC interval is `[2026-09-30T18:30:00Z,
-2026-10-01T18:30:00Z)`. The late-event and settlement window closes at
-**2026-10-02T18:31:00Z (2026-10-03 00:01 Asia/Kolkata)**. Do not qualify it
+The candidate is **2026-10-02 Asia/Kolkata** for the CodeVetter production
+app/environment. Its UTC interval is `[2026-10-01T18:30:00Z,
+2026-10-02T18:30:00Z)`. The late-event and settlement window closes at
+**2026-10-03T18:31:00Z (2026-10-04 00:01 Asia/Kolkata)**. Do not qualify it
 before that instant.
 
-Select this audited historical date explicitly with `?date=2026-10-01` in
-both report reads below. At the cutoff (2026-10-03 00:01 Asia/Kolkata), the
-default report date is the latest completed India day, **2026-10-02**. That
-day has only just entered its own 24-hour late window and is not eligible for
-qualification. Passing the Oct 1 cutoff does not make the default/latest day
-exact; each day has its own cutoff and evidence review.
+Select this audited historical date explicitly with `?date=2026-10-02` in
+both report reads below. At the cutoff, the default report date is the latest
+completed India day, **2026-10-03**. That day has only just entered its own
+24-hour late window and is not eligible for qualification. Each day requires
+its own cutoff and evidence review.
 
-The currently recorded tracker activation is 2026-09-30 06:43:32 UTC. The
-current App Health Worker rollout is version
-`48944ec2-a5bc-49f2-9a3f-b00a20cce468`, source tag
-`da7270d12e8b0f17bf69bcb3f4af5c20e7784d47`, activated at 2026-09-30
-08:59:50.293 UTC and provider-verified at 100% in deployment
-`16af810d-3f49-496f-9523-afe5c1197e7b`. Its rollout proof was recorded and
-read back at `1790759466629` ([issue #92 receipt](https://github.com/sass-maker/app-health/issues/92#issuecomment-5908063899)).
-Recheck provider history at qualification time; these values are the starting
-evidence, not proof of continuity through the cutoff.
+Standard bot filtering reached 100% on October 1 at 06:25:40.421 UTC. The
+October 1 India day is mixed and must remain unsealed. The subsequent briefing
+release is Worker `3a52114f-b776-4a11-b9cc-9d11d5748198`, source tag
+`91b9187ac7f3ee3459f400c16498c901f7a4896b`, at 100% from October 1
+07:55:44.818529 UTC. Its rollout generation
+`cf-app-health-worker-20261001-91b9187a-3a52114f` was recorded and independently
+read back in the acceptance ledger. Both deployments precede the October 2
+candidate start. [Release receipt](https://github.com/sass-maker/app-health/issues/96#issuecomment-5927271132).
+
+The recorded CodeVetter tracker activation is September 30 at 06:43:32 UTC.
+Recheck complete provider history at qualification time; the recorded values
+are starting evidence, not proof of continuity through the cutoff.
 
 If a Worker rollout starts during this candidate interval, the current seal
 query rejects the day even if the later version reaches 100%. A tracker source
@@ -91,7 +93,7 @@ one and seven days, while the D1 visitor ledger retains rows for 35 days
 ([provider snapshot](https://github.com/sass-maker/app-health/issues/96#issuecomment-5907199109)).
 Bound archive-parity eligibility by the age of the source bytes that still
 survive in R2; D1 retention does not extend the source-byte horizon. The
-October 1 candidate's October 3 audit fits within the observed 30-day window,
+October 2 candidate's October 4 audit fits within the observed 30-day window,
 but do not claim 35-day historical source parity. Recheck lifecycle state at
 qualification time. The owner archive-audit job below verifies manifests and
 bytes for acquired segments, but it cannot establish provider retention on
@@ -108,7 +110,7 @@ App Health dashboard origin. This request has no workspace or product selector;
 the owner session supplies the workspace:
 
 ```js
-const started = await fetch('/v1/browser/archive-audits?day=2026-10-01', {
+const started = await fetch('/v1/browser/archive-audits?day=2026-10-02', {
   method: 'POST',
   credentials: 'same-origin',
 }).then((response) => response.json());
@@ -139,14 +141,14 @@ SELECT
   (SELECT COUNT(*) FROM browser_visitor_days
    WHERE workspace_id = '<workspace_id>' AND app_id = '<app_id>'
      AND environment_id = '<production_environment_id>'
-     AND india_day = '2026-10-01' AND expires_at > <now_ms>) AS d1_visitors,
+     AND india_day = '2026-10-02' AND expires_at > <now_ms>) AS d1_visitors,
   (SELECT COUNT(*) FROM browser_visitor_receipt_days day_receipt
    JOIN browser_visitor_batch_receipts receipt
      USING (workspace_id, app_id, environment_id, batch_id)
    WHERE day_receipt.workspace_id = '<workspace_id>'
      AND day_receipt.app_id = '<app_id>'
      AND day_receipt.environment_id = '<production_environment_id>'
-     AND day_receipt.india_day = '2026-10-01'
+     AND day_receipt.india_day = '2026-10-02'
      AND receipt.expires_at > <now_ms>) AS accepted_batches,
   (SELECT COUNT(*) FROM browser_visitor_receipt_days day_receipt
    JOIN browser_visitor_batch_receipts receipt
@@ -156,7 +158,7 @@ SELECT
    WHERE day_receipt.workspace_id = '<workspace_id>'
      AND day_receipt.app_id = '<app_id>'
      AND day_receipt.environment_id = '<production_environment_id>'
-     AND day_receipt.india_day = '2026-10-01'
+     AND day_receipt.india_day = '2026-10-02'
      AND receipt.expires_at > <now_ms> AND staged.expires_at > <now_ms>) AS staged_batches;
 ```
 
@@ -183,7 +185,7 @@ visitor identifiers:
 
 ```js
 const report = await fetch(
-  '/v1/reports/daily-engagement?date=2026-10-01&browser_visitor_unknown_reason=1',
+  '/v1/reports/daily-engagement?date=2026-10-02&browser_visitor_unknown_reason=1',
   { credentials: 'same-origin' },
 ).then((response) => response.json());
 report.products.filter((row) => row.catalog_id === 'codevetter');
@@ -226,7 +228,7 @@ The exact inputs are:
   fields, or `audit_kind: 'tracker_scope'` with app/environment IDs;
   `audited_through` at least the cutoff, `observed_at` after the cutoff, and
   `evidence_sha` (SHA-256 of the redacted evidence for that specific audit).
-- `seal-day`: the app ID, production environment ID, and `day: '2026-10-01'`.
+- `seal-day`: the app ID, production environment ID, and `day: '2026-10-02'`.
 
 The proof writes are not retry-idempotent. If a request times out or returns a
 conflict, read the exact row from D1 before attempting another write. Do not
@@ -242,7 +244,7 @@ returns 409 when its own checks fail; that response is a stop condition, not a
 reason to edit or fabricate evidence.
 
 After a successful seal, fetch `/v1/reports/daily-engagement` again with the
-same explicit `?date=2026-10-01`. Verify CodeVetter's row uses the exact count
+same explicit `?date=2026-10-02`. Verify CodeVetter's row uses the exact count
 and matches the previously reviewed aggregate D1 count. The Daily page reads
 this same report route. An empty unsealed day remains `Unknown`; missing,
 sampled, or unqualified data must never become an automatic zero.
