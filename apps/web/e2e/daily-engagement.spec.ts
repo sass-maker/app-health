@@ -234,10 +234,7 @@ for (const width of [390, 768, 1440]) {
         expect(overflow).toBeLessThanOrEqual(1);
       }
       await checkReadability(page);
-      const evidence = new URL(
-        '../../../.fleet/evidence/cta-browsers-20261002/',
-        import.meta.url,
-      );
+      const evidence = new URL('../../../.fleet/evidence/cta-browsers-20261002/', import.meta.url);
       mkdirSync(fileURLToPath(evidence), { recursive: true });
       await page.screenshot({
         fullPage: false,
