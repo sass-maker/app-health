@@ -1,0 +1,183 @@
+{
+  "$schema": "fleet.design-review.v2",
+  "version": 2,
+  "project": "app-health",
+  "target": "Distinct browser counts in existing primary CTA disclosures",
+  "surfaceMode": "operate",
+  "mode": "preserve",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "source": "existing",
+    "references": [
+      "PRODUCT.md",
+      "DESIGN.md",
+      ".fleet/design-review.json",
+      "https://github.com/sass-maker/app-health/issues/83"
+    ],
+    "probes": [],
+    "selected": "daily-briefing-editorial",
+    "approval": "not-required",
+    "ownerEvidence": {
+      "path": "",
+      "quote": ""
+    },
+    "supplied": "",
+    "before": ".fleet/evidence/cta-browsers-20261002/before-1440-dark.jpg",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/badge.json"
+      ],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": "Existing project-native cards, table, filters and charts fit the requested owner briefing."
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "SaaS Maker catalog projects[app-health].presentation.directory.purposeContract, PRODUCT.md, DESIGN.md; inspected 2026-10-02.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "Historical proof details in PRODUCT.md are not used as current release evidence.",
+      "audience": "Owner and product teams tracking portfolio activity, acquisition and health.",
+      "job": "Scan the 55-product completed-day briefing, then expand a project's primary CTAs to distinguish repeated events from distinct recognized browsers.",
+      "thesis": "Preserve the approved Daily briefing composition and add browser-count truth inside its existing action disclosure; reuse that disclosure on phone cards.",
+      "system": "Retain existing shadcn tokens, editorial metric rail, product ledger, system sans text and monospace event names. Native details/summary disclosure, 44px touch target, explicit browser/event labels, muted secondary qualification.",
+      "signature": "A dated portfolio briefing whose metric strip, breakout stories and ranked project ledger make the 55-product day scannable in two minutes.",
+      "risk": "Summing distinct browsers across CTAs would double-count overlap. Keep counts per named action, never infer people, preserve unavailable sampled counts and measured zeroes.",
+      "qualityBar": "Per-action event and browser counts are easy to distinguish at 390/768/1440 in both themes. Unavailable is not zero. Long event names wrap without horizontal page overflow. Existing metrics, source filters, health labels and product drilldowns retain their hierarchy."
+    }
+  },
+  "evidence": {
+    "visualReview": {
+      "status": "pass",
+      "reviewer": "Codex root direct rendered review",
+      "direction": "daily-briefing-editorial",
+      "report": ".fleet/evidence/cta-browsers-20261002/review.md",
+      "checks": {
+        "hierarchy": {
+          "status": "pass",
+          "observation": "The existing completed-day metric rail and Every project ledger remain primary. Per-action browser counts appear only in a closed-by-default disclosure beneath the unchanged action total."
+        },
+        "typography": {
+          "status": "pass",
+          "observation": "The first desktop pass broke benchmark_opened across lines. Widening Actions from 10 to 16 percent makes this name and its 17 events / 3 browsers line legible. Event names remain monospace; counts and qualifications use existing small sans tokens in both themes."
+        },
+        "composition": {
+          "status": "pass",
+          "observation": "After reducing Top source and Responses widths, a first pass truncated Google. Grouping source name and share into one stacked child fixes that defect; the final 1440px view shows Google and its full share. Expanded CTA details increase row height deliberately; collapsed ledger remains compact."
+        },
+        "identity": {
+          "status": "pass",
+          "observation": "Retains App Health sidebar, dated report, browser/event measurement vocabulary, health qualification and ranked project ledger from the approved Daily briefing. No new theme, artwork, font or generic component surface."
+        },
+        "interaction": {
+          "status": "pass",
+          "observation": "Native details starts closed. Focus plus Enter opens the same action details on desktop and cards. Fixture browser checks verify measured 17 events / 3 browsers, sampled browser-unavailable state, and measured 0 events / 0 browsers; summary target is 44px with visible focus ring."
+        },
+        "responsive": {
+          "status": "pass",
+          "observation": "Rendered 390/768/1440 in light and dark. Phone/tablet cards expose the same counts instead of losing the capability. The readability/overflow check passes at all six states; long names wrap and the source button retains its meaning."
+        }
+      }
+    },
+    "screenshots": [
+      {
+        "width": 390,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-390-light.jpg"
+      },
+      {
+        "width": 390,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-390-dark.jpg"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-768-light.jpg"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-768-dark.jpg"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-1440-light.jpg"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/cta-browsers-20261002/after-1440-dark.jpg"
+      }
+    ],
+    "projectCheck": {
+      "command": "pnpm --filter @app-health/web exec vitest run test/DailyEngagement.test.tsx test/ProjectsView.test.tsx",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 36,
+      "maximum": 40,
+      "dimensions": {
+        "hierarchy": 7,
+        "typography": 7,
+        "composition": 7,
+        "identity": 7,
+        "interaction": 4,
+        "responsive": 4
+      }
+    },
+    "audit": {
+      "score": 18,
+      "maximum": 20,
+      "dimensions": {
+        "purpose": 4,
+        "accessibility": 5,
+        "behavior": 4,
+        "responsive": 3,
+        "performance": 2
+      }
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": [
+        "Unknown: standalone detector cannot reproduce the owner-report fixture interception used for this scoped review. No Clean claim."
+      ]
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    }
+  },
+  "ownerFeedback": {
+    "decision": "not-required",
+    "note": "Preserve work follows the existing direction; this is not owner acceptance of the result."
+  }
+}

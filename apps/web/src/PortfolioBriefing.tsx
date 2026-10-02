@@ -117,6 +117,32 @@ function actionCount(product: DailyProduct): number {
   return product.cta_events.reduce((total, event) => total + event.count, 0);
 }
 
+function ActionDetails({ events }: { events: DailyProduct['cta_events'] }): JSX.Element | null {
+  if (!events.length) return null;
+  return (
+    <details className="mt-1 text-xs">
+      <summary className="min-h-11 cursor-pointer content-center text-[11px] text-muted-foreground">
+        Actions and browsers
+      </summary>
+      <ul className="space-y-3 pb-2">
+        {events.map((event) => (
+          <li key={event.name}>
+            <span className="block break-all font-mono">{event.name}</span>
+            <span className="block text-muted-foreground">
+              {event.estimated ? 'Approx. ' : ''}
+              {formatNumber(event.count)} events ·{' '}
+              {event.unique_browsers === null
+                ? 'Browser count unavailable'
+                : `${formatNumber(event.unique_browsers)} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="pb-2 text-muted-foreground">Browser counts are per action and can overlap.</p>
+    </details>
+  );
+}
+
 function healthLabel(
   appId: string,
   projectHealth: Record<string, PortfolioHealthState> | undefined,
@@ -628,7 +654,7 @@ function ProductLedger({
                   onClick={() => changeSort('change')}
                 />
               </TableHead>
-              <TableHead className="w-[10%]">
+              <TableHead className="w-[16%]">
                 <SortButton
                   label="Actions"
                   active={sortKey === 'actions'}
@@ -636,8 +662,8 @@ function ProductLedger({
                   onClick={() => changeSort('actions')}
                 />
               </TableHead>
-              <TableHead className="w-[17%]">Top source</TableHead>
-              <TableHead className="w-[12%]">
+              <TableHead className="w-[13%]">Top source</TableHead>
+              <TableHead className="w-[10%]">
                 <SortButton
                   label="Responses"
                   active={sortKey === 'responses'}
@@ -716,21 +742,7 @@ function ProductLedger({
                   </TableCell>
                   <TableCell className="whitespace-normal text-xs">
                     {actionValue}
-                    {product.cta_events.length ? (
-                      <details className="mt-1">
-                        <summary className="min-h-9 cursor-pointer text-[11px] text-muted-foreground">
-                          Event names
-                        </summary>
-                        <ul className="space-y-1 pb-1">
-                          {product.cta_events.map((event) => (
-                            <li key={event.name} className="break-words font-mono">
-                              {event.name}: {event.estimated ? 'approx. ' : ''}
-                              {event.count}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    ) : null}
+                    <ActionDetails events={product.cta_events} />
                   </TableCell>
                   <TableCell className="whitespace-normal">
                     {source ? (
@@ -739,9 +751,13 @@ function ProductLedger({
                         date={data?.date}
                         onOpen={() => openProduct(product, source.name)}
                       >
-                        <span className="block truncate text-sm">{sourceLabel(source.name)}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {Math.round(source.share * 100)}% of pageviews
+                        <span className="min-w-0">
+                          <span className="block break-words text-sm">
+                            {sourceLabel(source.name)}
+                          </span>
+                          <span className="block text-xs text-muted-foreground">
+                            {Math.round(source.share * 100)}% of pageviews
+                          </span>
                         </span>
                       </SourceButton>
                     ) : (
@@ -875,6 +891,7 @@ function ProductLedger({
                   </dd>
                 </div>
               </dl>
+              <ActionDetails events={product.cta_events} />
               <details className="mt-2 border-t pt-2 text-xs">
                 <summary className="min-h-11 cursor-pointer content-center font-medium text-muted-foreground">
                   Native and server activity

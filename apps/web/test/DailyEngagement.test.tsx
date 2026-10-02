@@ -49,6 +49,33 @@ it('keeps the latest completed India day current on midnight and focus, and pres
   expect(requestsFor(fetch, '/daily-engagement')[3]).toContain('date=2026-09-29');
 });
 
+it('distinguishes CTA repeats, distinct browsers, unavailable counts and measured zeroes on both ledgers', async () => {
+  const daily = structuredClone(report);
+  daily.products[0].cta_events = [
+    { name: 'download_opened', count: 17, unique_browsers: 3, estimated: false },
+    { name: 'signup_clicked', count: 8, unique_browsers: null, estimated: true },
+    { name: 'zero_action', count: 0, unique_browsers: 0, estimated: false },
+  ];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) =>
+      Response.json(String(input).includes('/portfolio-briefing') ? briefing : daily),
+    ),
+  );
+  render(<DailyEngagement ownerToken="owner" />);
+  const table = await screen.findByRole('table');
+  const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
+  for (const ledger of [table, mobile]) {
+    expect(within(ledger).getByText('17 events · 3 browsers')).toBeTruthy();
+    expect(within(ledger).getByText('Approx. 8 events · Browser count unavailable')).toBeTruthy();
+    expect(within(ledger).getByText('0 events · 0 browsers')).toBeTruthy();
+    expect(within(ledger).getByText('Browser counts are per action and can overlap.')).toBeTruthy();
+    expect(
+      within(ledger).getByText('Actions and browsers').closest('details')?.hasAttribute('open'),
+    ).toBe(false);
+  }
+});
+
 it('shows browser counts, action intent, response receipts, sources, and applicable unknown states', async () => {
   expect(PortfolioBriefingV1.safeParse(briefing).success).toBe(true);
   const fetch = vi.fn(async (input: RequestInfo | URL) => responseFor(input));
