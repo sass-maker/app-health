@@ -979,7 +979,11 @@ function Summary({
     data?.products.some((row) => row.pageviews !== null && row.source_estimated) ?? false;
   const healthValue = attentionItems.length
     ? attentionItems.length.toLocaleString()
-    : 'No measured issues';
+    : !healthCoverage || (healthCoverage.applicable > 0 && healthCoverage.measured === 0)
+      ? 'Unknown'
+      : healthCoverage.applicable === 0
+        ? 'Not applicable'
+        : 'No measured issues';
   const healthDetail = healthCoverage
     ? `${healthCoverage.measured}/${healthCoverage.applicable} applicable measured · ${healthCoverage.total} in scope · latest 24 hours`
     : 'Coverage unknown · latest 24 hours';
