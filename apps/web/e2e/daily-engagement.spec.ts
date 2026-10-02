@@ -192,6 +192,29 @@ for (const width of [390, 768, 1440]) {
       await expect(report.locator('tbody tr')).toHaveCount(55);
       const mobileProducts = report.locator('ul[aria-label="Portfolio project ledger"] > li');
       await expect(mobileProducts).toHaveCount(55);
+      const actionProduct = daily.products.find((product) => product.cta_events.length > 0)!;
+      const visibleRows = width < 1024 ? mobileProducts : report.locator('tbody tr');
+      const actionRow = visibleRows.filter({
+        has: page.getByText(actionProduct.catalog_id, { exact: true }),
+      });
+      const actionDisclosure = actionRow
+        .locator('summary')
+        .filter({ hasText: 'Actions and browsers' });
+      await actionDisclosure.focus();
+      await page.keyboard.press('Enter');
+      for (const event of actionProduct.cta_events) {
+        const browsers =
+          event.unique_browsers === null
+            ? 'Browser count unavailable'
+            : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`;
+        await expect(
+          actionRow.getByText(
+            `${event.estimated ? 'Approx. ' : ''}${event.count} events · ${browsers}`,
+            { exact: true },
+          ),
+        ).toBeVisible();
+      }
+      await page.keyboard.press('Enter');
       await expect(report.getByText('No referrer', { exact: true }).first()).toBeVisible();
       await report.evaluate((content) => {
         const notice = document.createElement('p');
@@ -212,7 +235,7 @@ for (const width of [390, 768, 1440]) {
       }
       await checkReadability(page);
       const evidence = new URL(
-        '../../../.fleet/evidence/two-minute-briefing-2026-10-01/',
+        '../../../.fleet/evidence/cta-browsers-20261002/',
         import.meta.url,
       );
       mkdirSync(fileURLToPath(evidence), { recursive: true });
@@ -220,7 +243,7 @@ for (const width of [390, 768, 1440]) {
         fullPage: false,
         type: 'jpeg',
         quality: 88,
-        path: fileURLToPath(new URL(`after-${width}-${theme}.jpg`, evidence)),
+        path: fileURLToPath(new URL(`briefing-after-${width}-${theme}.jpg`, evidence)),
       });
       const sources = report
         .getByRole('heading', { name: 'Where traffic came from' })
