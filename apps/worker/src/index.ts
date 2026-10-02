@@ -743,13 +743,17 @@ async function handleOwnerAlertsRoute(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (url.pathname !== '/v1/workspace/alerts') return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
   if (owner.appId || !owner.workspaceId) return productScopeForbidden();
-  if (!env.DB) return json(503, { error: 'alert storage is unavailable' }, true);
+  const db = env.DB;
+  const workspaceId = owner.workspaceId;
+  if (!db) return json(503, { error: 'alert storage is unavailable' }, true);
   try {
-    return json(200, await readOwnerAlertFeed(env.DB, owner.workspaceId), true);
+    const feed = await measureOwnerRouteRead(timings, () => readOwnerAlertFeed(db, workspaceId));
+    return json(200, feed, true);
   } catch {
     return json(503, { error: 'alerts are unavailable' }, true);
   }
@@ -866,7 +870,8 @@ async function handleOwnerRoutes(
     handleWorkspaceHealthRoute,
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
       handleDailyEngagementRoute(req, current, identity, target, bindings, options?.timings),
-    handleOwnerAlertsRoute,
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
+      handleOwnerAlertsRoute(req, current, identity, target, bindings, options?.timings),
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
       handleEndpointsRoute(req, current, identity, target, options?.timings),
     handleFailuresRoute,
@@ -945,6 +950,7 @@ async function handleAccountOwner(
       '/v1/analytics/report',
       '/v1/reports/daily-engagement',
       '/v1/reports/portfolio-briefing',
+      '/v1/workspace/alerts',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';
