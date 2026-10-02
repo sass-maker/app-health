@@ -154,7 +154,7 @@ async function readVerifiedSegment(
   input: BrowserArchiveDayAuditInput,
   reference: SegmentReference,
   byteState: { compressed: number; decompressed: number },
-): Promise<CollectedBrowserBatch[]> {
+): Promise<{ batches: CollectedBrowserBatch[]; content_sha256: string }> {
   const object = await input.history.get(reference.object_key);
   if (!object) throw new Error('missing segment');
   try {
@@ -164,7 +164,10 @@ async function readVerifiedSegment(
       object,
       byteState,
     );
-    return await parseSegmentFacts(input.workspace, compressed, manifest, byteState);
+    return {
+      batches: await parseSegmentFacts(input.workspace, compressed, manifest, byteState),
+      content_sha256: manifest.content_sha256,
+    };
   } finally {
     await object.body.cancel().catch(() => undefined);
   }
@@ -175,7 +178,7 @@ export async function readBrowserArchiveAuditSegment(
   input: BrowserArchiveDayAuditInput,
   reference: SegmentReference,
   byteState: { compressed: number; decompressed: number },
-): Promise<CollectedBrowserBatch[]> {
+): Promise<{ batches: CollectedBrowserBatch[]; content_sha256: string }> {
   return readVerifiedSegment(input, reference, byteState);
 }
 
@@ -503,7 +506,7 @@ async function acquireArchiveFacts(
     if (state.processedReferences.has(reference.object_key)) continue;
     state.processedReferences.add(reference.object_key);
     try {
-      const batches = await readVerifiedSegment(input, reference, state.byteState);
+      const { batches } = await readVerifiedSegment(input, reference, state.byteState);
       if (state.archived.length + batches.length > ARCHIVE_FACT_LIMIT)
         throw new Error('archive fact cap');
       state.archived.push(...batches);

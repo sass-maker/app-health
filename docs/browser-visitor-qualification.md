@@ -256,6 +256,38 @@ and matches the previously reviewed aggregate D1 count. The Daily page reads
 this same report route. An empty unsealed day remains `Unknown`; missing,
 sampled, or unqualified data must never become an automatic zero.
 
+## Recover fact-slice-limited audits
+
+The October 2 audit reached a terminal `audit_fact_slice_cap` at 450 of 553
+receipts. Preserve that partial result; it is not completed reconciliation.
+After the bounded segment-resume repair is deployed and verified, repeat the
+existing authenticated `POST /v1/browser/archive-audits?day=<audited-day>` once.
+Only a job whose sole stored terminal reason is `audit_fact_slice_cap` resumes;
+other incomplete results retain their failure state. Re-read the same job ID
+and progress after the request before any retry.
+
+Recovery retains the existing receipt cursor, verified facts, completed
+segments and shard snapshots. Each slice considers at most 39 archived rows.
+A partial segment records its row offset and manifest-verified compressed
+content digest in the existing private job cursor state. The cursor and facts
+commit together; no segment or receipt page is marked complete prematurely.
+A digest change during resume stops the job. The single globally active job,
+three hourly slices, byte limits and total fact/segment limits remain bounded.
+
+Gzip segments are read and verified again for each partial slice, so larger
+segments require additional bounded R2 reads. This avoids a new storage table
+or an increased per-slice write cap; it is not a claim of zero operating cost.
+No Queue/DLQ, provider-continuity, retention or report qualification gate is
+waived. The audit still returns `complete: false` by design, even after all
+receipt and index work finishes.
+
+Terminal jobs still use the existing 24-hour expiry. If the old job has already
+expired and scheduled cleanup removed it before the repair release, start a
+fresh bounded snapshot through the same endpoint. Keep the prior aggregate
+findings in the operator record; do not restore expired audit state or claim
+that its progress was carried forward. Accepted-event and source retention
+remain separate from this short-lived operator-job state.
+
 ## Remaining automation gap
 
 There is no sound unattended collector today. Wrangler deployment history is

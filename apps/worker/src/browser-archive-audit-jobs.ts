@@ -35,6 +35,14 @@ type ShardState = {
   snapshot_sequence: number | null;
   cursor: DayCursor | null;
   exhausted: boolean;
+  // Slot zero stores the one in-progress segment for the whole job, including its index shard.
+  // Its cursor and fact writes commit atomically; only verified digests and offsets are persisted.
+  partial_segment?: {
+    segment_hash: string;
+    row_offset: number;
+    content_sha256: string;
+    shard?: number;
+  };
 };
 type JobRow = {
   job_id: string;
@@ -244,6 +252,30 @@ async function countsForJob(db: D1DatabaseLike, jobId: string): Promise<AuditCou
   return counts;
 }
 
+async function resumeFactCappedJob(db: D1DatabaseLike, job: JobRow, now: number) {
+  if (
+    job.status !== 'incomplete' ||
+    job.incomplete_reasons_json !== '["audit_fact_slice_cap"]' ||
+    job.created_at + ACTIVE_JOB_TTL_MS <= now
+  )
+    return job;
+  const result = await db
+    .prepare(
+      `UPDATE browser_archive_audit_jobs SET status = 'running',
+       phase = CASE WHEN receipts_processed < expected_receipts THEN 'receipts' ELSE 'archive_index' END,
+       incomplete_reasons_json = '[]', updated_at = ?, expires_at = created_at + ?,
+       lease_token = NULL, lease_until = NULL
+       WHERE job_id = ? AND status = 'incomplete' AND incomplete_reasons_json = '["audit_fact_slice_cap"]'
+         AND NOT EXISTS (SELECT 1 FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running'))`,
+    )
+    .bind(now, ACTIVE_JOB_TTL_MS, job.job_id)
+    .run();
+  if (!result.success) throw new Error('audit resume failed');
+  const resumed = await getJob(db, job.workspace_id, job.job_id);
+  if (resumed?.status !== 'running') throw new Error('audit already running');
+  return resumed;
+}
+
 export async function startBrowserArchiveAuditJob(
   db: D1DatabaseLike,
   workspace: string,
@@ -287,7 +319,10 @@ export async function startBrowserArchiveAuditJob(
     )
     .bind(workspace, day, now)
     .first<JobRow>();
-  if (existing) return jobPublicState(existing, await countsForJob(db, existing.job_id));
+  if (existing) {
+    const resumed = await resumeFactCappedJob(db, existing, now);
+    return jobPublicState(resumed, await countsForJob(db, resumed.job_id));
+  }
   const active = await db
     .prepare(
       "SELECT job_id FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running') AND expires_at > ? LIMIT 1",
@@ -533,6 +568,9 @@ type ArchiveWriteContext = {
   receiptHashes: ReadonlySet<string>;
   includeAllFacts: boolean;
   leaseToken: string;
+  states: ShardState[];
+  factBudget?: number;
+  shard?: number;
   sliceSeenSegments?: Set<string>;
 };
 
@@ -553,6 +591,67 @@ async function freshSegments(context: ArchiveWriteContext, refs: readonly Segmen
   return freshWithHashes;
 }
 
+function validatePartialSegment(context: ArchiveWriteContext, firstHash: string | undefined) {
+  const partial = context.states[0]!.partial_segment;
+  if (
+    partial &&
+    (!isHex(partial.segment_hash, 64) ||
+      !isHex(partial.content_sha256, 64) ||
+      !Number.isSafeInteger(partial.row_offset) ||
+      partial.row_offset < 1 ||
+      partial.shard !== context.shard ||
+      firstHash !== partial.segment_hash)
+  )
+    throw new Error('archive segment snapshot changed');
+}
+
+function segmentFactSlice(
+  context: ArchiveWriteContext,
+  hash: string,
+  snapshot: Awaited<ReturnType<typeof readBrowserArchiveAuditSegment>>,
+  budget: number,
+) {
+  const state = context.states[0]!;
+  const { batches, content_sha256 } = snapshot;
+  const offset =
+    state.partial_segment?.segment_hash === hash ? state.partial_segment.row_offset : 0;
+  if (
+    offset > batches.length ||
+    (offset && state.partial_segment?.content_sha256 !== content_sha256)
+  )
+    throw new Error('archive segment snapshot changed');
+  const selected = batches.slice(offset, offset + budget);
+  const rowOffset = offset + selected.length;
+  const done = rowOffset === batches.length;
+  if (done) delete state.partial_segment;
+  else
+    state.partial_segment = {
+      segment_hash: hash,
+      row_offset: rowOffset,
+      content_sha256,
+      ...(context.shard === undefined ? {} : { shard: context.shard }),
+    };
+  return { selected, done };
+}
+
+async function pendingArchiveFact(
+  job: JobRow,
+  batch: CollectedBrowserBatch,
+): Promise<PendingArchiveFact> {
+  if (batch.workspace !== job.workspace_id) throw new Error('archive workspace mismatch');
+  return {
+    batch,
+    identity_hash: await hashIdentity(job.identity_salt, [
+      batch.app_id,
+      batch.environment_id,
+      batch.batch_id,
+    ]),
+    target_day: batch.events.some(
+      (event) => indiaDayForTimestamp(event.timestamp) === job.india_day,
+    ),
+  };
+}
+
 async function readSegmentFacts(
   context: ArchiveWriteContext,
   fresh: Array<{ ref: SegmentReference; hash: string }>,
@@ -568,24 +667,24 @@ async function readSegmentFacts(
   };
   const pendingFacts: PendingArchiveFact[] = [];
   const processedSegments: string[] = [];
+  validatePartialSegment(context, fresh[0]?.hash);
+  const budget = context.factBudget ?? MAX_FACTS_PER_SLICE;
+  let done = true;
   for (const { ref, hash } of fresh) {
-    const batches = await readBrowserArchiveAuditSegment(input, ref, byteState);
-    processedSegments.push(hash);
-    for (const batch of batches) {
-      if (pendingFacts.length >= MAX_FACTS_PER_SLICE * 2) throw new Error('audit fact slice cap');
-      if (batch.workspace !== job.workspace_id) throw new Error('archive workspace mismatch');
-      const identityHash = await hashIdentity(job.identity_salt, [
-        batch.app_id,
-        batch.environment_id,
-        batch.batch_id,
-      ]);
-      const isTargetDay = batch.events.some(
-        (event) => indiaDayForTimestamp(event.timestamp) === job.india_day,
-      );
-      pendingFacts.push({ batch, identity_hash: identityHash, target_day: isTargetDay });
+    if (pendingFacts.length >= budget) {
+      done = false;
+      break;
     }
+    const snapshot = await readBrowserArchiveAuditSegment(input, ref, byteState);
+    const slice = segmentFactSlice(context, hash, snapshot, budget - pendingFacts.length);
+    for (const batch of slice.selected) pendingFacts.push(await pendingArchiveFact(job, batch));
+    if (!slice.done) {
+      done = false;
+      break;
+    }
+    processedSegments.push(hash);
   }
-  return { pendingFacts, processedSegments };
+  return { pendingFacts, processedSegments, done };
 }
 
 async function relevantArchiveFacts(
@@ -699,7 +798,7 @@ async function archiveWritesForSegments(
 ) {
   const { db, job } = context;
   const fresh = await freshSegments(context, refs);
-  const { pendingFacts, processedSegments } = await readSegmentFacts(context, fresh);
+  const { pendingFacts, processedSegments, done } = await readSegmentFacts(context, fresh);
   const relevantFacts = await relevantArchiveFacts(context, pendingFacts);
   const factRows = await digestArchiveFacts(relevantFacts, pendingFacts);
   const existing = await countFactRows(db, job.job_id);
@@ -708,7 +807,7 @@ async function archiveWritesForSegments(
   if (job.archive_fact_count + factRows.length > MAX_ARCHIVE_FACTS)
     throw new Error('audit archive fact cap');
   const writes = archiveFactStatements(context, processedSegments, factRows);
-  return { segments: processedSegments.length, facts: factRows.length, writes };
+  return { segments: processedSegments.length, facts: factRows.length, writes, done };
 }
 
 async function processReceiptSlice(
@@ -739,6 +838,8 @@ async function processReceiptSlice(
     ),
   );
   const receiptHashSet = new Set(identityHashes);
+  const states = JSON.parse(job.shard_state_json) as ShardState[];
+  if (states.length !== SHARD_COUNT) throw new Error('invalid shard cursor state');
   const refs: SegmentReference[] = [];
   for (const row of receipts) {
     const shard = await browserArchiveShard({
@@ -757,33 +858,35 @@ async function processReceiptSlice(
     receiptQuery(db, job.job_id, row, identityHashes[index]!, leaseToken),
   );
   const archive = await archiveWritesForSegments(
-    { db, job, receiptHashes: receiptHashSet, bindings, includeAllFacts: true, leaseToken },
+    { db, job, receiptHashes: receiptHashSet, bindings, includeAllFacts: true, leaseToken, states },
     refs,
   );
   if ((await countFactRows(db, job.job_id)) + receipts.length + archive.facts > MAX_FACT_ROWS)
     throw new Error('audit fact row cap');
-  const nextCursor = receipts[receipts.length - 1]!.row_id;
+  const nextCursor = archive.done ? receipts[receipts.length - 1]!.row_id : job.receipt_cursor;
   const finalWrites = [
     ...archive.writes,
-    ...receiptWrites,
+    ...(archive.done ? receiptWrites : []),
     db
       .prepare(
         `UPDATE browser_archive_audit_jobs SET status = 'running', phase = ?,
          receipt_cursor = ?, receipts_processed = receipts_processed + ?,
          segment_count = segment_count + ?, archive_fact_count = archive_fact_count + ?,
+         shard_state_json = ?,
          lease_token = NULL, lease_until = NULL, updated_at = ?
-         WHERE job_id = ? AND lease_token = ? AND receipt_cursor < ?`,
+         WHERE job_id = ? AND lease_token = ? AND receipt_cursor = ?`,
       )
       .bind(
         'receipts',
         nextCursor,
-        receipts.length,
+        archive.done ? receipts.length : 0,
         archive.segments,
         archive.facts,
+        JSON.stringify(states),
         now,
         job.job_id,
         leaseToken,
-        nextCursor,
+        job.receipt_cursor,
       ),
   ];
   const results = await db.batch(finalWrites);
@@ -797,11 +900,13 @@ async function readArchiveIndexPage(
     bindings: BrowserArchiveAuditJobBindings;
     leaseToken: string;
     sliceSeenSegments: Set<string>;
+    states: ShardState[];
+    factBudget: number;
   },
   shard: number,
   state: ShardState,
 ) {
-  const { db, job, bindings, leaseToken, sliceSeenSegments } = context;
+  const { db, job, bindings, leaseToken, sliceSeenSegments, states, factBudget } = context;
   const page = await bindings.archive
     .getByName(`${job.workspace_id}:browser-archive-v1:${shard}`)
     .archiveSegmentsForEventDay(job.india_day, state.cursor, SHARD_PAGE_SIZE);
@@ -810,9 +915,7 @@ async function readArchiveIndexPage(
   if (state.snapshot_sequence !== null && state.snapshot_sequence !== page.snapshot_sequence)
     throw new Error('archive index snapshot changed');
   state.snapshot_sequence = page.snapshot_sequence;
-  state.cursor = page.next_cursor;
-  state.exhausted = page.next_cursor === null;
-  return archiveWritesForSegments(
+  const result = await archiveWritesForSegments(
     {
       db,
       job,
@@ -821,9 +924,29 @@ async function readArchiveIndexPage(
       includeAllFacts: false,
       leaseToken,
       sliceSeenSegments,
+      states,
+      factBudget,
+      shard,
     },
     page.segments,
   );
+  if (result.done) {
+    state.cursor = page.next_cursor;
+    state.exhausted = page.next_cursor === null;
+  }
+  return result;
+}
+
+function indexShardStates(job: JobRow) {
+  const states = JSON.parse(job.shard_state_json) as ShardState[];
+  if (states.length !== SHARD_COUNT) throw new Error('invalid shard cursor state');
+  const partialShard = states[0]?.partial_segment?.shard;
+  if (
+    states[0]?.partial_segment &&
+    (!Number.isSafeInteger(partialShard) || partialShard! < 0 || partialShard! >= SHARD_COUNT)
+  )
+    throw new Error('invalid shard cursor state');
+  return states;
 }
 
 async function processArchiveIndexSlice(
@@ -833,18 +956,26 @@ async function processArchiveIndexSlice(
   now: number,
   leaseToken: string,
 ) {
-  const states = JSON.parse(job.shard_state_json) as ShardState[];
-  if (states.length !== SHARD_COUNT) throw new Error('invalid shard cursor state');
+  const states = indexShardStates(job);
   let processed = 0;
   let addedSegments = 0;
   let addedFacts = 0;
   const factWrites: Array<ReturnType<D1DatabaseLike['prepare']>> = [];
   const sliceSeenSegments = new Set<string>();
   for (let shard = 0; shard < SHARD_COUNT && processed < SHARDS_PER_SLICE; shard++) {
+    if (states[0]?.partial_segment && states[0].partial_segment.shard !== shard) continue;
     const state = states[shard]!;
     if (state.exhausted) continue;
     const result = await readArchiveIndexPage(
-      { db, job, bindings, leaseToken, sliceSeenSegments },
+      {
+        db,
+        job,
+        bindings,
+        leaseToken,
+        sliceSeenSegments,
+        states,
+        factBudget: MAX_FACTS_PER_SLICE - addedFacts,
+      },
       shard,
       state,
     );
@@ -855,6 +986,7 @@ async function processArchiveIndexSlice(
     addedSegments += result.segments;
     addedFacts += result.facts;
     processed++;
+    if (!result.done || addedFacts === MAX_FACTS_PER_SLICE) break;
   }
   if (job.segment_count + addedSegments > MAX_SEGMENTS) throw new Error('audit segment cap');
   if (job.archive_fact_count + addedFacts > MAX_ARCHIVE_FACTS)
@@ -1020,11 +1152,13 @@ export async function processPendingBrowserArchiveAuditJobs(
           'audit archive fact cap',
         ].includes(message)
           ? message.replaceAll(' ', '_')
-          : message.includes('snapshot changed')
-            ? 'archive_index_snapshot_changed'
-            : message.includes('receipt snapshot')
-              ? 'receipt_snapshot_changed'
-              : null;
+          : message === 'archive segment snapshot changed'
+            ? 'archive_segment_snapshot_changed'
+            : message.includes('snapshot changed')
+              ? 'archive_index_snapshot_changed'
+              : message.includes('receipt snapshot')
+                ? 'receipt_snapshot_changed'
+                : null;
       if (terminalReason) {
         await markIncomplete(bindings.db, current, terminalReason, now + slice, leaseToken);
       } else if (current.slice_failures + 1 >= 3) {

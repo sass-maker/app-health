@@ -56,22 +56,24 @@ async function applyMigration(name: string) {
     await db.prepare(statement).run();
 }
 
-async function archiveBody() {
-  const archived = {
-    ...batch,
-    facts_digest_version: 1,
-    facts_digest: await digestBrowserEventFacts(batch),
-  };
-  const raw = Buffer.from(`${JSON.stringify(archived)}\n`);
+async function archiveBody(batches: CollectedBrowserBatch[] = [batch], objectKey = OBJECT_KEY) {
+  const archived = await Promise.all(
+    batches.map(async (value) => ({
+      ...value,
+      facts_digest_version: 1,
+      facts_digest: await digestBrowserEventFacts(value),
+    })),
+  );
+  const raw = Buffer.from(archived.map((value) => `${JSON.stringify(value)}\n`).join(''));
   const compressed = gzipSync(raw);
   const manifest = {
     schema_version: 1,
-    object_key: OBJECT_KEY,
+    object_key: objectKey,
     workspace_id: WORKSPACE,
     format: 'jsonl-gzip',
     content_sha256: createHash('sha256').update(compressed).digest('hex'),
-    row_count: 1,
-    event_count: 1,
+    row_count: batches.length,
+    event_count: batches.reduce((count, value) => count + value.events.length, 0),
     min_event_at: batch.events[0]!.timestamp,
     max_event_at: batch.events[0]!.timestamp,
     uncompressed_bytes: raw.byteLength,
@@ -162,6 +164,209 @@ beforeEach(async () => {
 afterAll(() => mf.dispose());
 
 describe('resumable browser archive audit jobs', () => {
+  it('resumes a segment larger than the fact slice without skipping receipts or recounting facts', async () => {
+    const batches = Array.from({ length: 40 }, (_, index) => ({
+      ...batch,
+      batch_id: index === 0 ? batch.batch_id : `large-segment-batch-${index}`,
+    }));
+    for (const value of batches.slice(1))
+      await acceptBrowserVisitorBatch(db, value, value.received_at);
+    const bindings = { db, archive, history: { get: async () => archiveBody(batches) } };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 200);
+    const partial = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 201);
+    expect(partial).toMatchObject({
+      status: 'running',
+      phase: 'receipts',
+      progress: { receipts_processed: 0, segments_checked: 0, archive_facts_checked: 39 },
+    });
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 300);
+    const completedSegment = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 301);
+    expect(completedSegment?.progress).toMatchObject({
+      receipts_processed: 30,
+      segments_checked: 1,
+      archive_facts_checked: 40,
+    });
+    for (let tick = 0; tick < 8; tick++)
+      await processPendingBrowserArchiveAuditJobs(bindings, 400 + tick * 10);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1000);
+    expect(finished).toMatchObject({ status: 'finished', complete: false });
+    expect(finished?.progress).toMatchObject({ receipts_processed: 40, archive_facts_checked: 40 });
+    expect(finished?.observed_comparison_counts).toMatchObject({
+      matched: 40,
+      mismatched: 0,
+      archive_only_facts: 0,
+      duplicate_archive_candidates: 0,
+    });
+  });
+
+  it('resumes an archive-only segment before revisiting an earlier unfinished shard', async () => {
+    const indexed = Array.from({ length: 40 }, (_, index) => ({
+      ...batch,
+      batch_id: `indexed-segment-batch-${index}`,
+    }));
+    const indexedKey = OBJECT_KEY.replace('segment-a', 'segment-b');
+    const indexedRef = { segment_id: 'segment-b', object_key: indexedKey };
+    const indexedArchive = {
+      getByName(name: string) {
+        const shard = Number(name.split(':').at(-1));
+        return {
+          archiveSegmentForBatch: async () => REFERENCE,
+          archiveSegmentsForEventDay: async (day: string, cursor: unknown) => ({
+            segments: shard === 1 ? [indexedRef] : [],
+            next_cursor:
+              shard === 0 && !cursor
+                ? { event_day: day, object_key: 'next-page', snapshot_sequence: 1 }
+                : null,
+            snapshot_sequence: 1,
+          }),
+        };
+      },
+    };
+    const bindings = {
+      db,
+      archive: indexedArchive,
+      history: {
+        get: async (key: string) => archiveBody(key === indexedKey ? indexed : [batch], key),
+      },
+    };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 200);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 300);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 400);
+    const partial = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 401);
+    expect(partial).toMatchObject({
+      status: 'running',
+      phase: 'archive_index',
+      progress: { segments_checked: 1, archive_facts_checked: 40 },
+    });
+    for (let tick = 0; tick < 8; tick++)
+      await processPendingBrowserArchiveAuditJobs(bindings, 500 + tick * 10);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1000);
+    expect(finished).toMatchObject({ status: 'finished', complete: false });
+    expect(finished?.progress).toMatchObject({ segments_checked: 2, archive_facts_checked: 41 });
+    expect(finished?.observed_comparison_counts).toMatchObject({
+      matched: 1,
+      archive_only_facts: 40,
+      duplicate_archive_candidates: 0,
+    });
+  });
+
+  it('stops when the verified segment bytes change during a partial resume', async () => {
+    const batches = Array.from({ length: 40 }, (_, index) => ({
+      ...batch,
+      batch_id: `changed-${index}`,
+    }));
+    let changed = false;
+    const bindings = {
+      db,
+      archive,
+      history: {
+        get: async () =>
+          archiveBody(
+            changed
+              ? batches.map((value) => ({
+                  ...value,
+                  events: value.events.map((event) => ({ ...event, path: '/changed' })),
+                }))
+              : batches,
+          ),
+      },
+    };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 200);
+    changed = true;
+    await processPendingBrowserArchiveAuditJobs(bindings, 300);
+    const stopped = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 301);
+    expect(stopped).toMatchObject({
+      status: 'incomplete',
+      progress: { receipts_processed: 0, segments_checked: 0, archive_facts_checked: 39 },
+    });
+    expect(stopped?.incomplete_reasons).toContain('archive_segment_snapshot_changed');
+    const repeated = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 400);
+    expect(repeated).toMatchObject({ job_id: started.job_id, status: 'incomplete' });
+    expect(repeated.incomplete_reasons).toContain('archive_segment_snapshot_changed');
+  });
+
+  it('resumes the committed offset after a lost database acknowledgement without duplicate counts', async () => {
+    const batches = Array.from({ length: 40 }, (_, index) => ({
+      ...batch,
+      batch_id: index === 0 ? batch.batch_id : `lost-ack-${index}`,
+    }));
+    let loseAcknowledgement = true;
+    const interruptedDb = {
+      prepare: db.prepare.bind(db),
+      async batch(statements: Parameters<typeof db.batch>[0]) {
+        const results = await db.batch<Record<string, unknown>>(statements);
+        if (loseAcknowledgement && results.some((result) => result.meta.changes > 0)) {
+          loseAcknowledgement = false;
+          throw new Error('lost database acknowledgement');
+        }
+        return results;
+      },
+    };
+    const history = { get: async () => archiveBody(batches) };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await expect(
+      processBrowserArchiveAuditJob(
+        { db: interruptedDb, archive, history },
+        WORKSPACE,
+        started.job_id,
+        200,
+      ),
+    ).rejects.toThrow('lost database acknowledgement');
+    const committed = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 201);
+    expect(committed?.progress).toMatchObject({ archive_facts_checked: 39, receipts_processed: 0 });
+    for (let tick = 0; tick < 8; tick++)
+      await processPendingBrowserArchiveAuditJobs({ db, archive, history }, 300 + tick * 10);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1000);
+    expect(finished).toMatchObject({ status: 'finished', complete: false });
+    expect(finished?.progress).toMatchObject({ archive_facts_checked: 40, receipts_processed: 1 });
+    expect(finished?.observed_comparison_counts).toMatchObject({
+      matched: 1,
+      archive_only_facts: 39,
+      duplicate_archive_candidates: 0,
+    });
+  });
+
+  it('resumes only fact-capped jobs through the existing owner start operation and preserves progress', async () => {
+    const batches = Array.from({ length: 40 }, (_, index) => ({
+      ...batch,
+      batch_id: `restart-cap-${index}`,
+    }));
+    const bindings = { db, archive, history: { get: async () => archiveBody(batches) } };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 200);
+    await db
+      .prepare(
+        `UPDATE browser_archive_audit_jobs SET status = 'incomplete', phase = 'done',
+      incomplete_reasons_json = '["audit_fact_slice_cap"]' WHERE job_id = ?`,
+      )
+      .bind(started.job_id)
+      .run();
+    const other = await startBrowserArchiveAuditJob(db, 'workspace-other', DAY, 250);
+    await expect(startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 260)).rejects.toThrow(
+      'audit already running',
+    );
+    await db
+      .prepare("UPDATE browser_archive_audit_jobs SET status = 'finished' WHERE job_id = ?")
+      .bind(other.job_id)
+      .run();
+    const resumed = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 300);
+    expect(resumed).toMatchObject({
+      job_id: started.job_id,
+      status: 'running',
+      phase: 'receipts',
+      progress: { archive_facts_checked: 39, receipts_processed: 0 },
+    });
+    expect(resumed.incomplete_reasons).not.toContain('audit_fact_slice_cap');
+    for (let tick = 0; tick < 8; tick++)
+      await processPendingBrowserArchiveAuditJobs(bindings, 400 + tick * 10);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1000);
+    expect(finished?.progress.archive_facts_checked).toBe(40);
+    expect(finished?.observed_comparison_counts.duplicate_archive_candidates).toBe(0);
+  });
+
   it('advances bounded scheduled slices and reports aggregate-only incomplete evidence', async () => {
     await db
       .prepare(
