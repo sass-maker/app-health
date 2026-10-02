@@ -79,6 +79,11 @@ it('shows browser counts, action intent, response receipts, sources, and applica
   ).toBeTruthy();
   expect(screen.getAllByText('100').length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText('Download intent')).toBeTruthy();
+  const primaryActions = within(
+    screen.getByRole('region', { name: 'Selected day summary' }),
+  ).getByText('Primary action events').parentElement!;
+  expect(primaryActions.textContent).toContain('≈ 21');
+  expect(primaryActions.textContent).toContain('events, not people');
   expect(screen.getByText('Confirmed responses')).toBeTruthy();
   expect(screen.getByText('Measured health issues')).toBeTruthy();
   expect(screen.getByText('Atlas: Slow requests')).toBeTruthy();

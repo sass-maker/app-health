@@ -37,6 +37,13 @@ feature cards. The dashboard uses a shadcn sidebar, a compact workspace header, 
 column, and cards that preserve clear relationships between filters, totals, trends, and details.
 The footer belongs only to the landing page.
 
+The portfolio briefing uses an editorial report composition: a prominent completed-day
+heading, a continuous six-metric rail with semantic top rules, open breakout stories,
+and a compact acquisition column above the full project ledger. Avoid enclosing the
+whole report in another card or repeating its title. Keep qualifications next to their
+numbers; longer action definitions can use an accessible disclosure. Missing data,
+sampling, and measured health issues remain explicit in both themes.
+
 On phones, the sidebar becomes a sheet, dashboard filters stack, metrics become one column, and
 secondary table fields yield before the event name or primary action. Every control keeps a
 44-pixel touch target where space permits. Tablet layouts preserve the report hierarchy without

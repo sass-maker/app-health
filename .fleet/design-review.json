@@ -2,7 +2,7 @@
   "$schema": "fleet.design-review.v1",
   "version": 1,
   "project": "app-health",
-  "target": "Two-minute portfolio briefing with project numbers and source drivers",
+  "target": "Editorial two-minute portfolio briefing",
   "surfaceMode": "operate",
   "mode": "overhaul",
   "register": "product",
@@ -18,21 +18,13 @@
     ],
     "probes": [
       {
-        "id": "a-morning-briefing",
-        "path": "docs/design-previews/two-minute-20261001/a-morning-briefing.png"
-      },
-      {
-        "id": "b-portfolio-radar",
-        "path": "docs/design-previews/two-minute-20261001/b-portfolio-radar.png"
-      },
-      {
-        "id": "c-project-ledger",
-        "path": "docs/design-previews/two-minute-20261001/c-project-ledger.png"
+        "id": "daily-briefing-editorial",
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-1440-dark.jpg"
       }
     ],
-    "selected": "a-morning-briefing",
+    "selected": "daily-briefing-editorial",
     "approval": "delegated",
-    "before": ".fleet/evidence/daily-briefing-2026-09-29/after-1440.jpg",
+    "before": ".fleet/evidence/two-minute-briefing-2026-10-01/after-1440-dark.jpg",
     "library": {
       "strategy": "upstream-first",
       "primary": "existing-project-system",
@@ -56,9 +48,9 @@
       "driftNote": "Historical proof details in PRODUCT.md are not used as current release evidence.",
       "audience": "Owner and product teams tracking portfolio activity, acquisition and health.",
       "job": "Within two minutes identify meaningful breakouts and problems, scan numbers for all 55 projects, and open the corresponding product or source.",
-      "thesis": "An editorial Morning briefing leads with meaningful changes, actual activity and acquisition sources, followed by a complete project ledger.",
-      "system": "Preserve graphite shadcn surfaces and system sans typography. Sky marks browser/source activity, emerald comparable growth and actions, amber attention, red measured failures, neutral unavailable or not applicable. Use clear period and counting-unit labels.",
-      "signature": "Connect each meaningful change to its project numbers and recorded traffic sources without inventing attribution.",
+      "thesis": "A spacious editorial report with a continuous metric strip, clear breakout stories, compact acquisition chart, and a quiet full-portfolio ledger.",
+      "system": "Existing shadcn system, graphite dark and paper light surfaces, system sans with large tabular numbers, understated separators, sky browser evidence, emerald intent, amber attention. Preserve all labels and truthful missing-data states.",
+      "signature": "A dated portfolio briefing whose metric strip, breakout stories and ranked project ledger make the 55-product day scannable in two minutes.",
       "risk": "Small baselines and the bot-filter cutover can produce misleading growth. Suppress confident labels when comparability or coverage fails; no-referrer is not guessed as a platform."
     }
   },
@@ -66,27 +58,39 @@
     "screenshots": [
       {
         "width": 390,
-        "path": ".fleet/evidence/two-minute-briefing-2026-10-01/after-390-dark.jpg"
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-390-light.jpg"
+      },
+      {
+        "width": 390,
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-390-dark.jpg"
       },
       {
         "width": 768,
-        "path": ".fleet/evidence/two-minute-briefing-2026-10-01/after-768-dark.jpg"
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-768-light.jpg"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-768-dark.jpg"
       },
       {
         "width": 1440,
-        "path": ".fleet/evidence/two-minute-briefing-2026-10-01/after-1440-dark.jpg"
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-1440-light.jpg"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/briefing-editorial-2026-10-02/after-1440-dark.jpg"
       }
     ],
     "projectCheck": {
-      "command": "pnpm run check",
+      "command": "pnpm run check (131 browser tests); final focused briefing 6 theme/viewport cases",
       "status": "pass"
     },
     "critique": {
-      "score": 35,
+      "score": 38,
       "maximum": 40
     },
     "audit": {
-      "score": 18,
+      "score": 20,
       "maximum": 20
     },
     "unresolved": {
@@ -95,7 +99,9 @@
     },
     "detector": {
       "posture": "advisory",
-      "findings": []
+      "findings": [
+        "Independent review: small supporting qualification text remains a minor density tradeoff; no P0/P1 findings."
+      ]
     },
     "comprehension": {
       "status": "not-applicable",
@@ -122,6 +128,6 @@
   },
   "ownerFeedback": {
     "decision": "delegated",
-    "note": "Owner Oct 1: Build out any, just make it very beautiful. Currently the dashboard looks ugly. Selected A Morning briefing under this explicit delegated choice. Preview values are illustrative."
+    "note": "2026-10-02 owner: Build out any, just make it very beautiful. Currently the dashboard looks ugly. Root chose an editorial evolution of the previously selected Daily Briefing A."
   }
 }
