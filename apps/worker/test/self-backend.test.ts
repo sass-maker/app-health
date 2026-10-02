@@ -126,6 +126,7 @@ it.each([
   ['/v1/native', 'POST'],
   ['/v1/logs', 'POST'],
   ['/v1/analytics/live', 'GET'],
+  ['/v1/workspace/analytics', 'GET'],
   ['/v1/unknown/private', 'GET'],
   ['/assets/main.js', 'GET'],
   ['/v1/endpoints', 'OPTIONS'],
