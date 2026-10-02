@@ -59,11 +59,8 @@ export async function readOwnerAlertFeed(
       )`;
   const from = Math.max(0, now - RETENTION_MS);
   const binds = [workspaceId, from, now, workspaceId, workspaceId, workspaceId];
-  const countRow = await db
-    .prepare(`SELECT COUNT(*) AS total_count ${scope}`)
-    .bind(...binds)
-    .first<{ total_count: number | string }>();
-  const rows = await db
+  const countStatement = db.prepare(`SELECT COUNT(*) AS total_count ${scope}`).bind(...binds);
+  const entriesStatement = db
     .prepare(
       `SELECT l.log_id AS id, l.app_id AS app_id, c.catalog_id AS catalog_id,
         c.catalog_name AS project_name, l.event AS event, l.timestamp AS timestamp
@@ -71,18 +68,30 @@ export async function readOwnerAlertFeed(
        ORDER BY l.timestamp DESC, l.log_id DESC
        LIMIT ?`,
     )
-    .bind(...binds, limit)
-    .all<OwnerAlert>();
+    .bind(...binds, limit);
+  const results = await db.batch([countStatement, entriesStatement]);
+  const countRows = results[0]?.results;
+  const rows = results[1]?.results;
+  if (
+    results.length !== 2 ||
+    results.some((result) => !result.success) ||
+    !Array.isArray(countRows) ||
+    countRows.length !== 1 ||
+    !Array.isArray(rows)
+  ) {
+    throw new Error('D1 alert feed read failed');
+  }
+  const countRow = countRows[0];
 
   return {
     generated_at: now,
     total_count: Math.max(0, Math.floor(Number(countRow?.total_count ?? 0))),
-    entries: rows.results.map((row) => ({
+    entries: rows.map((row) => ({
       id: String(row.id),
       app_id: String(row.app_id),
       catalog_id: String(row.catalog_id),
       project_name: String(row.project_name),
-      event: row.event,
+      event: row.event as OwnerAlert['event'],
       timestamp: Math.max(0, Math.floor(Number(row.timestamp))),
     })),
   };
