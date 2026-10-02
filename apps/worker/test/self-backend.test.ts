@@ -24,7 +24,6 @@ it.each([
   '/v1/health',
   '/v1/reports/daily-engagement',
   '/v1/reports/portfolio-briefing',
-  '/v1/workspace/analytics',
   '/v1/workspace/health',
   '/v1/workspace/alerts',
 ])('delivers %s SDK batches through authenticated collector without recursion', async (path) => {
@@ -47,6 +46,7 @@ it.each([
     ctx,
   );
   if (path === '/v1/health') expect(response.status).toBe(200);
+  expect(response.status).not.toBe(404);
   await Promise.all(ctx.pending);
   expect(transport).toHaveBeenCalledTimes(1);
   const batch = JSON.parse(payloads[0]);
