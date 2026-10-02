@@ -66,6 +66,7 @@ async function archiveBody(batches: CollectedBrowserBatch[] = [batch], objectKey
   );
   const raw = Buffer.from(archived.map((value) => `${JSON.stringify(value)}\n`).join(''));
   const compressed = gzipSync(raw);
+  const eventTimes = batches.flatMap((value) => value.events.map((event) => event.timestamp));
   const manifest = {
     schema_version: 1,
     object_key: objectKey,
@@ -74,8 +75,8 @@ async function archiveBody(batches: CollectedBrowserBatch[] = [batch], objectKey
     content_sha256: createHash('sha256').update(compressed).digest('hex'),
     row_count: batches.length,
     event_count: batches.reduce((count, value) => count + value.events.length, 0),
-    min_event_at: batch.events[0]!.timestamp,
-    max_event_at: batch.events[0]!.timestamp,
+    min_event_at: Math.min(...eventTimes),
+    max_event_at: Math.max(...eventTimes),
     uncompressed_bytes: raw.byteLength,
     compressed_bytes: compressed.byteLength,
     created_at: Date.now(),
@@ -249,6 +250,72 @@ describe('resumable browser archive audit jobs', () => {
       matched: 1,
       archive_only_facts: 40,
       duplicate_archive_candidates: 0,
+    });
+  });
+
+  it('shares the scanned-row budget across shards even when rows are filtered out', async () => {
+    const outsideKey = OBJECT_KEY.replace('segment-a', 'outside-day');
+    const targetKey = OBJECT_KEY.replace('segment-a', 'target-day');
+    const outside = Array.from({ length: 39 }, (_, index) => ({
+      ...batch,
+      batch_id: `outside-${index}`,
+      events: batch.events.map((event) => ({
+        ...event,
+        timestamp: Date.parse('2026-09-30T18:00:00Z'),
+      })),
+    }));
+    let targetReads = 0;
+    const bindings = {
+      db,
+      archive: {
+        getByName(name: string) {
+          const shard = Number(name.split(':').at(-1));
+          return {
+            archiveSegmentForBatch: async () => REFERENCE,
+            archiveSegmentsForEventDay: async () => ({
+              segments:
+                shard < 2
+                  ? [
+                      {
+                        segment_id: `indexed-${shard}`,
+                        object_key: shard === 0 ? outsideKey : targetKey,
+                      },
+                    ]
+                  : [],
+              next_cursor: null,
+              snapshot_sequence: 1,
+            }),
+          };
+        },
+      },
+      history: {
+        get: async (key: string) => {
+          if (key === targetKey) targetReads++;
+          return archiveBody(
+            key === outsideKey
+              ? outside
+              : [{ ...batch, batch_id: key === targetKey ? 'target' : batch.batch_id }],
+            key,
+          );
+        },
+      },
+    };
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 100);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 200);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 300);
+    await processBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, 400);
+    expect(targetReads).toBe(0);
+    expect(
+      (await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 401))?.progress,
+    ).toMatchObject({ segments_checked: 2, archive_facts_checked: 1 });
+    for (let tick = 0; tick < 8; tick++)
+      await processPendingBrowserArchiveAuditJobs(bindings, 500 + tick * 10);
+    const finished = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 1000);
+    expect(targetReads).toBe(1);
+    expect(finished).toMatchObject({ status: 'finished', complete: false });
+    expect(finished?.observed_comparison_counts).toMatchObject({
+      matched: 1,
+      archive_only_facts: 1,
     });
   });
 

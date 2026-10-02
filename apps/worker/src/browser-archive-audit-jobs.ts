@@ -807,7 +807,13 @@ async function archiveWritesForSegments(
   if (job.archive_fact_count + factRows.length > MAX_ARCHIVE_FACTS)
     throw new Error('audit archive fact cap');
   const writes = archiveFactStatements(context, processedSegments, factRows);
-  return { segments: processedSegments.length, facts: factRows.length, writes, done };
+  return {
+    segments: processedSegments.length,
+    facts: factRows.length,
+    scannedRows: pendingFacts.length,
+    writes,
+    done,
+  };
 }
 
 async function processReceiptSlice(
@@ -960,6 +966,7 @@ async function processArchiveIndexSlice(
   let processed = 0;
   let addedSegments = 0;
   let addedFacts = 0;
+  let scannedRows = 0;
   const factWrites: Array<ReturnType<D1DatabaseLike['prepare']>> = [];
   const sliceSeenSegments = new Set<string>();
   for (let shard = 0; shard < SHARD_COUNT && processed < SHARDS_PER_SLICE; shard++) {
@@ -974,7 +981,7 @@ async function processArchiveIndexSlice(
         leaseToken,
         sliceSeenSegments,
         states,
-        factBudget: MAX_FACTS_PER_SLICE - addedFacts,
+        factBudget: MAX_FACTS_PER_SLICE - scannedRows,
       },
       shard,
       state,
@@ -985,8 +992,9 @@ async function processArchiveIndexSlice(
     factWrites.push(...result.writes);
     addedSegments += result.segments;
     addedFacts += result.facts;
+    scannedRows += result.scannedRows;
     processed++;
-    if (!result.done || addedFacts === MAX_FACTS_PER_SLICE) break;
+    if (!result.done || scannedRows === MAX_FACTS_PER_SLICE) break;
   }
   if (job.segment_count + addedSegments > MAX_SEGMENTS) throw new Error('audit segment cap');
   if (job.archive_fact_count + addedFacts > MAX_ARCHIVE_FACTS)
