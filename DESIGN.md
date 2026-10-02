@@ -38,7 +38,7 @@ column, and cards that preserve clear relationships between filters, totals, tre
 The footer belongs only to the landing page.
 
 The portfolio briefing uses an editorial report composition: a prominent completed-day
-heading, a continuous five-metric rail with semantic top rules, open breakout stories,
+heading, a continuous six-metric rail with semantic top rules, open breakout stories,
 and a compact acquisition column above the full project ledger. Avoid enclosing the
 whole report in another card or repeating its title. Keep qualifications next to their
 numbers; longer action definitions can use an accessible disclosure. Missing data,

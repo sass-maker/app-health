@@ -989,7 +989,7 @@ function Summary({
 
   return (
     <section aria-label="Selected day summary" className="space-y-4">
-      <div className="grid grid-cols-2 gap-x-5 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-x-5 sm:grid-cols-3 xl:grid-cols-6">
         <Stat
           label="Known browser counts"
           value={browserProducts ? browserCounts.toLocaleString() : 'Unknown'}
@@ -1004,6 +1004,16 @@ function Summary({
               ? `${pageviewProducts} products with source data${pageviewsEstimated ? ' · estimated' : ''}`
               : 'Source aggregate unavailable'
           }
+        />
+        <Stat
+          label="Primary action events"
+          value={
+            measuredActionProducts
+              ? `${actionEstimated ? '≈ ' : ''}${namedActionCount.toLocaleString()}`
+              : 'Unknown'
+          }
+          detail={`${measuredActionProducts} products with measured actions · events, not people`}
+          tone="green"
         />
         <Stat
           label="Download intent"
@@ -1021,7 +1031,6 @@ function Summary({
           value={healthValue}
           detail={healthDetail}
           tone={attentionItems.length ? 'amber' : 'neutral'}
-          className="col-span-2 xl:col-span-1"
         />
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
