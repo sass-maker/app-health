@@ -670,6 +670,7 @@ async function handleDailyEngagementRoute(
   owner: OwnerIdentity,
   url: URL,
   env: Env,
+  timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   if (!['/v1/reports/daily-engagement', '/v1/reports/portfolio-briefing'].includes(url.pathname))
     return null;
@@ -704,26 +705,28 @@ async function handleDailyEngagementRoute(
           }),
       );
     if (url.pathname === '/v1/reports/portfolio-briefing') {
-      const briefing = await cachedAnalytics(
-        env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
-        workspaceId,
-        `portfolio-briefing-v1:${day.date}`,
-        () =>
-          readPortfolioBriefing({
-            db,
-            workspaceId,
-            date: day.date,
-            now,
-            currentReport: loadReport(),
-            query,
-          }),
+      const briefing = await measureOwnerRouteRead(timings, () =>
+        cachedAnalytics(
+          env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+          workspaceId,
+          `portfolio-briefing-v1:${day.date}`,
+          () =>
+            readPortfolioBriefing({
+              db,
+              workspaceId,
+              date: day.date,
+              now,
+              currentReport: loadReport(),
+              query,
+            }),
+        ),
       );
       return json(200, briefing, true);
     }
     return json(
       200,
       dailyEngagementClientPayload(
-        await loadReport(),
+        await measureOwnerRouteRead(timings, loadReport),
         url.searchParams.get('capture_applicability') === '1',
         url.searchParams.get('browser_visitor_unknown_reason') === '1',
       ),
@@ -861,7 +864,8 @@ async function handleOwnerRoutes(
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
       handleInstallationStatusRoute(req, current, identity, target, options?.timings),
     handleWorkspaceHealthRoute,
-    handleDailyEngagementRoute,
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
+      handleDailyEngagementRoute(req, current, identity, target, bindings, options?.timings),
     handleOwnerAlertsRoute,
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
       handleEndpointsRoute(req, current, identity, target, options?.timings),
@@ -939,6 +943,8 @@ async function handleAccountOwner(
       '/v1/endpoints',
       '/v1/installation/status',
       '/v1/analytics/report',
+      '/v1/reports/daily-engagement',
+      '/v1/reports/portfolio-briefing',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';

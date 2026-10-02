@@ -125,53 +125,63 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   }
 
-  it('serves cached briefing after owner authentication without loading daily aggregates', async () => {
-    const cache = {
-      match: vi.fn(async (key: Request) =>
-        key.url.includes('portfolio-briefing-v1')
-          ? Response.json({ products: [], marker: 'cached-briefing' })
-          : undefined,
-      ),
-      put: vi.fn(async () => {}),
-    };
-    const captures = vi.fn(async () => ({ coverageStart: '2026-09-28', rows: [] }));
-    let catalogReads = 0;
-    const db = env.DB!;
-    const scopedEnv: Env = {
-      ...env,
-      DB: new Proxy(db, {
-        get(target, key, receiver) {
-          if (key === 'prepare')
-            return (sql: string) => {
-              if (sql.includes('catalog_project_imports')) catalogReads += 1;
-              return target.prepare(sql);
-            };
-          const value = Reflect.get(target, key, receiver);
-          return typeof value === 'function' ? value.bind(target) : value;
-        },
-      }),
-      SAASMAKER_METRICS: { getDailyCaptureCounts: captures },
-    };
-    vi.stubGlobal('caches', { default: cache });
-    try {
-      const path = 'https://dashboard.example.com/v1/reports/portfolio-briefing?date=2026-09-28';
-      const anonymous = await worker.fetch(new Request(path), scopedEnv);
-      expect(anonymous.status).toBe(401);
-      expect(cache.match).not.toHaveBeenCalled();
-      const response = await worker.fetch(
-        new Request(path, { headers: { cookie: aliceCookie } }),
-        scopedEnv,
-      );
-      expect(response.status).toBe(200);
-      expect(response.headers.get('cache-control')).toBe('no-store');
-      await expect(response.json()).resolves.toEqual({ products: [], marker: 'cached-briefing' });
-      expect(cache.match).toHaveBeenCalledTimes(1);
-      expect(catalogReads).toBe(0);
-      expect(captures).not.toHaveBeenCalled();
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
+  it.each([
+    ['portfolio-briefing', 'portfolio-briefing-v1'],
+    ['daily-engagement', 'daily-briefing-v2'],
+  ])(
+    'serves cached %s after owner authentication with private timing stages',
+    async (route, cacheKey) => {
+      const cache = {
+        match: vi.fn(async (key: Request) =>
+          key.url.includes(cacheKey)
+            ? Response.json({ products: [], marker: 'cached-briefing' })
+            : undefined,
+        ),
+        put: vi.fn(async () => {}),
+      };
+      const captures = vi.fn(async () => ({ coverageStart: '2026-09-28', rows: [] }));
+      let catalogReads = 0;
+      const db = env.DB!;
+      const scopedEnv: Env = {
+        ...env,
+        DB: new Proxy(db, {
+          get(target, key, receiver) {
+            if (key === 'prepare')
+              return (sql: string) => {
+                if (sql.includes('catalog_project_imports')) catalogReads += 1;
+                return target.prepare(sql);
+              };
+            const value = Reflect.get(target, key, receiver);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        }),
+        SAASMAKER_METRICS: { getDailyCaptureCounts: captures },
+      };
+      vi.stubGlobal('caches', { default: cache });
+      try {
+        const path = `https://dashboard.example.com/v1/reports/${route}?date=2026-09-28&private_marker=not-for-timing`;
+        const anonymous = await worker.fetch(new Request(path), scopedEnv);
+        expect(anonymous.status).toBe(401);
+        expect(anonymous.headers.get('server-timing')).toBeNull();
+        expect(cache.match).not.toHaveBeenCalled();
+        const response = await worker.fetch(
+          new Request(path, { headers: { cookie: aliceCookie } }),
+          scopedEnv,
+        );
+        expect(response.status).toBe(200);
+        expect(response.headers.get('cache-control')).toBe('no-store');
+        expect(response.headers.get('server-timing')).toMatch(
+          /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/,
+        );
+        await expect(response.json()).resolves.toEqual({ products: [], marker: 'cached-briefing' });
+        expect(cache.match).toHaveBeenCalledTimes(1);
+        expect(catalogReads).toBe(0);
+        expect(captures).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
   it('creates one workspace per account without claiming legacy projects', async () => {
     const account = await request('/v1/account');
@@ -605,7 +615,13 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(unauthenticated.status).toBe(401);
     expect(unauthenticated.headers.get('server-timing')).toBeNull();
     expect((await request('/v1/account')).headers.get('server-timing')).toBeNull();
-    for (const path of ['/v1/endpoints', '/v1/installation/status', '/v1/analytics/report']) {
+    for (const path of [
+      '/v1/endpoints',
+      '/v1/installation/status',
+      '/v1/analytics/report',
+      '/v1/reports/daily-engagement',
+      '/v1/reports/portfolio-briefing',
+    ]) {
       const response = await worker.fetch(new Request(`https://dashboard.example.com${path}`), env);
       expect(response.status).toBe(401);
       expect(response.headers.get('server-timing')).toBeNull();
