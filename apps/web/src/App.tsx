@@ -1036,12 +1036,23 @@ function EndpointHealth(props: {
   status: InstallationStatusV1 | null;
   error: string | null;
   loading: boolean;
+  hasData: boolean;
   endpoints: EndpointAggregateV1[];
   sortKey: SortKey;
   sortDirection: SortDirection;
   onSort: (key: SortKey) => void;
 }): JSX.Element {
-  const { project, status, error, loading, endpoints, sortKey, sortDirection, onSort } = props;
+  const { project, status, error, loading, hasData, endpoints, sortKey, sortDirection, onSort } =
+    props;
+  const endpointSummary = !hasData
+    ? loading
+      ? 'Loading endpoint count…'
+      : 'Endpoint count unavailable'
+    : error
+      ? `${endpoints.length} observed · Showing last successful result`
+      : loading
+        ? `${endpoints.length} observed · Refreshing`
+        : `${endpoints.length} observed`;
   const columns = [
     ['requests', 'Requests'],
     ['error_rate', 'Error rate'],
@@ -1075,8 +1086,9 @@ function EndpointHealth(props: {
         <CardHeader className="flex flex-row items-end justify-between gap-4 border-b">
           <div>
             <CardTitle className="text-base">Observed endpoints</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {endpoints.length} observed · Measurements update after each complete minute
+            <p className="mt-1 text-xs text-muted-foreground" role="status">
+              {endpointSummary}
+              {hasData ? ' · Measurements update after each complete minute' : null}
             </p>
           </div>
           <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
@@ -3042,6 +3054,7 @@ interface EndpointPanelProps {
   status: InstallationStatusV1 | null;
   error: string | null;
   loading: boolean;
+  hasData: boolean;
   endpoints: EndpointAggregateV1[];
   sortKey: SortKey;
   sortDirection: SortDirection;
@@ -3059,6 +3072,7 @@ function EndpointPanel(props: EndpointPanelProps): JSX.Element {
     status,
     error,
     loading,
+    hasData,
     endpoints,
     sortKey,
     sortDirection,
@@ -3080,6 +3094,7 @@ function EndpointPanel(props: EndpointPanelProps): JSX.Element {
           status={status}
           error={error}
           loading={loading}
+          hasData={hasData}
           endpoints={endpoints}
           sortKey={sortKey}
           sortDirection={sortDirection}
@@ -3102,6 +3117,7 @@ interface DashboardContentProps {
   status: InstallationStatusV1 | null;
   error: string | null;
   loading: boolean;
+  hasEndpointData: boolean;
   endpoints: EndpointAggregateV1[];
   sortKey: SortKey;
   sortDirection: SortDirection;
@@ -3129,6 +3145,7 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
         status={props.status}
         error={props.error}
         loading={props.loading}
+        hasData={props.hasEndpointData}
         endpoints={props.endpoints}
         sortKey={props.sortKey}
         sortDirection={props.sortDirection}
@@ -3171,14 +3188,23 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
       className="gap-5"
     >
       <TabsList variant="line" aria-label="Backend sections" className="max-w-full overflow-x-auto">
-        <TabsTrigger value="backend" onClick={() => props.onView('backend')}>
+        <TabsTrigger
+          value="backend"
+          className="group-data-[orientation=horizontal]/tabs:after:bottom-[-4px]"
+          onClick={() => props.onView('backend')}
+        >
           API monitoring
         </TabsTrigger>
-        <TabsTrigger value="backend/logs" onClick={() => props.onView('backend/logs')}>
+        <TabsTrigger
+          value="backend/logs"
+          className="group-data-[orientation=horizontal]/tabs:after:bottom-[-4px]"
+          onClick={() => props.onView('backend/logs')}
+        >
           Logs
         </TabsTrigger>
         <TabsTrigger
           value="backend/diagnostics"
+          className="group-data-[orientation=horizontal]/tabs:after:bottom-[-4px]"
           onClick={() => props.onView('backend/diagnostics')}
         >
           Diagnostics
@@ -3327,6 +3353,7 @@ function Dashboard({
           status={status}
           error={error}
           loading={loading}
+          hasEndpointData={data !== null}
           endpoints={sorted}
           sortKey={sortKey}
           sortDirection={sortDirection}
