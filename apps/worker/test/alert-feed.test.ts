@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readOwnerAlertFeed } from '../src/alert-feed.js';
 import type { D1DatabaseLike } from '../src/d1-adapter.js';
 
@@ -74,6 +74,15 @@ describe('readOwnerAlertFeed', () => {
       insert.run('expired-1', 'app-a', 'prod-a', 1_600_000_000_000, 'feedback.submitted', '{}');
 
       const db = {
+        batch: vi.fn(async (statements: Array<{ all(): Promise<{ results: unknown[] }> }>) =>
+          Promise.all(
+            statements.map(async (statement) => ({
+              ...(await statement.all()),
+              success: true,
+              meta: {},
+            })),
+          ),
+        ),
         prepare(sql: string) {
           return {
             bind(...values: unknown[]) {
@@ -90,6 +99,7 @@ describe('readOwnerAlertFeed', () => {
 
       const now = 1_700_000_000_700;
       const result = await readOwnerAlertFeed(db, 'ws-a', now, 10);
+      expect(db.batch).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         generated_at: now,
         total_count: 4,
@@ -122,6 +132,9 @@ describe('readOwnerAlertFeed', () => {
         ],
       });
       expect(JSON.stringify(result)).not.toContain('private');
+      const limited = await readOwnerAlertFeed(db, 'ws-a', now, 2);
+      expect(limited.total_count).toBe(4);
+      expect(limited.entries).toEqual(result.entries.slice(0, 2));
     } finally {
       sqlite.close();
     }
@@ -131,6 +144,10 @@ describe('readOwnerAlertFeed', () => {
     const statements: string[] = [];
     const bindings: unknown[][] = [];
     const db = {
+      batch: async () => [
+        { success: true, results: [{ total_count: 0 }], meta: {} },
+        { success: true, results: [], meta: {} },
+      ],
       prepare(sql: string) {
         statements.push(sql);
         return {
@@ -156,4 +173,35 @@ describe('readOwnerAlertFeed', () => {
       50,
     ]);
   });
+
+  it.each([
+    [],
+    [{ success: true, results: [{ total_count: 4 }], meta: {} }],
+    [
+      { success: false, results: [], meta: {} },
+      { success: true, results: [], meta: {} },
+    ],
+    [
+      { success: true, results: [{ total_count: 4 }], meta: {} },
+      { success: false, results: [], meta: {} },
+    ],
+    [
+      { success: true, results: [{ total_count: 4 }], meta: {} },
+      { success: true, meta: {} },
+    ],
+    [
+      { success: true, results: [], meta: {} },
+      { success: true, results: [], meta: {} },
+    ],
+  ])(
+    'rejects incomplete or failed database reads instead of returning an empty feed (%#)',
+    async (...results) => {
+      const statement = { bind: () => statement };
+      const db = {
+        prepare: () => statement,
+        batch: async () => results,
+      } as unknown as D1DatabaseLike;
+      await expect(readOwnerAlertFeed(db, 'ws-a')).rejects.toThrow('D1 alert feed read failed');
+    },
+  );
 });
