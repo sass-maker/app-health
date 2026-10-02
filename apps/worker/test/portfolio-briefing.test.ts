@@ -60,6 +60,48 @@ const briefingArgs = (overrides: Partial<Parameters<typeof readPortfolioBriefing
 });
 
 describe('readPortfolioBriefing', () => {
+  it('reads source aggregates while the daily report is pending and preserves the result', async () => {
+    let finishReport!: (report: {
+      products: { app_id: string; browser_visitors: number }[];
+    }) => void;
+    let sourcesStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      sourcesStarted = resolve;
+    });
+    const currentReport = new Promise<{ products: { app_id: string; browser_visitors: number }[] }>(
+      (resolve) => {
+        finishReport = resolve;
+      },
+    );
+    const rows = [sourceRow(1, 'Google', 25)];
+    const pending = readPortfolioBriefing(
+      briefingArgs({
+        currentReport,
+        query: async (sql) => {
+          sourcesStarted();
+          return queryWithRows(rows)(sql);
+        },
+      }),
+    );
+    await started;
+    finishReport({ products: [{ app_id: catalog[0]!.app_id, browser_visitors: 22 }] });
+    const result = await pending;
+    const sequential = await readPortfolioBriefing(briefingArgs({ query: queryWithRows(rows) }));
+    expect(result).toEqual(sequential);
+    expect(result.products[0]?.pageviews).toBe(25);
+  });
+
+  it('propagates a failed daily report rather than returning partial briefing data', async () => {
+    await expect(
+      readPortfolioBriefing(
+        briefingArgs({
+          currentReport: Promise.reject(new Error('daily report unavailable')),
+          query: queryWithRows([sourceRow(1, 'Google', 25)]),
+        }),
+      ),
+    ).rejects.toThrow('daily report unavailable');
+  });
+
   it('returns pageview sources and only flags a qualified unsampled breakout', async () => {
     const sql: string[] = [];
     const result = await readPortfolioBriefing({

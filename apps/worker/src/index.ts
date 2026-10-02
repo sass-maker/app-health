@@ -684,24 +684,25 @@ async function handleDailyEngagementRoute(
     const now = Date.now();
     const day = dailyEngagementWindow(url.searchParams.get('date'), now);
     if ('error' in day) throw Object.assign(new Error(day.error), { status: 400 });
-    const report = await cachedAnalytics(
-      env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
-      workspaceId,
-      `daily-briefing-v2:${day.date}`,
-      () =>
-        composeDailyEngagementReport({
-          db,
-          workspaceId,
-          query,
-          date: url.searchParams.get('date'),
-          now,
-          ctaEventNamesByCatalogId: dailyCtaEventNamesForDate(day.date),
-          ctaFullDayStart: DAILY_CTA_FULL_DAY_START,
-          ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
-          captureCountsService: env.SAASMAKER_METRICS,
-          endpointColdBucket: env.ENDPOINT_HISTORY,
-        }),
-    );
+    const loadReport = () =>
+      cachedAnalytics(
+        env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+        workspaceId,
+        `daily-briefing-v2:${day.date}`,
+        () =>
+          composeDailyEngagementReport({
+            db,
+            workspaceId,
+            query,
+            date: url.searchParams.get('date'),
+            now,
+            ctaEventNamesByCatalogId: dailyCtaEventNamesForDate(day.date),
+            ctaFullDayStart: DAILY_CTA_FULL_DAY_START,
+            ctaNotApplicableCatalogIds: DAILY_CTA_NOT_APPLICABLE_IDS,
+            captureCountsService: env.SAASMAKER_METRICS,
+            endpointColdBucket: env.ENDPOINT_HISTORY,
+          }),
+      );
     if (url.pathname === '/v1/reports/portfolio-briefing') {
       const briefing = await cachedAnalytics(
         env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
@@ -713,7 +714,7 @@ async function handleDailyEngagementRoute(
             workspaceId,
             date: day.date,
             now,
-            currentReport: report,
+            currentReport: loadReport(),
             query,
           }),
       );
@@ -722,7 +723,7 @@ async function handleDailyEngagementRoute(
     return json(
       200,
       dailyEngagementClientPayload(
-        report,
+        await loadReport(),
         url.searchParams.get('capture_applicability') === '1',
         url.searchParams.get('browser_visitor_unknown_reason') === '1',
       ),
