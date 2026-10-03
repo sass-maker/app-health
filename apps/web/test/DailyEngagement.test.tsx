@@ -145,9 +145,9 @@ it('shows unsupported response metrics as not applicable without hiding real fee
       ...product,
       feedback_submitted: index === 0 ? 2 : null,
       feedback_applicability: 'not_applicable',
-      newsletter_joins: null,
+      newsletter_joins: 0,
       newsletter_applicability: 'not_applicable',
-      waitlist_joins: null,
+      waitlist_joins: 0,
       waitlist_applicability: 'not_applicable',
     })),
   };
@@ -165,6 +165,12 @@ it('shows unsupported response metrics as not applicable without hiding real fee
   );
   const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
   expect(within(mobile).getAllByText('Replies + joins')[1]?.parentElement?.textContent).toContain(
+    'Not applicable',
+  );
+  expect(within(beacon).getByText('Newsletter').parentElement?.textContent).toContain(
+    'Not applicable',
+  );
+  expect(within(beacon).getByText('Waitlist').parentElement?.textContent).toContain(
     'Not applicable',
   );
   expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('feedback_applicability=1');
@@ -381,7 +387,7 @@ const report = {
       feedback_submitted: null,
       newsletter_joins: null,
       newsletter_applicability: 'not_applicable',
-      waitlist_joins: null,
+      waitlist_joins: 0,
       waitlist_applicability: 'not_applicable',
       native_sessions: null,
       native_sessions_applicability: 'not_applicable',

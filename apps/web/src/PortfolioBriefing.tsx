@@ -61,8 +61,9 @@ function applicableCount(
   value: number | null,
   applicability: 'applicable' | 'not_applicable' | 'unknown',
 ): string {
-  if (value !== null) return formatNumber(value);
-  return applicability === 'not_applicable' ? 'Not applicable' : 'Unknown';
+  if (applicability === 'not_applicable' && (value === null || value === 0))
+    return 'Not applicable';
+  return formatNumber(value);
 }
 
 function browserVisitorReason(product: DailyProduct): string | null {
@@ -654,7 +655,7 @@ function ProductLedger({
                   onClick={() => changeSort('browser')}
                 />
               </TableHead>
-              <TableHead className="w-[8%]">
+              <TableHead className="w-[12%]">
                 <SortButton
                   label="Change"
                   active={sortKey === 'change'}
@@ -662,7 +663,7 @@ function ProductLedger({
                   onClick={() => changeSort('change')}
                 />
               </TableHead>
-              <TableHead className="w-[16%]">
+              <TableHead className="w-[12%]">
                 <SortButton
                   label="Actions"
                   active={sortKey === 'actions'}
