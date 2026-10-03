@@ -2,7 +2,15 @@ import { AnalyticsComparison } from './AnalyticsComparison.js';
 import { AnalyticsEngagement } from './AnalyticsEngagement.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
 import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
-import { ArrowRight, BarChart3, Clock3, ListFilter, MousePointer2, Radio } from 'lucide-react';
+import {
+  ArrowRight,
+  BarChart3,
+  Clock3,
+  ListFilter,
+  MousePointer2,
+  Radio,
+  Users,
+} from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
@@ -41,17 +49,14 @@ function MetricCard(props: {
 }): JSX.Element {
   const { label, value, note, icon: Icon, live } = props;
   return (
-    <Card className="border-t-2 py-0 shadow-none" style={{ borderTopColor: props.tone }}>
+    <Card className="py-0 shadow-none">
       <CardContent className="p-5">
         <div className="flex items-center justify-between text-muted-foreground">
           <span className="text-xs font-medium">{label}</span>
           {live ? (
-            <span className="relative flex size-2">
-              <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
-              <span className="relative inline-flex size-2 rounded-full bg-emerald-400" />
-            </span>
+            <span className="size-2 rounded-full bg-success" aria-hidden="true" />
           ) : (
-            <Icon className="size-4" style={{ color: props.tone }} />
+            <Icon className="size-4" />
           )}
         </div>
         <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
@@ -194,7 +199,24 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
   const showPageViews = mode === 'web' && !selected;
   const showEventNames = mode === 'events' && !selected;
   return (
-    <div className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : 'xl:grid-cols-4'}`}>
+    <div
+      className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : mode === 'web' ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}
+    >
+      {showPageViews ? (
+        <MetricCard
+          label="Visitors"
+          value={report.audience?.visitors ?? null}
+          note={
+            report.sampled
+              ? 'Browser-scoped · sampled lower bound'
+              : 'Recognized browsers in this period'
+          }
+          icon={Users}
+          previous={report.previous?.visitors}
+          sampled={report.sampled}
+          unique
+        />
+      ) : null}
       {showPageViews ? (
         <MetricCard
           tone="var(--chart-1)"
@@ -370,12 +392,19 @@ export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
         </Tabs>
       ) : null}
       {mode === 'web' ? (
-        <EventTable
-          rows={report.events}
-          selected={selected}
-          onSelect={onEvent}
-          filtered={props.segmented}
-        />
+        <details className="rounded-lg border p-4">
+          <summary className="cursor-pointer text-sm font-medium">
+            Tracked product events · {report.events.length} types
+          </summary>
+          <div className="mt-4">
+            <EventTable
+              rows={report.events}
+              selected={selected}
+              onSelect={onEvent}
+              filtered={props.segmented}
+            />
+          </div>
+        </details>
       ) : null}
     </>
   );

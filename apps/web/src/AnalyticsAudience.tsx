@@ -1,4 +1,3 @@
-import { AnalyticsComparison } from './AnalyticsComparison.js';
 import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
 import { countryName } from './country-name.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
@@ -22,13 +21,11 @@ export function AnalyticsAudience({
       </p>
     );
   const total = report.series.reduce((sum, row) => sum + row[metric], 0);
-  const previous = report.previous?.visitors;
   const groups = audienceGroups(audience, breakdown);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3">
         {[
-          ['Visitors', audience.visitors],
           ['New sessions', audience.new_sessions],
           ['Returning sessions', audience.returning_sessions],
           ['Unidentified sessions', audience.unidentified_sessions],
@@ -41,15 +38,6 @@ export function AnalyticsAudience({
             <p className="mt-1 text-xs text-muted-foreground">
               {report.sampled ? 'Sampled lower bound' : 'Browser-scoped'}
             </p>
-            {label === 'Visitors' ? (
-              <AnalyticsComparison
-                current={audience.visitors}
-                previous={previous}
-                label="Visitors"
-                sampled={report.sampled}
-                unique={true}
-              />
-            ) : null}
           </div>
         ))}
       </div>

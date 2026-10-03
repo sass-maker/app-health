@@ -2,13 +2,14 @@
 name: App Health
 description: Product analytics connected to application health
 colors:
-  ink: '#fafafa'
-  muted: '#a1a1aa'
-  background: '#09090b'
-  paper: '#111113'
-  line: '#27272a'
-  indigo: '#a5b4fc'
-  emerald: '#34d399'
+  ink: 'oklch(0.985 0 0)'
+  muted: 'oklch(0.708 0 0)'
+  background: 'oklch(0.145 0 0)'
+  paper: 'oklch(0.205 0 0)'
+  line: 'oklch(1 0 0 / 10%)'
+  primary: 'oklch(0.922 0 0)'
+  success: '#4ade80'
+  warning: '#fbbf24'
 ---
 
 # App Health design system
@@ -83,3 +84,9 @@ as well as analytics and events. A review of only the newest screens cannot esta
 theme quality. Inspect rendered colors, spacing, content wrapping, keyboard focus, and recovery in
 both themes at desktop, tablet, and mobile widths. Keep screenshot coverage tied to the exact route
 and state; passing unit tests alone is insufficient.
+
+## Default component revision — October 3, 2026
+
+The owner chose standard shadcn Neutral components, searchable project navigation in the sidebar, and project report tabs. Keep the selected Daily briefing structure. Color serves charts and status; metric cards do not receive decorative colored rules. Visitors have one primary metric presentation; secondary event detail uses disclosure.
+
+The default light muted foreground is adjusted from oklch(0.556 0 0) to oklch(0.54 0 0): browser contrast checks found 4.35:1 on the standard muted surface, below the small-text requirement. This is a neutral accessibility correction.

@@ -215,7 +215,6 @@ function Stat({
   label,
   value,
   detail,
-  tone = 'neutral',
   className = '',
 }: {
   label: string;
@@ -224,14 +223,8 @@ function Stat({
   tone?: 'neutral' | 'sky' | 'green' | 'amber';
   className?: string;
 }): JSX.Element {
-  const toneClass = {
-    neutral: 'border-t-border',
-    sky: 'border-t-sky-500',
-    green: 'border-t-emerald-500',
-    amber: 'border-t-amber-500',
-  }[tone];
   return (
-    <div className={`min-w-0 border-t-2 py-3 ${toneClass} ${className}`}>
+    <div className={`min-w-0 rounded-lg border bg-card p-4 ${className}`}>
       <p className="text-[11px] font-medium tracking-[0.03em] text-muted-foreground">{label}</p>
       <p
         className={`mt-3 break-words font-medium tabular-nums text-foreground ${
