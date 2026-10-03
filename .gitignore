@@ -19,3 +19,6 @@ playwright-report/
 .fleet/evidence/portfolio-overview-directions/*.png
 /.build/
 /.swiftpm/
+
+# Owner-only rendered design and advisory scan evidence
+.fleet-local/

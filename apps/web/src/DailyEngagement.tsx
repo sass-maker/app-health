@@ -1,3 +1,4 @@
+import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import {
   DailyEngagementReportV1,
   type DailyEngagementReportV1 as Report,
@@ -62,6 +63,7 @@ function ReportHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-2">
+        <BrowserTrafficPolicy />
         <label className="grid gap-1 text-xs text-muted-foreground">
           Report date
           <Input

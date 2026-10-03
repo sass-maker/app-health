@@ -1,3 +1,4 @@
+import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
 import { useState } from 'react';
@@ -83,6 +84,7 @@ function ReportFilters(props: ReportFiltersProps): JSX.Element {
           ]}
         />
       </div>
+      <BrowserTrafficPolicy />
       {selected ? (
         <Badge variant="secondary" className="h-10 max-w-full gap-2 px-3 font-mono font-normal">
           <span className="truncate">{selected}</span>

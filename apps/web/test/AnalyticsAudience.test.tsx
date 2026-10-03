@@ -39,7 +39,9 @@ it('uses page views as the ranking denominator and labels identity states', () =
   expect(screen.getByText('Unidentified sessions')).toBeTruthy();
   expect(screen.getByText('100.0%')).toBeTruthy();
   expect(screen.queryByText('500.0%')).toBeNull();
-  expect(screen.getByText('+100% vs previous period')).toBeTruthy();
+  expect(screen.queryByLabelText('Visitors comparison')).toBeNull();
+  expect(screen.queryByText('Recognized browsers in this period')).toBeNull();
+  expect(screen.queryByText('+100% vs previous period')).toBeNull();
 });
 
 it('shows readable connection countries in the default audience report', () => {

@@ -112,7 +112,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
         await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
       await expect(page.getByRole('button', { name: 'Clear all filters' })).toHaveCSS(
         'color',
-        theme === 'light' ? 'rgb(24, 24, 27)' : 'rgb(250, 250, 250)',
+        await page.locator('body').evaluate((body) => getComputedStyle(body).color),
       );
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
@@ -131,8 +131,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   await period.click();
   await page.getByRole('option', { name: 'Last 7 days', exact: true }).click();
   await expect(period).toHaveText('Last 7 days');
-  await page.getByRole('combobox', { name: 'Project', exact: true }).click();
-  await page.getByRole('option', { name: 'All projects', exact: true }).click();
+  await page.getByRole('button', { name: 'Daily briefing', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
   const briefingDay = page.getByRole('region').filter({ hasText: 'Completed India day' });
   await expect(briefingDay.getByRole('heading', { level: 2 })).toBeVisible();
@@ -151,13 +150,13 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
         true,
       );
       if (width === 1440) {
-        const picker = await page
-          .getByRole('combobox', { name: 'Project', exact: true })
+        const projectNavigation = await page
+          .getByRole('button', { name: project.name, exact: true })
           .boundingBox();
         const themeButton = await page
           .getByRole('button', { name: `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` })
           .boundingBox();
-        expect(picker!.x).toBeLessThan(themeButton!.x / 2);
+        expect(projectNavigation!.x).toBeLessThan(themeButton!.x / 2);
       }
       await page.screenshot({
         path: resolve(evidence, `overview-${theme}-${width}.png`),
@@ -166,8 +165,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
       });
     }
   }
-  await page.getByRole('combobox', { name: 'Project', exact: true }).click();
-  await page.getByRole('option', { name: project.name, exact: true }).click();
+  await page.getByRole('button', { name: project.name, exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Analytics', exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
   await expect(page.getByText('Your projects', { exact: true })).toHaveCount(0);

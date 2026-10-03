@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -21,6 +21,14 @@ import type {
 } from '@app-health/contracts';
 
 const STORAGE_KEY = 'app-health-v0-project';
+
+function expectSelectedProject(name: string) {
+  expect(screen.getByRole('button', { name })).toHaveAttribute('data-active', 'true');
+  expect(
+    within(screen.getByRole('group', { name: 'Project context' })).getByText(name, { exact: true }),
+  ).toBeVisible();
+}
+
 const storageValues = new Map<string, string>();
 const storage = {
   getItem: (key: string) => storageValues.get(key) ?? null,
@@ -332,7 +340,8 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    expect(await screen.findByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha');
+    await screen.findByRole('button', { name: 'alpha' });
+    expectSelectedProject('alpha');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('app-alpha');
   });
 
@@ -346,14 +355,13 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    const picker = await screen.findByRole('combobox', { name: 'Project' });
-    fireEvent.keyDown(picker, { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: 'beta' }));
+    await screen.findByRole('button', { name: 'alpha' });
+    fireEvent.click(screen.getByRole('button', { name: 'beta' }));
     expect(new URL(window.location.href).searchParams.get('project')).toBe('app-beta');
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 20));
     });
-    expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('beta');
+    expectSelectedProject('beta');
   });
 
   it('shows a retryable error when an explicit target inventory request is forbidden', async () => {
@@ -374,21 +382,18 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    expect(await screen.findByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha');
+    await screen.findByRole('button', { name: 'alpha' });
+    expectSelectedProject('alpha');
     await act(async () => {
       window.history.pushState({}, '', '/app?project=app-beta&environment=env-beta#analytics');
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('beta'),
-    );
+    await waitFor(() => expectSelectedProject('beta'));
     await act(async () => {
       window.history.pushState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
       window.dispatchEvent(new PopStateEvent('popstate'));
     });
-    await waitFor(() =>
-      expect(screen.getByRole('combobox', { name: 'Project' })).toHaveTextContent('alpha'),
-    );
+    await waitFor(() => expectSelectedProject('alpha'));
   });
 
   it('resumes a Google workspace once in StrictMode, switches projects, and signs out without persisting credentials', async () => {
@@ -405,17 +410,19 @@ describe('App Health V0 UI', () => {
         <App />
       </StrictMode>,
     );
-    const picker = await screen.findByRole('combobox', { name: 'Project' });
-    expect(picker).toHaveTextContent('alpha');
+    await screen.findByRole('button', { name: 'alpha' });
+    expectSelectedProject('alpha');
     // Production bootstrap reuses its inventory even under StrictMode effect replay.
     expect(
       mock.mock.calls.filter(
         ([input, init]) => String(input).endsWith('/v1/apps') && (init?.method ?? 'GET') === 'GET',
       ),
     ).toHaveLength(1);
-    fireEvent.keyDown(picker, { key: 'ArrowDown' });
-    fireEvent.click(await screen.findByRole('option', { name: 'beta' }));
-    await waitFor(() => expect(localStorage.getItem(STORAGE_KEY)).toContain('app-beta'));
+    fireEvent.click(screen.getByRole('button', { name: 'beta' }));
+    await waitFor(() => {
+      expect(localStorage.getItem(STORAGE_KEY)).toContain('app-beta');
+      expectSelectedProject('beta');
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Add another project' }));
     expect(await screen.findByRole('button', { name: 'Back to projects' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
@@ -688,8 +695,8 @@ describe('App Health V0 UI', () => {
       expect(failureCall).toBeDefined();
     });
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
-    fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
-    fireEvent.click(await screen.findByRole('option', { name: 'polaris' }));
+    fireEvent.click(screen.getByRole('button', { name: 'polaris' }));
+    expectSelectedProject('polaris');
     expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('staging');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
   });
@@ -722,7 +729,7 @@ describe('App Health V0 UI', () => {
 
     render(<App />);
 
-    expect(await screen.findByText('Polaris')).toBeTruthy();
+    await waitFor(() => expectSelectedProject('Polaris'));
     expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('local');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('app-polaris');
   });
@@ -1041,9 +1048,12 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
 
-    expect(await screen.findByRole('button', { name: 'Analytics' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Events' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Backend' }));
+    expect(await screen.findByRole('tab', { name: 'Analytics' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Events' })).toBeTruthy();
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Backend' }), {
+      button: 0,
+      ctrlKey: false,
+    });
     expect(await screen.findByText('API monitoring is not selected')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Enable API monitoring' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy();
@@ -1371,7 +1381,7 @@ describe('Logs view', () => {
     fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
     expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Backend' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Backend' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'API monitoring' })).toBeTruthy();
   });
 

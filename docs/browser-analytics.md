@@ -82,14 +82,14 @@ To publish aggregate live counts on a product website, use
 
 ### Server-side bot filtering
 
-The Worker source is prepared to ignore recognized bot batches using trusted
+The production Worker ignores recognized bot batches using trusted
 Cloudflare verified-bot metadata or the pinned `isbot` user-agent matcher. This
 runs after payload, timestamp, public-key, and Origin checks, and before quota,
 session/presence, queue, archive, D1 visitor-ledger, or capability updates. The
 user-agent is inspected transiently and is never stored. Missing user-agent
 values and ordinary browsers keep the current acceptance path. Endpoint health
 continues to measure all HTTP requests; explicit application logs and feedback
-are unchanged. Production activation is pending review and release. The first
+are unchanged. Filtering reached 100% on October 1, 2026 at 06:25:40.421 UTC. Rejected bot batches are not retained, so the dashboard cannot query a Bots total or retroactively reclassify old events. The first
 complete India calendar day after activation is the earliest bot-filtered
 visitor qualification candidate; historical days, including October 1, are not
 retroactively classified.

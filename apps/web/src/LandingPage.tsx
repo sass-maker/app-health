@@ -8,7 +8,6 @@ import {
   Code2,
   MousePointer2,
   Radio,
-  Sparkles,
   Zap,
 } from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
@@ -57,14 +56,12 @@ function ProductPreview(): JSX.Element {
   return (
     <Card
       aria-label="Illustrative web analytics preview"
-      className="relative overflow-hidden border-border/80 bg-card/90 shadow-2xl shadow-black/15"
+      className="overflow-hidden border-border bg-card shadow-sm"
     >
-      <div className="absolute inset-x-0 top-0 h-px bg-primary/70" />
       <CardHeader className="flex flex-row items-center justify-between gap-4 border-b py-4">
         <div className="flex min-w-0 items-center gap-2.5">
-          <span className="relative flex size-2.5">
-            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-50" />
-            <span className="relative inline-flex size-2.5 rounded-full bg-emerald-400" />
+          <span className="flex size-2.5">
+            <span className="m-auto size-2 rounded-full bg-success" />
           </span>
           <CardTitle className="truncate text-sm">acme.app</CardTitle>
         </div>
@@ -112,11 +109,9 @@ function PreviewList({ label, rows }: { label: string; rows: string[][] }) {
 function Hero(): JSX.Element {
   return (
     <section className="relative overflow-hidden px-4 pb-20 pt-10 sm:px-6 sm:pb-28 sm:pt-16 lg:px-8">
-      <div aria-hidden="true" className="landing-grid absolute inset-0 opacity-60" />
       <div className="relative mx-auto max-w-7xl">
         <div className="max-w-4xl">
-          <Badge variant="secondary" className="mb-5 gap-2 px-3 py-1.5 font-medium">
-            <Sparkles className="size-3.5 text-primary" />
+          <Badge variant="secondary" className="mb-5 px-3 py-1.5 font-medium">
             For people shaping digital products
           </Badge>
           <h1 className="max-w-4xl text-balance text-4xl font-semibold leading-[0.98] tracking-[-0.055em] sm:text-6xl lg:text-[5rem]">
@@ -156,7 +151,7 @@ function Hero(): JSX.Element {
               key={point}
               className="inline-flex items-center gap-2 text-xs text-muted-foreground"
             >
-              <Check className="size-3.5 text-emerald-400" />
+              <Check className="size-3.5 text-muted-foreground" />
               {point}
             </span>
           ))}
@@ -213,7 +208,7 @@ function ProductSections(): JSX.Element {
             <Card key={feature.title} className="group bg-card/70 transition-colors hover:bg-card">
               <CardHeader className="pb-4">
                 <div className="flex items-center justify-between">
-                  <span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <span className="flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                     <feature.icon className="size-5" />
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">0{index + 1}</span>
@@ -259,12 +254,12 @@ function IntegrationSection(): JSX.Element {
             </a>
           </Button>
         </div>
-        <Card className="overflow-hidden bg-zinc-950 text-zinc-100 shadow-xl dark:bg-zinc-950">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-white/10 py-4">
-            <div className="flex items-center gap-2 text-xs text-zinc-400">
-              <span className="size-2 rounded-full bg-emerald-400" /> your-website.html
+        <Card className="overflow-hidden border bg-card text-card-foreground shadow-sm">
+          <CardHeader className="flex flex-row items-center justify-between border-b border-border py-4">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="size-2 rounded-full bg-success" /> your-website.html
             </div>
-            <Badge className="bg-white/10 text-zinc-300 hover:bg-white/10">Browser</Badge>
+            <Badge variant="secondary">Browser</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <pre className="overflow-x-auto p-5 text-xs leading-6 sm:p-7 sm:text-sm">
@@ -276,7 +271,7 @@ function IntegrationSection(): JSX.Element {
 
 window.appHealth.track('signup.completed')`}</code>
             </pre>
-            <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 px-5 py-4 text-xs text-zinc-400 sm:px-7">
+            <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border px-5 py-4 text-xs text-muted-foreground sm:px-7">
               <span className="inline-flex items-center gap-1.5">
                 <Zap className="size-3" /> Named events
               </span>
@@ -328,7 +323,7 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
   }, [props.fetchImpl, props.navigate]);
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b bg-background/90 backdrop-blur-xl">
+      <header className="sticky top-0 z-40 border-b bg-background">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
           <ProductBrand />
           <nav aria-label="Main navigation" className="ml-auto hidden items-center gap-6 md:flex">
