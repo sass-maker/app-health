@@ -715,7 +715,7 @@ function ProductLedger({
                       </span>
                     ) : null}
                   </TableCell>
-                  <TableCell className="tabular-nums">
+                  <TableCell className="whitespace-normal break-words tabular-nums">
                     {item?.browser_change === null || item?.browser_change === undefined ? (
                       <span
                         title={item?.comparison_reason ?? 'Comparison unavailable'}
