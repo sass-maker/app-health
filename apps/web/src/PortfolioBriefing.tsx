@@ -655,7 +655,7 @@ function ProductLedger({
                   onClick={() => changeSort('browser')}
                 />
               </TableHead>
-              <TableHead className="w-[8%]">
+              <TableHead className="w-[12%]">
                 <SortButton
                   label="Change"
                   active={sortKey === 'change'}
@@ -663,7 +663,7 @@ function ProductLedger({
                   onClick={() => changeSort('change')}
                 />
               </TableHead>
-              <TableHead className="w-[16%]">
+              <TableHead className="w-[12%]">
                 <SortButton
                   label="Actions"
                   active={sortKey === 'actions'}
