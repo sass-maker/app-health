@@ -30,8 +30,14 @@ Hosted feedback is **Not applicable** for the two remaining non-browser forms:
 The underlying evidence is Slow SERP's README and dossier, and War Chest's
 AGENTS.md, README, PRODUCT.md and dossier, reviewed October 3. Native telemetry
 and the private Fleet Social/Unified Portfolio rendered-screen checks retain
-the owner's existing deferrals. Site Health's local feedback-dialog render is
-tracked separately; source inclusion alone does not qualify its interaction.
+the owner's existing deferrals. Site Health's local feedback dialog was opened and closed in Chrome on October 3.
+The verified actual Astro layout and Projects template match current base
+`4896b522`; the clean release host is `d886fd5b`, whose dashboard client and CSS
+differ from current base. The shared Direct line dialog rendered required title
+and description, optional screenshot/contact fields, consent and submit controls.
+No form was submitted and private dashboard data was unavailable. This closes
+the local launcher/dialog interaction check, not full current-base dashboard
+acceptance or a durable submission proof.
 
 No exact browser day is sealed. October 4 India day is the earliest candidate,
 with earliest settlement October 6 at 00:01 IST, conditional on continuity,
