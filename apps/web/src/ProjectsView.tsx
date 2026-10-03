@@ -699,6 +699,15 @@ function briefingHealth(rows: WatchtowerRow[], reportAppIds: ReadonlySet<string>
   };
 }
 
+function reportHealthScope(report: DailyEngagementReportV1 | null) {
+  return report
+    ? {
+        appIds: new Set(report.products.map((product) => product.app_id)),
+        serverRequestsApplicability: reportServerApplicability(report),
+      }
+    : null;
+}
+
 export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
@@ -707,14 +716,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
     serverRequestsApplicability: Map<string, WatchtowerRow['serverRequestsApplicability']>;
   } | null>(null);
   const onDailyReport = useCallback((report: DailyEngagementReportV1 | null) => {
-    setReportScope(
-      report
-        ? {
-            appIds: new Set(report.products.map((product) => product.app_id)),
-            serverRequestsApplicability: reportServerApplicability(report),
-          }
-        : null,
-    );
+    setReportScope(reportHealthScope(report));
   }, []);
   const rows = useMemo(
     () =>
