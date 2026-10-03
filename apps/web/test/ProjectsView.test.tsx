@@ -292,13 +292,13 @@ it('scopes briefing health coverage to the daily report and keeps extra workspac
     '17/51 applicable measured · 55 report products · latest 24 hours · 1 issue outside report scope',
   );
   expect(screen.getByText('Product 0: High 5xx and slow requests')).toBeTruthy();
-  expect(screen.getByText('Product 50: High 5xx and slow requests')).toBeTruthy();
 
   fireEvent.click(screen.getByText('Request health and collection details'));
   const issues = screen
     .getByText('Request issues', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(issues).getByText('Workspace extra')).toBeTruthy();
+  expect(within(issues).getByText('Product 50')).toBeTruthy();
 });
 
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
