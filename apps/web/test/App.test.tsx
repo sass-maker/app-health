@@ -23,7 +23,7 @@ import type {
 const STORAGE_KEY = 'app-health-v0-project';
 
 function expectSelectedProject(name: string) {
-  expect(screen.getByRole('button', { name, exact: true })).toHaveAttribute('data-active', 'true');
+  expect(screen.getByRole('button', { name })).toHaveAttribute('data-active', 'true');
   expect(
     within(screen.getByRole('group', { name: 'Project context' })).getByText(name, { exact: true }),
   ).toBeVisible();
@@ -340,7 +340,7 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    await screen.findByRole('button', { name: 'alpha', exact: true });
+    await screen.findByRole('button', { name: 'alpha' });
     expectSelectedProject('alpha');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('app-alpha');
   });
@@ -355,8 +355,8 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    await screen.findByRole('button', { name: 'alpha', exact: true });
-    fireEvent.click(screen.getByRole('button', { name: 'beta', exact: true }));
+    await screen.findByRole('button', { name: 'alpha' });
+    fireEvent.click(screen.getByRole('button', { name: 'beta' }));
     expect(new URL(window.location.href).searchParams.get('project')).toBe('app-beta');
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 20));
@@ -382,7 +382,7 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app?project=app-alpha&environment=env-alpha#analytics');
     installFetch({ apps });
     render(<App />);
-    await screen.findByRole('button', { name: 'alpha', exact: true });
+    await screen.findByRole('button', { name: 'alpha' });
     expectSelectedProject('alpha');
     await act(async () => {
       window.history.pushState({}, '', '/app?project=app-beta&environment=env-beta#analytics');
@@ -410,7 +410,7 @@ describe('App Health V0 UI', () => {
         <App />
       </StrictMode>,
     );
-    await screen.findByRole('button', { name: 'alpha', exact: true });
+    await screen.findByRole('button', { name: 'alpha' });
     expectSelectedProject('alpha');
     // Production bootstrap reuses its inventory even under StrictMode effect replay.
     expect(
@@ -418,7 +418,7 @@ describe('App Health V0 UI', () => {
         ([input, init]) => String(input).endsWith('/v1/apps') && (init?.method ?? 'GET') === 'GET',
       ),
     ).toHaveLength(1);
-    fireEvent.click(screen.getByRole('button', { name: 'beta', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'beta' }));
     await waitFor(() => {
       expect(localStorage.getItem(STORAGE_KEY)).toContain('app-beta');
       expectSelectedProject('beta');
@@ -695,7 +695,7 @@ describe('App Health V0 UI', () => {
       expect(failureCall).toBeDefined();
     });
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
-    fireEvent.click(screen.getByRole('button', { name: 'polaris', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'polaris' }));
     expectSelectedProject('polaris');
     expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('staging');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-polaris-staging');
