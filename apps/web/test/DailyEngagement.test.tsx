@@ -138,6 +138,38 @@ it('shows browser counts, action intent, response receipts, sources, and applica
   expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('browser_visitor_unknown_reason=1');
 });
 
+it('shows unsupported response metrics as not applicable without hiding real feedback', async () => {
+  const daily = {
+    ...report,
+    products: report.products.map((product, index) => ({
+      ...product,
+      feedback_submitted: index === 0 ? 2 : null,
+      feedback_applicability: 'not_applicable',
+      newsletter_joins: null,
+      newsletter_applicability: 'not_applicable',
+      waitlist_joins: null,
+      waitlist_applicability: 'not_applicable',
+    })),
+  };
+  const fetch = vi.fn(async (input: RequestInfo | URL) =>
+    Response.json(String(input).includes('/portfolio-briefing') ? briefing : daily),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  const table = await screen.findByRole('table');
+  const atlas = within(table).getByText('atlas').closest('tr')!;
+  const beacon = within(table).getByText('beacon').closest('tr')!;
+  expect(within(atlas).getByText('Feedback').parentElement?.textContent).toContain('2');
+  expect(within(beacon).getByText('Feedback').parentElement?.textContent).toContain(
+    'Not applicable',
+  );
+  const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
+  expect(within(mobile).getAllByText('Replies + joins')[1]?.parentElement?.textContent).toContain(
+    'Not applicable',
+  );
+  expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('feedback_applicability=1');
+});
+
 it('makes every breakout available when more than two projects grow', async () => {
   const products = [0, 1, 2].map((index) => ({
     ...report.products[0],

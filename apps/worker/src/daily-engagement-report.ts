@@ -96,6 +96,7 @@ interface DailyCaptureCounts {
   rows: readonly DailyCaptureCountRow[];
   /** Catalog policy returned by SaaS Maker; absent on older compatible providers. */
   applicabilityByCatalogId?: Readonly<Record<string, CaptureApplicability>>;
+  feedbackApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
   nativeSessionsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
   browserVisitorsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
   serverRequestsApplicabilityByCatalogId?: Readonly<Record<string, MetricApplicability>>;
@@ -220,6 +221,10 @@ function validateDailyCaptureCounts(
     coverageStart: coverageStart as string | null,
     rows,
     applicabilityByCatalogId,
+    feedbackApplicabilityByCatalogId: parseMetricApplicability(
+      response.feedbackApplicabilityByCatalogId,
+      allowedIds,
+    ),
     nativeSessionsApplicabilityByCatalogId,
     browserVisitorsApplicabilityByCatalogId,
     serverRequestsApplicabilityByCatalogId,
@@ -596,7 +601,10 @@ function metricCount(
   counts: Partial<Record<MetricKind, number>> | undefined,
 ): number | null {
   const sourceCount = coveredCaptureCount(kind, input, row);
-  if (sourceCount !== null) return sourceCount;
+  const unsupportedFeedback =
+    kind === 'feedback' &&
+    input.captureCounts?.feedbackApplicabilityByCatalogId?.[row.catalog_id] === 'not_applicable';
+  if (sourceCount !== null && !(unsupportedFeedback && sourceCount === 0)) return sourceCount;
 
   // App Health log delivery is asynchronous, so a positive count is an observed
   // lower bound when the source aggregate is unavailable or does not cover it.
@@ -605,7 +613,7 @@ function metricCount(
 
   // A confirmed hook can establish zero only when the log source itself is the
   // authoritative measured surface. Never use that inference for fallback.
-  if (input.captureCountsRequested || !input.logsMeasured) return null;
+  if (unsupportedFeedback || input.captureCountsRequested || !input.logsMeasured) return null;
   const confirmed = input.confirmedLogMetricsByCatalogId?.[row.catalog_id] ?? [];
   return confirmed.includes(kind) ? (counts?.[kind] ?? 0) : null;
 }
@@ -646,6 +654,8 @@ function buildProductReport(
     cta_events: ctas,
     cta_status: productCtaStatus(row, ctas, input),
     feedback_submitted: feedback,
+    feedback_applicability:
+      input.captureCounts?.feedbackApplicabilityByCatalogId?.[row.catalog_id] ?? 'unknown',
     newsletter_joins: newsletter,
     newsletter_applicability: metricApplicability(
       input.captureCounts?.applicabilityByCatalogId?.[row.catalog_id],
@@ -858,8 +868,14 @@ export function dailyEngagementClientPayload(
   report: DailyEngagementReportV1,
   includeCaptureApplicability: boolean,
   includeBrowserVisitorUnknownReason = false,
+  includeFeedbackApplicability = false,
 ) {
-  if (includeCaptureApplicability && includeBrowserVisitorUnknownReason) return report;
+  if (
+    includeCaptureApplicability &&
+    includeBrowserVisitorUnknownReason &&
+    includeFeedbackApplicability
+  )
+    return report;
   return {
     ...report,
     products: report.products.map((row) => {
@@ -872,6 +888,7 @@ export function dailyEngagementClientPayload(
         delete legacyRow.server_requests_applicability;
       }
       if (!includeBrowserVisitorUnknownReason) delete legacyRow.browser_visitors_unknown_reason;
+      if (!includeFeedbackApplicability) delete legacyRow.feedback_applicability;
       return legacyRow;
     }),
   };

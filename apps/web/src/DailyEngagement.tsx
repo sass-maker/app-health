@@ -210,7 +210,7 @@ export function DailyEngagement(props: DailyEngagementProps): JSX.Element {
     setLoading(true);
     setError('');
     onReport?.(null);
-    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1`;
+    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1&feedback_applicability=1`;
     void fetch(url, {
       signal: controller.signal,
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},

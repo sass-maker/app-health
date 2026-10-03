@@ -729,6 +729,7 @@ async function handleDailyEngagementRoute(
         await measureOwnerRouteRead(timings, loadReport),
         url.searchParams.get('capture_applicability') === '1',
         url.searchParams.get('browser_visitor_unknown_reason') === '1',
+        url.searchParams.get('feedback_applicability') === '1',
       ),
       true,
     );
