@@ -1,6 +1,43 @@
 # Fleet engagement rollout: 55-product baseline (2026-09-28)
 
-## Current production state (verified 2026-09-30, Asia/Kolkata)
+## Current acceptance checkpoint (verified 2026-10-03, Asia/Kolkata)
+
+The signed-in October 2 daily report contains **55/55 products**, with reportable
+browser counts for **50 applicable products**, **48 measured primary-action
+products**, **47 newsletter-applicable products**, and no applicable waitlist
+offers. All 50 browser tracker activation proofs were written and independently
+read back on October 3; the five browser N/A products remain visible. These
+proofs establish verified activation, not a completed exact visitor day.
+
+App Health main `52c642e6c0406787a4b7b1becc1798194ab6caa6` is live at 100%.
+The request-health summary uses the same 55-product report cohort. Health is a
+rolling 24-hour measurement, separate from the selected completed engagement
+day; observed issues remain visible until their measurements recover.
+[Release and qualification receipt](https://github.com/sass-maker/app-health/issues/96#issuecomment-5968470971).
+
+Hosted feedback is **Not applicable** for the two remaining non-browser forms:
+
+- **Slow SERP:** a private local CLI/API support tool without a product UI.
+  Manual developer feedback uses its
+  [repository Issues](https://github.com/Significant-Hobbies/slow-serp/issues).
+  There is no hosted App Health submission surface; this does not assert zero
+  feedback or imply an in-product feedback form.
+- **War Chest:** a private single-owner offline game whose product instructions
+  prohibit runtime network calls and analytics. Owner playtest notes use its
+  private repository issue tracker. A local feedback export would be a separate
+  product feature, not part of hosted capture qualification.
+
+The underlying evidence is Slow SERP's README and dossier, and War Chest's
+AGENTS.md, README, PRODUCT.md and dossier, reviewed October 3. Native telemetry
+and the private Fleet Social/Unified Portfolio rendered-screen checks retain
+the owner's existing deferrals. Site Health's local feedback-dialog render is
+tracked separately; source inclusion alone does not qualify its interaction.
+
+No exact browser day is sealed. October 4 India day is the earliest candidate,
+with earliest settlement October 6 at 00:01 IST, conditional on continuity,
+late-delivery, Queue/DLQ, archive, retention and unsampled-control evidence.
+
+## Historical production snapshot (verified 2026-09-30, Asia/Kolkata)
 
 The Google-authenticated Daily briefing currently shows the completed **2026-09-29 Asia/Kolkata** day with **55/55 products**. Browser visitor counts are reportable for 48 products; ChatGPT Connections is Unknown because it has no qualifying analytics receipt, and CodeVetter is Unknown because its distinct-visitor group was sampled. Five products are Not applicable. Primary action counts are reportable for 47 products; CodeVetter is Unknown and seven products are Not applicable. Browser counts describe recognized browsers, not people, and action names describe the instrumented interaction rather than downstream completion.
 
