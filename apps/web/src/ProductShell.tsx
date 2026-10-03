@@ -89,26 +89,76 @@ export function ProductBrand(): JSX.Element {
     </a>
   );
 }
-function WorkspaceSidebar({
+type WorkspaceSidebarProps = Pick<
+  Props,
+  'view' | 'project' | 'projects' | 'onProject' | 'onView' | 'onAdd'
+>;
+
+function projectApps(projects: Project[]): Project[] {
+  return [...new Map(projects.map((item) => [item.appId, item])).values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+}
+
+function projectForApp(app: Project, current: Project, projects: Project[]): Project {
+  if (app.appId === current.appId) return current;
+  return (
+    projects.find((item) => item.appId === app.appId && item.environment === 'production') ?? app
+  );
+}
+
+function ProjectNavigation({
   view,
   project,
   projects,
   onProject,
   onView,
-  onAdd,
-}: Pick<Props, 'view' | 'project' | 'projects' | 'onProject' | 'onView' | 'onAdd'>): JSX.Element {
+}: WorkspaceSidebarProps): JSX.Element {
   const [query, setQuery] = useState('');
   const { setOpenMobile } = useSidebar();
-  const apps = useMemo(
-    () =>
-      [...new Map(projects.map((item) => [item.appId, item])).values()].sort((a, b) =>
-        a.name.localeCompare(b.name),
-      ),
-    [projects],
-  );
+  const apps = useMemo(() => projectApps(projects), [projects]);
   const matches = apps.filter((item) =>
     item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
+  return (
+    <SidebarGroup className="px-3">
+      <SidebarGroupLabel className="justify-between">
+        Projects <span className="tabular-nums">{apps.length}</span>
+      </SidebarGroupLabel>
+      <Input
+        aria-label="Search projects"
+        placeholder="Search projects…"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        className="mb-2 h-9"
+      />
+      <SidebarGroupContent>
+        <SidebarMenu>
+          {matches.map((app) => (
+            <SidebarMenuItem key={app.appId}>
+              <SidebarMenuButton
+                isActive={view !== 'overview' && project.appId === app.appId}
+                title={app.name}
+                onClick={() => {
+                  onProject(projectForApp(app, project, projects));
+                  if (view === 'overview') onView('analytics');
+                  setOpenMobile(false);
+                }}
+              >
+                <span className="truncate">{app.name}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
+        {!matches.length ? (
+          <p className="px-2 py-4 text-xs text-muted-foreground">No projects match your search.</p>
+        ) : null}
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
+}
+
+function WorkspaceSidebar(props: WorkspaceSidebarProps): JSX.Element {
   return (
     <Sidebar
       collapsible="offcanvas"
@@ -124,77 +174,41 @@ function WorkspaceSidebar({
         <NavigationGroup
           label="Workspace"
           items={[{ id: 'overview', label: 'Daily briefing', icon: Layers3 }]}
-          view={view}
-          onView={onView}
+          view={props.view}
+          onView={props.onView}
         />
-        <SidebarGroup className="px-3">
-          <SidebarGroupLabel className="justify-between">
-            Projects <span className="tabular-nums">{apps.length}</span>
-          </SidebarGroupLabel>
-          <Input
-            aria-label="Search projects"
-            placeholder="Search projects…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="mb-2 h-9"
-          />
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {matches.map((app) => (
-                <SidebarMenuItem key={app.appId}>
-                  <SidebarMenuButton
-                    isActive={view !== 'overview' && project.appId === app.appId}
-                    title={app.name}
-                    onClick={() => {
-                      const next =
-                        app.appId === project.appId
-                          ? project
-                          : (projects.find(
-                              (item) =>
-                                item.appId === app.appId && item.environment === 'production',
-                            ) ?? app);
-                      onProject(next);
-                      if (view === 'overview') onView('analytics');
-                      setOpenMobile(false);
-                    }}
-                  >
-                    <span className="truncate">{app.name}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-            {!matches.length ? (
-              <p className="px-2 py-4 text-xs text-muted-foreground">
-                No projects match your search.
-              </p>
-            ) : null}
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <div className="mt-auto px-3 pb-3">
-          <Button
-            variant="ghost"
-            className="w-full justify-start"
-            aria-label="Add another project"
-            onClick={() => {
-              window.appHealth?.track('project_add_started');
-              void window.appHealth?.flush?.();
-              onAdd();
-            }}
-          >
-            <Plus />
-            Add project
-          </Button>
-          <a
-            href="/#integration"
-            className="flex min-h-11 items-center gap-2 px-3 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <CircleHelp className="size-4" />
-            Help with setup
-            <ArrowUpRight className="ml-auto size-3" />
-          </a>
-        </div>
+        <ProjectNavigation {...props} />
+        <WorkspaceSidebarFooter onAdd={props.onAdd} />
       </SidebarContent>
     </Sidebar>
+  );
+}
+
+function WorkspaceSidebarFooter({ onAdd }: Pick<Props, 'onAdd'>): JSX.Element {
+  return (
+    <div className="mt-auto px-3 pb-3">
+      <Button
+        variant="ghost"
+        className="w-full justify-start"
+        aria-label="Add another project"
+        onClick={() => {
+          window.appHealth?.track('project_add_started');
+          void window.appHealth?.flush?.();
+          onAdd();
+        }}
+      >
+        <Plus />
+        Add project
+      </Button>
+      <a
+        href="/#integration"
+        className="flex min-h-11 items-center gap-2 px-3 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <CircleHelp className="size-4" />
+        Help with setup
+        <ArrowUpRight className="ml-auto size-3" />
+      </a>
+    </div>
   );
 }
 

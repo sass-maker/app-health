@@ -194,6 +194,24 @@ export interface AnalyticsReportProps {
   onFilter?: (key: keyof BrowserSegmentFilter, value: string) => void;
 }
 
+function VisitorMetric({ report }: Pick<AnalyticsReportProps, 'report'>): JSX.Element {
+  return (
+    <MetricCard
+      label="Visitors"
+      value={report.audience?.visitors ?? null}
+      note={
+        report.sampled
+          ? 'Browser-scoped · sampled lower bound'
+          : 'Recognized browsers in this period'
+      }
+      icon={Users}
+      previous={report.previous?.visitors}
+      sampled={report.sampled}
+      unique={true}
+    />
+  );
+}
+
 function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
   const { mode, report, selected, totals, active } = props;
   const showPageViews = mode === 'web' && !selected;
@@ -202,21 +220,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
     <div
       className={`grid grid-cols-2 gap-3 ${selected ? 'xl:grid-cols-3' : mode === 'web' ? 'xl:grid-cols-5' : 'xl:grid-cols-4'}`}
     >
-      {showPageViews ? (
-        <MetricCard
-          label="Visitors"
-          value={report.audience?.visitors ?? null}
-          note={
-            report.sampled
-              ? 'Browser-scoped · sampled lower bound'
-              : 'Recognized browsers in this period'
-          }
-          icon={Users}
-          previous={report.previous?.visitors}
-          sampled={report.sampled}
-          unique
-        />
-      ) : null}
+      {showPageViews ? <VisitorMetric report={report} /> : null}
       {showPageViews ? (
         <MetricCard
           tone="var(--chart-1)"
