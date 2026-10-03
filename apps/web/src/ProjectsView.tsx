@@ -628,7 +628,7 @@ function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
   );
 }
 
-function briefingHealth(rows: WatchtowerRow[]) {
+function briefingHealth(rows: WatchtowerRow[], reportAppIds: ReadonlySet<string> | null) {
   const byApp = new Map<string, WatchtowerRow>();
   for (const row of rows) {
     if (!byApp.has(row.project.appId) || row.project.environment === 'production')
@@ -675,27 +675,48 @@ function briefingHealth(rows: WatchtowerRow[]) {
       label: attentionLabel(row),
       p95_ms: row.health?.endpoints.metrics?.p95_ms ?? null,
       error_rate: row.health?.endpoints.metrics?.error_rate ?? null,
+      report_scoped: reportAppIds?.has(row.project.appId),
     })),
-    healthCoverage: {
-      measured: scoped.filter((row) =>
-        ['healthy', 'degraded', 'unhealthy'].includes(
-          row.health?.endpoints.metrics?.health_state ?? '',
-        ),
-      ).length,
-      applicable: scoped.filter((row) => !endpointNotApplicable(row)).length,
-      total: scoped.length,
-    },
+    healthCoverage: reportAppIds
+      ? {
+          measured: [...reportAppIds].filter((appId) => {
+            const row = byApp.get(appId);
+            return Boolean(
+              row &&
+              !endpointNotApplicable(row) &&
+              ['healthy', 'degraded', 'unhealthy'].includes(
+                row.health?.endpoints.metrics?.health_state ?? '',
+              ),
+            );
+          }).length,
+          applicable: [...reportAppIds].filter((appId) => {
+            const row = byApp.get(appId);
+            return !row || !endpointNotApplicable(row);
+          }).length,
+          total: reportAppIds.size,
+        }
+      : undefined,
   };
+}
+
+function reportHealthScope(report: DailyEngagementReportV1 | null) {
+  return report
+    ? {
+        appIds: new Set(report.products.map((product) => product.app_id)),
+        serverRequestsApplicability: reportServerApplicability(report),
+      }
+    : null;
 }
 
 export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
-  const [serverRequestsApplicability, setServerRequestsApplicability] = useState<
-    Map<string, WatchtowerRow['serverRequestsApplicability']>
-  >(new Map());
+  const [reportScope, setReportScope] = useState<{
+    appIds: Set<string>;
+    serverRequestsApplicability: Map<string, WatchtowerRow['serverRequestsApplicability']>;
+  } | null>(null);
   const onDailyReport = useCallback((report: DailyEngagementReportV1 | null) => {
-    setServerRequestsApplicability(reportServerApplicability(report));
+    setReportScope(reportHealthScope(report));
   }, []);
   const rows = useMemo(
     () =>
@@ -707,13 +728,16 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
         health: health.data?.environments.find(
           (item) => item.app_id === project.appId && item.environment_id === project.environmentId,
         ),
-        serverRequestsApplicability: serverRequestsApplicability.get(project.appId),
+        serverRequestsApplicability: reportScope?.serverRequestsApplicability.get(project.appId),
       })),
-    [projects, analytics.data, health.data, serverRequestsApplicability],
+    [projects, analytics.data, health.data, reportScope],
   );
   const now = health.data?.refreshed_at ?? analytics.data?.live.measured_at ?? Date.now();
 
-  const briefing = useMemo(() => briefingHealth(rows), [rows]);
+  const briefing = useMemo(
+    () => briefingHealth(rows, reportScope?.appIds ?? null),
+    [rows, reportScope],
+  );
 
   if (!projects.length) return <EmptyProjectsView />;
 
