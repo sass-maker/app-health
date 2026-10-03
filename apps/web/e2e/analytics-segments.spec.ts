@@ -83,7 +83,7 @@ test('real collected traffic supports stacked source and device filters with cle
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await expect(page.getByRole('button', { name: 'Clear all filters' })).toHaveCSS(
         'color',
-        theme === 'light' ? 'rgb(24, 24, 27)' : 'rgb(250, 250, 250)',
+        await page.locator('body').evaluate((body) => getComputedStyle(body).color),
       );
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,

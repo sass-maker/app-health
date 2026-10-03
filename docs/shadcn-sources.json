@@ -76,8 +76,8 @@
     "source": "https://ui.shadcn.com/r/styles/new-york-v4/sidebar.json",
     "upstreamSha256": "2ba1a9b9422f4172373f4cd0587b675d2331a41f4fa68f65dab2b23ca98fd9d2",
     "path": "apps/web/src/components/ui/sidebar.tsx",
-    "localSha256": "8c177422f7bdb836ff42cebd80da261ae1eeca506cef0fc41477f794593b77ca",
-    "adaptations": "Local relative imports and repository formatting; sidebar cookie persistence removed."
+    "localSha256": "d1fe0414cd4f3e0c40a5b6692ce2f9a61d4e2ea5a1f42c90c3e00f4f8bbe9ec8",
+    "adaptations": "Local relative imports and repository formatting; sidebar cookie persistence removed. Optional Sheet close-autofocus callback restores focus to the navigation trigger after mobile project selection."
   },
   {
     "component": "tooltip",

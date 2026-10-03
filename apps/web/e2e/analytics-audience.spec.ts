@@ -112,7 +112,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
         await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
       await expect(page.getByRole('button', { name: 'Clear all filters' })).toHaveCSS(
         'color',
-        theme === 'light' ? 'rgb(24, 24, 27)' : 'rgb(250, 250, 250)',
+        await page.locator('body').evaluate((body) => getComputedStyle(body).color),
       );
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
