@@ -180,6 +180,127 @@ it('uses catalog server applicability without hiding measured or out-of-report e
   expect(within(atlas).getByText('Unhealthy')).toBeTruthy();
 });
 
+it('scopes briefing health coverage to the daily report and keeps extra workspace issues visible', async () => {
+  const reportProducts = Array.from({ length: 55 }, (_, index) => ({
+    catalog_id: `catalog-${index}`,
+    app_id: `app-${index}`,
+    name: `Product ${index}`,
+    browser_visitors: null,
+    browser_visitors_applicability: 'unknown',
+    cta_events: [],
+    cta_status: 'unknown',
+    feedback_submitted: null,
+    newsletter_joins: null,
+    newsletter_applicability: 'unknown',
+    waitlist_joins: null,
+    waitlist_applicability: 'unknown',
+    native_sessions: null,
+    native_sessions_applicability: 'unknown',
+    api_activity: null,
+    server_requests_applicability: index < 50 ? 'applicable' : 'not_applicable',
+    freshness: { browser_last_seen: null, log_last_seen: null },
+    coverage: 'unknown',
+  }));
+  const report = {
+    schema: 'app-health.daily-engagement.v1',
+    schema_version: 1,
+    generated_at: now,
+    date: '2026-09-28',
+    timezone: 'Asia/Kolkata',
+    from: now - 86_400_000,
+    to: now,
+    product_count: reportProducts.length,
+    products: reportProducts,
+    sampled: false,
+    notes: [],
+  };
+  const inventory = [
+    ...reportProducts,
+    {
+      ...reportProducts[0],
+      app_id: 'workspace-extra',
+      catalog_id: 'workspace-extra',
+      name: 'Workspace extra',
+    },
+  ];
+  const measuredEnvironment = (
+    appId: string,
+    name: string,
+    state: 'healthy' | 'unhealthy' | null,
+  ) => ({
+    app_id: appId,
+    app_name: name,
+    environment_id: `prod-${appId}`,
+    environment_name: 'production',
+    analytics: { enabled: false, first_received_at: null, last_received_at: null },
+    endpoints: {
+      state:
+        state === null
+          ? appId.startsWith('app-') && Number(appId.slice(4)) >= 50
+            ? 'unconfigured'
+            : 'connected'
+          : 'connected',
+      runtime: 'worker',
+      first_received_at: state === null ? null : now - 100_000,
+      last_received_at: state === null ? null : now - 60_000,
+      metrics:
+        state === null
+          ? null
+          : {
+              request_count: 100,
+              error_count: state === 'unhealthy' ? 40 : 0,
+              error_rate: state === 'unhealthy' ? 0.4 : 0,
+              p95_ms: state === 'unhealthy' ? 2_500 : 100,
+              last_seen: now - 60_000,
+              health_state: state,
+            },
+    },
+  });
+  const healthResponse = {
+    ...health,
+    environments: [
+      ...inventory.map((product, index) =>
+        measuredEnvironment(
+          product.app_id,
+          product.name,
+          index < 12 || index === 50 || index === 55 ? 'unhealthy' : index < 16 ? 'healthy' : null,
+        ),
+      ),
+    ],
+  };
+  installFetch({
+    healthResponse: Response.json(healthResponse),
+    reportResponse: Response.json(report),
+  });
+  render(
+    <ProjectsView
+      projects={inventory.map((product) => ({
+        appId: product.app_id,
+        environmentId: `prod-${product.app_id}`,
+        name: product.name,
+        environment: 'production',
+      }))}
+      ownerToken="owner"
+      onOpen={() => {}}
+    />,
+  );
+
+  const summaryRegion = await screen.findByRole('region', { name: 'Selected day summary' });
+  const healthStat = within(summaryRegion).getByText('Measured health issues').parentElement!;
+  await waitFor(() => expect(healthStat.textContent).toContain('13'));
+  expect(healthStat.textContent).toContain(
+    '17/51 applicable measured · 55 report products · latest 24 hours · 1 issue outside report scope',
+  );
+  expect(screen.getByText('Product 0: High 5xx and slow requests')).toBeTruthy();
+  expect(screen.getByText('Product 50: High 5xx and slow requests')).toBeTruthy();
+
+  fireEvent.click(screen.getByText('Request health and collection details'));
+  const issues = screen
+    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+    .closest<HTMLElement>('[data-slot="card"]')!;
+  expect(within(issues).getByText('Workspace extra')).toBeTruthy();
+});
+
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-29T12:00:00.000Z'));

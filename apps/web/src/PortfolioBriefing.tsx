@@ -29,6 +29,7 @@ export interface PortfolioAttentionItem {
   label: string;
   p95_ms: number | null;
   error_rate: number | null;
+  report_scoped?: boolean;
 }
 
 export interface PortfolioHealthState {
@@ -350,11 +351,14 @@ function HealthCallout({
             {item.name}: {item.label}
           </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
+            {item.report_scoped === false ? 'Outside daily report scope · ' : ''}
             {item.p95_ms === null ? 'Latency unknown' : `p95 ${item.p95_ms.toLocaleString()} ms`}
             {item.error_rate === null
               ? ''
               : ` · ${(item.error_rate * 100).toFixed(1)}% request errors`}
-            {coverage ? ` · ${coverage.measured}/${coverage.applicable} measured` : ''}
+            {coverage
+              ? ` · report coverage ${coverage.measured}/${coverage.applicable} measured`
+              : ''}
           </span>
         </span>
       </span>
@@ -994,15 +998,22 @@ function Summary({
   const responsesUnknown = report.products.some((product) => responseCount(product) === null);
   const pageviewsEstimated =
     data?.products.some((row) => row.pageviews !== null && row.source_estimated) ?? false;
-  const healthValue = attentionItems.length
-    ? attentionItems.length.toLocaleString()
-    : !healthCoverage || (healthCoverage.applicable > 0 && healthCoverage.measured === 0)
-      ? 'Unknown'
-      : healthCoverage.applicable === 0
-        ? 'Not applicable'
-        : 'No measured issues';
+  const reportAttentionItems = attentionItems.filter((item) => item.report_scoped !== false);
+  const outsideReportIssues = attentionItems.filter((item) => item.report_scoped === false);
+  const outsideReportDetail = outsideReportIssues.length
+    ? ` · ${outsideReportIssues.length} issue${outsideReportIssues.length === 1 ? '' : 's'} outside report scope`
+    : '';
+  const healthValue = !healthCoverage
+    ? 'Unknown'
+    : reportAttentionItems.length
+      ? reportAttentionItems.length.toLocaleString()
+      : healthCoverage.applicable > 0 && healthCoverage.measured === 0
+        ? 'Unknown'
+        : healthCoverage.applicable === 0
+          ? 'Not applicable'
+          : 'No measured issues';
   const healthDetail = healthCoverage
-    ? `${healthCoverage.measured}/${healthCoverage.applicable} applicable measured · ${healthCoverage.total} in scope · latest 24 hours`
+    ? `${healthCoverage.measured}/${healthCoverage.applicable} applicable measured · ${healthCoverage.total} report products · latest 24 hours${outsideReportDetail}`
     : 'Coverage unknown · latest 24 hours';
   const downloadValue = downloadIntentEvents.length
     ? `${downloadIsApproximate ? '≈ ' : ''}${downloadIntent.toLocaleString()}`
@@ -1095,7 +1106,8 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
     () => (data?.products ?? []).filter((product) => product.breakout),
     [data],
   );
-  const attention = attentionItems[0];
+  const attention =
+    attentionItems.find((item) => item.report_scoped !== false) ?? attentionItems[0];
   const comparisonHint = data?.comparison_note ?? 'Comparison details are unavailable.';
   const open = (appId: string, focus: ProductFocus, source?: string) =>
     onOpenProduct?.(appId, focus, source, data?.date ?? date);
