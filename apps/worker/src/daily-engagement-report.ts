@@ -594,6 +594,17 @@ function coveredCaptureCount(
   );
 }
 
+function isUnsupportedFeedback(
+  kind: MetricKind,
+  input: DailyEngagementInputs,
+  row: CatalogProductRow,
+): boolean {
+  return (
+    kind === 'feedback' &&
+    input.captureCounts?.feedbackApplicabilityByCatalogId?.[row.catalog_id] === 'not_applicable'
+  );
+}
+
 function metricCount(
   kind: MetricKind,
   input: DailyEngagementInputs,
@@ -601,9 +612,7 @@ function metricCount(
   counts: Partial<Record<MetricKind, number>> | undefined,
 ): number | null {
   const sourceCount = coveredCaptureCount(kind, input, row);
-  const unsupportedFeedback =
-    kind === 'feedback' &&
-    input.captureCounts?.feedbackApplicabilityByCatalogId?.[row.catalog_id] === 'not_applicable';
+  const unsupportedFeedback = isUnsupportedFeedback(kind, input, row);
   if (sourceCount !== null && !(unsupportedFeedback && sourceCount === 0)) return sourceCount;
 
   // App Health log delivery is asynchronous, so a positive count is an observed
