@@ -97,6 +97,7 @@ describe('buildDailyEngagementReport', () => {
     });
     const legacy = dailyEngagementClientPayload(report, false);
     const oldRowSchema = DailyEngagementProductReportV1.omit({
+      feedback_applicability: true,
       newsletter_applicability: true,
       waitlist_applicability: true,
       native_sessions_applicability: true,
@@ -109,7 +110,10 @@ describe('buildDailyEngagementReport', () => {
       'browser_visitors_unknown_reason',
     );
     expect(legacy.products[0]).not.toHaveProperty('browser_visitors_unknown_reason');
-    expect(dailyEngagementClientPayload(report, true, true)).toEqual(report);
+    expect(dailyEngagementClientPayload(report, true, true).products[0]).not.toHaveProperty(
+      'feedback_applicability',
+    );
+    expect(dailyEngagementClientPayload(report, true, true, true)).toEqual(report);
     expect(DailyEngagementReportV1.parse(report)).toEqual(report);
   });
 
@@ -1073,6 +1077,43 @@ describe('composeDailyEngagementReport', () => {
       feedback_submitted: null,
       newsletter_joins: null,
       waitlist_joins: null,
+    });
+  });
+
+  it('does not report unsupported hosted feedback as zero and preserves positive submissions', async () => {
+    const report = await composeDailyEngagementReport({
+      db: new MockDatabase(catalog(3), []),
+      workspaceId: 'ws-1',
+      date: DAY,
+      now: NOW,
+      captureCountsService: {
+        async getDailyCaptureCounts() {
+          return {
+            coverageStart: DAY,
+            rows: [
+              { catalogId: 'product-000', feedback: 0, newsletter: 0, waitlist: 0 },
+              { catalogId: 'product-001', feedback: 2, newsletter: 0, waitlist: 0 },
+              { catalogId: 'product-002', feedback: 0, newsletter: 0, waitlist: 0 },
+            ],
+            feedbackApplicabilityByCatalogId: {
+              'product-000': 'not_applicable',
+              'product-001': 'not_applicable',
+            },
+          };
+        },
+      },
+    });
+    expect(report.products[0]).toMatchObject({
+      feedback_submitted: null,
+      feedback_applicability: 'not_applicable',
+    });
+    expect(report.products[1]).toMatchObject({
+      feedback_submitted: 2,
+      feedback_applicability: 'not_applicable',
+    });
+    expect(report.products[2]).toMatchObject({
+      feedback_submitted: 0,
+      feedback_applicability: 'unknown',
     });
   });
 

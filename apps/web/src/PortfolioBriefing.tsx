@@ -110,8 +110,19 @@ function responseCount(product: DailyProduct): number | null {
     : null;
 }
 
+function responseNotApplicable(product: DailyProduct): boolean {
+  return (
+    product.feedback_applicability === 'not_applicable' &&
+    product.newsletter_applicability === 'not_applicable' &&
+    product.waitlist_applicability === 'not_applicable'
+  );
+}
+
 function displayResponse(product: DailyProduct): string {
-  return formatNumber(responseCount(product));
+  return applicableCount(
+    responseCount(product),
+    responseNotApplicable(product) ? 'not_applicable' : 'unknown',
+  );
 }
 
 function actionCount(product: DailyProduct): number {
@@ -770,7 +781,13 @@ function ProductLedger({
                         Details
                       </summary>
                       <dl className="grid gap-1 pb-2">
-                        <Metric label="Feedback" value={formatNumber(product.feedback_submitted)} />
+                        <Metric
+                          label="Feedback"
+                          value={applicableCount(
+                            product.feedback_submitted,
+                            product.feedback_applicability ?? 'unknown',
+                          )}
+                        />
                         <Metric
                           label="Newsletter"
                           value={applicableCount(
@@ -988,7 +1005,9 @@ function Summary({
   const responseProducts = report.products.filter(
     (product) => responseCount(product) !== null,
   ).length;
-  const responsesUnknown = report.products.some((product) => responseCount(product) === null);
+  const responsesUnknown = report.products.some(
+    (product) => responseCount(product) === null && !responseNotApplicable(product),
+  );
   const pageviewsEstimated =
     data?.products.some((row) => row.pageviews !== null && row.source_estimated) ?? false;
   const reportAttentionItems = attentionItems.filter((item) => item.report_scoped !== false);

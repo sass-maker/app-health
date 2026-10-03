@@ -89,6 +89,8 @@ export const DailyEngagementProductReportV1 = z
     cta_status: z.enum(['measured', 'not_applicable', 'unknown']),
     /** Feedback submissions, or an observed App Health log lower bound when source data is unavailable. */
     feedback_submitted: z.number().int().min(0).nullable(),
+    /** Hosted feedback policy, independent of newsletter and waitlist eligibility. */
+    feedback_applicability: z.enum(['applicable', 'not_applicable', 'unknown']).optional(),
     /** Newsletter joins, or an observed App Health log lower bound when source data is unavailable. */
     newsletter_joins: z.number().int().min(0).nullable(),
     /** Capture policy applicability, separate from whether a count was measured. */
