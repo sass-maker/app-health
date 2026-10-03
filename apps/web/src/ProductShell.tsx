@@ -1,5 +1,5 @@
 import { type DashboardView } from './dashboard-navigation.js';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -110,7 +110,13 @@ function WorkspaceSidebar({
     item.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
   return (
-    <Sidebar collapsible="offcanvas">
+    <Sidebar
+      collapsible="offcanvas"
+      onCloseAutoFocus={(event) => {
+        event.preventDefault();
+        document.getElementById('workspace-navigation-trigger')?.focus();
+      }}
+    >
       <SidebarHeader className="px-4 py-4">
         <ProductBrand />
       </SidebarHeader>
@@ -237,8 +243,11 @@ function ProjectPicker({
 }: Pick<Props, 'project' | 'projects' | 'onProject' | 'view'>): JSX.Element {
   const environments = projects.filter((candidate) => candidate.appId === project.appId);
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      <span className="min-w-0 flex-1 truncate text-sm font-medium" title={project.name}>
+    <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
+      <span
+        className="min-w-0 flex-1 truncate text-sm font-medium"
+        title={view === 'overview' ? 'Portfolio' : project.name}
+      >
         {view === 'overview' ? 'Portfolio' : project.name}
       </span>
       {view !== 'overview' ? (
@@ -260,23 +269,10 @@ function ProjectPicker({
   );
 }
 
-function MobileFocusReturn({ triggerId }: { triggerId: string }) {
-  const { openMobile } = useSidebar();
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    const shouldRestore = wasOpen.current && !openMobile;
-    wasOpen.current = openMobile;
-    if (!shouldRestore) return;
-    const timer = window.setTimeout(() => document.getElementById(triggerId)?.focus(), 0);
-    return () => window.clearTimeout(timer);
-  }, [openMobile, triggerId]);
-  return null;
-}
 export function ProductShell(props: Props): JSX.Element {
   const triggerId = 'workspace-navigation-trigger';
   return (
     <SidebarProvider>
-      <MobileFocusReturn triggerId={triggerId} />
       <WorkspaceSidebar
         view={props.view}
         project={props.project}
