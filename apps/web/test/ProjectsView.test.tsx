@@ -294,11 +294,13 @@ it('scopes briefing health coverage to the daily report and keeps extra workspac
   expect(screen.getByText('Product 0: High 5xx and slow requests')).toBeTruthy();
 
   fireEvent.click(screen.getByText('Request health and collection details'));
-  const issues = screen
-    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+  const inventoryCard = screen
+    .getByText('Complete inventory', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;
-  expect(within(issues).getByText('Workspace extra')).toBeTruthy();
-  expect(within(issues).getByText('Product 50')).toBeTruthy();
+  const extraRow = within(inventoryCard).getByText('Workspace extra').closest('tr')!;
+  const measuredNaRow = within(inventoryCard).getByText('Product 50').closest('tr')!;
+  expect(within(extraRow).getByText('Unhealthy')).toBeTruthy();
+  expect(within(measuredNaRow).getByText('Unhealthy')).toBeTruthy();
 });
 
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
