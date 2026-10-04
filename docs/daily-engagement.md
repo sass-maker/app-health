@@ -105,8 +105,13 @@ deployment and live qualification are recorded separately from source checks.
 ## In-app alerts
 
 The owner-selected alert destination is the App Health Overview feed. It reads
-the latest 50 production `feedback.submitted`, `waitlist.join`, and
-`newsletter.subscribe` logs from the workspace's 30-day retention window,
+the latest 50 production error-level logs, warning-level `*.degraded` logs,
+and `feedback.submitted`, `waitlist.join`, and `newsletter.subscribe` logs
+from the workspace's 30-day retention window,
 refreshes every minute and when the tab regains focus, and shows only project,
-event, and time. Central SaaS Maker logs are mapped by exact catalog project ID
+event, level, source, and time. Browser and native claims retain their source
+labels. Error and degradation entries are visible even below the endpoint
+health calculation's 20-request threshold. They are retained occurrences,
+not automatically resolved incident states or a guarantee of notification
+delivery while the dashboard is closed. Central SaaS Maker logs are mapped by exact catalog project ID
 or slug. The feed never returns email, submission text, or log properties.

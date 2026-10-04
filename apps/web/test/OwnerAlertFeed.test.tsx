@@ -70,6 +70,46 @@ it('refreshes the feed and gives a retryable error when unavailable', async () =
   await waitFor(() => expect(screen.getByText('9 in retention')).toBeTruthy());
 });
 
+it('shows production failures and degradation with explicit source labels', async () => {
+  const healthFeed = {
+    generated_at: feed.generated_at,
+    total_count: 2,
+    entries: [
+      {
+        id: 'picker-failed',
+        app_id: 'app-memes',
+        catalog_id: 'meme-lab',
+        project_name: 'Meme Lab',
+        event: 'recommendation.failed',
+        level: 'error',
+        source: 'browser',
+        timestamp: Date.UTC(2026, 9, 4, 4),
+      },
+      {
+        id: 'picker-degraded',
+        app_id: 'app-memes',
+        catalog_id: 'meme-lab',
+        project_name: 'Meme Lab',
+        event: 'recommendation.degraded',
+        level: 'warn',
+        source: 'server',
+        timestamp: Date.UTC(2026, 9, 4, 3),
+      },
+    ],
+  };
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json(healthFeed)),
+  );
+  render(<OwnerAlertFeed ownerToken="owner-token" />);
+  expect(await screen.findByText('Production failure')).toBeTruthy();
+  expect(screen.getByText('Service degraded')).toBeTruthy();
+  expect(screen.getByText(/browser recommendation.failed/)).toBeTruthy();
+  expect(screen.getByText(/server recommendation.degraded/)).toBeTruthy();
+  expect(screen.getByText('2 in retention')).toBeTruthy();
+  expect(screen.queryByText('Newsletter subscription')).toBeNull();
+});
+
 it('times out a hung fetch, recovers on manual retry, and ignores its late response', async () => {
   vi.useFakeTimers();
   let resolveHungFetch!: (response: Response) => void;

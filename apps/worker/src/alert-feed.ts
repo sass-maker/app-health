@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './d1-adapter.js';
+import type { LogLevel, LogSource } from '@app-health/contracts';
 
 const ALERT_FEED_LIMIT = 50;
 const RETENTION_MS = 30 * 86_400_000;
@@ -8,7 +9,9 @@ interface OwnerAlert {
   app_id: string;
   catalog_id: string;
   project_name: string;
-  event: 'feedback.submitted' | 'waitlist.join' | 'newsletter.subscribe';
+  event: string;
+  level: LogLevel;
+  source: LogSource;
   timestamp: number;
 }
 
@@ -19,8 +22,8 @@ export interface OwnerAlertFeed {
 }
 
 /**
- * Read the latest owner-authored feedback, waitlist, and newsletter alert metadata for one
- * workspace. Submitted text, email, props, and other log fields are never read.
+ * Read recent production errors, degradation and response receipts for one
+ * workspace. Submitted text, email and arbitrary log properties are never returned.
  */
 export async function readOwnerAlertFeed(
   db: D1DatabaseLike,
@@ -34,7 +37,9 @@ export async function readOwnerAlertFeed(
       AND lower(e.name) = 'production'
     JOIN catalog_project_imports c
       ON c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
-    WHERE l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe')
+    WHERE (l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe')
+      OR l.level = 'error'
+      OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
       AND l.timestamp >= ? AND l.timestamp <= ?
       AND EXISTS (SELECT 1 FROM catalog_project_imports source
         WHERE source.workspace_id = ? AND source.app_id = l.app_id
@@ -63,7 +68,8 @@ export async function readOwnerAlertFeed(
   const entriesStatement = db
     .prepare(
       `SELECT l.log_id AS id, l.app_id AS app_id, c.catalog_id AS catalog_id,
-        c.catalog_name AS project_name, l.event AS event, l.timestamp AS timestamp
+        c.catalog_name AS project_name, l.event AS event, l.level AS level,
+        l.source AS source, l.timestamp AS timestamp
        ${scope}
        ORDER BY l.timestamp DESC, l.log_id DESC
        LIMIT ?`,
@@ -91,7 +97,9 @@ export async function readOwnerAlertFeed(
       app_id: String(row.app_id),
       catalog_id: String(row.catalog_id),
       project_name: String(row.project_name),
-      event: row.event as OwnerAlert['event'],
+      event: String(row.event),
+      level: row.level as LogLevel,
+      source: row.source as LogSource,
       timestamp: Math.max(0, Math.floor(Number(row.timestamp))),
     })),
   };
