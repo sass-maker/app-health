@@ -312,9 +312,12 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
   const daily = await screen.findByRole('heading', {
     name: /Monday, 28 Sept 2026/,
   });
-  const alerts = screen.getByText('Production failures and responses · separate from the selected day', {
-    selector: '[data-slot="card-title"]',
-  });
+  const alerts = screen.getByText(
+    'Production failures and responses · separate from the selected day',
+    {
+      selector: '[data-slot="card-title"]',
+    },
+  );
   fireEvent.click(screen.getByText('Request health and collection details'));
   const requestHealth = screen.getByRole('heading', { name: 'Request health' });
   const issues = screen.getByText('Request issues', { selector: '[data-slot="card-title"]' });
