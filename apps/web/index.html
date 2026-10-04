@@ -208,14 +208,29 @@
     </noscript>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      if (window.location.pathname === '/') {
+      if (window.location.pathname === '/' && !window.location.search.includes('demo=')) {
+        var footerTheme = 'dark';
+        try {
+          footerTheme = localStorage.getItem('app-health-theme') === 'light' ? 'light' : 'dark';
+        } catch {}
         for (var widget of [
-          ['https://sassmaker.com/project-strip.js', 'project', 'app-health'],
-          ['https://sassmaker.com/ai-chat-footer.js', 'name', 'App Health'],
+          {
+            src: 'https://sassmaker.com/project-strip.js?v=precise-b0adaa67',
+            project: 'app-health',
+          },
+          {
+            src: 'https://sassmaker.com/ai-chat-footer.js?v=precise-b0adaa67',
+            name: 'App Health',
+            project: 'app-health',
+          },
         ]) {
           var widgetScript = document.createElement('script');
-          widgetScript.src = widget[0];
-          widgetScript.dataset[widget[1]] = widget[2];
+          widgetScript.src = widget.src;
+          widgetScript.dataset.hostOnly = 'true';
+          widgetScript.dataset.theme = footerTheme;
+          widgetScript.dataset.surface = 'web';
+          if (widget.project) widgetScript.dataset.project = widget.project;
+          if (widget.name) widgetScript.dataset.name = widget.name;
           document.body.appendChild(widgetScript);
         }
       }

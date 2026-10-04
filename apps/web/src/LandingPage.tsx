@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { createElement, useEffect } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
@@ -321,6 +321,29 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
     void redirectSignedInLanding(props.fetchImpl ?? fetch, props.navigate, controller.signal);
     return () => controller.abort();
   }, [props.fetchImpl, props.navigate]);
+  useEffect(() => {
+    const syncFooterTheme = () => {
+      const theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+      document
+        .querySelectorAll<HTMLScriptElement>(
+          'script[src*="/project-strip.js"], script[src*="/ai-chat-footer.js"]',
+        )
+        .forEach((script) => {
+          script.dataset.theme = theme;
+        });
+      document.querySelector('fleet-footer-extension')?.setAttribute('theme', theme);
+      document
+        .querySelectorAll('portfolio-project-strip, ai-chat-footer, saas-maker-newsletter-capture')
+        .forEach((element) => element.setAttribute('theme', theme));
+    };
+    syncFooterTheme();
+    const observer = new MutationObserver(syncFooterTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background">
@@ -363,18 +386,57 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
         <IntegrationSection />
         <HonestStatus />
       </main>
-      <footer className="border-t px-4 py-8 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 text-xs text-muted-foreground sm:flex-row sm:items-center">
-          <ProductBrand />
-          <span>A Fleet product for people who build products.</span>
-          <a className="sm:ml-auto hover:text-foreground" href="/changelog">
-            Changelog
-          </a>
-          <a className="hover:text-foreground" href="/privacy">
-            Privacy
-          </a>
-        </div>
-      </footer>
+      {createElement(
+        'fleet-footer-extension',
+        {
+          'product-name': 'App Health',
+          'art-src': '/footer-art/app-health.webp',
+          'art-alt': 'Original App Health illustration',
+          'art-width': '2169',
+          'art-height': '725',
+          'art-position': '50% 50%',
+          'art-credit': 'Original illustration for App Health',
+          surface: 'web',
+          'font-base': '/fonts/fleet-footer-precise-v1/',
+          'data-fleet-footer-project': 'app-health',
+        },
+        <>
+          <div slot="cta" data-fleet-footer-cta className="flex flex-wrap items-center gap-4 py-6">
+            <a
+              className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+              href="/app"
+              data-app-health-event="dashboard_opened"
+            >
+              Open App Health
+            </a>
+            <a
+              className="min-h-11 py-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+              href="#product"
+            >
+              Explore the product
+            </a>
+          </div>
+          <footer
+            slot="navigation"
+            data-fleet-footer-navigation
+            className="flex w-full flex-col gap-4 text-xs text-muted-foreground sm:flex-row sm:items-center"
+          >
+            <ProductBrand />
+            <span>A Fleet product for people who build products.</span>
+            <nav
+              aria-label="Footer navigation"
+              className="flex flex-wrap gap-x-5 gap-y-2 sm:ml-auto"
+            >
+              <a className="min-h-11 py-3 hover:text-foreground" href="/changelog">
+                Changelog
+              </a>
+              <a className="min-h-11 py-3 hover:text-foreground" href="/privacy">
+                Privacy
+              </a>
+            </nav>
+          </footer>
+        </>,
+      )}
     </div>
   );
 }
