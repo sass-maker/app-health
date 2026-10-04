@@ -11,7 +11,8 @@ describe('readOwnerAlertFeed', () => {
         CREATE TABLE catalog_project_imports
           (workspace_id TEXT, catalog_id TEXT, catalog_name TEXT, app_id TEXT, lifecycle TEXT);
         CREATE TABLE log_events
-          (log_id TEXT, app_id TEXT, environment_id TEXT, timestamp INTEGER, event TEXT, props TEXT);
+          (log_id TEXT, app_id TEXT, environment_id TEXT, timestamp INTEGER, event TEXT, props TEXT,
+            level TEXT NOT NULL DEFAULT 'info', source TEXT NOT NULL DEFAULT 'server');
         INSERT INTO environments VALUES
           ('prod-a', 'app-a', 'production'), ('stage-a', 'app-a', 'staging'),
           ('prod-b', 'app-b', 'production'), ('prod-maker', 'saas-maker', 'production');
@@ -20,7 +21,9 @@ describe('readOwnerAlertFeed', () => {
           ('ws-a', 'saas-maker', 'SaaS Maker', 'saas-maker', 'active'),
           ('ws-a', 'retired', 'Retired', 'app-old', 'retired'),
           ('ws-b', 'other', 'Other', 'app-b', 'active');`);
-      const insert = sqlite.prepare('INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?)');
+      const insert = sqlite.prepare(
+        'INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, props) VALUES (?, ?, ?, ?, ?, ?)',
+      );
       insert.run(
         'feedback-1',
         'app-a',
@@ -72,6 +75,110 @@ describe('readOwnerAlertFeed', () => {
         '{"project":"not-in-catalog"}',
       );
       insert.run('expired-1', 'app-a', 'prod-a', 1_600_000_000_000, 'feedback.submitted', '{}');
+      const insertAlert = sqlite.prepare('INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const alerts: Array<[string, string, string, number, string, string, string, string]> = [
+        [
+          'browser-error',
+          'app-a',
+          'prod-a',
+          1_700_000_000_610,
+          'recommendation.failed',
+          '{"prompt":"private"}',
+          'error',
+          'browser',
+        ],
+        [
+          'server-degraded',
+          'app-a',
+          'prod-a',
+          1_700_000_000_620,
+          'recommendation.degraded',
+          '{"body":"private"}',
+          'warn',
+          'server',
+        ],
+        [
+          'server-error',
+          'app-a',
+          'prod-a',
+          1_700_000_000_630,
+          'endpoint.failed',
+          '{"headers":"private"}',
+          'error',
+          'server',
+        ],
+        [
+          'native-error',
+          'app-a',
+          'prod-a',
+          1_700_000_000_640,
+          'runtime.error',
+          '{"email":"private"}',
+          'error',
+          'native',
+        ],
+        [
+          'unrelated-warning',
+          'app-a',
+          'prod-a',
+          1_700_000_000_660,
+          'cache.miss',
+          '{}',
+          'warn',
+          'server',
+        ],
+        [
+          'info-degraded',
+          'app-a',
+          'prod-a',
+          1_700_000_000_670,
+          'recommendation.degraded',
+          '{}',
+          'info',
+          'server',
+        ],
+        [
+          'staging-error',
+          'app-a',
+          'stage-a',
+          1_700_000_000_680,
+          'endpoint.failed',
+          '{}',
+          'error',
+          'server',
+        ],
+        [
+          'foreign-error',
+          'app-b',
+          'prod-b',
+          1_700_000_000_690,
+          'endpoint.failed',
+          '{"project":"atlas"}',
+          'error',
+          'server',
+        ],
+        [
+          'future-error',
+          'app-a',
+          'prod-a',
+          1_700_000_000_710,
+          'endpoint.failed',
+          '{}',
+          'error',
+          'server',
+        ],
+        [
+          'expired-error',
+          'app-a',
+          'prod-a',
+          1_600_000_000_000,
+          'endpoint.failed',
+          '{}',
+          'error',
+          'server',
+        ],
+      ];
+      for (const alert of alerts) insertAlert.run(...alert);
 
       const db = {
         batch: vi.fn(async (statements: Array<{ all(): Promise<{ results: unknown[] }> }>) =>
@@ -102,14 +209,40 @@ describe('readOwnerAlertFeed', () => {
       expect(db.batch).toHaveBeenCalledTimes(1);
       expect(result).toEqual({
         generated_at: now,
-        total_count: 4,
+        total_count: 8,
         entries: [
+          expect.objectContaining({
+            id: 'native-error',
+            event: 'runtime.error',
+            level: 'error',
+            source: 'native',
+          }),
+          expect.objectContaining({
+            id: 'server-error',
+            event: 'endpoint.failed',
+            level: 'error',
+            source: 'server',
+          }),
+          expect.objectContaining({
+            id: 'server-degraded',
+            event: 'recommendation.degraded',
+            level: 'warn',
+            source: 'server',
+          }),
+          expect.objectContaining({
+            id: 'browser-error',
+            event: 'recommendation.failed',
+            level: 'error',
+            source: 'browser',
+          }),
           {
             id: 'central-known',
             app_id: 'saas-maker',
             catalog_id: 'atlas',
             project_name: 'Atlas',
             event: 'feedback.submitted',
+            level: 'info',
+            source: 'server',
             timestamp: 1_700_000_000_500,
           },
           {
@@ -118,6 +251,8 @@ describe('readOwnerAlertFeed', () => {
             catalog_id: 'atlas',
             project_name: 'Atlas',
             event: 'newsletter.subscribe',
+            level: 'info',
+            source: 'server',
             timestamp: 1_700_000_000_400,
           },
           {
@@ -126,14 +261,17 @@ describe('readOwnerAlertFeed', () => {
             catalog_id: 'atlas',
             project_name: 'Atlas',
             event: 'waitlist.join',
+            level: 'info',
+            source: 'server',
             timestamp: 1_700_000_000_100,
           },
           expect.objectContaining({ id: 'feedback-1' }),
         ],
       });
       expect(JSON.stringify(result)).not.toContain('private');
+      expect(result.total_count).toBeLessThan(20);
       const limited = await readOwnerAlertFeed(db, 'ws-a', now, 2);
-      expect(limited.total_count).toBe(4);
+      expect(limited.total_count).toBe(8);
       expect(limited.entries).toEqual(result.entries.slice(0, 2));
     } finally {
       sqlite.close();
