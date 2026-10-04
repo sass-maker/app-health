@@ -16,12 +16,20 @@ export interface DailyCtaPolicy {
   qualification: 'verified' | 'candidate_only' | 'unknown' | 'not_applicable';
 }
 
-/** Production browser-ingest receipts observed on 2026-09-28. */
+/** Initial production browser-ingest receipts observed on 2026-09-28. */
 const firstQualifiedIndiaDay = '2026-09-28';
+/** Anchor's renamed click was received during this India day; retain both names on cutover. */
+const anchorClickCutoverIndiaDay = '2026-10-05';
+const historicalAnchorEvents = [
+  'testflight_status_opened',
+  'how_it_works_opened',
+  'mac_beta_downloaded',
+] as const;
 /** Hooks were activated during September 28; silence is measurable from the next full day. */
 export const DAILY_CTA_FULL_DAY_START = '2026-09-29';
+/** Current names; dailyCtaEventNamesForDate preserves the qualified historical names. */
 const verifiedAppHealthEvents: Readonly<Record<string, readonly string[]>> = {
-  anchor: ['testflight_status_opened', 'how_it_works_opened', 'mac_beta_downloaded'],
+  anchor: ['testflight_status_opened', 'how_it_works_opened', 'mac_beta_download_clicked'],
   'agent-testing': ['tools_catalog_opened', 'experiment_results_opened'],
   'ai-game': ['play_now_clicked', 'game.begin.clicked'],
   'anime-list': ['cta_search', 'cta_discover', 'cta_stats'],
@@ -108,7 +116,7 @@ const candidateNames: Readonly<Record<string, string>> = {
   'sarthakagrawal-personal': 'projects_opened',
   'field-track': 'manager_dashboard_opened',
   'reddit-insights': 'source_thread_opened',
-  anchor: 'mac_beta_downloaded',
+  anchor: 'mac_beta_download_clicked',
   storagedaddy: 'source_opened',
   browserdaddy: 'release_status_opened',
   performancedaddy: 'source_opened',
@@ -188,5 +196,13 @@ export const DAILY_CTA_REPORT_EVENT_NAMES: Readonly<Record<string, readonly stri
 export function dailyCtaEventNamesForDate(
   date: string,
 ): Readonly<Record<string, readonly string[]>> {
-  return date >= firstQualifiedIndiaDay ? DAILY_CTA_REPORT_EVENT_NAMES : {};
+  if (date < firstQualifiedIndiaDay) return {};
+  if (date > anchorClickCutoverIndiaDay) return DAILY_CTA_REPORT_EVENT_NAMES;
+  return {
+    ...DAILY_CTA_REPORT_EVENT_NAMES,
+    anchor:
+      date === anchorClickCutoverIndiaDay
+        ? [...historicalAnchorEvents, 'mac_beta_download_clicked']
+        : historicalAnchorEvents,
+  };
 }

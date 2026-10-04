@@ -50,7 +50,7 @@ describe('daily CTA policy', () => {
 
   it('reports only App Health events with production ingest receipts', () => {
     expect(DAILY_CTA_REPORT_EVENT_NAMES).toEqual({
-      anchor: ['testflight_status_opened', 'how_it_works_opened', 'mac_beta_downloaded'],
+      anchor: ['testflight_status_opened', 'how_it_works_opened', 'mac_beta_download_clicked'],
       'agent-testing': ['tools_catalog_opened', 'experiment_results_opened'],
       'ai-game': ['play_now_clicked', 'game.begin.clicked'],
       'anime-list': ['cta_search', 'cta_discover', 'cta_stats'],
@@ -107,6 +107,28 @@ describe('daily CTA policy', () => {
 
   it('leaves days before the first production qualification unknown', () => {
     expect(dailyCtaEventNamesForDate('2026-09-27')).toEqual({});
-    expect(dailyCtaEventNamesForDate('2026-09-28')).toEqual(DAILY_CTA_REPORT_EVENT_NAMES);
+    expect(dailyCtaEventNamesForDate('2026-09-28').anchor).toEqual([
+      'testflight_status_opened',
+      'how_it_works_opened',
+      'mac_beta_downloaded',
+    ]);
+  });
+  it('preserves legacy Anchor counts and both click names on the cutover day', () => {
+    const historical = dailyCtaEventNamesForDate('2026-10-04');
+    const cutover = dailyCtaEventNamesForDate('2026-10-05');
+    const current = dailyCtaEventNamesForDate('2026-10-06');
+    expect(historical.anchor).toEqual([
+      'testflight_status_opened',
+      'how_it_works_opened',
+      'mac_beta_downloaded',
+    ]);
+    expect(cutover.anchor).toEqual([...historical.anchor!, 'mac_beta_download_clicked']);
+    expect(current).toEqual(DAILY_CTA_REPORT_EVENT_NAMES);
+    expect(current.anchor).not.toContain('mac_beta_downloaded');
+    for (const catalogId of Object.keys(current).filter((id) => id !== 'anchor')) {
+      expect(historical[catalogId]).toEqual(current[catalogId]);
+      expect(cutover[catalogId]).toEqual(current[catalogId]);
+    }
+    expect(DAILY_CTA_POLICY.anchor?.clarityCandidate).toBe('mac_beta_download_clicked');
   });
 });

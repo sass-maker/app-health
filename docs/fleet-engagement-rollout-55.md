@@ -191,3 +191,17 @@ The [55-row capability matrix](fleet-engagement-capability-matrix.csv) is the or
 ## Qualification ledger
 
 Source hints above need review in the owning checkout. For every product, record exact source path, local check, production activation authorization, timestamped accepted ingest response, and matching authenticated App Health dashboard count. Keep non-live integrations labelled dark. No 55-product completion claim follows from this baseline.
+
+## Anchor click naming cutover (2026-10-05)
+
+The Anchor landing now emits `mac_beta_download_clicked`. A real CTA click from
+its production homepage appeared in the authenticated App Health Events report
+on October 5, after the landing release. This is a QA ingestion receipt, not
+organic demand, a completed DMG download, or an installation.
+
+The September 28 receipt and earlier completed reports retain the legacy
+`mac_beta_downloaded` name; it always represented a click. The October 5 India-day
+report accepts both names so clicks before and after the deployment are retained.
+From October 6, the qualified policy uses only the new click name, alongside
+Anchor's unchanged TestFlight and how-it-works actions. Other products' event
+qualification dates and names are unchanged.

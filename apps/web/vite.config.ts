@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 interface LocalWorkerModule {
   default: {
@@ -29,7 +30,7 @@ function localWorkerApi(): Plugin {
       server.middlewares.use('/v1', (request, response) => {
         void (async () => {
           workerModule ??= server.ssrLoadModule(
-            '/@fs/' + new URL('../worker/src/index.ts', import.meta.url).pathname,
+            '/@fs/' + fileURLToPath(new URL('../worker/src/index.ts', import.meta.url)),
           ) as Promise<LocalWorkerModule>;
           const worker = (await workerModule).default;
           const chunks: Uint8Array[] = [];
