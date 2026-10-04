@@ -26,6 +26,22 @@ jobs:
       - run: pnpm --filter @app-health/web exec playwright install --with-deps chromium
       - run: pnpm run check
       - run: node --test scripts/verify-local-sdk.mjs
+      - name: Package production release candidate
+        run: |
+          pnpm run build:production
+          pnpm --filter @app-health/worker exec wrangler deploy --env="" --dry-run --outdir ../../.release/worker
+          git rev-parse HEAD > .release/source-sha.txt
+      - name: Retain exact-source production package
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-package-${{ github.sha }}
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            .release/worker/
+            .release/source-sha.txt
+            apps/web/dist/
 
   go:
     name: Go (test, vet)
