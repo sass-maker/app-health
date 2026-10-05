@@ -2,6 +2,30 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @custom-variant dark (&:is(.dark *));
+@font-face {
+  font-family: 'Fleet Footer Geist';
+  src: url('/fonts/fleet-footer-precise-v1/geist.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Fleet Footer Geist Mono';
+  src: url('/fonts/fleet-footer-precise-v1/geistmono.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+fleet-footer-extension {
+  --fleet-footer-signature-font: 'Fleet Footer Geist', ui-sans-serif, sans-serif;
+  font-family: 'Fleet Footer Geist', ui-sans-serif, sans-serif;
+}
+fleet-footer-extension [data-fleet-footer-navigation] {
+  font-family: 'Fleet Footer Geist', ui-sans-serif, sans-serif;
+}
+fleet-footer-extension [data-fleet-footer-navigation] code {
+  font-family: 'Fleet Footer Geist Mono', ui-monospace, monospace;
+}
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

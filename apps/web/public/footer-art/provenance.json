@@ -1,0 +1,17 @@
+{
+  "asset": "app-health.webp",
+  "credit": "Original illustration for App Health",
+  "original": {
+    "format": "PNG",
+    "sha256": "4bdf13819c60aca7f25f2fa12ba5b4b45bb5395764856ff80575800054ab5b22",
+    "width": 2169,
+    "height": 725
+  },
+  "derivative": {
+    "format": "WebP",
+    "sha256": "d89c904afcbb6b379ecdb0aeb394609af83c63f1703f637dec6df5e5fde08886",
+    "bytes": 1057598,
+    "width": 2169,
+    "height": 725
+  }
+}

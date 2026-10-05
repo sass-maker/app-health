@@ -1,0 +1,27 @@
+{
+  "accessed": "2026-10-04",
+  "purpose": "Local App Health mirror of the owner-selected Precise footer typography; runtime loads no Google Fonts resources.",
+  "fonts": [
+    {
+      "family": "Geist",
+      "asset": "geist.woff2",
+      "source": "https://fonts.gstatic.com/s/geist/v5/gyByhwUxId8gMEwcGFU.woff2",
+      "license": "geist-OFL.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/geist/OFL.txt",
+      "sha256": "19f9c92546aa300c312235e3125af1b81394d8db9a4bc4a425cd5b641d2d54e1",
+      "bytes": 29400,
+      "axes": { "wght": [100, 900] }
+    },
+    {
+      "family": "Geist Mono",
+      "asset": "geistmono.woff2",
+      "source": "https://fonts.gstatic.com/s/geistmono/v6/or3yQ6H-1_WfwkMZI_qYPLs1a-t7PU0AbeE9KK5U5Ck.woff2",
+      "license": "geistmono-OFL.txt",
+      "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/geistmono/OFL.txt",
+      "sha256": "3f98383b122fe015a48536cd4a1cda855a201718923ffe74931a01597107b9b5",
+      "bytes": 9864,
+      "axes": {}
+    }
+  ],
+  "runtimePolicy": "Local font paths are intended; browser network loading remains unverified."
+}
