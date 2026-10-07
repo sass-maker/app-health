@@ -1,0 +1,32 @@
+name: Dependency lock artifact
+
+on:
+  push:
+    branches:
+      - codex/apphealth92-owner-timing-20261007
+
+permissions:
+  contents: read
+
+jobs:
+  lockfile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.2
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Generate lockfile only
+        run: pnpm install --lockfile-only --ignore-scripts --no-frozen-lockfile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-health-pnpm-lock
+          path: pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 1
