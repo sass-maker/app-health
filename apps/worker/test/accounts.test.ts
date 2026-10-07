@@ -362,6 +362,122 @@ describe('Google account boundary with real D1 SQL', () => {
     );
   });
 
+  it('authorizes endpoint reads from the requested app in a large real-D1 workspace', async () => {
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/account', { headers: { cookie: aliceCookie } }),
+      env,
+    );
+    expect(identity).not.toBeNull();
+    const workspaceId = identity!.workspace.id;
+    const current = await env
+      .DB!.prepare('SELECT COUNT(*) AS count FROM workspace_apps WHERE workspace_id = ?')
+      .bind(workspaceId)
+      .first<{ count: number }>();
+    const additionalApps = Math.max(0, 56 - (current?.count ?? 0));
+    for (let index = 0; index < additionalApps; index++) {
+      const appId = `alice-scope-fixture-${index}`;
+      await env
+        .DB!.prepare('INSERT INTO apps (id, name, created_at) VALUES (?, ?, ?)')
+        .bind(appId, `Scope fixture ${index}`, index)
+        .run();
+      await env
+        .DB!.prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+        .bind(appId, workspaceId)
+        .run();
+    }
+    const fixtureSize = await env
+      .DB!.prepare('SELECT COUNT(*) AS count FROM workspace_apps WHERE workspace_id = ?')
+      .bind(workspaceId)
+      .first<{ count: number }>();
+    expect(fixtureSize?.count).toBe(56);
+
+    const statements: string[] = [];
+    const db = env.DB!;
+    const countedDb = new Proxy(db, {
+      get(target, key, receiver) {
+        if (key === 'prepare')
+          return (sql: string) => {
+            statements.push(sql);
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const provider = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ data: [] }));
+    let archivedFixtureMutated = false;
+    try {
+      const owned = await worker.fetch(
+        new Request(
+          `https://dashboard.example.com/v1/endpoints?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+          { headers: { cookie: aliceCookie } },
+        ),
+        { ...env, DB: countedDb },
+      );
+      expect(owned.status).toBe(200);
+      const scopeReads = statements.filter((sql) => /FROM workspaces w/.test(sql));
+      expect(scopeReads).toHaveLength(1);
+      expect(scopeReads[0]).toContain('EXISTS (');
+      expect(scopeReads[0]).toContain('wa.app_id = ?');
+      expect(scopeReads[0]).toContain('a.archived_at IS NULL');
+      expect(scopeReads[0]).not.toContain('LEFT JOIN workspace_apps');
+
+      const foreign = await request(
+        `/v1/endpoints?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+        bobCookie,
+      );
+      expect(foreign.status).toBe(403);
+
+      await env
+        .DB!.prepare('UPDATE apps SET archived_at = ? WHERE id = ?')
+        .bind(Date.now(), aliceApp.app.id)
+        .run();
+      archivedFixtureMutated = true;
+      const archived = await request(
+        `/v1/endpoints?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+      );
+      expect(archived.status).toBe(403);
+
+      expect((await request('/v1/endpoints')).status).toBe(400);
+      expect(
+        (await request(`/v1/endpoints?app_id=&environment_id=${aliceApp.environment.id}`)).status,
+      ).toBe(400);
+
+      const auth = createAccountAuth(env)!;
+      const authContext = await auth.$context;
+      const firstUser = await authContext.internalAdapter.createUser(
+        { name: 'first-session', email: 'first-session@example.com', emailVerified: true },
+        { method: 'oauth' },
+      );
+      const firstSession = await authContext.internalAdapter.createSession(firstUser.id, false);
+      const signature = await makeSignature(firstSession.token, env.BETTER_AUTH_SECRET!);
+      const firstCookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${firstSession.token}.${signature}`)}`;
+      const firstRequest = await request(
+        `/v1/endpoints?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+        firstCookie,
+      );
+      expect(firstRequest.status).toBe(403);
+      const firstWorkspace = await request('/v1/account', firstCookie);
+      expect(firstWorkspace.status).toBe(200);
+      const firstWorkspaceBody = (await firstWorkspace.json()) as { workspace: { id: string } };
+      expect(firstWorkspaceBody.workspace.id).toBeTruthy();
+    } finally {
+      provider.mockRestore();
+      if (archivedFixtureMutated)
+        await env
+          .DB!.prepare('UPDATE apps SET archived_at = NULL WHERE id = ?')
+          .bind(aliceApp.app.id)
+          .run();
+      for (let index = 0; index < additionalApps; index++) {
+        const appId = `alice-scope-fixture-${index}`;
+        await env.DB!.prepare('DELETE FROM workspace_apps WHERE app_id = ?').bind(appId).run();
+        await env.DB!.prepare('DELETE FROM apps WHERE id = ?').bind(appId).run();
+      }
+    }
+  });
+
   it('loads capability scope and setup with one D1 read after live session validation', async () => {
     const expectedIdentity = await accountIdentity(
       new Request('https://dashboard.example.com/v1/account', {

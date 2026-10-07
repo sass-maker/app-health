@@ -254,6 +254,25 @@ async function workspaceAndApps(db: D1DatabaseLike, userId: string, includeEnvir
   return results;
 }
 
+async function workspaceAndRequestedApp(db: D1DatabaseLike, userId: string, appId: string) {
+  return db
+    .prepare(
+      `SELECT w.id AS workspace_id, w.name AS workspace_name,
+              EXISTS (
+                SELECT 1
+                FROM workspace_apps wa
+                JOIN apps a ON a.id = wa.app_id
+                WHERE wa.workspace_id = w.id
+                  AND wa.app_id = ?
+                  AND a.archived_at IS NULL
+              ) AS has_app
+       FROM workspaces w
+       WHERE w.owner_id = ?`,
+    )
+    .bind(appId, userId)
+    .first<{ workspace_id: string; workspace_name: string; has_app: number }>();
+}
+
 export async function accountIdentity(
   request: Request,
   env: AccountBindings,
@@ -261,6 +280,7 @@ export async function accountIdentity(
   timings?: OwnerRequestTimings,
   includeApps = false,
   capabilityScope?: { appId: string; environmentId: string },
+  requestedAppId?: string,
 ): Promise<{
   owner: OwnerIdentity;
   workspace: Workspace;
@@ -305,6 +325,26 @@ export async function accountIdentity(
         appIds: scoped.appIds,
       },
       capabilitySetup: scoped.setup,
+    };
+  }
+
+  if (requestedAppId) {
+    const workspaceScopeStarted = performance.now();
+    let workspaceRow = await workspaceAndRequestedApp(env.DB, session.user.id, requestedAppId);
+    if (!workspaceRow) {
+      await personalWorkspace(env.DB, session.user.id, () => onSignup?.(session.user.id));
+      workspaceRow = await workspaceAndRequestedApp(env.DB, session.user.id, requestedAppId);
+    }
+    if (timings) timings.workspaceScopeMs = performance.now() - workspaceScopeStarted;
+    if (!workspaceRow) throw new Error('Workspace could not be read');
+    return {
+      workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
+      owner: {
+        id: session.user.id,
+        label: session.user.name,
+        workspaceId: workspaceRow.workspace_id,
+        appIds: workspaceRow.has_app ? [requestedAppId] : [],
+      },
     };
   }
 
