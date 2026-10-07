@@ -171,7 +171,7 @@ describe('Google account boundary with real D1 SQL', () => {
         expect(response.status).toBe(200);
         expect(response.headers.get('cache-control')).toBe('no-store');
         expect(response.headers.get('server-timing')).toMatch(
-          /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}$/,
+          /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, workspace_scope;dur=\d+\.\d{2}, route_read;dur=\d+\.\d{2}, owner_handler_total;dur=\d+\.\d{2}$/,
         );
         await expect(response.json()).resolves.toEqual({ products: [], marker: 'cached-briefing' });
         expect(cache.match).toHaveBeenCalledTimes(1);
