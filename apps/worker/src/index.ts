@@ -954,6 +954,7 @@ async function handleAccountOwner(
       '/v1/workspace/alerts',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
+  const ownerHandlerStarted = timings ? performance.now() : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';
   const capabilityScope = requestedCapabilityScope(request, path, url);
   const account = await accountIdentity(
@@ -984,6 +985,8 @@ async function handleAccountOwner(
       ...(capabilityScope ? { preloadedCapabilitySetup: account.capabilitySetup ?? null } : {}),
     },
   );
+  if (timings && ownerHandlerStarted !== undefined)
+    timings.ownerHandlerTotalMs = performance.now() - ownerHandlerStarted;
   return withOwnerServerTiming(response, timings);
 }
 
