@@ -957,6 +957,10 @@ async function handleAccountOwner(
   const ownerHandlerStarted = timings ? performance.now() : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';
   const capabilityScope = requestedCapabilityScope(request, path, url);
+  const requestedEndpointAppId =
+    request.method === 'GET' && path === '/v1/endpoints'
+      ? url.searchParams.get('app_id') || undefined
+      : undefined;
   const account = await accountIdentity(
     request,
     env,
@@ -968,6 +972,7 @@ async function handleAccountOwner(
     timings,
     includeApps,
     capabilityScope,
+    requestedEndpointAppId,
   );
   if (!account || !env.DB) return json(401, { error: 'sign in required' }, true);
   if (url.pathname === '/v1/account' && request.method === 'GET')
