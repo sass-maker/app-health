@@ -566,7 +566,7 @@ describe('Google account boundary with real D1 SQL', () => {
   });
 
   it('returns anonymous Server-Timing stages only on authenticated owner read paths', async () => {
-    const apps = await request('/v1/apps');
+    const apps = await request('/v1/apps?private_marker=not-for-timing');
     const capabilities = await request(
       `/v1/capabilities?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
     );
@@ -587,7 +587,7 @@ describe('Google account boundary with real D1 SQL', () => {
     const analyticsReport = await request('/v1/analytics/report');
     const alerts = await request('/v1/workspace/alerts');
     const timingPattern =
-      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, (?:workspace_scope;dur=\d+\.\d{2}|workspace_capability_setup_read;dur=\d+\.\d{2})(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}$/;
+      /^auth_setup;dur=\d+\.\d{2}, session_lookup;dur=\d+\.\d{2}, session_db_read;dur=\d+\.\d{2}, (?:workspace_scope;dur=\d+\.\d{2}|workspace_capability_setup_read;dur=\d+\.\d{2})(?:, apps_projection;dur=\d+\.\d{2})?(?:, capability_setup_read;dur=\d+\.\d{2})?, route_read;dur=\d+\.\d{2}, owner_handler_total;dur=\d+\.\d{2}$/;
     for (const [response, status] of [
       [apps, 200],
       [capabilities, 200],
@@ -603,12 +603,34 @@ describe('Google account boundary with real D1 SQL', () => {
       expect(header).not.toContain('user_db_read');
       expect(header).not.toContain(aliceApp.app.id);
       expect(header).not.toContain(aliceCookie);
+      expect(header).not.toContain('alice@example.com');
+      expect(header).not.toContain('not-for-timing');
+      expect(header).not.toMatch(/SELECT|FROM/i);
     }
     expect(capabilities.headers.get('server-timing')).toContain(
       'workspace_capability_setup_read;dur=',
     );
     expect(capabilities.headers.get('server-timing')).not.toMatch(/, capability_setup_read;/);
+    const appsTiming = apps.headers.get('server-timing') ?? '';
+    const appsStages = [
+      'workspace_scope;',
+      'apps_projection;',
+      'route_read;',
+      'owner_handler_total;',
+    ];
+    for (let index = 0; index < appsStages.length; index++) {
+      expect(appsTiming).toContain(appsStages[index]);
+      if (index > 0)
+        expect(appsTiming.indexOf(appsStages[index - 1]!)).toBeLessThan(
+          appsTiming.indexOf(appsStages[index]!),
+        );
+    }
     expect(apps.headers.get('server-timing')).not.toContain('capability_setup_read');
+    expect(capabilities.headers.get('server-timing')).not.toContain('apps_projection');
+    const duration = (name: string) =>
+      Number(new RegExp(name + ';dur=(\\d+\\.\\d{2})').exec(appsTiming)?.[1]);
+    expect(duration('owner_handler_total')).toBeGreaterThanOrEqual(duration('route_read'));
+    expect(duration('owner_handler_total')).toBeGreaterThanOrEqual(duration('apps_projection'));
 
     const unauthenticated = await worker.fetch(
       new Request('https://dashboard.example.com/v1/apps'),

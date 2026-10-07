@@ -102,6 +102,8 @@ export interface OwnerRequestTimings {
   analyticsEngagementMs?: number;
   analyticsExitsMs?: number;
   analyticsReportAssemblyMs?: number;
+  appsProjectionMs?: number;
+  ownerHandlerTotalMs?: number;
   routeReadMs?: number;
 }
 
@@ -169,6 +171,7 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['session_db_read', timings.sessionDbReadMs],
     ['user_db_read', timings.userDbReadMs],
     ['workspace_scope', timings.workspaceScopeMs],
+    ['apps_projection', timings.appsProjectionMs],
     ['workspace_capability_setup_read', timings.workspaceCapabilitySetupReadMs],
     ['capability_setup_read', timings.capabilitySetupReadMs],
     ['analytics_cache_lookup', timings.analyticsCacheLookupMs],
@@ -183,6 +186,7 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['analytics_exits', timings.analyticsExitsMs],
     ['analytics_report_assembly', timings.analyticsReportAssemblyMs],
     ['route_read', timings.routeReadMs],
+    ['owner_handler_total', timings.ownerHandlerTotalMs],
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)
     .map(([name, milliseconds]) => `${name};dur=${milliseconds.toFixed(2)}`);
@@ -313,6 +317,7 @@ export async function accountIdentity(
   if (timings) timings.workspaceScopeMs = performance.now() - workspaceScopeStarted;
   const workspaceRow = rows[0];
   if (!workspaceRow) throw new Error('Workspace could not be read');
+  const appsProjectionStarted = includeApps && timings ? performance.now() : undefined;
   const appsById = new Map<string, AppEnvironmentV1>();
   if (includeApps) {
     for (const row of rows) {
@@ -334,15 +339,19 @@ export async function accountIdentity(
         });
     }
   }
+  const projectedApps = includeApps ? [...appsById.values()] : undefined;
+  const appIds = [...new Set(rows.flatMap((row) => (row.app_id === null ? [] : [row.app_id])))];
+  if (appsProjectionStarted !== undefined && timings)
+    timings.appsProjectionMs = performance.now() - appsProjectionStarted;
   return {
     workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
     owner: {
       id: session.user.id,
       label: session.user.name,
       workspaceId: workspaceRow.workspace_id,
-      appIds: [...new Set(rows.flatMap((row) => (row.app_id === null ? [] : [row.app_id])))],
+      appIds,
     },
-    ...(includeApps ? { apps: [...appsById.values()] } : {}),
+    ...(includeApps ? { apps: projectedApps ?? [] } : {}),
   };
 }
 
