@@ -119,6 +119,7 @@ function fixtureInsights(report: ReturnType<typeof fixtureReport>) {
   return {
     date: report.date,
     timezone: 'Asia/Kolkata',
+    traffic: 'non_bot',
     generated_at: Date.now(),
     comparison_note: 'QA fixture: illustrative comparable gains, not live telemetry.',
     filter_note: 'QA fixture: source attribution is illustrative.',

@@ -1,5 +1,6 @@
 import {
   PortfolioBriefingV1,
+  type BriefingTraffic,
   type DailyEngagementReportV1,
   type PortfolioBriefingV1 as PortfolioBriefingData,
 } from '@app-health/contracts';
@@ -51,6 +52,51 @@ interface PortfolioBriefingProps {
   attentionItems?: PortfolioAttentionItem[];
   healthCoverage?: PortfolioHealthCoverage;
   projectHealth?: Record<string, PortfolioHealthState>;
+}
+
+const TRAFFIC_OPTIONS: { id: BriefingTraffic; label: string }[] = [
+  { id: 'non_bot', label: 'Non-bot' },
+  { id: 'bots', label: 'Bots' },
+  { id: 'all', label: 'All' },
+];
+
+const NOT_RETAINED = 'Not retained';
+
+/** Bot counters keep pageviews by source only; browser and action metrics are non-bot. */
+function nonBotMetric(traffic: BriefingTraffic, value: string): string {
+  return traffic === 'bots' ? NOT_RETAINED : value;
+}
+
+function TrafficSelector({
+  traffic,
+  onChange,
+}: {
+  traffic: BriefingTraffic;
+  onChange: (traffic: BriefingTraffic) => void;
+}): JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <div role="group" aria-label="Traffic" className="flex gap-2">
+        {TRAFFIC_OPTIONS.map((option) => (
+          <Button
+            key={option.id}
+            type="button"
+            variant={traffic === option.id ? 'secondary' : 'outline'}
+            className="min-h-11"
+            aria-pressed={traffic === option.id}
+            onClick={() => onChange(option.id)}
+          >
+            {option.label}
+          </Button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {traffic === 'non_bot'
+          ? 'Known bots excluded; unrecognized automation can remain.'
+          : 'Pageviews and sources include known bots. Browsers and actions stay non-bot only.'}
+      </p>
+    </div>
+  );
 }
 
 function formatNumber(value: number | null): string {
@@ -169,7 +215,7 @@ function healthLabel(
     : { label: 'Unknown', tone: 'muted' };
 }
 
-function usePortfolioBriefing(ownerToken: string, date: string) {
+function usePortfolioBriefing(ownerToken: string, date: string, traffic: BriefingTraffic) {
   const [data, setData] = useState<PortfolioBriefingData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -191,10 +237,13 @@ function usePortfolioBriefing(ownerToken: string, date: string) {
       }
     }, 10_000);
 
-    void fetch(`/v1/reports/portfolio-briefing?date=${encodeURIComponent(date)}`, {
-      signal: controller.signal,
-      headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
-    })
+    void fetch(
+      `/v1/reports/portfolio-briefing?date=${encodeURIComponent(date)}&traffic=${traffic}`,
+      {
+        signal: controller.signal,
+        headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
+      },
+    )
       .then(async (response) => {
         if (!response.ok) throw new Error(`Portfolio sources returned ${response.status}`);
         return PortfolioBriefingV1.parse(await response.json());
@@ -218,7 +267,7 @@ function usePortfolioBriefing(ownerToken: string, date: string) {
       clearTimeout(timeout);
       controller.abort();
     };
-  }, [date, ownerToken, retry]);
+  }, [date, ownerToken, retry, traffic]);
 
   return { data, loading, error, retry: () => setRetry((value) => value + 1) };
 }
@@ -468,7 +517,9 @@ function valueForSort(
   product: DailyProduct,
   row: PortfolioBriefingData['products'][number] | undefined,
   key: SortKey,
+  traffic: BriefingTraffic,
 ): number | null {
+  if (traffic === 'bots' && (key === 'browser' || key === 'actions')) return null;
   if (key === 'browser') return product.browser_visitors;
   if (key === 'change') return row?.browser_change ?? null;
   if (key === 'actions') return product.cta_status === 'measured' ? actionCount(product) : null;
@@ -510,9 +561,11 @@ function ProductLedger({
   sourceFilter,
   setSourceFilter,
   onOpenProduct,
+  traffic,
 }: {
   report: DailyEngagementReportV1;
   data: PortfolioBriefingData | null;
+  traffic: BriefingTraffic;
   attentionItems: PortfolioAttentionItem[];
   projectHealth?: Record<string, PortfolioHealthState>;
   query: string;
@@ -548,15 +601,15 @@ function ProductLedger({
         return true;
       })
       .sort((left, right) => {
-        const l = valueForSort(left, byApp.get(left.app_id), sortKey);
-        const r = valueForSort(right, byApp.get(right.app_id), sortKey);
+        const l = valueForSort(left, byApp.get(left.app_id), sortKey, traffic);
+        const r = valueForSort(right, byApp.get(right.app_id), sortKey, traffic);
         if (l === null && r !== null) return 1;
         if (l !== null && r === null) return -1;
         if (l !== null && r !== null && l !== r)
           return (l - r) * (sortDirection === 'asc' ? 1 : -1);
         return left.name.localeCompare(right.name);
       });
-  }, [report, byApp, attentionIds, filter, query, sourceFilter, sortDirection, sortKey]);
+  }, [report, byApp, attentionIds, filter, query, sourceFilter, sortDirection, sortKey, traffic]);
 
   const changeSort = (key: SortKey) => {
     if (sortKey === key) setSortDirection((direction) => (direction === 'asc' ? 'desc' : 'asc'));
@@ -697,11 +750,13 @@ function ProductLedger({
               const source = item?.sources_status === 'measured' ? item.top_sources[0] : undefined;
               const health = healthLabel(product.app_id, projectHealth, attentionItems);
               const actionValue =
-                product.cta_status === 'not_applicable'
-                  ? 'Not applicable'
-                  : product.cta_status === 'measured'
-                    ? `${product.cta_events.some((event) => event.estimated) ? 'Approx. ' : ''}${formatNumber(actionCount(product))} events`
-                    : 'Unknown';
+                traffic === 'bots'
+                  ? NOT_RETAINED
+                  : product.cta_status === 'not_applicable'
+                    ? 'Not applicable'
+                    : product.cta_status === 'measured'
+                      ? `${product.cta_events.some((event) => event.estimated) ? 'Approx. ' : ''}${formatNumber(actionCount(product))} events`
+                      : 'Unknown';
               return (
                 <TableRow key={product.app_id} className="border-border/60">
                   <TableCell className="whitespace-normal">
@@ -717,11 +772,14 @@ function ProductLedger({
                     </button>
                   </TableCell>
                   <TableCell className="whitespace-normal tabular-nums">
-                    {applicableCount(
-                      product.browser_visitors,
-                      product.browser_visitors_applicability,
+                    {nonBotMetric(
+                      traffic,
+                      applicableCount(
+                        product.browser_visitors,
+                        product.browser_visitors_applicability,
+                      ),
                     )}
-                    {browserVisitorReason(product) ? (
+                    {traffic !== 'bots' && browserVisitorReason(product) ? (
                       <span className="mt-1 block text-xs text-muted-foreground">
                         {browserVisitorReason(product)}
                       </span>
@@ -866,9 +924,12 @@ function ProductLedger({
               <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t pt-3 text-xs">
                 <Metric
                   label="Browsers"
-                  value={applicableCount(
-                    product.browser_visitors,
-                    product.browser_visitors_applicability,
+                  value={nonBotMetric(
+                    traffic,
+                    applicableCount(
+                      product.browser_visitors,
+                      product.browser_visitors_applicability,
+                    ),
                   )}
                 />
                 <Metric
@@ -878,11 +939,13 @@ function ProductLedger({
                 <Metric
                   label="Actions"
                   value={
-                    product.cta_status === 'measured'
-                      ? `${product.cta_events.some((event) => event.estimated) ? 'Approx. ' : ''}${formatNumber(actionCount(product))}`
-                      : product.cta_status === 'not_applicable'
-                        ? 'Not applicable'
-                        : 'Unknown'
+                    traffic === 'bots'
+                      ? NOT_RETAINED
+                      : product.cta_status === 'measured'
+                        ? `${product.cta_events.some((event) => event.estimated) ? 'Approx. ' : ''}${formatNumber(actionCount(product))}`
+                        : product.cta_status === 'not_applicable'
+                          ? 'Not applicable'
+                          : 'Unknown'
                   }
                 />
                 <Metric label="Replies + joins" value={displayResponse(product)} />
@@ -964,14 +1027,23 @@ function HealthBadge({ state }: { state: PortfolioHealthState }): JSX.Element {
   );
 }
 
+const BOT_IDENTITY_DETAIL = 'Bot counters keep pageviews by source only';
+const PAGEVIEW_LABEL: Record<BriefingTraffic, string> = {
+  non_bot: 'Browser pageviews',
+  bots: 'Bot pageviews',
+  all: 'All pageviews',
+};
+
 function Summary({
   report,
   data,
+  traffic,
   attentionItems,
   healthCoverage,
 }: {
   report: DailyEngagementReportV1;
   data: PortfolioBriefingData | null;
+  traffic: BriefingTraffic;
   attentionItems: PortfolioAttentionItem[];
   healthCoverage?: PortfolioHealthCoverage;
 }): JSX.Element {
@@ -1011,6 +1083,7 @@ function Summary({
   );
   const pageviewsEstimated =
     data?.products.some((row) => row.pageviews !== null && row.source_estimated) ?? false;
+  const nonBotSuffix = traffic === 'all' ? ' · non-bot only' : '';
   const reportAttentionItems = attentionItems.filter((item) => item.report_scoped !== false);
   const outsideReportIssues = attentionItems.filter((item) => item.report_scoped === false);
   const outsideReportDetail = outsideReportIssues.length
@@ -1037,12 +1110,19 @@ function Summary({
       <div className="grid grid-cols-2 gap-x-5 sm:grid-cols-3 xl:grid-cols-6">
         <Stat
           label="Known browser counts"
-          value={browserProducts ? browserCounts.toLocaleString() : 'Unknown'}
-          detail={`${browserProducts} products with reportable counts · scopes may overlap`}
+          value={nonBotMetric(
+            traffic,
+            browserProducts ? browserCounts.toLocaleString() : 'Unknown',
+          )}
+          detail={
+            traffic === 'bots'
+              ? BOT_IDENTITY_DETAIL
+              : `${browserProducts} products with reportable counts · scopes may overlap${nonBotSuffix}`
+          }
           tone="sky"
         />
         <Stat
-          label="Browser pageviews"
+          label={PAGEVIEW_LABEL[traffic]}
           value={data && pageviewProducts ? formatNumber(pageviews) : 'Unknown'}
           detail={
             data
@@ -1052,18 +1132,27 @@ function Summary({
         />
         <Stat
           label="Primary action events"
-          value={
+          value={nonBotMetric(
+            traffic,
             measuredActionProducts
               ? `${actionEstimated ? '≈ ' : ''}${namedActionCount.toLocaleString()}`
-              : 'Unknown'
+              : 'Unknown',
+          )}
+          detail={
+            traffic === 'bots'
+              ? BOT_IDENTITY_DETAIL
+              : `${measuredActionProducts} products with measured actions · events, not people${nonBotSuffix}`
           }
-          detail={`${measuredActionProducts} products with measured actions · events, not people`}
           tone="green"
         />
         <Stat
           label="Download intent"
-          value={downloadValue}
-          detail={`${downloadIntentEvents.length ? `${downloadIntentEvents.length} named event${downloadIntentEvents.length === 1 ? '' : 's'}` : 'No named download event'} · clicks, not completions`}
+          value={nonBotMetric(traffic, downloadValue)}
+          detail={
+            traffic === 'bots'
+              ? BOT_IDENTITY_DETAIL
+              : `${downloadIntentEvents.length ? `${downloadIntentEvents.length} named event${downloadIntentEvents.length === 1 ? '' : 's'}` : 'No named download event'} · clicks, not completions${nonBotSuffix}`
+          }
           tone="green"
         />
         <Stat
@@ -1111,7 +1200,8 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
     healthCoverage,
     projectHealth,
   } = props;
-  const { data, loading, error, retry } = usePortfolioBriefing(ownerToken, date);
+  const [traffic, setTraffic] = useState<BriefingTraffic>('non_bot');
+  const { data, loading, error, retry } = usePortfolioBriefing(ownerToken, date, traffic);
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [showAllBreakouts, setShowAllBreakouts] = useState(false);
@@ -1127,9 +1217,17 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
 
   return (
     <div className="space-y-8 sm:space-y-10">
+      <TrafficSelector
+        traffic={traffic}
+        onChange={(next) => {
+          setTraffic(next);
+          setSourceFilter(null);
+        }}
+      />
       <Summary
         report={report}
         data={data}
+        traffic={traffic}
         attentionItems={attentionItems}
         healthCoverage={healthCoverage}
       />
@@ -1215,6 +1313,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
       <ProductLedger
         report={report}
         data={data}
+        traffic={traffic}
         attentionItems={attentionItems}
         projectHealth={projectHealth}
         query={query}

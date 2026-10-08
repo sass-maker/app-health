@@ -1,5 +1,6 @@
 import { isBot } from 'isbot';
 import { browserMetadata } from './browser-metadata.js';
+import { writeBotCounter } from './browser-bot-counters.js';
 import { measureOwnerRouteRead, type OwnerRequestTimings } from './accounts.js';
 import { readPublicJson } from './public-body.js';
 import {
@@ -55,15 +56,16 @@ const UNSAFE_BROWSER_PATH = /[@?#\\\s]/;
 const json = (status: number, body: unknown) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
 
-function isBrowserBot(request: Request): boolean {
+function browserBotClass(request: Request): 'verified' | 'user_agent' | null {
   const cloudflare = request.cf as
     { botManagement?: { verifiedBot?: unknown }; verifiedBotCategory?: unknown } | undefined;
-  return (
+  if (
     cloudflare?.botManagement?.verifiedBot === true ||
     (typeof cloudflare?.verifiedBotCategory === 'string' &&
-      cloudflare.verifiedBotCategory.length > 0) ||
-    isBot(request.headers.get('user-agent'))
-  );
+      cloudflare.verifiedBotCategory.length > 0)
+  )
+    return 'verified';
+  return isBot(request.headers.get('user-agent')) ? 'user_agent' : null;
 }
 
 function cors(request: Request, response: Response): Response {
@@ -132,7 +134,12 @@ async function collectBrowser(
   const key = await repos.publicKeys?.verifyPublicKey(input.public_key);
   if (!key || !key.allowed_origins.includes(request.headers.get('origin') ?? ''))
     return json(403, { error: 'browser key or origin rejected' });
-  if (isBrowserBot(request)) return json(200, { ignored: true });
+  const botClass = browserBotClass(request);
+  if (botClass) {
+    // Known bots stay out of every browser report; retain only a counter.
+    writeBotCounter(env.BROWSER_ANALYTICS, key, input, botClass, now);
+    return json(200, { ignored: true });
+  }
   const quota = await repos.publicKeys!.consumeBrowserQuota(
     `analytics:${key.id}`,
     Math.floor(now / 60_000) * 60_000,
