@@ -79,7 +79,7 @@ export function ProductBrand(): JSX.Element {
   return (
     <a
       href="/"
-      className="flex items-center gap-2.5 text-sm font-semibold tracking-tight"
+      className="flex shrink-0 items-center gap-2.5 whitespace-nowrap text-sm font-semibold tracking-tight"
       aria-label="App Health home"
     >
       <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
