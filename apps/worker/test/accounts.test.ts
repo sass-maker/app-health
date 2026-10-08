@@ -126,7 +126,7 @@ describe('Google account boundary with real D1 SQL', () => {
   }
 
   it.each([
-    ['portfolio-briefing', 'portfolio-briefing-v1'],
+    ['portfolio-briefing', 'portfolio-briefing-v2'],
     ['daily-engagement', 'daily-briefing-v2'],
   ])(
     'serves cached %s after owner authentication with private timing stages',

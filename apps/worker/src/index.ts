@@ -31,6 +31,7 @@ import {
 } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { readPortfolioBriefing } from './portfolio-briefing.js';
+import { writeBotCounterHeartbeat } from './browser-bot-counters.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
@@ -40,6 +41,7 @@ import {
   type BrowserEnvironment,
 } from './browser-routes.js';
 import {
+  BriefingTraffic,
   CreateAppRequestV1,
   CatalogImportRequestV1,
   DEFAULT_FAILURE_QUERY_LIMIT,
@@ -664,6 +666,13 @@ function dailyReportError(error: unknown): Response {
   );
 }
 
+function briefingTraffic(url: URL): BriefingTraffic {
+  const traffic = BriefingTraffic.safeParse(url.searchParams.get('traffic') ?? 'non_bot');
+  if (!traffic.success)
+    throw Object.assign(new Error('invalid traffic selection'), { status: 400 });
+  return traffic.data;
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -705,11 +714,12 @@ async function handleDailyEngagementRoute(
           }),
       );
     if (url.pathname === '/v1/reports/portfolio-briefing') {
+      const traffic = briefingTraffic(url);
       const briefing = await measureOwnerRouteRead(timings, () =>
         cachedAnalytics(
           env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
           workspaceId,
-          `portfolio-briefing-v1:${day.date}`,
+          `portfolio-briefing-v2:${day.date}:${traffic}`,
           () =>
             readPortfolioBriefing({
               db,
@@ -718,6 +728,7 @@ async function handleDailyEngagementRoute(
               now,
               currentReport: loadReport(),
               query,
+              traffic,
             }),
         ),
       );
@@ -1131,6 +1142,7 @@ const unmonitoredWorker = {
   },
 
   async scheduled(_controller: unknown, env: Env): Promise<void> {
+    writeBotCounterHeartbeat(env.BROWSER_ANALYTICS, Date.now());
     if (!env.DB) return;
     await compactEndpointHistoryIfEnabled(env);
     const control = new D1ControlPlane(env.DB);

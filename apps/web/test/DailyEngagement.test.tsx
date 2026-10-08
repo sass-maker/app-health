@@ -298,9 +298,54 @@ it('shows a retryable daily-report error without losing selected date behavior',
   await waitFor(() => expect(screen.getByText('2 in scope')).toBeTruthy());
 });
 
+it('applies the Non-bot / Bots / All selection to pageviews, sources, breakouts and rows', async () => {
+  const bots = {
+    ...briefing,
+    traffic: 'bots' as const,
+    products: briefing.products.map((product) => ({
+      ...product,
+      pageviews: product.pageviews === null ? null : 9,
+      top_sources: product.pageviews === null ? [] : [{ name: 'bing.com', pageviews: 9, share: 1 }],
+      previous_browser_visitors: null,
+      browser_change: null,
+      breakout: false,
+      comparison_reason: 'Bot counters keep no browser identity, so bot traffic has no breakouts.',
+    })),
+    sources: [{ name: 'bing.com', pageviews: 9, share: 1 }],
+    comparison_note: 'Bot counters keep no browser identity, so bot traffic has no breakouts.',
+  };
+  const fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (!url.includes('/portfolio-briefing')) return Response.json(report);
+    return Response.json(url.includes('traffic=bots') ? bots : briefing);
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  await screen.findByRole('table');
+  expect(requestsFor(fetch, '/portfolio-briefing')[0]).toContain('traffic=non_bot');
+  expect(screen.getByRole('button', { name: 'Non-bot' })).toHaveAttribute('aria-pressed', 'true');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Bots' }));
+  await screen.findByText('Bot pageviews');
+  expect(requestsFor(fetch, '/portfolio-briefing').at(-1)).toContain('traffic=bots');
+  expect(screen.getByText('No comparable breakouts for this day')).toBeTruthy();
+  expect(
+    screen.getByRole('button', { name: 'Filter projects by Bing source for 2026-09-27' }),
+  ).toBeTruthy();
+  const table = screen.getByRole('table');
+  expect(within(table).getAllByText('Not retained').length).toBeGreaterThan(0);
+  expect(within(table).getByText('9')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'All' }));
+  await waitFor(() =>
+    expect(requestsFor(fetch, '/portfolio-briefing').at(-1)).toContain('traffic=all'),
+  );
+});
+
 const briefing = {
   date: '2026-09-27',
   timezone: 'Asia/Kolkata',
+  traffic: 'non_bot' as const,
   generated_at: Date.UTC(2026, 8, 28),
   products: [
     {

@@ -1,7 +1,7 @@
 import { ShieldCheck } from 'lucide-react';
 import { Button } from './components/ui/button.js';
 
-/** Collection policy, not a query toggle: discarded bot batches have no report rows. */
+/** Collection policy: known bots never enter browser report rows; only counters are retained. */
 export function BrowserTrafficPolicy(): JSX.Element {
   return (
     <details className="max-w-sm text-xs">
@@ -13,9 +13,11 @@ export function BrowserTrafficPolicy(): JSX.Element {
       </Button>
       <p className="mt-2 leading-5 text-muted-foreground">
         Browser collection excludes Cloudflare verified bots and recognized bot user agents.
-        Unrecognized automation can still pass: these counts are not verified humans. Rejected bots
-        are not retained, so a Bots total is unavailable. Filtering began October 1, 2026; earlier
-        data may include bots. Backend health counts all requests.
+        Unrecognized automation can still pass: these counts are not verified humans. Known bots are
+        kept out of browser reports and retained only as pageview counters by source, with no paths,
+        sessions or browsers; the Daily briefing can show Bots or All. Bot counts are unknown for
+        days before counting covered the whole day. Filtering began October 1, 2026; earlier data
+        may include bots. Backend health counts all requests.
       </p>
     </details>
   );

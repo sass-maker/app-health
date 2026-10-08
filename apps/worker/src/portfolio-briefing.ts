@@ -3,8 +3,14 @@ import {
   ANALYTICS_SOURCE_ALIASES,
   PortfolioBriefingV1,
   normalizeAnalyticsSource,
+  type BriefingTraffic,
   type PortfolioBriefingV1 as PortfolioBriefing,
 } from '@app-health/contracts';
+import {
+  botCounterCoverageSql,
+  botCountersCoverDay,
+  botSourceAggregateSql,
+} from './browser-bot-counters.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import { dailyEngagementWindow, type CatalogProductRow } from './daily-engagement-report.js';
 
@@ -103,19 +109,21 @@ async function readBriefingCatalog(db: D1DatabaseLike, workspaceId: string): Pro
   return result.results;
 }
 
+function scopedEnvironmentList(catalog: readonly ScopeRow[]): string | null {
+  const environments = [
+    ...new Set(catalog.flatMap((row) => (row.environment_id ? [row.environment_id] : []))),
+  ];
+  return environments.length ? environments.map(quote).join(',') : null;
+}
+
 function sourceAggregateSql(
   workspaceId: string,
   catalog: readonly ScopeRow[],
   from: number,
   to: number,
 ): string | null {
-  const scoped = catalog.filter((row) => row.environment_id);
-  if (scoped.length === 0) return null;
-  const environments = [
-    ...new Set(scoped.flatMap((row) => (row.environment_id ? [row.environment_id] : []))),
-  ]
-    .map(quote)
-    .join(',');
+  const environments = scopedEnvironmentList(catalog);
+  if (!environments) return null;
   const allFrom = from - DAY_MS;
   const period = `IF(double2 >= ${from}, 1, 0)`;
   // Keep the SQL projection small enough for long imported environment IDs.
@@ -137,13 +145,8 @@ function baselineAggregateSql(
   catalog: readonly ScopeRow[],
   from: number,
 ): string | null {
-  const scoped = catalog.filter((row) => row.environment_id);
-  if (!scoped.length) return null;
-  const environments = [
-    ...new Set(scoped.flatMap((row) => (row.environment_id ? [row.environment_id] : []))),
-  ]
-    .map(quote)
-    .join(',');
+  const environments = scopedEnvironmentList(catalog);
+  if (!environments) return null;
   const previousFrom = from - DAY_MS;
   const sql = `SELECT 0 AS period, 'baseline' AS kind, blob1 AS app_id, '__baseline__' AS name,
       0 AS pageviews, COUNT(DISTINCT blob8) AS visitors, MAX(_sample_interval) AS sample_interval
@@ -290,6 +293,57 @@ async function loadSourceAggregates(args: {
   return sources;
 }
 
+/** Bot counters: current-day pageviews by source, measured only with full-day coverage. */
+async function loadBotAggregates(args: {
+  query?: AnalyticsEngineQuery;
+  catalog: readonly ScopeRow[];
+  from: number;
+  to: number;
+}): Promise<SourceAggregates> {
+  const environments = scopedEnvironmentList(args.catalog);
+  if (!args.query || !environments) return emptySourceAggregates();
+  const scoped = args.catalog.filter((row) => row.environment_id).map((row) => row.app_id);
+  const sql = botSourceAggregateSql(scoped, environments, args.from, args.to, MAX_SOURCE_ROWS);
+  if (sql.length > MAX_ANALYTICS_SQL_BYTES) return emptySourceAggregates();
+  try {
+    const [rows, coverage] = await Promise.all([
+      args.query(sql),
+      args.query(botCounterCoverageSql(args.from, args.to)),
+    ]);
+    if (!botCountersCoverDay(coverage, args.from, args.to)) return emptySourceAggregates();
+    return parseSourceRows(rows as BriefingQueryRow[], args.catalog);
+  } catch {
+    return emptySourceAggregates();
+  }
+}
+
+/** All traffic: per-source sums of non-bot and bot pageviews; unknown if either is. */
+function mergeAggregates(nonBot: SourceAggregates, bots: SourceAggregates): SourceAggregates {
+  if (!nonBot.measured || !bots.measured) return emptySourceAggregates();
+  const merged = emptySourceAggregates();
+  merged.measured = true;
+  for (const state of [nonBot, bots]) {
+    for (const [appId, groups] of state.rowsByApp) {
+      const target = merged.rowsByApp.get(appId) ?? { current: new Map(), previous: new Map() };
+      for (const [name, count] of groups.current)
+        target.current.set(name, (target.current.get(name) ?? 0) + count);
+      merged.rowsByApp.set(appId, target);
+    }
+    for (const appId of state.estimatedApps) merged.estimatedApps.add(appId);
+  }
+  return merged;
+}
+
+async function loadTrafficAggregates(
+  traffic: BriefingTraffic,
+  args: Parameters<typeof loadSourceAggregates>[0],
+): Promise<SourceAggregates> {
+  const nonBot = traffic === 'bots' ? emptySourceAggregates() : loadSourceAggregates(args);
+  if (traffic === 'non_bot') return nonBot;
+  const [human, bots] = await Promise.all([nonBot, loadBotAggregates(args)]);
+  return traffic === 'bots' ? bots : mergeAggregates(human, bots);
+}
+
 interface SourceTotals {
   pageviewsByApp: Map<string, number>;
   sourceCountsByApp: Map<string, Map<string, number>>;
@@ -395,26 +449,37 @@ interface ProductBuildContext {
   totals: SourceTotals;
   comparisonsAllowed: boolean;
   priorFrom: number;
+  traffic: BriefingTraffic;
+}
+
+const TRAFFIC_COMPARISON_REASON = {
+  bots: 'Bot counters keep no browser identity, so bot traffic has no breakouts.',
+  all: 'Breakouts compare non-bot browsers only; select Non-bot to see them.',
+} as const;
+
+function hasBothPeriods(aggregates: SourceAggregates, appId: string): boolean {
+  const periods = aggregates.periodsByApp.get(appId);
+  return Boolean(periods?.has(0) && periods.has(1));
 }
 
 function buildBriefingProduct(row: ScopeRow, context: ProductBuildContext) {
-  const { report, aggregates, totals, comparisonsAllowed, priorFrom } = context;
+  const { report, aggregates, totals, comparisonsAllowed, priorFrom, traffic } = context;
   const covered =
     row.analytics_first_received_at !== null && row.analytics_first_received_at <= priorFrom;
   const previous = comparisonsAllowed
     ? (aggregates.previousVisitors.get(row.app_id) ?? null)
     : null;
-  const estimated = aggregates.estimatedApps.has(row.app_id);
-  const periods = aggregates.periodsByApp.get(row.app_id);
-  const sourceCoverage = Boolean(periods?.has(0) && periods.has(1));
-  const comparison = assessComparison({
-    allowed: comparisonsAllowed,
-    coverage: covered,
-    current: report?.browser_visitors ?? null,
-    previous,
-    estimated,
-    sourceCoverage,
-  });
+  const comparison =
+    traffic === 'non_bot'
+      ? assessComparison({
+          allowed: comparisonsAllowed,
+          coverage: covered,
+          current: report?.browser_visitors ?? null,
+          previous,
+          estimated: aggregates.estimatedApps.has(row.app_id),
+          sourceCoverage: hasBothPeriods(aggregates, row.app_id),
+        })
+      : { change: null, breakout: false, reason: TRAFFIC_COMPARISON_REASON[traffic] };
   const notApplicable = browserNotApplicable(report);
   const pageviews = notApplicable ? null : (totals.pageviewsByApp.get(row.app_id) ?? null);
   const sources = totals.sourceCountsByApp.get(row.app_id) ?? new Map<string, number>();
@@ -425,8 +490,8 @@ function buildBriefingProduct(row: ScopeRow, context: ProductBuildContext) {
     pageviews,
     top_sources: pageviews === null ? [] : rank(sources, pageviews, 5),
     sources_status: sourcesStatus(row, report, aggregates, pageviews),
-    source_estimated: estimated,
-    previous_browser_visitors: previous,
+    source_estimated: aggregates.estimatedApps.has(row.app_id),
+    previous_browser_visitors: traffic === 'non_bot' ? previous : null,
     browser_change: comparison.change,
     breakout: comparison.breakout,
     comparison_reason: comparison.reason,
@@ -443,13 +508,15 @@ export async function readPortfolioBriefing(args: {
     | { products: readonly CurrentReportProduct[] }
     | Promise<{ products: readonly CurrentReportProduct[] }>;
   query?: AnalyticsEngineQuery;
+  traffic?: BriefingTraffic;
 }): Promise<PortfolioBriefing> {
+  const traffic = args.traffic ?? 'non_bot';
   const window = dailyEngagementWindow(args.date, args.now);
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
   const [sourceData, currentReport] = await Promise.all([
     readBriefingCatalog(args.db, args.workspaceId).then(async (catalog) => ({
       catalog,
-      aggregates: await loadSourceAggregates({
+      aggregates: await loadTrafficAggregates(traffic, {
         query: args.query,
         workspaceId: args.workspaceId,
         catalog,
@@ -464,7 +531,13 @@ export async function readPortfolioBriefing(args: {
   const priorFrom = window.from - DAY_MS;
   const comparisonsAllowed = window.to <= BOT_FILTER_CUTOVER || priorFrom >= BOT_FILTER_CUTOVER;
   const totals = portfolioSourceTotals(catalog, aggregates, window.from, currentByApp);
-  const context: ProductBuildContext = { aggregates, totals, comparisonsAllowed, priorFrom };
+  const context: ProductBuildContext = {
+    aggregates,
+    totals,
+    comparisonsAllowed,
+    priorFrom,
+    traffic,
+  };
   const products = catalog.map((row) =>
     buildBriefingProduct(row, { ...context, report: currentByApp.get(row.app_id) }),
   );
@@ -472,16 +545,26 @@ export async function readPortfolioBriefing(args: {
   return PortfolioBriefingV1.parse({
     date: window.date,
     timezone: 'Asia/Kolkata',
+    traffic,
     generated_at: args.now,
     products,
     sources: rank(totals.allSources, totals.pageviews, 10),
-    comparison_note: comparisonsAllowed
-      ? 'Compared with the previous Asia/Kolkata day within the same bot-filter regime; breakout needs 20 current visitors, 10 net gain, 50% growth, and a baseline of at least 5.'
-      : `Comparison suppressed because the current and prior days cross the bot-filter cutover (${new Date(BOT_FILTER_CUTOVER).toISOString()}); Oct 2 is the first fully filtered day.`,
-    filter_note:
-      'Analytics Engine browser events are counted in pageview units; no-referrer traffic is shown as “No referrer”.',
+    comparison_note:
+      traffic !== 'non_bot'
+        ? TRAFFIC_COMPARISON_REASON[traffic]
+        : comparisonsAllowed
+          ? 'Compared with the previous Asia/Kolkata day within the same bot-filter regime; breakout needs 20 current visitors, 10 net gain, 50% growth, and a baseline of at least 5.'
+          : `Comparison suppressed because the current and prior days cross the bot-filter cutover (${new Date(BOT_FILTER_CUTOVER).toISOString()}); Oct 2 is the first fully filtered day.`,
+    filter_note: TRAFFIC_FILTER_NOTE[traffic],
   });
 }
+
+const TRAFFIC_FILTER_NOTE = {
+  non_bot:
+    'Analytics Engine browser events are counted in pageview units; no-referrer traffic is shown as “No referrer”.',
+  bots: 'Known-bot pageviews from retained counters, by receipt time; unknown until the counting collector covered the whole day.',
+  all: 'Non-bot plus known-bot pageviews; unknown when either side is unknown. Unrecognized automation stays in Non-bot.',
+} as const;
 
 function indexCurrentReport(
   rows: readonly CurrentReportProduct[],

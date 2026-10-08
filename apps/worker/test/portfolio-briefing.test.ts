@@ -518,3 +518,114 @@ describe('readPortfolioBriefing', () => {
     expect(result.sources).toEqual([]);
   });
 });
+
+describe('readPortfolioBriefing traffic selection', () => {
+  const CURRENT_TO = CURRENT_FROM + 86_400_000;
+  const fullCoverage = [
+    { first_seen: CURRENT_FROM - 3_000_000, last_seen: CURRENT_TO + 1_000_000, beats: 27 },
+  ];
+  const botRow = (name: string, pageviews: number) => ({ ...sourceRow(1, name, pageviews) });
+  function trafficQuery(options: {
+    human: ReturnType<typeof sourceRow>[];
+    bots: ReturnType<typeof sourceRow>[];
+    coverage?: unknown[];
+    sql?: string[];
+  }) {
+    return async (sql: string) => {
+      options.sql?.push(sql);
+      if (sql.includes('bot-counter-heartbeat')) return options.coverage ?? fullCoverage;
+      if (sql.includes("'bot_batch'")) return options.bots;
+      return queryWithRows(options.human)(sql);
+    };
+  }
+
+  it('keeps the default non-bot briefing free of bot counter queries', async () => {
+    const sql: string[] = [];
+    const result = await readPortfolioBriefing(
+      briefingArgs({
+        query: trafficQuery({ human: [sourceRow(1, 'Google', 25)], bots: [], sql }),
+      }),
+    );
+    expect(result.traffic).toBe('non_bot');
+    expect(result.products[0]?.pageviews).toBe(25);
+    expect(sql.some((query) => query.includes('bot:'))).toBe(false);
+  });
+
+  it('reads bot pageviews by source without breakouts or visitor baselines', async () => {
+    const sql: string[] = [];
+    const result = await readPortfolioBriefing(
+      briefingArgs({
+        traffic: 'bots',
+        query: trafficQuery({
+          human: [sourceRow(1, 'Google', 25)],
+          bots: [botRow('google.com', 7), botRow('', 3)],
+          sql,
+        }),
+      }),
+    );
+    expect(PortfolioBriefingV1.parse(result).traffic).toBe('bots');
+    expect(result.products[0]).toMatchObject({
+      pageviews: 10,
+      sources_status: 'measured',
+      breakout: false,
+      browser_change: null,
+      previous_browser_visitors: null,
+    });
+    expect(result.sources.map((source) => source.name)).toEqual(['Google', 'No referrer']);
+    expect(result.comparison_note).toMatch(/no breakouts/);
+    expect(sql.some((query) => query.includes(`index1 IN ('bot:${catalog[0]!.app_id}')`))).toBe(
+      true,
+    );
+    // The non-bot source query is not needed for Bots.
+    expect(sql.some((query) => query.includes("blob3 = 'pageview'"))).toBe(false);
+  });
+
+  it('reports bots as unknown, not zero, before counting covered the whole day', async () => {
+    const partial = [{ first_seen: CURRENT_FROM + 3_600_000, last_seen: CURRENT_TO, beats: 20 }];
+    for (const coverage of [partial, [], [{ first_seen: 0, last_seen: 0, beats: 0 }]]) {
+      const result = await readPortfolioBriefing(
+        briefingArgs({
+          traffic: 'bots',
+          query: trafficQuery({ human: [], bots: [botRow('google.com', 7)], coverage }),
+        }),
+      );
+      expect(result.products[0]).toMatchObject({ pageviews: null, sources_status: 'unknown' });
+      expect(result.sources).toEqual([]);
+    }
+  });
+
+  it('sums non-bot and bot pageviews per source for All and stays unknown if either is', async () => {
+    const result = await readPortfolioBriefing(
+      briefingArgs({
+        traffic: 'all',
+        query: trafficQuery({
+          human: [sourceRow(1, 'Google', 25), sourceRow(1, 'No referrer', 5)],
+          bots: [botRow('google.com', 7)],
+        }),
+      }),
+    );
+    expect(result.traffic).toBe('all');
+    expect(result.products[0]).toMatchObject({ pageviews: 37, breakout: false });
+    expect(result.sources[0]).toMatchObject({ name: 'Google', pageviews: 32 });
+    const unknown = await readPortfolioBriefing(
+      briefingArgs({
+        traffic: 'all',
+        query: trafficQuery({ human: [sourceRow(1, 'Google', 25)], bots: [], coverage: [] }),
+      }),
+    );
+    expect(unknown.products[0]?.pageviews).toBeNull();
+  });
+
+  it('treats a failed bot counter query as unknown', async () => {
+    const result = await readPortfolioBriefing(
+      briefingArgs({
+        traffic: 'bots',
+        query: async (sql) => {
+          if (sql.includes("'bot_batch'")) throw new Error('AE unavailable');
+          return fullCoverage;
+        },
+      }),
+    );
+    expect(result.products[0]?.pageviews).toBeNull();
+  });
+});

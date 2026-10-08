@@ -504,24 +504,43 @@ describe('browser collector boundary', () => {
   it.each([
     'Googlebot/2.1 (+http://www.google.com/bot.html)',
     'Mozilla/5.0 HeadlessChrome/138.0.0.0 Safari/537.36',
-  ])('ignores known bot user-agent %s before quota or projections', async (userAgent) => {
-    const repos = await fixture();
-    const fixtureState = productionIngestFixture(repos);
-    const response = await handleBrowserIngest(
-      withRequestSignals(input(), { userAgent }),
-      fixtureState.env,
-      repos,
-      false,
-    );
-    expect(response?.status).toBe(200);
-    expect(await response?.json()).toEqual({ ignored: true });
-    expect(fixtureState.quota).not.toHaveBeenCalled();
-    expect(fixtureState.dbPrepare).not.toHaveBeenCalled();
-    expect(fixtureState.send).not.toHaveBeenCalled();
-    expect(fixtureState.heartbeat).not.toHaveBeenCalled();
-    expect(fixtureState.writeDataPoint).not.toHaveBeenCalled();
-    expect(fixtureState.capability).not.toHaveBeenCalled();
-  });
+  ])(
+    'counts known bot user-agent %s without quota, D1 or report projections',
+    async (userAgent) => {
+      const repos = await fixture();
+      const fixtureState = productionIngestFixture(repos);
+      const response = await handleBrowserIngest(
+        withRequestSignals(input(), { userAgent }),
+        fixtureState.env,
+        repos,
+        false,
+      );
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({ ignored: true });
+      expect(fixtureState.quota).not.toHaveBeenCalled();
+      expect(fixtureState.dbPrepare).not.toHaveBeenCalled();
+      expect(fixtureState.send).not.toHaveBeenCalled();
+      expect(fixtureState.heartbeat).not.toHaveBeenCalled();
+      expect(fixtureState.capability).not.toHaveBeenCalled();
+      // One lightweight counter point outside every workspace-indexed report.
+      expect(fixtureState.writeDataPoint).toHaveBeenCalledTimes(1);
+      const point = (
+        fixtureState.writeDataPoint.mock.calls[0] as unknown as [
+          { indexes: string[]; blobs: string[]; doubles: number[] },
+        ]
+      )[0];
+      const key = await repos.publicKeys!.verifyPublicKey(SEED_PUBLIC_KEY);
+      expect(point.indexes).toEqual([`bot:${key!.app_id}`]);
+      expect(point.blobs).toEqual([
+        key!.app_id,
+        key!.environment_id,
+        'bot_batch',
+        '',
+        'user_agent',
+      ]);
+      expect(point.doubles[0]).toBe(input().events.filter((e) => e.type === 'pageview').length);
+    },
+  );
   it.each([
     { signal: 'verifiedBot', cf: { botManagement: { verifiedBot: true } } },
     { signal: 'verifiedBotCategory', cf: { verifiedBotCategory: 'Search Engine Crawler' } },
@@ -541,6 +560,9 @@ describe('browser collector boundary', () => {
     expect(fixtureState.quota).not.toHaveBeenCalled();
     expect(fixtureState.send).not.toHaveBeenCalled();
     expect(fixtureState.dbPrepare).not.toHaveBeenCalled();
+    expect(
+      (fixtureState.writeDataPoint.mock.calls[0] as unknown as [{ blobs: string[] }])[0].blobs[4],
+    ).toBe('verified');
   });
   it('keeps real browsers and missing user agents on the existing acceptance path', async () => {
     const repos = await fixture();
