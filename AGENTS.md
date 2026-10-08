@@ -52,9 +52,3 @@ separate Go compatibility job that retains the tagged Echo release canary.
   caller passes. Never derive a log from request traffic, keep the 30-day
   retention bounded, and never accept a browser batch without a public key
   whose origin allowlist matches the request `Origin`.
-
-## Wave status
-
-- The local endpoint V0 is complete. The production Cloudflare implementation
-  is tracked in `openspec/changes/deploy-cloudflare-endpoint-health-v0/`; only
-  production provisioning and canary verification remain.
