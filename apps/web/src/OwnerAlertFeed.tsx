@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import type { LogLevel, LogSource } from '@app-health/contracts';
-import { AlertTriangle, Mail, MessageSquareText, RefreshCw, UserRoundPlus } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Mail,
+  MessageSquareText,
+  RadioTower,
+  RefreshCw,
+  UserRoundPlus,
+} from 'lucide-react';
+import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
 import { Skeleton } from './components/ui/skeleton.js';
@@ -16,15 +25,33 @@ interface AlertEntry {
   level: LogLevel;
   source: LogSource;
   timestamp: number;
+  journey?: string;
+  location?: string;
+}
+
+interface ProbeCoverage {
+  location: string;
+  last_seen_at: number;
+  interval_seconds: number;
+  state: 'fresh' | 'stale';
 }
 
 interface Feed {
   generated_at: number;
   total_count: number;
   entries: AlertEntry[];
+  probes?: ProbeCoverage[];
 }
 
+const JOURNEY_LABELS: Record<string, string> = {
+  'journey.failed': 'Journey failing',
+  'journey.degraded': 'Journey slow',
+  'journey.recovered': 'Journey recovered',
+};
+
 function eventLabel(entry: AlertEntry): string {
+  const journey = JOURNEY_LABELS[entry.event];
+  if (journey) return journey;
   if (entry.event === 'feedback.submitted') return 'New feedback';
   if (entry.event === 'waitlist.join') return 'Waitlist join';
   if (entry.event === 'newsletter.subscribe') return 'Newsletter subscription';
@@ -36,6 +63,7 @@ function EventIcon({ event }: { event: AlertEntry['event'] }) {
     return <MessageSquareText aria-hidden="true" className="size-4" />;
   if (event === 'waitlist.join') return <UserRoundPlus aria-hidden="true" className="size-4" />;
   if (event === 'newsletter.subscribe') return <Mail aria-hidden="true" className="size-4" />;
+  if (event === 'journey.recovered') return <CheckCircle2 aria-hidden="true" className="size-4" />;
   return <AlertTriangle aria-hidden="true" className="size-4" />;
 }
 
@@ -51,11 +79,19 @@ function AlertEntries({ entries }: { entries: AlertEntry[] }): JSX.Element {
             <p className="text-sm font-medium">{eventLabel(entry)}</p>
             <p className="truncate text-xs text-muted-foreground">
               {entry.project_name} <span aria-hidden="true">·</span> {entry.catalog_id}
-              {(entry.level === 'error' || entry.level === 'warn') && (
+              {entry.journey && entry.location ? (
                 <>
                   {' '}
-                  <span aria-hidden="true">·</span> {entry.source} {entry.event}
+                  <span aria-hidden="true">·</span> {entry.journey} from {entry.location}{' '}
+                  (synthetic)
                 </>
+              ) : (
+                (entry.level === 'error' || entry.level === 'warn') && (
+                  <>
+                    {' '}
+                    <span aria-hidden="true">·</span> {entry.source} {entry.event}
+                  </>
+                )
               )}
             </p>
           </div>
@@ -142,6 +178,38 @@ function AlertHeader({
   );
 }
 
+function elapsed(from: number, to: number): string {
+  const minutes = Math.max(0, Math.round((to - from) / 60_000));
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
+}
+
+function ProbeCoverageLine({ feed }: { feed: Feed }): JSX.Element | null {
+  if (!feed.probes) return null;
+  return (
+    <div
+      aria-label="Synthetic journey probes"
+      className="mb-4 flex flex-wrap items-center gap-2 border-b pb-3 text-xs text-muted-foreground"
+    >
+      <RadioTower aria-hidden="true" className="size-4" />
+      {feed.probes.length === 0 ? (
+        <span>No synthetic journey probe has reported. Journey coverage is missing.</span>
+      ) : (
+        feed.probes.map((probe) => (
+          <span key={probe.location} className="flex items-center gap-1.5">
+            {probe.location}
+            <Badge variant={probe.state === 'stale' ? 'destructive' : 'secondary'}>
+              {probe.state === 'stale' ? 'Stale' : 'Reporting'}
+            </Badge>
+            last run {elapsed(probe.last_seen_at, feed.generated_at)}
+          </span>
+        ))
+      )}
+    </div>
+  );
+}
+
 export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): JSX.Element {
   const [feed, setFeed] = useState<Feed | null>(null);
   const [error, setError] = useState('');
@@ -206,6 +274,7 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): JSX.Elem
     >
       <AlertHeader feed={feed} loading={loading} onRefresh={() => setRetry((value) => value + 1)} />
       <CardContent className="p-5">
+        {feed && !loading && !error && <ProbeCoverageLine feed={feed} />}
         <AlertBody loading={loading} error={error} feed={feed} />
         {feed && feed.total_count > feed.entries.length && !loading && !error && (
           <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">

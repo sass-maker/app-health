@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "journeys": [
+    {
+      "project": "app-health",
+      "journey": "landing",
+      "url": "https://health.sassmaker.com/",
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": ["id=\"root\""],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "app-health",
+      "journey": "api-health",
+      "url": "https://health.sassmaker.com/v1/health",
+      "budget_ms": 1000,
+      "expect": { "content_type": "application/json", "json": [{ "path": "ok", "equals": true }] }
+    },
+    {
+      "project": "app-health",
+      "journey": "ingest-health",
+      "url": "https://ingest.sassmaker.com/v1/health",
+      "budget_ms": 1000,
+      "expect": { "content_type": "application/json", "json": [{ "path": "ok", "equals": true }] }
+    },
+    {
+      "project": "anime-list",
+      "journey": "home",
+      "url": "https://anime.significanthobbies.com/",
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": ["id=\"root\""],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "anime-search",
+      "url": "https://anime.significanthobbies.com/api/search",
+      "method": "POST",
+      "body": {
+        "filters": [],
+        "pagesize": 3,
+        "offset": 0,
+        "airing": "any",
+        "hideWatched": [],
+        "includeWatched": []
+      },
+      "budget_ms": 2000,
+      "warm_check": true,
+      "expect": {
+        "content_type": "application/json",
+        "json": [{ "path": "filteredList", "min_items": 1 }]
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "anime-search-backend",
+      "url": "https://mal-api.sarthakagrawal927.workers.dev/api/search",
+      "method": "POST",
+      "body": {
+        "filters": [],
+        "pagesize": 3,
+        "offset": 0,
+        "airing": "any",
+        "hideWatched": [],
+        "includeWatched": []
+      },
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [{ "path": "filteredList", "min_items": 1 }]
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "manga-search",
+      "url": "https://anime.significanthobbies.com/api/manga/search",
+      "method": "POST",
+      "body": { "filters": [], "pagesize": 3, "offset": 0, "hideWatched": [] },
+      "budget_ms": 3000,
+      "warm_check": true,
+      "expect": {
+        "content_type": "application/json",
+        "json": [{ "path": "filteredList", "min_items": 1 }]
+      }
+    }
+  ]
+}

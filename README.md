@@ -361,6 +361,14 @@ events an application chooses to send, never derived from traffic.
 
 See [docs/logs.md](docs/logs.md) for the wiring guide and decision record.
 
+## Journey probes
+
+`apps/probe` runs scheduled complete-response checks of production hostnames
+from outside Cloudflare and reports incident transitions (`journey.failed`,
+`journey.degraded`, `journey.recovered`) plus a `probe.heartbeat` through
+`/v1/logs`. The owner alert feed shows the incidents and marks each probe
+location Reporting or Stale. See [docs/journey-probes.md](docs/journey-probes.md).
+
 ## Privacy boundary
 
 Endpoint telemetry stores **only** method, normalized route, status code,

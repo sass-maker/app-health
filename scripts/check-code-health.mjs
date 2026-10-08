@@ -12,6 +12,7 @@ checkShadcnVendor();
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const productionPaths = [
+  'apps/probe/src',
   'apps/web/src',
   'apps/worker/src',
   'packages/contracts/src',
@@ -97,6 +98,11 @@ function checkCoverage() {
       label: 'Contracts',
       filter: '@app-health/contracts',
       minimums: { lines: 99.17, branches: 91.66, functions: 100, statements: 99.17 },
+    },
+    {
+      label: 'Journey probe',
+      filter: '@app-health/probe',
+      minimums: { lines: 98.8, branches: 96.87, functions: 100, statements: 98.8 },
     },
     {
       label: 'Node SDK',
