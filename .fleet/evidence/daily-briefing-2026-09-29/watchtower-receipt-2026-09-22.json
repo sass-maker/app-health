@@ -1,0 +1,123 @@
+{
+  "$schema": "fleet.design-review.v1",
+  "version": 1,
+  "project": "app-health",
+  "target": "Cross-project usage and request-health overview",
+  "surfaceMode": "operate",
+  "mode": "overhaul",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "references": ["PRODUCT.md", "DESIGN.md", "apps/web/src/ProjectsView.tsx"],
+    "probes": [
+      {
+        "id": "fleet-ledger",
+        "path": ".fleet/evidence/portfolio-overview-directions/ledger.png"
+      },
+      {
+        "id": "signal-board",
+        "path": ".fleet/evidence/portfolio-overview-directions/signal-board.png"
+      },
+      {
+        "id": "watchtower",
+        "path": ".fleet/evidence/portfolio-overview-directions/watchtower.png"
+      }
+    ],
+    "selected": "watchtower",
+    "approval": "approved",
+    "before": ".fleet/evidence/analytics/overview-local-1440.png",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [
+        "https://ui.shadcn.com/r/styles/new-york-v4/card.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/badge.json",
+        "https://ui.shadcn.com/r/styles/new-york-v4/table.json"
+      ],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": ""
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md and SaaS Maker catalog purposeContract, verified 2026-09-22.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Product managers, founders, and product teams; developers connect the instrumentation.",
+      "job": "Compare application use and request safety across the active portfolio without confusing sessions, views, events, and requests.",
+      "thesis": "An exception-first watchtower opens with coverage gaps, stale signals, and unhealthy request behavior, then preserves a complete searchable project inventory beneath it.",
+      "system": "Preserve the existing shadcn graphite workspace. Indigo denotes usage, emerald healthy request state, amber attention, red active failure, and neutral gray unknown or not applicable. Use compact sans labels, monospace technical values, generous operational cards, and explicit timestamps.",
+      "signature": "A reliability field maps error rate against p95 latency while bubble size represents request volume; every visual point has an accessible project-row equivalent.",
+      "risk": "Exception-first composition can hide quiet products, so the complete inventory remains visible, filterable, and independent of alert state."
+    }
+  },
+  "evidence": {
+    "screenshots": [
+      {
+        "width": 390,
+        "path": ".fleet/evidence/portfolio-overview-directions/after-390.png"
+      },
+      {
+        "width": 768,
+        "path": ".fleet/evidence/portfolio-overview-directions/after-768.png"
+      },
+      {
+        "width": 1440,
+        "path": ".fleet/evidence/portfolio-overview-directions/after-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "pnpm run check",
+      "status": "pass"
+    },
+    "critique": {
+      "score": 37,
+      "maximum": 40
+    },
+    "audit": {
+      "score": 19,
+      "maximum": 20
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": []
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    }
+  },
+  "ownerFeedback": {
+    "decision": "keep",
+    "note": "Owner selected Watchtower on 2026-09-22: 'I like the sound of the watchtower. I'm open to anything.' The implementation retains a complete inventory to mitigate the direction's visibility risk."
+  }
+}

@@ -1,0 +1,228 @@
+{
+  "$schema": "fleet.design-review.v2",
+  "version": 2,
+  "project": "app-health",
+  "target": "App Health footer #168 Precise C local source and asset preflight",
+  "surfaceMode": "operate",
+  "mode": "overhaul",
+  "register": "product",
+  "context": {
+    "product": "PRODUCT.md",
+    "design": "DESIGN.md"
+  },
+  "direction": {
+    "productSurfaces": {
+      "scope": "standalone",
+      "landing": "Public front door / at apps/web/index.html -> apps/web/src/LandingPage.tsx",
+      "app": "",
+      "reason": "PRODUCT.md and DESIGN.md make the landing page the only footer surface; the authenticated dashboard has no footer. #168 changes the public front-door closing region only."
+    },
+    "pairedPreview": {
+      "landing": "",
+      "app": ""
+    },
+    "source": "owner-supplied",
+    "references": [
+      "App Health PRODUCT.md",
+      "App Health DESIGN.md"
+    ],
+    "probes": [],
+    "selected": "c",
+    "approval": "approved",
+    "ownerEvidence": {
+      "path": ".fleet-local/precise-footer-release/selected-direction/owner-selection.md",
+      "quote": "Okay let's go with precise. Release it for every project. I guess we have done improving things. Now we have deprecating returns."
+    },
+    "supplied": ".fleet-local/precise-footer-release/selected-direction/direction-c.json",
+    "before": "",
+    "library": {
+      "strategy": "upstream-first",
+      "primary": "existing-project-system",
+      "sources": [],
+      "runtime": "existing",
+      "customReplacement": {
+        "used": false,
+        "authorization": "not-required",
+        "reason": "Use existing App Health and shared footer primitives; no custom runtime or third-party component."
+      }
+    },
+    "contract": {
+      "purpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeSource": "PRODUCT.md; current purposeContract in the canonical project catalog.",
+      "canonicalPurpose": "App Health helps product teams understand web traffic, intentional user actions, and application health across their projects.",
+      "purposeAlignment": "match",
+      "driftNote": "",
+      "audience": "Product managers, founders, and product teams; developers connect instrumentation.",
+      "job": "At the public front door, provide concise optional next steps for help, feedback, updates, and exploring the owner’s products.",
+      "thesis": "Precise closes the existing front door with measured hierarchy and tightly grouped utility, retaining App Health’s graphite and indigo system.",
+      "system": "Use footer-scoped Geist and Geist Mono in the selected shared composition; retain App Health semantic tokens, native logo, existing route/action handlers, theme behavior, and landing typography.",
+      "signature": "Original App Health artwork and the product’s existing final navigation remain recognizable within the compact Precise utility hierarchy.",
+      "risk": "A compact utility close can feel generic or compress useful actions; preserve the native color, brand, labels, and accessible hit areas, then review the rendered result at mobile, tablet, and desktop widths.",
+      "qualityBar": "Keep the existing landing CTA, navigation, authentication boundary, dashboard route, analytics and capture behavior intact; use same-origin exact artwork and licensed font assets; verify actual loading, controls, validation, consent, focus, wrapping, and no overflow at 390/768/1440."
+    }
+  },
+  "evidence": {
+    "platform": "web",
+    "productContinuity": {
+      "status": "not-applicable",
+      "reason": "This issue changes the single public landing-page footer. PRODUCT.md/DESIGN.md explicitly exclude the authenticated dashboard from footer treatment; no dashboard counterpart is in scope.",
+      "reviewer": "",
+      "report": ".fleet-local/precise-footer-release/selected-direction/app-health-evidence-manifest.json",
+      "surfaces": {
+        "landing": "",
+        "app": ""
+      },
+      "checks": {
+        "designSystem": {
+          "status": "pending",
+          "observation": ""
+        },
+        "identity": {
+          "status": "pending",
+          "observation": ""
+        },
+        "vocabulary": {
+          "status": "pending",
+          "observation": ""
+        },
+        "productTruth": {
+          "status": "pending",
+          "observation": ""
+        },
+        "handoff": {
+          "status": "pending",
+          "observation": ""
+        }
+      }
+    },
+    "slopScale": {
+      "platform": "web",
+      "posture": "advisory",
+      "reason": "C is an owner-selected existing global direction; no App Health working render exists in this read-only preparation and root owns the browser. Preserve the scan limitation as unknown.",
+      "checkpoints": [
+        {
+          "stage": "directions",
+          "direction": "c",
+          "status": "blocked",
+          "report": ".fleet-local/precise-footer-release/selected-direction/direction-c-scan-blocked.json",
+          "reason": "App Health C preview scan was not run: no managed candidate render was available in this read-only triage; root owns browser review. Existing static global font specimen does not establish App Health browser rendering."
+        }
+      ]
+    },
+    "visualReview": {
+      "status": "pending",
+      "reviewer": "",
+      "direction": "c",
+      "report": ".fleet-local/precise-footer-release/selected-direction/review.md",
+      "checks": {
+        "hierarchy": {
+          "status": "pending",
+          "observation": ""
+        },
+        "typography": {
+          "status": "pending",
+          "observation": ""
+        },
+        "composition": {
+          "status": "pending",
+          "observation": ""
+        },
+        "identity": {
+          "status": "pending",
+          "observation": ""
+        },
+        "interaction": {
+          "status": "pending",
+          "observation": ""
+        },
+        "responsive": {
+          "status": "pending",
+          "observation": ""
+        }
+      }
+    },
+    "screenshots": [
+      {
+        "width": 390,
+        "path": "artifacts/design/after-390.png"
+      },
+      {
+        "width": 768,
+        "path": "artifacts/design/after-768.png"
+      },
+      {
+        "width": 1440,
+        "path": "artifacts/design/after-1440.png"
+      }
+    ],
+    "projectCheck": {
+      "command": "pending managed focused check, project check, and exact-SHA CI",
+      "status": "pending"
+    },
+    "critique": {
+      "score": 0,
+      "maximum": 40,
+      "dimensions": {
+        "hierarchy": 0,
+        "typography": 0,
+        "composition": 0,
+        "identity": 0,
+        "interaction": 0,
+        "responsive": 0
+      }
+    },
+    "audit": {
+      "score": 0,
+      "maximum": 20,
+      "dimensions": {
+        "purpose": 0,
+        "accessibility": 0,
+        "behavior": 0,
+        "responsive": 0,
+        "performance": 0
+      }
+    },
+    "unresolved": {
+      "p0": 0,
+      "p1": 0
+    },
+    "detector": {
+      "posture": "advisory",
+      "findings": [
+        "Same-origin original App Health artwork and OFL font mirror bytes identified and hashed; browser loading remains unverified.",
+        "App Health live / and /changelog responses have no CSP; prior ambiguous multi-URL CSP inference was invalid and referred to StorageDaddy."
+      ]
+    },
+    "comprehension": {
+      "status": "not-applicable",
+      "reviewer": "",
+      "answers": {
+        "product": "",
+        "audience": "",
+        "value": "",
+        "mechanism": "",
+        "proof": "",
+        "nextAction": ""
+      },
+      "purposeScore": {
+        "product": 0,
+        "audience": 0,
+        "value": 0,
+        "mechanism": 0,
+        "proof": 0,
+        "nextAction": 0,
+        "total": 0
+      },
+      "mismatches": []
+    },
+    "httpSourceReview": {
+      "status": "read-only-source-and-anonymous-http-verified",
+      "report": ".fleet-local/precise-footer-release/selected-direction/app-health-evidence-manifest.json",
+      "browserRequestEvidence": "unverified"
+    }
+  },
+  "ownerFeedback": {
+    "decision": "approved",
+    "note": "Owner selected Precise C globally in the copied owner-selection record; product-specific implementation/render review remains pending."
+  }
+}

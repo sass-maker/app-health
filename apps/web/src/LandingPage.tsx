@@ -1,3 +1,4 @@
+import { createElement } from 'react';
 import { useEffect } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
@@ -368,7 +369,9 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
         <IntegrationSection />
         <HonestStatus />
       </main>
-      <footer className="border-t px-4 py-8 sm:px-6 lg:px-8">
+      {createElement('fleet-footer-extension', { 'product-name': 'App Health', 'art-src': 'https://sassmaker.com/footer-art/app-health.webp', surface: 'app' }, <>
+
+<footer slot="navigation" data-fleet-footer-navigation className="border-t px-4 py-8 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 text-xs text-muted-foreground sm:flex-row sm:items-center">
           <ProductBrand />
           <span>A Fleet product for people who build products.</span>
@@ -380,6 +383,7 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
           </a>
         </div>
       </footer>
+</>)}
     </div>
   );
 }

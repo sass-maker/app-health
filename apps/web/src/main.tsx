@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.js';
 import { LandingPage } from './LandingPage.js';
@@ -79,5 +79,10 @@ document.title =
 createRoot(root).render(
   <StrictMode>
     <RootView />
+    {window.location.pathname === "/" && RootView !== LandingPage && createElement("fleet-footer-extension", {
+      "product-name": "App Health",
+      "art-src": "https://sassmaker.com/footer-art/app-health.webp",
+      surface: "app",
+    })}
   </StrictMode>,
 );
