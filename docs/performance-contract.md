@@ -117,6 +117,35 @@ the 50-per-day or 30-per-window minimums. Low-volume surfaces remain
 insufficient and can use separately configured synthetic probes. Do not
 merge different route budgets or percentiles into one alert window.
 
+## Speed report
+
+`GET /v1/reports/speed` requires a workspace owner session; product keys are
+forbidden. Query parameters: `range=1h|24h|7d` (default `24h`), optional `app_id`,
+and `class=landing|app|api` (default `app`). Web budgets follow the selected
+class (`api` has no web budget); server timings always use API read budgets.
+
+The report scopes production environments to primary/active, non-archived catalog
+products in the owner's workspace, capped at 56 products and 25 routes per product and
+event (breaching routes first, then busiest). After a catalog lookup, two indexed D1 reads select at most
+20,000 newest debug logs each for `api.stage_timing` and `web.vitals` within
+the requested range. Stage timings are read only from `server` logs and web vitals
+only from `browser` logs, so a browser public key cannot forge server timings. Hitting either limit marks that event's `truncated` flag
+on every product, including products with no retained samples. Internal results
+are cached for 60 seconds; owner responses use `no-store`.
+
+Percentiles use nearest rank over observed rows. Product-emitted stage logs
+are sampled; these counts and error rates describe samples, not total traffic.
+Invalid props count as rejected and are excluded. Web breaches require 50
+samples of that metric per route group; server breaches require 30 per route.
+Smaller sets can show percentiles but never breaches. Sustained state uses
+the four consecutive 15-minute windows ending at generation time, evaluating
+server p95 and LCP p75 only, with no persisted previous state. Cache counts
+use `edge_cache`; hit ratio is `HIT / (samples - NONE)`, or null when all are
+`NONE`. A product is measured when any route/metric meets its sample minimum,
+insufficient when only smaller valid sets exist, and no_data when none exist.
+The summary counts a product as breaching for any percentile or sustained breach.
+No raw props leave the report.
+
 ## Not implemented yet
 
 Opt-in browser tracker emission is implemented: one debug-level `web.vitals`
@@ -125,5 +154,6 @@ to the tracker tag; the tracker lazily loads `/vitals.js` from the same host.
 Vitals are a separate opt-in static file; only the loader (about 180 bytes)
 raises the tracker gzip budget, from 3250 to 3400 bytes. See
 [browser analytics](browser-analytics.md#web-vitals) for attributes and sampling.
-Performance reports, per-product wiring, runtime alert routing, probe evaluation,
-and per-job route budgets remain unimplemented. Worker behavior is unchanged.
+The owner speed report API above reads both event types. Dashboard speed views,
+a daily-report speed section, per-product wiring, runtime alert routing, probe
+evaluation, and per-job route budgets remain unimplemented.

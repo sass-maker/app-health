@@ -31,6 +31,7 @@ import {
 } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { readPortfolioBriefing } from './portfolio-briefing.js';
+import { readSpeedReport } from './speed-report.js';
 import { writeBotCounterHeartbeat } from './browser-bot-counters.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
@@ -42,6 +43,7 @@ import {
 } from './browser-routes.js';
 import {
   BriefingTraffic,
+  SpeedReportQuery,
   CreateAppRequestV1,
   CatalogImportRequestV1,
   DEFAULT_FAILURE_QUERY_LIMIT,
@@ -673,6 +675,45 @@ function briefingTraffic(url: URL): BriefingTraffic {
   return traffic.data;
 }
 
+async function handleSpeedReportRoute(
+  request: Request,
+  _bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+  env: Env,
+  timings?: OwnerRequestTimings,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/reports/speed') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  if (owner.appId || !owner.workspaceId) return productScopeForbidden();
+  if (!env.DB) return json(503, { error: 'speed report storage is unavailable' }, true);
+  const query = SpeedReportQuery.safeParse(Object.fromEntries(url.searchParams));
+  if (!query.success) return json(400, { error: 'invalid speed report query' }, true);
+  const db = env.DB;
+  const workspaceId = owner.workspaceId;
+  try {
+    const report = await measureOwnerRouteRead(timings, () =>
+      cachedAnalytics(
+        env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+        workspaceId,
+        `speed-report-v1:${JSON.stringify(query.data)}`,
+        () =>
+          readSpeedReport({
+            db,
+            workspaceId,
+            range: query.data.range,
+            now: Date.now(),
+            appId: query.data.app_id,
+            performanceClass: query.data.class,
+          }),
+      ),
+    );
+    return json(200, report, true);
+  } catch {
+    return json(503, { error: 'speed report is unavailable' }, true);
+  }
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -881,6 +922,8 @@ async function handleOwnerRoutes(
       handleInstallationStatusRoute(req, current, identity, target, options?.timings),
     handleWorkspaceHealthRoute,
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
+      handleSpeedReportRoute(req, current, identity, target, bindings, options?.timings),
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
       handleDailyEngagementRoute(req, current, identity, target, bindings, options?.timings),
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
       handleOwnerAlertsRoute(req, current, identity, target, bindings, options?.timings),
@@ -962,6 +1005,7 @@ async function handleAccountOwner(
       '/v1/analytics/report',
       '/v1/reports/daily-engagement',
       '/v1/reports/portfolio-briefing',
+      '/v1/reports/speed',
       '/v1/workspace/alerts',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
