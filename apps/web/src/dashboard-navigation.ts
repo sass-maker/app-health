@@ -12,6 +12,11 @@ export const DASHBOARD_PAGES = {
     title: 'Daily briefing',
     description: 'Activity, acquisition and meaningful changes across your portfolio.',
   },
+  speed: {
+    eyebrow: 'Workspace',
+    title: 'Speed',
+    description: 'Field Web Vitals and server timings against the fleet performance budgets.',
+  },
   analytics: {
     eyebrow: 'Product',
     title: 'Analytics',

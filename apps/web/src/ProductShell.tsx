@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   BarChart3,
   CircleHelp,
+  Gauge,
   Layers3,
   Plus,
   Settings2,
@@ -137,11 +138,11 @@ function ProjectNavigation({
           {matches.map((app) => (
             <SidebarMenuItem key={app.appId}>
               <SidebarMenuButton
-                isActive={view !== 'overview' && project.appId === app.appId}
+                isActive={view !== 'overview' && view !== 'speed' && project.appId === app.appId}
                 title={app.name}
                 onClick={() => {
                   onProject(projectForApp(app, project, projects));
-                  if (view === 'overview') onView('analytics');
+                  if (view === 'overview' || view === 'speed') onView('analytics');
                   setOpenMobile(false);
                 }}
               >
@@ -173,7 +174,10 @@ function WorkspaceSidebar(props: WorkspaceSidebarProps): JSX.Element {
       <SidebarContent>
         <NavigationGroup
           label="Workspace"
-          items={[{ id: 'overview', label: 'Daily briefing', icon: Layers3 }]}
+          items={[
+            { id: 'overview', label: 'Daily briefing', icon: Layers3 },
+            { id: 'speed', label: 'Speed', icon: Gauge },
+          ]}
           view={props.view}
           onView={props.onView}
         />
@@ -260,11 +264,11 @@ function ProjectPicker({
     <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
       <span
         className="min-w-0 flex-1 truncate text-sm font-medium"
-        title={view === 'overview' ? 'Portfolio' : project.name}
+        title={view === 'overview' || view === 'speed' ? 'Portfolio' : project.name}
       >
-        {view === 'overview' ? 'Portfolio' : project.name}
+        {view === 'overview' || view === 'speed' ? 'Portfolio' : project.name}
       </span>
-      {view !== 'overview' ? (
+      {view !== 'overview' && view !== 'speed' ? (
         <LabeledSelect
           label="Environment"
           triggerClassName="h-9 w-28 text-xs"
@@ -339,7 +343,7 @@ export function ProductShell(props: Props): JSX.Element {
               </Badge>
             ) : null}
           </div>
-          {props.view !== 'overview' ? (
+          {props.view !== 'overview' && props.view !== 'speed' ? (
             <Tabs
               value={props.view.split('/')[0]}
               onValueChange={(value) => props.onView(value as DashboardView)}

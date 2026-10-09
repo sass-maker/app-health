@@ -9,6 +9,8 @@ import { LabeledSelect as IdentitySelect } from './LabeledSelect.js';
 import { AnalyticsSharing } from './AnalyticsSharing.js';
 import { NativeKeys } from './NativeKeys.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
+import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
+import { SpeedView } from './SpeedView.js';
 import { EnvironmentCreateForm } from './EnvironmentCreateForm.js';
 import { ProductBrand, ProductShell } from './ProductShell.js';
 import { AnalyticsView } from './AnalyticsView.js';
@@ -107,7 +109,6 @@ import {
 import { ThemeToggle } from './ThemeToggle.js';
 import { ProjectsView } from './ProjectsView.js';
 
-const API_BASE = (import.meta.env.VITE_APP_HEALTH_API as string | undefined) ?? '';
 const INGEST_ORIGIN =
   (import.meta.env.VITE_APP_HEALTH_INGEST_ORIGIN as string | undefined) ?? window.location.origin;
 const STORAGE_KEY = 'app-health-v0-project';
@@ -134,26 +135,6 @@ const healthWeight: Record<EndpointAggregateV1['health_state'], number> = {
   'insufficient-data': 2,
   healthy: 1,
 };
-
-function apiUrl(path: string): URL {
-  const base = API_BASE || window.location.origin;
-  return new URL(path, base);
-}
-
-function ownerHeaders(ownerToken: string, headers?: HeadersInit): Headers {
-  const next = new Headers(headers);
-  if (ownerToken) next.set('authorization', `Bearer ${ownerToken}`);
-  return next;
-}
-
-function ownerFetch(
-  path: string | URL,
-  ownerToken: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  const url = typeof path === 'string' ? apiUrl(path) : path;
-  return fetch(url, { ...init, headers: ownerHeaders(ownerToken, init.headers) });
-}
 
 function readDashboardResponse<T>(
   value: unknown,
@@ -3217,6 +3198,7 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
 
 function DashboardContent(props: DashboardContentProps): JSX.Element {
   const { view } = props;
+  if (view === 'speed') return <SpeedView ownerToken={props.ownerToken} />;
   if (isBackendView(view)) return <DashboardBackend {...props} view={view} />;
   return view === 'analytics' || view === 'events' ? (
     <DashboardAnalytics {...props} />
