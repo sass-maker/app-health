@@ -199,3 +199,62 @@ it('aborts a pending request and clears its timeout when unmounted', () => {
   expect(vi.getTimerCount()).toBe(0);
   vi.useRealTimers();
 });
+
+it('labels synthetic journey incidents and shows probe freshness or missing coverage', async () => {
+  const now = Date.UTC(2026, 9, 9, 6);
+  const journeyFeed = {
+    generated_at: now,
+    total_count: 3,
+    entries: ['journey.recovered', 'journey.degraded', 'journey.failed'].map((event, index) => ({
+      id: `journey-${index}`,
+      app_id: 'app-health',
+      catalog_id: 'anime-list',
+      project_name: 'Anime List',
+      event,
+      level: event === 'journey.failed' ? 'error' : event === 'journey.degraded' ? 'warn' : 'info',
+      source: 'server',
+      timestamp: now - (index + 1) * 600_000,
+      journey: 'anime-search',
+      location: 'india-home',
+    })),
+    probes: [
+      {
+        location: 'india-home',
+        last_seen_at: now - 240_000,
+        interval_seconds: 300,
+        state: 'fresh',
+      },
+      {
+        location: 'remote-us',
+        last_seen_at: now - 3 * 3_600_000,
+        interval_seconds: 300,
+        state: 'stale',
+      },
+      {
+        location: 'old-box',
+        last_seen_at: now - 4 * 86_400_000,
+        interval_seconds: 300,
+        state: 'stale',
+      },
+    ],
+  };
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(journeyFeed))
+    .mockResolvedValueOnce(Response.json({ ...journeyFeed, probes: [] }));
+  vi.stubGlobal('fetch', fetch);
+  render(<OwnerAlertFeed ownerToken="owner-token" />);
+  expect(await screen.findByText('Journey recovered')).toBeTruthy();
+  expect(screen.getByText('Journey slow')).toBeTruthy();
+  expect(screen.getByText('Journey failing')).toBeTruthy();
+  expect(screen.getAllByText(/anime-search from india-home \(synthetic\)/)).toHaveLength(3);
+  const probes = screen.getByLabelText('Synthetic journey probes');
+  expect(probes).toHaveTextContent('india-home');
+  expect(probes).toHaveTextContent('Reporting');
+  expect(probes).toHaveTextContent('last run 4 min ago');
+  expect(probes).toHaveTextContent('Stale');
+  expect(probes).toHaveTextContent('last run 3 h ago');
+  expect(probes).toHaveTextContent('last run 4 d ago');
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
+  expect(await screen.findByText(/Journey coverage is missing/)).toBeTruthy();
+});

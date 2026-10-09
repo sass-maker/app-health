@@ -267,6 +267,7 @@ describe('readOwnerAlertFeed', () => {
           },
           expect.objectContaining({ id: 'feedback-1' }),
         ],
+        probes: [],
       });
       expect(JSON.stringify(result)).not.toContain('private');
       expect(result.total_count).toBeLessThan(20);
@@ -278,12 +279,175 @@ describe('readOwnerAlertFeed', () => {
     }
   });
 
+  it('surfaces synthetic journey incidents and probe location freshness', async () => {
+    const sqlite = new DatabaseSync(':memory:');
+    try {
+      sqlite.exec(`CREATE TABLE environments (id TEXT, app_id TEXT, name TEXT);
+        CREATE TABLE catalog_project_imports
+          (workspace_id TEXT, catalog_id TEXT, catalog_name TEXT, app_id TEXT, lifecycle TEXT);
+        CREATE TABLE log_events
+          (log_id TEXT, app_id TEXT, environment_id TEXT, timestamp INTEGER, event TEXT, props TEXT,
+            level TEXT NOT NULL DEFAULT 'info', source TEXT NOT NULL DEFAULT 'server');
+        INSERT INTO environments VALUES
+          ('prod-health', 'app-health', 'production'), ('prod-anime', 'app-anime', 'production'),
+          ('prod-other', 'app-other', 'production');
+        INSERT INTO catalog_project_imports VALUES
+          ('ws-a', 'app-health', 'App Health', 'app-health', 'active'),
+          ('ws-a', 'anime-list', 'Anime List', 'app-anime', 'active'),
+          ('ws-b', 'other', 'Other', 'app-other', 'active');`);
+      const insert = sqlite.prepare('INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      const minute = 60_000;
+      const now = 1_700_000_000_000;
+      const rows: Array<[string, string, string, number, string, string, string, string]> = [
+        [
+          'failed',
+          'app-health',
+          'prod-health',
+          now - 30 * minute,
+          'journey.failed',
+          '{"project":"anime-list","journey":"anime-search","location":"india-home","failure":"timeout"}',
+          'error',
+          'server',
+        ],
+        [
+          'slow',
+          'app-health',
+          'prod-health',
+          now - 20 * minute,
+          'journey.degraded',
+          '{"project":"anime-list","journey":"manga-search","location":"india-home"}',
+          'warn',
+          'server',
+        ],
+        [
+          'recovered',
+          'app-health',
+          'prod-health',
+          now - 10 * minute,
+          'journey.recovered',
+          '{"project":"anime-list","journey":"anime-search","location":"india-home"}',
+          'info',
+          'server',
+        ],
+        [
+          'info-other',
+          'app-health',
+          'prod-health',
+          now - 9 * minute,
+          'journey.checked',
+          '{"project":"anime-list"}',
+          'info',
+          'server',
+        ],
+        [
+          'hb-old',
+          'app-health',
+          'prod-health',
+          now - 60 * minute,
+          'probe.heartbeat',
+          '{"location":"india-home","interval_seconds":300}',
+          'debug',
+          'server',
+        ],
+        [
+          'hb-new',
+          'app-health',
+          'prod-health',
+          now - 4 * minute,
+          'probe.heartbeat',
+          '{"location":"india-home","interval_seconds":300}',
+          'debug',
+          'server',
+        ],
+        [
+          'hb-remote',
+          'app-health',
+          'prod-health',
+          now - 40 * minute,
+          'probe.heartbeat',
+          '{"location":"remote-us","interval_seconds":"bad"}',
+          'debug',
+          'server',
+        ],
+        [
+          'hb-foreign',
+          'app-other',
+          'prod-other',
+          now - minute,
+          'probe.heartbeat',
+          '{"location":"elsewhere","interval_seconds":300}',
+          'debug',
+          'server',
+        ],
+        [
+          'hb-unnamed',
+          'app-health',
+          'prod-health',
+          now - minute,
+          'probe.heartbeat',
+          '{}',
+          'debug',
+          'server',
+        ],
+      ];
+      for (const row of rows) insert.run(...row);
+      const db = {
+        batch: async (statements: Array<{ all(): Promise<{ results: unknown[] }> }>) =>
+          Promise.all(
+            statements.map(async (statement) => ({
+              ...(await statement.all()),
+              success: true,
+              meta: {},
+            })),
+          ),
+        prepare(sql: string) {
+          return {
+            bind(...values: unknown[]) {
+              return {
+                all: async () => ({
+                  results: sqlite.prepare(sql).all(...(values as Array<string | number>)),
+                }),
+              };
+            },
+          };
+        },
+      } as unknown as D1DatabaseLike;
+
+      const feed = await readOwnerAlertFeed(db, 'ws-a', now, 10);
+      expect(
+        feed.entries.map((entry) => [entry.id, entry.catalog_id, entry.journey, entry.location]),
+      ).toEqual([
+        ['recovered', 'anime-list', 'anime-search', 'india-home'],
+        ['slow', 'anime-list', 'manga-search', 'india-home'],
+        ['failed', 'anime-list', 'anime-search', 'india-home'],
+      ]);
+      expect(JSON.stringify(feed.entries)).not.toContain('timeout');
+      expect(feed.probes).toEqual([
+        {
+          location: 'india-home',
+          last_seen_at: now - 4 * minute,
+          interval_seconds: 300,
+          state: 'fresh',
+        },
+        {
+          location: 'remote-us',
+          last_seen_at: now - 40 * minute,
+          interval_seconds: 300,
+          state: 'stale',
+        },
+      ]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('clamps the requested result size to the fixed maximum', async () => {
     const statements: string[] = [];
     const bindings: unknown[][] = [];
     const db = {
       batch: async () => [
         { success: true, results: [{ total_count: 0 }], meta: {} },
+        { success: true, results: [], meta: {} },
         { success: true, results: [], meta: {} },
       ],
       prepare(sql: string) {
@@ -330,6 +494,11 @@ describe('readOwnerAlertFeed', () => {
     [
       { success: true, results: [], meta: {} },
       { success: true, results: [], meta: {} },
+    ],
+    [
+      { success: true, results: [{ total_count: 0 }], meta: {} },
+      { success: true, results: [], meta: {} },
+      { success: true, meta: {} },
     ],
   ])(
     'rejects incomplete or failed database reads instead of returning an empty feed (%#)',

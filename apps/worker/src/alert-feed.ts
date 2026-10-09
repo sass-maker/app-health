@@ -3,6 +3,10 @@ import type { LogLevel, LogSource } from '@app-health/contracts';
 
 const ALERT_FEED_LIMIT = 50;
 const RETENTION_MS = 30 * 86_400_000;
+const PROBE_LOCATION_LIMIT = 10;
+/** A probe location is stale after this many missed scheduled runs. */
+const PROBE_STALE_RUNS = 3;
+const DEFAULT_PROBE_INTERVAL_S = 300;
 
 interface OwnerAlert {
   id: string;
@@ -13,12 +17,63 @@ interface OwnerAlert {
   level: LogLevel;
   source: LogSource;
   timestamp: number;
+  /** Synthetic journey incidents only: the probed journey and probe location. */
+  journey?: string;
+  location?: string;
+}
+
+/** Last heartbeat from one synthetic journey probe location. */
+interface ProbeCoverage {
+  location: string;
+  last_seen_at: number;
+  interval_seconds: number;
+  state: 'fresh' | 'stale';
 }
 
 export interface OwnerAlertFeed {
   generated_at: number;
   total_count: number;
   entries: OwnerAlert[];
+  /** Every probe location seen in retention; an empty list means no probe coverage. */
+  probes: ProbeCoverage[];
+}
+
+function probeStatement(db: D1DatabaseLike, workspaceId: string, from: number, now: number) {
+  // SQLite returns the bare interval column from the row holding MAX(timestamp).
+  return db
+    .prepare(
+      `SELECT json_extract(l.props, '$.location') AS location, MAX(l.timestamp) AS last_seen_at,
+        json_extract(l.props, '$.interval_seconds') AS interval_seconds
+       FROM log_events l
+       JOIN environments e ON e.id = l.environment_id AND e.app_id = l.app_id
+         AND lower(e.name) = 'production'
+       WHERE l.event = 'probe.heartbeat' AND l.timestamp >= ? AND l.timestamp <= ?
+         AND json_extract(l.props, '$.location') IS NOT NULL
+         AND l.app_id IN (SELECT source.app_id FROM catalog_project_imports source
+           WHERE source.workspace_id = ? AND source.lifecycle IN ('primary', 'active'))
+       GROUP BY location
+       ORDER BY location
+       LIMIT ?`,
+    )
+    .bind(from, now, workspaceId, PROBE_LOCATION_LIMIT);
+}
+
+function probeCoverage(row: Record<string, unknown>, now: number): ProbeCoverage {
+  const interval = Number(row.interval_seconds);
+  const intervalSeconds =
+    Number.isFinite(interval) && interval >= 60 ? Math.floor(interval) : DEFAULT_PROBE_INTERVAL_S;
+  const lastSeenAt = Math.max(0, Math.floor(Number(row.last_seen_at)));
+  return {
+    location: String(row.location),
+    last_seen_at: lastSeenAt,
+    interval_seconds: intervalSeconds,
+    state: now - lastSeenAt > PROBE_STALE_RUNS * intervalSeconds * 1000 ? 'stale' : 'fresh',
+  };
+}
+
+function journeyFields(row: Record<string, unknown>): Pick<OwnerAlert, 'journey' | 'location'> {
+  if (typeof row.journey !== 'string' || typeof row.location !== 'string') return {};
+  return { journey: row.journey, location: row.location };
 }
 
 /**
@@ -37,7 +92,8 @@ export async function readOwnerAlertFeed(
       AND lower(e.name) = 'production'
     JOIN catalog_project_imports c
       ON c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
-    WHERE (l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe')
+    WHERE (l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe',
+        'journey.recovered')
       OR l.level = 'error'
       OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
       AND l.timestamp >= ? AND l.timestamp <= ?
@@ -69,21 +125,29 @@ export async function readOwnerAlertFeed(
     .prepare(
       `SELECT l.log_id AS id, l.app_id AS app_id, c.catalog_id AS catalog_id,
         c.catalog_name AS project_name, l.event AS event, l.level AS level,
-        l.source AS source, l.timestamp AS timestamp
+        l.source AS source, l.timestamp AS timestamp,
+        CASE WHEN l.event LIKE 'journey.%' THEN json_extract(l.props, '$.journey') END AS journey,
+        CASE WHEN l.event LIKE 'journey.%' THEN json_extract(l.props, '$.location') END AS location
        ${scope}
        ORDER BY l.timestamp DESC, l.log_id DESC
        LIMIT ?`,
     )
     .bind(...binds, limit);
-  const results = await db.batch([countStatement, entriesStatement]);
+  const results = await db.batch([
+    countStatement,
+    entriesStatement,
+    probeStatement(db, workspaceId, from, now),
+  ]);
   const countRows = results[0]?.results;
   const rows = results[1]?.results;
+  const probeRows = results[2]?.results;
   if (
-    results.length !== 2 ||
+    results.length !== 3 ||
     results.some((result) => !result.success) ||
     !Array.isArray(countRows) ||
     countRows.length !== 1 ||
-    !Array.isArray(rows)
+    !Array.isArray(rows) ||
+    !Array.isArray(probeRows)
   ) {
     throw new Error('D1 alert feed read failed');
   }
@@ -101,6 +165,8 @@ export async function readOwnerAlertFeed(
       level: row.level as LogLevel,
       source: row.source as LogSource,
       timestamp: Math.max(0, Math.floor(Number(row.timestamp))),
+      ...journeyFields(row),
     })),
+    probes: probeRows.map((row) => probeCoverage(row, now)),
   };
 }

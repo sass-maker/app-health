@@ -1,0 +1,21 @@
+{
+  "name": "@app-health/probe",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Scheduled complete-response journey probes that report incidents to App Health logs.",
+  "type": "module",
+  "bin": {
+    "app-health-probe": "./src/cli.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc --noEmit",
+    "probe": "node src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.7"
+  }
+}
