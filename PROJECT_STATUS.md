@@ -1,6 +1,18 @@
 # app-health — PROJECT STATUS
 
-Last updated: 2026-10-01
+Last updated: 2026-10-09
+
+## deploy-freeze: no App Health deploys until 2026-10-11 18:31 UTC
+
+Owner-approved 2026-10-09. Migration 0028 and main `265f6f1` (Worker version
+`d7662f43-6815-44c0-9e7d-aabe222d4f67`) went to 100% at 2026-10-09 16:14:49 UTC.
+Do not deploy, roll out, or change Worker versions for `health.sassmaker.com` /
+`ingest.sassmaker.com` until the Oct 10 India day
+(`[2026-10-09T18:30Z, 2026-10-10T18:30Z)`) plus its 24h late window and 60s
+margin close at 2026-10-11 18:31 UTC, so issue #96 can seal its first day.
+Rollback (regression only, announce on #96 first):
+`wrangler versions deploy 50ca9dec-dc9d-430f-a45f-8eac2334e662@100%`.
+Merging docs/code to main is fine; only deploys are frozen. Tracking: #96, #92.
 
 ## Why / What
 
