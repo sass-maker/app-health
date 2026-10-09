@@ -6,6 +6,7 @@ export * from './event.js';
 export * from './aggregate.js';
 export * from './failure.js';
 export * from './log.js';
+export * from './performance.js';
 export * from './setup.js';
 export * from './installation.js';
 export * from './health.js';
