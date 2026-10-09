@@ -643,19 +643,6 @@
       }
     },
     {
-      "project": "agent-testing",
-      "journey": "home",
-      "url": "https://browser-agents.sarthakagrawal.dev/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>The Map of Browser Agent Testing"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "nutrition-formula-engine",
       "journey": "home",
       "url": "https://formula.significanthobbies.com/",
