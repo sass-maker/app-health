@@ -119,6 +119,11 @@ merge different route budgets or percentiles into one alert window.
 
 ## Not implemented yet
 
-Tracker emission, performance reports, per-product wiring, runtime alert
-routing, probe evaluation, and per-job route budgets are not implemented by
-this change. Existing Worker and web behavior is unchanged.
+Opt-in browser tracker emission is implemented: one debug-level `web.vitals`
+log per document goes to the existing browser Logs endpoint. Add `data-vitals`
+to the tracker tag; the tracker lazily loads `/vitals.js` from the same host.
+Vitals are a separate opt-in static file; only the loader (about 180 bytes)
+raises the tracker gzip budget, from 3250 to 3400 bytes. See
+[browser analytics](browser-analytics.md#web-vitals) for attributes and sampling.
+Performance reports, per-product wiring, runtime alert routing, probe evaluation,
+and per-job route budgets remain unimplemented. Worker behavior is unchanged.

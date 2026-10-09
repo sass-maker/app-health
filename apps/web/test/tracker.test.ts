@@ -26,9 +26,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('ships under 3.25KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
-  // Cross-tab locking, identity, attribution, and in-flight delivery stay within 3.25 KB compressed.
-  expect(gzipSync(source).length).toBeLessThanOrEqual(3250);
+it('ships under 3.4KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
+  // Cross-tab locking, identity, attribution, and in-flight delivery stay within 3.4 KB compressed (3.25 KB plus the opt-in vitals loader).
+  expect(gzipSync(source).length).toBeLessThanOrEqual(3400);
   api().page('/users/123?email=private@example.com#token');
   api().track('signup.completed');
   await api().flush();
