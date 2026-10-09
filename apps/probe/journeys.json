@@ -695,19 +695,6 @@
       }
     },
     {
-      "project": "mentionpilot",
-      "journey": "home",
-      "url": "https://mention.highsignal.app/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>MentionPilot"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "daddyrad",
       "journey": "home",
       "url": "https://daddyrad.com/",
