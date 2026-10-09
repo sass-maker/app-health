@@ -31,7 +31,7 @@ import {
 } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { readPortfolioBriefing } from './portfolio-briefing.js';
-import { readSpeedReport } from './speed-report.js';
+import { readSpeedReport, readSpeedReportParts, summarizeSpeedForDay } from './speed-report.js';
 import { writeBotCounterHeartbeat } from './browser-bot-counters.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
@@ -714,6 +714,46 @@ async function handleSpeedReportRoute(
   }
 }
 
+function dailySpeedClass(url: URL): SpeedReportQuery['class'] | null {
+  if (url.searchParams.get('speed') !== '1') return null;
+  const parsed = SpeedReportQuery.shape.class.safeParse(
+    url.searchParams.get('speed_class') ?? undefined,
+  );
+  if (!parsed.success)
+    throw Object.assign(new Error('speed_class must be landing, app, or api'), { status: 400 });
+  return parsed.data;
+}
+
+async function dailySpeedPayload(
+  env: Env,
+  workspaceId: string,
+  day: Parameters<typeof summarizeSpeedForDay>[1],
+  performanceClass: SpeedReportQuery['class'],
+  now: number,
+) {
+  try {
+    const speed = await cachedAnalytics(
+      env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+      workspaceId,
+      `daily-speed-v1:${day.date}:${performanceClass}`,
+      async () =>
+        summarizeSpeedForDay(
+          await readSpeedReportParts({
+            db: env.DB!,
+            workspaceId,
+            window: day,
+            now,
+            performanceClass,
+          }),
+          day,
+        ),
+    );
+    return { speed };
+  } catch {
+    return { speed_error: 'unavailable' as const };
+  }
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -775,14 +815,20 @@ async function handleDailyEngagementRoute(
       );
       return json(200, briefing, true);
     }
+    const speedClass = dailySpeedClass(url);
+    const payload = dailyEngagementClientPayload(
+      await measureOwnerRouteRead(timings, loadReport),
+      url.searchParams.get('capture_applicability') === '1',
+      url.searchParams.get('browser_visitor_unknown_reason') === '1',
+      url.searchParams.get('feedback_applicability') === '1',
+    );
+    if (speedClass === null) return json(200, payload, true);
     return json(
       200,
-      dailyEngagementClientPayload(
-        await measureOwnerRouteRead(timings, loadReport),
-        url.searchParams.get('capture_applicability') === '1',
-        url.searchParams.get('browser_visitor_unknown_reason') === '1',
-        url.searchParams.get('feedback_applicability') === '1',
-      ),
+      {
+        ...payload,
+        ...(await dailySpeedPayload(env, workspaceId, day, speedClass, now)),
+      },
       true,
     );
   } catch (error) {

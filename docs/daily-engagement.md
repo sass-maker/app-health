@@ -18,6 +18,15 @@ shows whether the source query failed, no production environment exists, the
 visitor group was sampled, telemetry began partway through or after the day, or
 no qualifying analytics receipt exists.
 
+Opt into a sibling `speed` section with `speed=1`; `speed_class=landing|app|api`
+defaults to `app` and invalid opted-in values return 400. It covers the report's
+completed India day, with nearest-rank product percentiles over all retained samples.
+Breaching-route counts and the worst budget-overshoot route include capped-out routes.
+Missing metrics are null; products remain measured, insufficient, or no_data.
+The section has a separate workspace/day/class cache (60 seconds); truncation marks
+retained-log limits. Read failures omit `speed` and add `speed_error: "unavailable"`.
+Without opt-in the response is unchanged; portfolio briefing does not include speed.
+
 ## What a row means
 
 - Scope comes from active or primary rows in the workspace's

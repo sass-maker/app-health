@@ -146,6 +146,15 @@ insufficient when only smaller valid sets exist, and no_data when none exist.
 The summary counts a product as breaching for any percentile or sustained breach.
 No raw props leave the report.
 
+`GET /v1/reports/daily-engagement?speed=1` adds a sibling `DailySpeedSectionV1`;
+without opt-in the existing daily response is unchanged. `speed_class=landing|app|api`
+defaults to `app`; invalid opted-in classes return 400. It uses the same completed
+India day `[from,to)`, with sustained states always insufficient. Product percentiles,
+error/cache ratios, breach counts, and worst budget-overshoot route use all retained
+samples/routes before display capping; `truncated` signals a retained-log limit.
+The section is cached separately by workspace/day/class for 60 seconds. A speed read
+failure leaves the daily report available with `speed_error: "unavailable"`.
+
 ## Not implemented yet
 
 Opt-in browser tracker emission is implemented: one debug-level `web.vitals`
@@ -155,5 +164,5 @@ Vitals are a separate opt-in static file; only the loader (about 180 bytes)
 raises the tracker gzip budget, from 3250 to 3400 bytes. See
 [browser analytics](browser-analytics.md#web-vitals) for attributes and sampling.
 The owner speed report API above reads both event types. Dashboard speed views,
-a daily-report speed section, per-product wiring, runtime alert routing, probe
+per-product wiring, runtime alert routing, probe
 evaluation, and per-job route budgets remain unimplemented.
