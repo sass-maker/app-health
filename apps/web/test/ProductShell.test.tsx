@@ -86,6 +86,17 @@ function projectButtons() {
 }
 
 describe('ProductShell navigation', () => {
+  it('opens Speed at workspace level and enters analytics when choosing a project', () => {
+    const { onView, onProject } = renderShell({ view: 'speed' });
+    expect(screen.getByText('Portfolio')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Environment' })).toBeNull();
+    expect(screen.queryByRole('tablist', { name: 'Project reports' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Speed' }));
+    expect(onView).toHaveBeenCalledWith('speed');
+    fireEvent.click(screen.getByRole('button', { name: 'Product 2' }));
+    expect(onProject).toHaveBeenCalledWith(appTwoProduction);
+    expect(onView).toHaveBeenLastCalledWith('analytics');
+  });
   it('deduplicates all 55 apps and searches project names case-insensitively', () => {
     renderShell();
 

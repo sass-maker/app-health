@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import process from 'node:process';
 import { checkReadability } from './readability';
 
 interface BriefingProduct {
@@ -235,7 +236,11 @@ for (const width of [390, 768, 1440]) {
         expect(overflow).toBeLessThanOrEqual(1);
       }
       await checkReadability(page);
-      const evidence = new URL('../../../.fleet/evidence/cta-browsers-20261002/', import.meta.url);
+      const evidence = new URL(
+        process.env.APP_HEALTH_EVIDENCE_DIRECTORY ??
+          '../../../.fleet/evidence/cta-browsers-20261002/',
+        import.meta.url,
+      );
       mkdirSync(fileURLToPath(evidence), { recursive: true });
       await page.screenshot({
         fullPage: false,
