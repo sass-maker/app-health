@@ -20,7 +20,7 @@ Cloudflare invokes it every few minutes.
 - **Cold and warm.** `warm_check` repeats the request; either over budget is slow.
 - **Diagnosis only, no causation.** Numeric `Server-Timing` (backend time) and the
   `cf-ray` colo are recorded. A journey against the direct backend
-  (`anime-search-backend`) next to the public one separates slow backend from
+  (`anime-stats-backend`) next to the public one separates slow backend from
   slow delivery.
 
 ## Incidents
@@ -73,9 +73,15 @@ Synthetic activity is not analytics traffic, so it never inflates engagement.
   A single overseas runner, or a probe inside Cloudflare, cannot show
   user-network health. A location that is not provisioned is missing coverage.
 
-`apps/probe/pilot-journeys.json` is the pilot policy: App Health landing, the
-API and ingest health checks, and the Anime List home page, anime search
-(public and direct backend) and manga search. Budgets: 2 s for pages and
-anime search, 3 s for manga (provisional), 1 s for health. The policy for the
-rest of the Fleet should be generated from the SaaS Maker catalog and passed
-with `--config`.
+`apps/probe/journeys.json` is the default policy. It is generated from the SaaS
+Maker catalog (`projects[].systems.probe`, written by `pnpm catalog:sync` in
+SaaS Maker), the same way Site Health consumes its generated manifests. Never
+edit it here; change the catalog and re-sync. Catalog journeys are public GET
+requests only: the sync rejects methods, bodies, query strings and
+credentials.
+
+It covers a `home` page journey for every active project with a public
+hostname, App Health's API and ingest health checks, and Anime List's catalog
+stats (public and direct backend), anime detail and manga stats. Budgets are
+provisional: 2 s for the App Health and Anime List pilot pages and anime
+detail, 3 s for other pages and the stats endpoints, 1 s for health.

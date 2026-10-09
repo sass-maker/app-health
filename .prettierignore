@@ -13,3 +13,6 @@ AGENTS.md
 PROJECT_STATUS.md
 packages/swift/.build
 packages/swift/.swiftpm
+
+# Generated from the SaaS Maker catalog (pnpm catalog:sync); never hand-edited.
+apps/probe/journeys.json

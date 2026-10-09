@@ -1,8 +1,9 @@
 // Journey probe policy. A journey is one fixed, read-only, public request
 // against a production hostname, plus the checks that make its response count
-// as usable. Policy is data: the Fleet-wide set is meant to be a projection of
-// the canonical SaaS Maker catalog; the checked-in pilot file covers App Health
-// and Anime List only.
+// as usable. Policy is data: apps/probe/journeys.json is generated from the
+// canonical SaaS Maker catalog (`projects[].systems.probe`, `pnpm catalog:sync`)
+// and is never hand-edited. Catalog policy is GET-only; POST support remains
+// for fixed public fixtures passed explicitly with --config.
 
 export interface JsonCheck {
   /** Dotted path into the parsed JSON body, e.g. `filteredList` or `data.items`. */

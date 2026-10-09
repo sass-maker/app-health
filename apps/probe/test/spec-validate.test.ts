@@ -12,13 +12,29 @@ const minimal = {
 };
 
 describe('parseSpec', () => {
-  it('accepts the checked-in pilot policy', () => {
-    const spec = parseSpec(JSON.parse(readFileSync('pilot-journeys.json', 'utf8')));
-    expect(spec.journeys.map(journeyKey)).toContain('anime-list/anime-search');
-    const search = spec.journeys.find((item) => item.journey === 'anime-search');
-    expect(search?.method).toBe('POST');
-    expect(search?.timeout_ms).toBe(8000);
-    expect(JSON.parse(search?.body ?? '{}')).toMatchObject({ pagesize: 3 });
+  it('accepts the catalog-generated policy, which is GET-only', () => {
+    const spec = parseSpec(JSON.parse(readFileSync('journeys.json', 'utf8')));
+    expect(spec.journeys.map(journeyKey)).toEqual(
+      expect.arrayContaining([
+        'app-health/home',
+        'app-health/api-health',
+        'anime-list/anime-stats',
+      ]),
+    );
+    expect(spec.journeys.every((item) => item.method === 'GET' && item.body === undefined)).toBe(
+      true,
+    );
+    expect(new Set(spec.journeys.map((item) => item.project)).size).toBeGreaterThan(2);
+  });
+
+  it('parses a fixed POST fixture', () => {
+    const [journey] = parseSpec({
+      schema_version: 1,
+      journeys: [{ ...minimal, method: 'POST', body: { pagesize: 3 } }],
+    }).journeys;
+    expect(journey?.method).toBe('POST');
+    expect(journey?.timeout_ms).toBe(8000);
+    expect(JSON.parse(journey?.body ?? '{}')).toMatchObject({ pagesize: 3 });
   });
 
   it('applies defaults', () => {

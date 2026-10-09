@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "generated_from": "saas-maker catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
+  "purpose": "Complete-response, read-only public GET journeys that App Health probes from scheduled vantages. Each journey is attributed to its catalog project.",
+  "source_issue": "https://github.com/sass-maker/app-health/issues/175",
+  "journeys": [
+    {
+      "project": "codevetter",
+      "journey": "home",
+      "url": "https://codevetter.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>CodeVetter"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "pace",
+      "journey": "home",
+      "url": "https://heypace.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>HeyPace"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "posttrainllm",
+      "journey": "home",
+      "url": "https://posttrainllm.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>PostTrainLLM"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "live",
+      "journey": "home",
+      "url": "https://live.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Live"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "saas-maker",
+      "journey": "home",
+      "url": "https://sassmaker.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>SaaS Maker"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "gitstat",
+      "journey": "home",
+      "url": "https://git.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>GitStat"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "email-manager",
+      "journey": "home",
+      "url": "https://mail.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Kinetic"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "chatgpt-memory-insights",
+      "journey": "home",
+      "url": "https://chatgpt.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Memory Map"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "free-ai",
+      "journey": "home",
+      "url": "https://ai-gateway.sassmaker.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Free AI"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "high-signal",
+      "journey": "home",
+      "url": "https://highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>High Signal"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "on-record",
+      "journey": "home",
+      "url": "https://podcasts.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>High Signal Podcasts"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "issue-pages",
+      "journey": "home",
+      "url": "https://issues.sarthakagrawal.dev/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>IssuePages"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "research-papers",
+      "journey": "home",
+      "url": "https://papers.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Research Papers"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "knowledge-base",
+      "journey": "home",
+      "url": "https://knowledgebase.sassmaker.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Knowledge Base"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "significanthobbies",
+      "journey": "home",
+      "url": "https://significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Significant Hobbies"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "home",
+      "url": "https://anime.significanthobbies.com/",
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Anime List"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "anime-stats",
+      "url": "https://anime.significanthobbies.com/api/stats",
+      "budget_ms": 3000,
+      "warm_check": true,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "genreCounts",
+            "min_items": 1
+          }
+        ]
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "anime-stats-backend",
+      "url": "https://mal-api.sarthakagrawal927.workers.dev/api/stats",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "genreCounts",
+            "min_items": 1
+          }
+        ]
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "anime-detail",
+      "url": "https://anime.significanthobbies.com/api/anime/1",
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "anime.mal_id",
+            "equals": 1
+          }
+        ]
+      }
+    },
+    {
+      "project": "anime-list",
+      "journey": "manga-stats",
+      "url": "https://anime.significanthobbies.com/api/manga/stats",
+      "budget_ms": 3000,
+      "warm_check": true,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "genreCounts",
+            "min_items": 1
+          }
+        ]
+      }
+    },
+    {
+      "project": "looptv",
+      "journey": "home",
+      "url": "https://tv.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>LoopTV"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "reader",
+      "journey": "home",
+      "url": "https://read.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Reader"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "swe-interview-prep",
+      "journey": "home",
+      "url": "https://learn.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>SWE Interview Prep"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "calorie",
+      "journey": "home",
+      "url": "https://calorie.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Calorie"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "setline",
+      "journey": "home",
+      "url": "https://setline.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Setline"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "kith",
+      "journey": "home",
+      "url": "https://kith.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Kith"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "ios-landings",
+      "journey": "home",
+      "url": "https://apps.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "App landings</title>"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "rolepatch",
+      "journey": "home",
+      "url": "https://rolepatch.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>RolePatch"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "karte",
+      "journey": "home",
+      "url": "https://karte.cc/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Karte"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "starboard",
+      "journey": "home",
+      "url": "https://starboard.codevetter.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Starboard"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "ai-game",
+      "journey": "home",
+      "url": "https://aliveville.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Aliveville"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "app-health",
+      "journey": "home",
+      "url": "https://health.sassmaker.com/",
+      "budget_ms": 2000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>App Health"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "app-health",
+      "journey": "api-health",
+      "url": "https://health.sassmaker.com/v1/health",
+      "budget_ms": 1000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "ok",
+            "equals": true
+          }
+        ]
+      }
+    },
+    {
+      "project": "app-health",
+      "journey": "ingest-health",
+      "url": "https://ingest.sassmaker.com/v1/health",
+      "budget_ms": 1000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "ok",
+            "equals": true
+          }
+        ]
+      }
+    },
+    {
+      "project": "mashup",
+      "journey": "home",
+      "url": "https://mashup.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Mashup"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "motion",
+      "journey": "home",
+      "url": "https://motion.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Motion"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "open-historia",
+      "journey": "home",
+      "url": "https://historia.aliveville.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Open Historia"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "ph-catalog",
+      "journey": "home",
+      "url": "https://ph.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>PH Catalog"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "web-playables",
+      "journey": "home",
+      "url": "https://idle.aliveville.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Idle"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "what-it-takes-to-win",
+      "journey": "home",
+      "url": "https://paths.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Paths"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "sarthakagrawal-personal",
+      "journey": "home",
+      "url": "https://sarthakagrawal.dev/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Sarthak Agrawal"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "reddit-insights",
+      "journey": "home",
+      "url": "https://reddit-insights.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Reddit Insights"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "anchor",
+      "journey": "home",
+      "url": "https://anchor.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Anchor"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "nomad-data-adventure",
+      "journey": "home",
+      "url": "https://nomad.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Nomad Atlas"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "storagedaddy",
+      "journey": "home",
+      "url": "https://storage.daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "storagedaddy</title>"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "browserdaddy",
+      "journey": "home",
+      "url": "https://browser.daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>BrowserDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "performancedaddy",
+      "journey": "home",
+      "url": "https://performance.daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>PerformanceDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "meme-lab",
+      "journey": "home",
+      "url": "https://memes.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Meme Lab"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "agent-testing",
+      "journey": "home",
+      "url": "https://browser-agents.sarthakagrawal.dev/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>The Map of Browser Agent Testing"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "nutrition-formula-engine",
+      "journey": "home",
+      "url": "https://formula.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Formula Calculator"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "every-song-is-a-website",
+      "journey": "home",
+      "url": "https://music.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>every song is a website"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "contextdaddy",
+      "journey": "home",
+      "url": "https://context.daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>ContextDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "mentionpilot",
+      "journey": "home",
+      "url": "https://mention.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>MentionPilot"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "daddyrad",
+      "journey": "home",
+      "url": "https://daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>DaddyRad"
+        ],
+        "first_party_asset": true
+      }
+    }
+  ]
+}

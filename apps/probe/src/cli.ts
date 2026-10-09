@@ -5,7 +5,7 @@
 // results and the logs it would send are printed, and no state is written.
 //
 //   node apps/probe/src/cli.ts --location india-home \
-//     [--config apps/probe/pilot-journeys.json] [--state ~/.app-health-probe/state.json] \
+//     [--config apps/probe/journeys.json] [--state ~/.app-health-probe/state.json] \
 //     [--interval 300]
 
 import { randomUUID } from 'node:crypto';
@@ -24,7 +24,7 @@ export interface CliOptions {
   intervalSeconds: number;
 }
 
-const DEFAULT_CONFIG = resolve(dirname(fileURLToPath(import.meta.url)), '../pilot-journeys.json');
+const DEFAULT_CONFIG = resolve(dirname(fileURLToPath(import.meta.url)), '../journeys.json');
 const LOCATION_PATTERN = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 const FLAGS = new Set(['--location', '--config', '--state', '--interval']);
