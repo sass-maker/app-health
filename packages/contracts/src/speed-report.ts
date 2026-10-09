@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ReportDate } from './daily-engagement.js';
 
 export const SpeedReportQuery = z
   .object({
@@ -108,3 +109,40 @@ export const SpeedReportV1 = z
   })
   .strict();
 export type SpeedReportV1 = z.infer<typeof SpeedReportV1>;
+
+/** Optional sibling of the strict daily engagement report, never a report field. */
+export const DailySpeedSectionV1 = z
+  .object({
+    date: ReportDate,
+    from: count,
+    to: count,
+    class: SpeedReportQuery.shape.class.removeDefault(),
+    products: z
+      .array(
+        z
+          .object({
+            catalog_id: product.shape.catalog_id,
+            app_id: product.shape.app_id,
+            state: product.shape.state,
+            vitals_samples: count,
+            lcp_p75_ms: value.nullable(),
+            inp_p75_ms: value.nullable(),
+            cls_p75_milli: value.nullable(),
+            ttfb_p75_ms: value.nullable(),
+            server_samples: count,
+            server_p50_ms: value.nullable(),
+            server_p95_ms: value.nullable(),
+            server_p99_ms: value.nullable(),
+            error_rate: z.number().min(0).max(1).nullable(),
+            cache_hit_ratio: z.number().min(0).max(1).nullable(),
+            breaching_routes: count,
+            worst_route: serverRoute.shape.route.nullable(),
+          })
+          .strict(),
+      )
+      .max(56),
+    summary: SpeedReportV1.shape.summary,
+    truncated: z.boolean(),
+  })
+  .strict();
+export type DailySpeedSectionV1 = z.infer<typeof DailySpeedSectionV1>;

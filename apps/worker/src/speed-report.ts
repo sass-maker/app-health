@@ -8,6 +8,7 @@ import {
   WEB_VITAL_BUDGETS,
   WEB_VITALS_EVENT,
   SpeedReportV1,
+  DailySpeedSectionV1,
   WebVitalsProps,
   evaluateSustainedBreach,
   parseStageTiming,
@@ -27,6 +28,14 @@ const SERVER_BUDGET = SERVER_TIME_BUDGETS_MS.api.read;
 
 type CatalogRow = Pick<CatalogProductRow, 'catalog_id' | 'app_id' | 'catalog_name'>;
 type Product = SpeedReportV1['products'][number];
+type DailyProduct = DailySpeedSectionV1['products'][number];
+type DayWindow = { date: string; from: number; to: number };
+/** A report plus per-product aggregates computed before the route display cap. */
+export interface SpeedReportParts {
+  report: SpeedReportV1;
+  /** Aggregates only: raw samples never leave this module. */
+  daily: DailyProduct[];
+}
 type VitalRoute = Product['vitals']['routes'][number];
 type ServerRoute = Product['server']['routes'][number];
 type VitalBudget = typeof WEB_VITAL_BUDGETS.app | typeof WEB_VITAL_BUDGETS.landing;
@@ -173,7 +182,7 @@ function vitalRoute(
   route_group: string,
   samples: Sample<WebVitalsProps>[],
   budget: VitalBudget | null,
-  now: number,
+  now: number | undefined,
 ): VitalRoute {
   const route: VitalRoute = {
     route_group,
@@ -195,7 +204,7 @@ function vitalRoute(
     if (budget && values.length >= MIN_WEB_VITAL_SAMPLES_PER_DAY && p75 > budget[metric].p75)
       route.breaches.push({ metric, value: p75, budget: budget[metric].p75 });
   }
-  if (budget && samples.length >= MIN_WEB_VITAL_SAMPLES_PER_DAY)
+  if (now !== undefined && budget && samples.length >= MIN_WEB_VITAL_SAMPLES_PER_DAY)
     route.sustained = sustainedState(samples, (p) => p.lcp_ms, 0.75, budget.lcp_ms.p75, now);
   return route;
 }
@@ -229,7 +238,11 @@ function stagePercentiles(samples: readonly Sample<StageTimingProps>[]): Record<
   return Object.fromEntries([...stages].map(([key, values]) => [key, percentile(values, 0.95)]));
 }
 
-function serverRoute(route: string, samples: Sample<StageTimingProps>[], now: number): ServerRoute {
+function serverRoute(
+  route: string,
+  samples: Sample<StageTimingProps>[],
+  now: number | undefined,
+): ServerRoute {
   const values = samples.map(({ props }) => props.total_ms);
   const total_ms = {
     p50: percentile(values, 0.5),
@@ -264,9 +277,10 @@ function serverRoute(route: string, samples: Sample<StageTimingProps>[], now: nu
       })),
     stages_p95_ms: stagePercentiles(samples),
     breaches,
-    sustained: sufficient
-      ? sustainedState(samples, (p) => p.total_ms, 0.95, SERVER_BUDGET.p95, now)
-      : 'insufficient',
+    sustained:
+      sufficient && now !== undefined
+        ? sustainedState(samples, (p) => p.total_ms, 0.95, SERVER_BUDGET.p95, now)
+        : 'insufficient',
   };
 }
 
@@ -287,7 +301,7 @@ function productState(samples: ProductSamples, budget: VitalBudget | null): Prod
   return serverMeasured || vitalsMeasured ? 'measured' : 'insufficient';
 }
 
-/** Breaching routes are never dropped by the display cap; the rest stay busiest-first. */
+/** Prefer breaching routes within the display cap; the rest stay busiest-first. */
 function capRoutes<T extends { breaches: unknown[]; sustained: string }>(routes: T[]): T[] {
   const flagged = (route: T) => route.breaches.length > 0 || route.sustained === 'breach';
   return [...routes.filter(flagged), ...routes.filter((route) => !flagged(route))].slice(
@@ -296,14 +310,72 @@ function capRoutes<T extends { breaches: unknown[]; sustained: string }>(routes:
   );
 }
 
+function worstBreach(routes: readonly (VitalRoute | ServerRoute)[]): string | null {
+  let worst: string | null = null;
+  let ratio = 1;
+  for (const route of routes) {
+    for (const breach of route.breaches) {
+      const overshoot = breach.value / breach.budget;
+      if (overshoot > ratio) {
+        ratio = overshoot;
+        worst = 'route' in route ? route.route : route.route_group;
+      }
+    }
+  }
+  return worst;
+}
+
+function dailyProduct(
+  product: Product,
+  samples: ProductSamples,
+  routes: readonly (VitalRoute | ServerRoute)[],
+): DailyProduct {
+  const vitalP75 = (metric: (typeof VITAL_METRICS)[number]) => {
+    const values = samples.vitals.flatMap(({ props }) =>
+      props[metric] === undefined ? [] : [props[metric]],
+    );
+    return values.length === 0 ? null : percentile(values, 0.75);
+  };
+  const serverValues = samples.server.map(({ props }) => props.total_ms);
+  const serverP = (fraction: number) =>
+    serverValues.length === 0 ? null : percentile(serverValues, fraction);
+  return {
+    catalog_id: product.catalog_id,
+    app_id: product.app_id,
+    state: product.state,
+    vitals_samples: samples.vitals.length,
+    lcp_p75_ms: vitalP75('lcp_ms'),
+    inp_p75_ms: vitalP75('inp_ms'),
+    cls_p75_milli: vitalP75('cls_milli'),
+    ttfb_p75_ms: vitalP75('ttfb_ms'),
+    server_samples: serverValues.length,
+    server_p50_ms: serverP(0.5),
+    server_p95_ms: serverP(0.95),
+    server_p99_ms: serverP(0.99),
+    error_rate:
+      serverValues.length === 0
+        ? null
+        : samples.server.filter(({ props }) => props.status >= 500).length / serverValues.length,
+    cache_hit_ratio: cacheCounts(samples.server).hit_ratio,
+    breaching_routes: routes.filter((route) => route.breaches.length > 0).length,
+    worst_route: worstBreach(routes),
+  };
+}
+
 function buildProduct(
   row: CatalogRow,
   samples: ProductSamples,
   budget: VitalBudget | null,
-  now: number,
+  now: number | undefined,
   truncated: { server: boolean; vitals: boolean },
-): Product {
-  return {
+): { product: Product; daily: DailyProduct } {
+  const vitals = busiestGroups(samples.vitals, (p) => p.route_group).map(([name, rows]) =>
+    vitalRoute(name, rows, budget, now),
+  );
+  const server = busiestGroups(samples.server, (p) => p.route).map(([name, rows]) =>
+    serverRoute(name, rows, now),
+  );
+  const product: Product = {
     catalog_id: row.catalog_id,
     app_id: row.app_id,
     name: row.catalog_name,
@@ -311,46 +383,73 @@ function buildProduct(
     vitals: {
       samples: samples.vitals.length,
       truncated: truncated.vitals,
-      routes: capRoutes(
-        busiestGroups(samples.vitals, (p) => p.route_group).map(([name, rows]) =>
-          vitalRoute(name, rows, budget, now),
-        ),
-      ),
+      routes: capRoutes(vitals),
     },
     server: {
       samples: samples.server.length,
       truncated: truncated.server,
-      routes: capRoutes(
-        busiestGroups(samples.server, (p) => p.route).map(([name, rows]) =>
-          serverRoute(name, rows, now),
-        ),
-      ),
+      routes: capRoutes(server),
     },
     rejected: samples.rejected,
   };
+  return { product, daily: dailyProduct(product, samples, [...vitals, ...server]) };
+}
+
+/** Condense a freshly read report using aggregates calculated before the route display cap. */
+export function summarizeSpeedForDay(parts: SpeedReportParts, day: DayWindow): DailySpeedSectionV1 {
+  const { report, daily: products } = parts;
+  const summary = { measured: 0, no_data: 0, insufficient: 0, breaching: 0 };
+  for (const product of products) {
+    summary[product.state]++;
+    if (product.breaching_routes > 0) summary.breaching++;
+  }
+  return DailySpeedSectionV1.parse({
+    ...day,
+    class: report.class,
+    products,
+    summary,
+    truncated: report.products.some(
+      (product) => product.vitals.truncated || product.server.truncated,
+    ),
+  });
 }
 
 /** Product-emitted stage logs are sampled; the report describes only retained samples. */
-export async function readSpeedReport(args: {
+export async function readSpeedReport(
+  args: Parameters<typeof readSpeedReportParts>[0],
+): Promise<SpeedReportV1> {
+  return (await readSpeedReportParts(args)).report;
+}
+
+export async function readSpeedReportParts(args: {
   db: D1DatabaseLike;
   workspaceId: string;
-  range: SpeedReportQuery['range'];
+  range?: SpeedReportQuery['range'];
+  window?: { from: number; to: number };
   now: number;
   appId?: string;
   performanceClass: SpeedReportQuery['class'];
-}): Promise<SpeedReportV1> {
+}): Promise<SpeedReportParts> {
   const catalog = await readCatalog(args.db, args.workspaceId, args.appId);
-  const from = args.now - RANGE_MS[args.range];
+  const range = args.range ?? '24h';
+  const { from, to } = args.window ?? { from: args.now - RANGE_MS[range], to: args.now };
   const [server, vitals] = await Promise.all([
-    readLogs(args.db, catalog, STAGE_TIMING_EVENT, 'server', from, args.now),
-    readLogs(args.db, catalog, WEB_VITALS_EVENT, 'browser', from, args.now),
+    readLogs(args.db, catalog, STAGE_TIMING_EVENT, 'server', from, to),
+    readLogs(args.db, catalog, WEB_VITALS_EVENT, 'browser', from, to),
   ]);
   const samples = collectSamples(catalog, server, vitals);
   const budget = args.performanceClass === 'api' ? null : WEB_VITAL_BUDGETS[args.performanceClass];
   const truncated = { server: server.length === LOG_LIMIT, vitals: vitals.length === LOG_LIMIT };
-  const products = catalog.map((row) =>
-    buildProduct(row, samples.get(row.app_id)!, budget, args.now, truncated),
+  const built = catalog.map((row) =>
+    buildProduct(
+      row,
+      samples.get(row.app_id)!,
+      budget,
+      args.window ? undefined : args.now,
+      truncated,
+    ),
   );
+  const products = built.map(({ product }) => product);
   const summary = { measured: 0, no_data: 0, insufficient: 0, breaching: 0 };
   for (const product of products) {
     summary[product.state]++;
@@ -361,8 +460,8 @@ export async function readSpeedReport(args: {
     )
       summary.breaching++;
   }
-  return SpeedReportV1.parse({
-    range: args.range,
+  const report = SpeedReportV1.parse({
+    range,
     generated_at: args.now,
     class: args.performanceClass,
     budgets: { vitals: budget, server: SERVER_BUDGET },
@@ -374,4 +473,5 @@ export async function readSpeedReport(args: {
     products,
     summary,
   });
+  return { report, daily: built.map(({ daily }) => daily) };
 }
