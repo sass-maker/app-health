@@ -315,55 +315,71 @@ function HonestStatus(): ReactElement {
   );
 }
 
-function ProductFooter(): ReactElement {
-  return createElement(
-    'fleet-footer-extension',
+interface StudioFooterElement extends HTMLElement {
+  config: Record<string, unknown>;
+}
+
+const footerConfig = {
+  product: 'App Health',
+  url: 'https://health.sassmaker.com',
+  summary: 'A Fleet product for people who build products.',
+  catalogId: 'app-health',
+  capture: 'newsletter',
+  variant: 'studio',
+  art: {
+    src: '/footer-art/app-health.webp',
+    alt: 'Original App Health illustration',
+    position: '50% 50%',
+  },
+  groups: [
     {
-      'product-name': 'App Health',
-      'art-src': '/footer-art/app-health.webp',
-      'art-alt': 'Original App Health illustration',
-      'art-width': '2169',
-      'art-height': '725',
-      'art-position': '50% 50%',
-      'art-credit': 'Original illustration for App Health',
-      surface: 'web',
-      'font-base': '/fonts/fleet-footer-precise-v1/',
-      'data-fleet-footer-project': 'app-health',
+      title: 'Product',
+      links: [
+        { label: 'Changelog', href: '/changelog' },
+        { label: 'Privacy', href: '/privacy' },
+      ],
     },
-    <>
-      <div slot="cta" data-fleet-footer-cta className="flex flex-wrap items-center gap-4 py-6">
-        <a
-          className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
-          href="/app"
-          data-app-health-event="dashboard_opened"
-        >
-          Open App Health
-        </a>
-        <a
-          className="min-h-11 py-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-          href="#product"
-        >
-          Explore the product
-        </a>
-      </div>
-      <footer
-        slot="navigation"
-        data-fleet-footer-navigation
-        className="flex w-full flex-col gap-4 text-xs text-muted-foreground sm:flex-row sm:items-center"
-      >
-        <ProductBrand />
-        <span>A Fleet product for people who build products.</span>
-        <nav aria-label="Footer navigation" className="flex flex-wrap gap-x-5 gap-y-2 sm:ml-auto">
-          <a className="min-h-11 py-3 hover:text-foreground" href="/changelog">
-            Changelog
-          </a>
-          <a className="min-h-11 py-3 hover:text-foreground" href="/privacy">
-            Privacy
-          </a>
-        </nav>
-      </footer>
-    </>,
-  );
+  ],
+  privacyUrl: '/privacy',
+};
+
+/** The framework-free SaaS Maker footer; its stylesheet and element load on the landing page only. */
+function ProductFooter(): ReactElement {
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/footer.css';
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = '/footer.js';
+    // Library gap: flex-1 collapses the stacked email field to its content height below 640px.
+    const fix = document.createElement('style');
+    fix.textContent = '@media (max-width:639px){studio-footer input[name="email"]{flex:none}}';
+    document.head.append(link, script, fix);
+    const syncTheme = () => {
+      const element = document.querySelector('studio-footer');
+      if (!element) return;
+      if (document.documentElement.dataset.theme === 'light') element.removeAttribute('data-mode');
+      else element.setAttribute('data-mode', 'dark');
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => {
+      observer.disconnect();
+      link.remove();
+      script.remove();
+      fix.remove();
+    };
+  }, []);
+  return createElement('studio-footer', {
+    ref: (element: StudioFooterElement | null) => {
+      if (element) element.config = footerConfig;
+    },
+  });
 }
 
 export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
@@ -372,29 +388,6 @@ export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
     void redirectSignedInLanding(props.fetchImpl ?? fetch, props.navigate, controller.signal);
     return () => controller.abort();
   }, [props.fetchImpl, props.navigate]);
-  useEffect(() => {
-    const syncFooterTheme = () => {
-      const theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-      document
-        .querySelectorAll<HTMLScriptElement>(
-          'script[src*="/project-strip.js"], script[src*="/ai-chat-footer.js"]',
-        )
-        .forEach((script) => {
-          script.dataset.theme = theme;
-        });
-      document.querySelector('fleet-footer-extension')?.setAttribute('theme', theme);
-      document
-        .querySelectorAll('portfolio-project-strip, ai-chat-footer, saas-maker-newsletter-capture')
-        .forEach((element) => element.setAttribute('theme', theme));
-    };
-    syncFooterTheme();
-    const observer = new MutationObserver(syncFooterTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    });
-    return () => observer.disconnect();
-  }, []);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background">

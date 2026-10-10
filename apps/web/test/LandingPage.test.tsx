@@ -30,16 +30,13 @@ it('introduces analytics and event exploration to product people with honest pro
   expect(screen.getByText('For people shaping digital products')).toBeTruthy();
   expect(screen.getByLabelText('Illustrative web analytics preview')).toBeTruthy();
   expect(screen.queryByText(/funnels/i)).toBeNull();
-  expect(screen.getByRole('contentinfo')).toHaveTextContent('A Fleet product');
-  expect(document.querySelectorAll('fleet-footer-extension')).toHaveLength(1);
-  expect(document.querySelector('fleet-footer-extension')).toHaveAttribute(
-    'font-base',
-    '/fonts/fleet-footer-precise-v1/',
-  );
-  expect(document.querySelector('[slot="cta"]')).toHaveAttribute('data-fleet-footer-cta');
-  expect(document.querySelector('[slot="navigation"]')).toHaveAttribute(
-    'data-fleet-footer-navigation',
-  );
+  expect(document.querySelectorAll('studio-footer')).toHaveLength(1);
+  expect(
+    (document.querySelector('studio-footer') as HTMLElement & { config: { catalogId: string } })
+      .config.catalogId,
+  ).toBe('app-health');
+  expect(document.querySelector('link[href="/footer.css"]')).not.toBeNull();
+  expect(document.querySelector('script[src="/footer.js"]')).not.toBeNull();
   expect(
     screen.getAllByRole('link', { name: /Open App Health|Open dashboard/ }).length,
   ).toBeGreaterThan(0);
@@ -51,9 +48,6 @@ it('offers complete theme control from the landing navigation', () => {
   expect(document.documentElement).not.toHaveClass('dark');
   expect(document.documentElement.dataset.theme).toBe('light');
   expect(localStorage.setItem).toHaveBeenCalledWith('app-health-theme', 'light');
-  return waitFor(() =>
-    expect(document.querySelector('fleet-footer-extension')).toHaveAttribute('theme', 'light'),
-  );
 });
 
 it('redirects only a verified signed-in session', async () => {

@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/.turbo/**',
       '**/coverage/**',
+      'apps/web/public/footer.js',
       'packages/go/**',
       'openspec/**',
       '.codex/**',
