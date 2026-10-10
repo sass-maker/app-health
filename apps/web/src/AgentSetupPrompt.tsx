@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Check, Copy, WandSparkles } from 'lucide-react';
 import { Button } from './components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
@@ -9,7 +9,7 @@ export function AgentSetupPrompt(props: {
   capabilities: AgentSetupCapability[];
   publicKey?: string;
   analyticsSnippet?: string;
-}): JSX.Element {
+}): ReactElement {
   const [copied, setCopied] = useState(false);
   const CopyIcon = copied ? Check : Copy;
   const prompt = createAgentSetupPrompt(props);

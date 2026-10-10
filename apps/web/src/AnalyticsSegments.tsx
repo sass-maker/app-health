@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import type { BrowserSegmentFilter } from '@app-health/contracts';
 import { X } from 'lucide-react';
 import { Button } from './components/ui/button.js';
@@ -27,7 +28,7 @@ export function AnalyticsSegments({
   onRemove: (key: keyof BrowserSegmentFilter) => void;
   onClear: () => void;
   emptyHint?: string;
-}): JSX.Element {
+}): ReactElement {
   const entries = Object.entries(filters) as [keyof BrowserSegmentFilter, string][];
   return (
     <section aria-label="Report filters" className="space-y-2">

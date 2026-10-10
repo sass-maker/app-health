@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { Card, CardContent, CardHeader } from './components/ui/card.js';
 
 export function AnalyticsRanking(props: {
@@ -8,7 +9,7 @@ export function AnalyticsRanking(props: {
   total?: number;
   tone?: string;
   description?: string;
-}): JSX.Element {
+}): ReactElement {
   const { title, label, rows, total } = props;
   const max = Math.max(1, ...rows.map((row) => row.count));
   return (

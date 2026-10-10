@@ -1,7 +1,8 @@
+import type { ReactElement } from 'react';
 import type { BrowserReport } from '@app-health/contracts';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
 
-export function AnalyticsEngagement({ report }: { report: BrowserReport }): JSX.Element | null {
+export function AnalyticsEngagement({ report }: { report: BrowserReport }): ReactElement | null {
   const metrics = report.engagement;
   if (!metrics) return null;
   const duration = metrics.average_session_duration_ms;

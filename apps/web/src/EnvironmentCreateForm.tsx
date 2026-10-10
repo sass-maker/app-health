@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import type { FormEvent, ReactElement } from 'react';
 import { Button } from './components/ui/button.js';
 import { Input } from './components/ui/input.js';
 
@@ -9,7 +9,7 @@ interface Props {
   onSubmit: (event: FormEvent) => Promise<void>;
 }
 
-export function EnvironmentCreateForm(props: Props): JSX.Element {
+export function EnvironmentCreateForm(props: Props): ReactElement {
   const { name, pending, onName, onSubmit } = props;
   return (
     <form

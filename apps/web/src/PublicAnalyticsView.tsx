@@ -3,7 +3,7 @@ import {
   parseSharedAnalytics,
   type SharedAnalytics as PublicAnalytics,
 } from '@app-health/contracts/sharing';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { usePublicAnalytics } from './usePublicAnalytics.js';
 import { PublicAnalyticsReport } from './PublicAnalyticsReport.js';
 import { Badge } from './components/ui/badge.js';
@@ -74,7 +74,7 @@ function PublicUnavailable({ reason, retry }: { reason: 'link' | 'temporary'; re
     </Card>
   );
 }
-export function PublicAnalyticsView(): JSX.Element {
+export function PublicAnalyticsView(): ReactElement {
   const [token, setToken] = useState(tokenFromLocation);
   useEffect(() => {
     const change = () => setToken(tokenFromLocation());

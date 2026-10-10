@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Button } from './components/ui/button.js';
 
-export function GoogleSignIn(): JSX.Element {
+export function GoogleSignIn(): ReactElement {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(() =>
     new URLSearchParams(window.location.search).has('error') ||

@@ -3,7 +3,7 @@ import {
   DailyEngagementReportV1,
   type DailyEngagementReportV1 as Report,
 } from '@app-health/contracts';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { AlertTriangle, CalendarDays, RefreshCw } from 'lucide-react';
 import { Button } from './components/ui/button.js';
 import { CardContent } from './components/ui/card.js';
@@ -37,7 +37,7 @@ function ReportHeader({
   onDateChange: (date: string) => void;
   onRefresh: () => void;
   onLatest: () => void;
-}): JSX.Element {
+}): ReactElement {
   const dayLabel = new Date(`${date}T12:00:00+05:30`).toLocaleDateString('en-IN', {
     weekday: 'long',
     day: 'numeric',
@@ -109,7 +109,7 @@ interface ReportBodyProps {
   projectHealth?: Record<string, PortfolioHealthState>;
 }
 
-function ReportBody(props: ReportBodyProps): JSX.Element {
+function ReportBody(props: ReportBodyProps): ReactElement {
   const {
     ownerToken,
     loading,
@@ -167,7 +167,7 @@ interface DailyEngagementProps {
   projectHealth?: Record<string, PortfolioHealthState>;
 }
 
-export function DailyEngagement(props: DailyEngagementProps): JSX.Element {
+export function DailyEngagement(props: DailyEngagementProps): ReactElement {
   const {
     ownerToken,
     onReport,

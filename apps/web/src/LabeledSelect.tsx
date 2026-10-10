@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import {
   Select,
   SelectContent,
@@ -23,7 +24,7 @@ export function LabeledSelect({
   options: SelectOption[];
   triggerClassName?: string;
   onValueChange: (value: string) => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger aria-label={label} className={`bg-background ${triggerClassName ?? ''}`}>

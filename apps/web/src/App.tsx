@@ -31,7 +31,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import {
   DEGRADED_ERROR_RATE,
   DEGRADED_P95_MS,
@@ -377,7 +377,7 @@ export function OwnerUnlock({
 }: {
   onUnlock: (token: string, listed: ListAppsResponseV1) => void;
   googleEnabled?: boolean;
-}): JSX.Element {
+}): ReactElement {
   const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -526,7 +526,7 @@ function Setup({
 }: {
   ownerToken: string;
   onCreated: (created: CreateAppResponseV1) => void;
-}): JSX.Element {
+}): ReactElement {
   const [name, setName] = useState('');
   const [environment, setEnvironment] = useState('production');
   const [error, setError] = useState<string | null>(null);
@@ -642,7 +642,7 @@ function KeySetup({
 }: {
   created: CreateAppResponseV1;
   onDone: () => void;
-}): JSX.Element {
+}): ReactElement {
   type SetupRuntime = 'express' | 'hono' | 'pages' | 'echo' | 'otel';
   const [runtime, setRuntime] = useState<SetupRuntime>('express');
   const [copied, setCopied] = useState<string | null>(null);
@@ -778,7 +778,7 @@ function KeySetup({
   );
 }
 
-function CopyFallback({ subject }: { subject: 'key' | 'snippet' }): JSX.Element {
+function CopyFallback({ subject }: { subject: 'key' | 'snippet' }): ReactElement {
   return (
     <Alert variant="destructive">
       <AlertTriangle />
@@ -839,7 +839,7 @@ function StatusBanner({
 }: {
   status: InstallationStatusV1;
   fixture: boolean;
-}): JSX.Element {
+}): ReactElement {
   const [title, message] = fixture
     ? [
         'Sample data',
@@ -869,7 +869,7 @@ function StatusBanner({
   );
 }
 
-function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Element {
+function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): ReactElement {
   const hasMetrics = endpoint.metrics_available !== false;
   const sampled = endpoint.upstream_sampled || endpoint.sampled;
   return (
@@ -932,7 +932,7 @@ function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.
   );
 }
 
-function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Element {
+function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): ReactElement {
   const hasMetrics = endpoint.metrics_available !== false;
   const sampled = endpoint.upstream_sampled || endpoint.sampled;
   return (
@@ -1022,7 +1022,7 @@ function EndpointHealth(props: {
   sortKey: SortKey;
   sortDirection: SortDirection;
   onSort: (key: SortKey) => void;
-}): JSX.Element {
+}): ReactElement {
   const { project, status, error, loading, hasData, endpoints, sortKey, sortDirection, onSort } =
     props;
   const endpointSummary = !hasData
@@ -1231,7 +1231,7 @@ function FailureDetail({
 }: {
   failure: FailureEventV1;
   detailId: string;
-}): JSX.Element {
+}): ReactElement {
   return (
     <TableRow className="bg-muted/25 hover:bg-muted/25">
       <TableCell colSpan={7} className="whitespace-normal p-4 sm:p-5">
@@ -1290,7 +1290,7 @@ function FailureDetail({
   );
 }
 
-function FailureRow({ failure }: { failure: FailureEventV1 }): JSX.Element {
+function FailureRow({ failure }: { failure: FailureEventV1 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
   const detailId = `failure-detail-${failure.failure_id}`;
   const endpointLabel = `${failure.method} ${failure.route} ${failure.status_code}`;
@@ -1347,7 +1347,7 @@ function DataReceived({
   project: SavedProject;
   ownerToken: string;
   windowKey: Window;
-}): JSX.Element {
+}): ReactElement {
   const [data, setData] = useState<FailureQueryResponseV1 | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1586,7 +1586,7 @@ function formatPropValue(value: StoredLogV1['props'][string]): string {
   return value === null ? 'null' : String(value);
 }
 
-function LogRow({ log }: { log: StoredLogV1 }): JSX.Element {
+function LogRow({ log }: { log: StoredLogV1 }): ReactElement {
   const props = Object.entries(log.props);
   return (
     <TableRow>
@@ -1634,7 +1634,7 @@ function LogsSurface({
   error: string | null;
   loading: boolean;
   onRefresh: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <CardContent className="p-0">
       {error ? (
@@ -1713,7 +1713,7 @@ function LogsView({
 }: {
   project: SavedProject;
   ownerToken: string;
-}): JSX.Element {
+}): ReactElement {
   const [filters, setFilters] = useState<LogsFilters>({ level: 'debug', source: '', event: '' });
   const [result, setResult] = useState<LogsResult>({ data: null, error: null, loading: true });
   const [refresh, setRefresh] = useState(0);
@@ -1783,7 +1783,7 @@ function LogsToolbar({
   filters: LogsFilters;
   onFilters: (update: (previous: LogsFilters) => LogsFilters) => void;
   onRefresh: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <CardHeader className="gap-5 border-b lg:flex-row lg:items-end lg:justify-between">
       <div>
@@ -1912,7 +1912,7 @@ interface PublicKeysPanelProps {
   purpose?: BrowserKeyPurpose;
 }
 
-function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
+function PublicKeysPanel(props: PublicKeysPanelProps): ReactElement {
   const {
     project,
     ownerToken,
@@ -2034,7 +2034,7 @@ function PublicKeyForm({
   onCreate,
 }: {
   onCreate: (origins: string[]) => Promise<void>;
-}): JSX.Element {
+}): ReactElement {
   return (
     <form
       className="flex flex-col gap-3 sm:flex-row sm:items-end"
@@ -2072,7 +2072,7 @@ function PublicKeyReveal({
   project: SavedProject;
   environment: string;
   purpose: BrowserKeyPurpose;
-}): JSX.Element {
+}): ReactElement {
   const [identityMode, setIdentityMode] = useState('persistent');
   const logsSnippet = `import { createWebLogger } from '@saas-maker/app-health/web';\n\nconst logs = createWebLogger({\n  publicKey: '${created.key}',\n  environment: ${JSON.stringify(environment)},\n  endpoint: '${INGEST_ORIGIN}/v1/logs',\n});\n\nlogs.warn('network.retry_scheduled', { props: { attempt: 2 } });`;
   const analyticsSnippet = `<script defer src="${location.origin}/tracker.js" data-key="${created.key}" data-project="${created.record.app_id}" data-identity="${identityMode}" data-endpoint="${INGEST_ORIGIN}/v1/browser"></script>\n\n<!-- After the tracker loads: window.appHealth.track('signup.completed') -->`;
@@ -2129,7 +2129,7 @@ function PublicKeyList({
 }: {
   keys: PublicLogKeyV1[];
   onRevoke: (keyId: string) => Promise<void>;
-}): JSX.Element {
+}): ReactElement {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   async function confirmRevoke(keyId: string): Promise<void> {
@@ -2232,7 +2232,7 @@ function CapabilityErrorNotice({
   message: string;
   onRetry: () => void;
   title?: string;
-}): JSX.Element {
+}): ReactElement {
   return (
     <Alert variant="destructive">
       <AlertTriangle />
@@ -2273,7 +2273,7 @@ function CapabilitySettings({
 }: {
   controller: CapabilityController;
   onOpen: (id: CapabilityId) => void;
-}): JSX.Element {
+}): ReactElement {
   if (controller.loading && !controller.data)
     return <Skeleton className="h-64 w-full" aria-label="Loading capabilities" />;
   if (!controller.data)
@@ -2363,7 +2363,7 @@ function CapabilitySettings({
   );
 }
 
-function OneTimeEnvironmentKey({ result }: { result: EnvironmentKeyResponse }): JSX.Element {
+function OneTimeEnvironmentKey({ result }: { result: EnvironmentKeyResponse }): ReactElement {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   async function copy(): Promise<void> {
@@ -2401,7 +2401,7 @@ function PrivateKeySummary({
   current,
 }: {
   current: EnvironmentCapabilities['private_key'];
-}): JSX.Element {
+}): ReactElement {
   if (!current)
     return <p className="text-sm text-muted-foreground">No active private key is available.</p>;
   return (
@@ -2431,7 +2431,7 @@ interface PrivateKeyActionProps {
   onIssue: () => Promise<boolean>;
 }
 
-function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
+function PrivateKeyAction(props: PrivateKeyActionProps): ReactElement {
   const { replacesEnvironmentKey, pending, confirming, error, scopeLabel, onConfirming, onIssue } =
     props;
   const actionContainerRef = useRef<HTMLDivElement>(null);
@@ -2506,7 +2506,7 @@ function PrivateKeyManager({
   project: SavedProject;
   ownerToken: string;
   controller: CapabilityController;
-}): JSX.Element {
+}): ReactElement {
   const [result, setResult] = useState<EnvironmentKeyResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -2575,7 +2575,7 @@ interface EnvironmentManagerProps {
   onCreated: (environment: SavedProject) => void;
 }
 
-function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
+function EnvironmentManager(props: EnvironmentManagerProps): ReactElement {
   const { project, projects, ownerToken, onCreated } = props;
   const [name, setName] = useState('');
   const [result, setResult] = useState<EnvironmentKeyResponse | null>(null);
@@ -2660,7 +2660,7 @@ interface ProjectSettingsProps {
   actions: ProjectSettingsActions;
 }
 
-const ProjectSettings = (props: ProjectSettingsProps): JSX.Element => {
+const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
   const { project, projects, ownerToken, controller, actions } = props;
   return (
     <div className="space-y-5">
@@ -2716,7 +2716,7 @@ interface CapabilityBoundaryProps {
   children: ReactNode;
 }
 
-function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
+function CapabilityBoundary(props: CapabilityBoundaryProps): ReactElement {
   const { id, displayTitle, project, ownerToken, controller, onManage, children } = props;
   const capabilityTitle = displayTitle ?? CAPABILITY_COPY[id].title;
   if (controller.loading && !controller.data)
@@ -2814,7 +2814,7 @@ function ServerCapabilitySetup({
   project: SavedProject;
   privateKey: EnvironmentCapabilities['private_key'];
   onManage: () => void;
-}): JSX.Element {
+}): ReactElement {
   const snippet =
     id === 'endpoints'
       ? `import { createAppHealthClient } from '@saas-maker/app-health';\nimport { honoMiddleware } from '@saas-maker/app-health/hono';\n\napp.use('*', honoMiddleware({\n  client: (c) => createAppHealthClient({\n    key: c.env.APP_HEALTH_INGEST_KEY,\n    environment: ${JSON.stringify(project.environment)},\n    endpoint: '${INGEST_ORIGIN}/v1/ingest',\n    runtime: 'worker',\n    disableTimer: true,\n  }),\n}));`
@@ -2857,7 +2857,7 @@ function CapabilitySetup(props: {
   ownerToken: string;
   privateKey: EnvironmentCapabilities['private_key'];
   onManage: () => void;
-}): JSX.Element {
+}): ReactElement {
   const { id, displayTitle, project, ownerToken, privateKey, onManage } = props;
   const copy = {
     ...CAPABILITY_COPY[id],
@@ -3043,7 +3043,7 @@ interface EndpointPanelProps {
   onManage: () => void;
 }
 
-function EndpointPanel(props: EndpointPanelProps): JSX.Element {
+function EndpointPanel(props: EndpointPanelProps): ReactElement {
   const {
     project,
     ownerToken,
@@ -3111,7 +3111,7 @@ function isBackendView(view: DashboardView): view is BackendView {
   return view === 'backend' || view === 'backend/logs' || view === 'backend/diagnostics';
 }
 
-function DashboardBackend(props: DashboardContentProps & { view: BackendView }): JSX.Element {
+function DashboardBackend(props: DashboardContentProps & { view: BackendView }): ReactElement {
   const { view, project, ownerToken, capabilities } = props;
   let content: ReactNode;
 
@@ -3196,7 +3196,7 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
   );
 }
 
-function DashboardContent(props: DashboardContentProps): JSX.Element {
+function DashboardContent(props: DashboardContentProps): ReactElement {
   const { view } = props;
   if (view === 'speed') return <SpeedView ownerToken={props.ownerToken} />;
   if (isBackendView(view)) return <DashboardBackend {...props} view={view} />;
@@ -3207,7 +3207,7 @@ function DashboardContent(props: DashboardContentProps): JSX.Element {
   );
 }
 
-function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
+function DashboardAnalytics(props: DashboardContentProps): ReactElement {
   const { view, project, projects, ownerToken, handlers, capabilities } = props;
   return (
     <CapabilityBoundary
@@ -3234,7 +3234,7 @@ function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
   );
 }
 
-function DashboardManagement(props: DashboardContentProps): JSX.Element {
+function DashboardManagement(props: DashboardContentProps): ReactElement {
   const { view, project, projects, ownerToken, handlers, capabilities } = props;
   if (view === 'overview')
     return (
@@ -3282,7 +3282,7 @@ function Dashboard({
   projects: SavedProject[];
   ownerToken: string;
   handlers: DashboardHandlers;
-}): JSX.Element {
+}): ReactElement {
   const [view, changeView] = useDashboardNavigation();
   const [windowKey, setWindowKey] = useState<Window>('15m');
   const [sortKey, setSortKey] = useState<SortKey>('health');
@@ -3372,7 +3372,7 @@ interface ProjectSetupShellProps {
   lock: () => Promise<void>;
   handleCreated: (created: CreateAppResponseV1) => void;
 }
-function ProjectSetupShell(props: ProjectSetupShellProps): JSX.Element {
+function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">
@@ -3421,7 +3421,7 @@ async function requestSignOut(): Promise<void> {
   if (!response.ok) throw new Error('Could not sign out. Please try again.');
 }
 
-export function App(): JSX.Element {
+export function App(): ReactElement {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [accountSession, setAccountSession] = useState(false);
   const [sessionError, setSessionError] = useState('');
