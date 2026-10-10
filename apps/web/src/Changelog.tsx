@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { ProductBrand } from './ProductShell.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { Button } from './components/ui/button.js';
@@ -48,7 +49,7 @@ const entries = [
   },
 ];
 
-export function Changelog(): JSX.Element {
+export function Changelog(): ReactElement {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">

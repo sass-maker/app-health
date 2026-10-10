@@ -1,4 +1,4 @@
-import { createElement, useEffect } from 'react';
+import { createElement, useEffect, type ReactElement } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
@@ -42,7 +42,7 @@ function PreviewMetric({ label, value, note }: { label: string; value: string; n
   );
 }
 
-function ProductPreview(): JSX.Element {
+function ProductPreview(): ReactElement {
   const pages = [
     ['/pricing', '482'],
     ['/', '391'],
@@ -106,7 +106,7 @@ function PreviewList({ label, rows }: { label: string; rows: string[][] }) {
   );
 }
 
-function Hero(): JSX.Element {
+function Hero(): ReactElement {
   return (
     <section className="relative overflow-hidden px-4 pb-20 pt-10 sm:px-6 sm:pb-28 sm:pt-16 lg:px-8">
       <div className="relative mx-auto max-w-7xl">
@@ -185,7 +185,7 @@ const features = [
   },
 ];
 
-function ProductSections(): JSX.Element {
+function ProductSections(): ReactElement {
   return (
     <section id="product" className="border-y bg-muted/25 px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
       <div className="mx-auto max-w-7xl">
@@ -233,7 +233,7 @@ function ProductSections(): JSX.Element {
   );
 }
 
-function IntegrationSection(): JSX.Element {
+function IntegrationSection(): ReactElement {
   return (
     <section id="integration" className="px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
       <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
@@ -289,7 +289,7 @@ window.appHealth.track('signup.completed')`}</code>
   );
 }
 
-function HonestStatus(): JSX.Element {
+function HonestStatus(): ReactElement {
   return (
     <section className="border-y bg-primary text-primary-foreground">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_auto] lg:items-center lg:px-8">
@@ -315,7 +315,7 @@ function HonestStatus(): JSX.Element {
   );
 }
 
-function ProductFooter(): JSX.Element {
+function ProductFooter(): ReactElement {
   return createElement(
     'fleet-footer-extension',
     {
@@ -366,7 +366,7 @@ function ProductFooter(): JSX.Element {
   );
 }
 
-export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
+export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
   useEffect(() => {
     const controller = new AbortController();
     void redirectSignedInLanding(props.fetchImpl ?? fetch, props.navigate, controller.signal);

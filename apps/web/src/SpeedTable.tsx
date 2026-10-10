@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, type ReactElement } from 'react';
 import type { SpeedReportV1 } from '@app-health/contracts';
 import { ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
 import { Badge } from './components/ui/badge.js';
@@ -41,7 +41,7 @@ function ProductCells({
   product: SpeedProduct;
   expanded: boolean;
   onToggle: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <>
       <TableCell className="max-w-48 !whitespace-normal">
@@ -82,7 +82,7 @@ function ProductCells({
   );
 }
 
-function BudgetCaption({ report }: { report: SpeedReportV1 }): JSX.Element {
+function BudgetCaption({ report }: { report: SpeedReportV1 }): ReactElement {
   const web = report.budgets.vitals;
   const rejected = report.products.reduce((sum, product) => sum + product.rejected, 0);
   const truncated = report.products.some(
@@ -127,7 +127,7 @@ export function SpeedTable({
   sort: SpeedSort;
   ascending: boolean;
   onSort: (key: SpeedSort) => void;
-}): JSX.Element {
+}): ReactElement {
   const [expanded, setExpanded] = useState<string | null>(null);
   return (
     <div className="min-w-0 rounded-xl border">

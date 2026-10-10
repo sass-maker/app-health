@@ -1,5 +1,5 @@
 import { type DashboardView } from './dashboard-navigation.js';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import {
   Activity,
   ArrowUpRight,
@@ -76,7 +76,7 @@ type NavigationItem = {
   icon: LucideIcon;
   activeViews?: readonly string[];
 };
-export function ProductBrand(): JSX.Element {
+export function ProductBrand(): ReactElement {
   return (
     <a
       href="/"
@@ -114,7 +114,7 @@ function ProjectNavigation({
   projects,
   onProject,
   onView,
-}: WorkspaceSidebarProps): JSX.Element {
+}: WorkspaceSidebarProps): ReactElement {
   const [query, setQuery] = useState('');
   const { setOpenMobile } = useSidebar();
   const apps = useMemo(() => projectApps(projects), [projects]);
@@ -159,7 +159,7 @@ function ProjectNavigation({
   );
 }
 
-function WorkspaceSidebar(props: WorkspaceSidebarProps): JSX.Element {
+function WorkspaceSidebar(props: WorkspaceSidebarProps): ReactElement {
   return (
     <Sidebar
       collapsible="offcanvas"
@@ -188,7 +188,7 @@ function WorkspaceSidebar(props: WorkspaceSidebarProps): JSX.Element {
   );
 }
 
-function WorkspaceSidebarFooter({ onAdd }: Pick<Props, 'onAdd'>): JSX.Element {
+function WorkspaceSidebarFooter({ onAdd }: Pick<Props, 'onAdd'>): ReactElement {
   return (
     <div className="mt-auto px-3 pb-3">
       <Button
@@ -226,7 +226,7 @@ function NavigationGroup({
   items: readonly NavigationItem[];
   view: DashboardView;
   onView: Props['onView'];
-}): JSX.Element {
+}): ReactElement {
   const { setOpenMobile } = useSidebar();
   return (
     <SidebarGroup className="px-3">
@@ -258,7 +258,7 @@ function ProjectPicker({
   projects,
   onProject,
   view,
-}: Pick<Props, 'project' | 'projects' | 'onProject' | 'view'>): JSX.Element {
+}: Pick<Props, 'project' | 'projects' | 'onProject' | 'view'>): ReactElement {
   const environments = projects.filter((candidate) => candidate.appId === project.appId);
   return (
     <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
@@ -287,7 +287,7 @@ function ProjectPicker({
   );
 }
 
-export function ProductShell(props: Props): JSX.Element {
+export function ProductShell(props: Props): ReactElement {
   const triggerId = 'workspace-navigation-trigger';
   return (
     <SidebarProvider>

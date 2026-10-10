@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { ProductBrand } from './ProductShell.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { Button } from './components/ui/button.js';
@@ -29,7 +30,7 @@ const sections = [
   ],
 ];
 
-export function PrivacyPage(): JSX.Element {
+export function PrivacyPage(): ReactElement {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">

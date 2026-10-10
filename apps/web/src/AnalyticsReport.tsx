@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { AnalyticsComparison } from './AnalyticsComparison.js';
 import { AnalyticsEngagement } from './AnalyticsEngagement.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
@@ -46,7 +47,7 @@ function MetricCard(props: {
   previous?: number;
   sampled?: boolean;
   unique?: boolean;
-}): JSX.Element {
+}): ReactElement {
   const { label, value, note, icon: Icon, live } = props;
   return (
     <Card className="py-0 shadow-none">
@@ -80,7 +81,7 @@ function EventTable(props: {
   selected: string;
   filtered?: boolean;
   onSelect: (event: string) => void;
-}): JSX.Element {
+}): ReactElement {
   const { rows, selected, onSelect } = props;
   if (!rows.length && props.filtered)
     return (
@@ -194,7 +195,7 @@ export interface AnalyticsReportProps {
   onFilter?: (key: keyof BrowserSegmentFilter, value: string) => void;
 }
 
-function VisitorMetric({ report }: Pick<AnalyticsReportProps, 'report'>): JSX.Element {
+function VisitorMetric({ report }: Pick<AnalyticsReportProps, 'report'>): ReactElement {
   return (
     <MetricCard
       label="Visitors"
@@ -212,7 +213,7 @@ function VisitorMetric({ report }: Pick<AnalyticsReportProps, 'report'>): JSX.El
   );
 }
 
-function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
+function ReportMetrics(props: AnalyticsReportProps): ReactElement {
   const { mode, report, selected, totals, active } = props;
   const showPageViews = mode === 'web' && !selected;
   const showEventNames = mode === 'events' && !selected;
@@ -278,7 +279,7 @@ function ReportMetrics(props: AnalyticsReportProps): JSX.Element {
   );
 }
 
-function ReportChart(props: AnalyticsReportProps): JSX.Element {
+function ReportChart(props: AnalyticsReportProps): ReactElement {
   const { report, mode, selected, metric, range, sourceNote, totals, onMetric } = props;
   const showMetricPicker = mode === 'web' && !selected;
   return (
@@ -332,7 +333,7 @@ function ReportChart(props: AnalyticsReportProps): JSX.Element {
   );
 }
 
-function ReportRankings(props: AnalyticsReportProps): JSX.Element {
+function ReportRankings(props: AnalyticsReportProps): ReactElement {
   const { report, selected } = props;
   return (
     <div className="grid gap-5 lg:grid-cols-2">
@@ -360,7 +361,7 @@ function ReportRankings(props: AnalyticsReportProps): JSX.Element {
   );
 }
 
-export function AnalyticsReport(props: AnalyticsReportProps): JSX.Element {
+export function AnalyticsReport(props: AnalyticsReportProps): ReactElement {
   const { report, mode, selected, onEvent, breakdown, onBreakdown } = props;
   return (
     <>

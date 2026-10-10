@@ -1,7 +1,7 @@
 import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Activity, ArrowRight, RefreshCw, X } from 'lucide-react';
 import { AnalyticsReport, type AnalyticsReportProps } from './AnalyticsReport.js';
 import { useBrowserReport, useWorkspaceAnalytics } from './useAnalytics.js';
@@ -65,7 +65,7 @@ interface ReportFiltersProps {
   onInstall?: () => void;
 }
 
-function ReportFilters(props: ReportFiltersProps): JSX.Element {
+function ReportFilters(props: ReportFiltersProps): ReactElement {
   const { mode, range, selected, onRange, onClearEvent, onInstall, date } = props;
   return (
     <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
@@ -122,7 +122,7 @@ type AnalyticsResultsProps = Omit<AnalyticsReportProps, 'report'> & {
   detail: ReturnType<typeof useBrowserReport>;
 };
 
-function AnalyticsResults(props: AnalyticsResultsProps): JSX.Element {
+function AnalyticsResults(props: AnalyticsResultsProps): ReactElement {
   const { workspace, detail } = props;
   return (
     <>
@@ -144,7 +144,7 @@ function AnalyticsResults(props: AnalyticsResultsProps): JSX.Element {
 function AnalyticsFooter(props: {
   sourceNote: string;
   workspace: ReturnType<typeof useWorkspaceAnalytics>;
-}): JSX.Element {
+}): ReactElement {
   const { sourceNote, workspace } = props;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-xs text-muted-foreground">
@@ -204,7 +204,7 @@ function useReportSelection(project: Project) {
   };
 }
 
-export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
+export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
   const { project, ownerToken, mode = 'web', onInstall } = props;
   const { segments, setSegments, appId, environmentId, selected, setSelected, removeSegment } =
     useReportSelection(project);

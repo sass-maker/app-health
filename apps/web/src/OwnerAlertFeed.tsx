@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import type { LogLevel, LogSource } from '@app-health/contracts';
 import {
   AlertTriangle,
@@ -67,7 +67,7 @@ function EventIcon({ event }: { event: AlertEntry['event'] }) {
   return <AlertTriangle aria-hidden="true" className="size-4" />;
 }
 
-function AlertEntries({ entries }: { entries: AlertEntry[] }): JSX.Element {
+function AlertEntries({ entries }: { entries: AlertEntry[] }): ReactElement {
   return (
     <ol aria-label="Latest workspace alerts" className="divide-y">
       {entries.map((entry) => (
@@ -115,7 +115,7 @@ function AlertBody({
   loading: boolean;
   error: string;
   feed: Feed | null;
-}): JSX.Element {
+}): ReactElement {
   if (loading)
     return (
       <div role="status" aria-label="Loading alerts" className="space-y-2">
@@ -146,7 +146,7 @@ function AlertHeader({
   feed: Feed | null;
   loading: boolean;
   onRefresh: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <CardHeader className="flex-row items-center justify-between gap-4 border-b px-5 py-4">
       <div>
@@ -185,7 +185,7 @@ function elapsed(from: number, to: number): string {
   return hours < 48 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-function ProbeCoverageLine({ feed }: { feed: Feed }): JSX.Element | null {
+function ProbeCoverageLine({ feed }: { feed: Feed }): ReactElement | null {
   if (!feed.probes) return null;
   return (
     <div
@@ -210,7 +210,7 @@ function ProbeCoverageLine({ feed }: { feed: Feed }): JSX.Element | null {
   );
 }
 
-export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): JSX.Element {
+export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactElement {
   const [feed, setFeed] = useState<Feed | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);

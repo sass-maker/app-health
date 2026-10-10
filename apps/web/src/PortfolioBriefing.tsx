@@ -4,7 +4,7 @@ import {
   type DailyEngagementReportV1,
   type PortfolioBriefingV1 as PortfolioBriefingData,
 } from '@app-health/contracts';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import { AlertTriangle, ArrowUpDown, ExternalLink, RefreshCw, Search, Signal } from 'lucide-react';
 import { Badge } from './components/ui/badge.js';
 import { Button } from './components/ui/button.js';
@@ -73,7 +73,7 @@ function TrafficSelector({
 }: {
   traffic: BriefingTraffic;
   onChange: (traffic: BriefingTraffic) => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
       <div role="group" aria-label="Traffic" className="flex gap-2">
@@ -176,7 +176,7 @@ function actionCount(product: DailyProduct): number {
   return product.cta_events.reduce((total, event) => total + event.count, 0);
 }
 
-function ActionDetails({ events }: { events: DailyProduct['cta_events'] }): JSX.Element | null {
+function ActionDetails({ events }: { events: DailyProduct['cta_events'] }): ReactElement | null {
   if (!events.length) return null;
   return (
     <details className="mt-1 text-xs">
@@ -283,7 +283,7 @@ function Stat({
   detail: string;
   tone?: 'neutral' | 'sky' | 'green' | 'amber';
   className?: string;
-}): JSX.Element {
+}): ReactElement {
   return (
     <div className={`min-w-0 rounded-lg border bg-card p-4 ${className}`}>
       <p className="text-[11px] font-medium tracking-[0.03em] text-muted-foreground">{label}</p>
@@ -309,7 +309,7 @@ function BreakoutCard({
   item: PortfolioBriefingData['products'][number];
   currentBrowsers: number | null;
   onOpen: () => void;
-}): JSX.Element {
+}): ReactElement {
   const source = item.sources_status === 'measured' ? item.top_sources[0] : undefined;
   const tone = item.browser_change !== null && item.browser_change < 0 ? 'amber' : 'green';
   return (
@@ -356,7 +356,7 @@ function BreakoutCards({
   items: PortfolioBriefingData['products'];
   report: DailyEngagementReportV1;
   onOpen: (appId: string, focus: ProductFocus, source?: string) => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {items.map((item) => (
@@ -390,7 +390,7 @@ function HealthCallout({
   item: PortfolioAttentionItem | undefined;
   coverage: PortfolioHealthCoverage | undefined;
   onOpen: () => void;
-}): JSX.Element | null {
+}): ReactElement | null {
   if (!item) return null;
   return (
     <button
@@ -429,7 +429,7 @@ function SourcesPanel({
 }: {
   data: PortfolioBriefingData | null;
   onSelectSource: (source: string) => void;
-}): JSX.Element {
+}): ReactElement {
   const sources = data?.sources ?? [];
   return (
     <section
@@ -498,7 +498,7 @@ function SourceButton({
   onOpen: () => void;
   intent?: 'open' | 'filter';
   children: ReactNode;
-}): JSX.Element {
+}): ReactElement {
   if (source === 'Other referral')
     return <div className="flex min-h-11 items-center gap-3 text-left">{children}</div>;
   return (
@@ -537,7 +537,7 @@ function SortButton({
   active: boolean;
   direction: 'asc' | 'desc';
   onClick: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <button
       type="button"
@@ -573,7 +573,7 @@ function ProductLedger({
   sourceFilter: string | null;
   setSourceFilter: (value: string | null) => void;
   onOpenProduct?: PortfolioBriefingProps['onOpenProduct'];
-}): JSX.Element {
+}): ReactElement {
   const [filter, setFilter] = useState<ScopeFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('browser');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
@@ -1004,7 +1004,7 @@ function ProductLedger({
   );
 }
 
-function Metric({ label, value }: { label: string; value: string }): JSX.Element {
+function Metric({ label, value }: { label: string; value: string }): ReactElement {
   return (
     <div>
       <dt className="text-muted-foreground">{label}</dt>
@@ -1013,7 +1013,7 @@ function Metric({ label, value }: { label: string; value: string }): JSX.Element
   );
 }
 
-function HealthBadge({ state }: { state: PortfolioHealthState }): JSX.Element {
+function HealthBadge({ state }: { state: PortfolioHealthState }): ReactElement {
   const className =
     state.tone === 'attention'
       ? 'border-amber-500/30 text-amber-800 dark:text-amber-200'
@@ -1046,7 +1046,7 @@ function Summary({
   traffic: BriefingTraffic;
   attentionItems: PortfolioAttentionItem[];
   healthCoverage?: PortfolioHealthCoverage;
-}): JSX.Element {
+}): ReactElement {
   const pageviews = data?.products.reduce((total, row) => total + (row.pageviews ?? 0), 0) ?? null;
   const pageviewProducts = data?.products.filter((row) => row.pageviews !== null).length ?? 0;
   const browserProducts = report.products.filter(
@@ -1190,7 +1190,7 @@ function Summary({
   );
 }
 
-export function PortfolioBriefing(props: PortfolioBriefingProps): JSX.Element {
+export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
   const {
     ownerToken,
     date,

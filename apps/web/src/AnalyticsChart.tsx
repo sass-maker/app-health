@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type ReactElement } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import type { BrowserReport } from '@app-health/contracts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from './components/ui/chart.js';
@@ -13,7 +13,7 @@ function ChartValues({
   time: (timestamp: number) => string;
   metric: 'pageviews' | 'events';
   onlyMetric: boolean;
-}): JSX.Element {
+}): ReactElement {
   const columns: ('pageviews' | 'events')[] = onlyMetric ? [metric] : ['pageviews', 'events'];
   return (
     <details className="mt-2 text-xs text-muted-foreground">
@@ -60,7 +60,7 @@ export function AnalyticsChart({
   metric?: 'pageviews' | 'events';
   compact?: boolean;
   onlyMetric?: boolean;
-}): JSX.Element {
+}): ReactElement {
   const id = useId().replace(/:/g, '');
   const label = metric === 'events' ? 'Events' : 'Page views';
   const color = metric === 'events' ? 'var(--chart-4)' : 'var(--chart-1)';
@@ -136,7 +136,7 @@ export function AnalyticsChart({
 
 // Selectively adapted from Evil Charts GradientPattern (MIT).
 // Pinned source and retained license: docs/frontend-redesign-evidence.md.
-function EvilAreaFill({ id, color }: { id: string; color: string }): JSX.Element {
+function EvilAreaFill({ id, color }: { id: string; color: string }): ReactElement {
   return (
     <>
       <linearGradient id={`${id}-fade`} x1="0" y1="0" x2="0" y2="1">

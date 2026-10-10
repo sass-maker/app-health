@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { SpeedReportV1, type SpeedReportV1 as Report } from '@app-health/contracts';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
@@ -82,7 +82,7 @@ function useSpeedReport(
   return { report, error, loading, reload: () => setRetry((value) => value + 1) };
 }
 
-function EnableSpeedData(): JSX.Element {
+function EnableSpeedData(): ReactElement {
   return (
     <p className="text-sm leading-6 text-muted-foreground">
       Enable tracker <code>data-vitals</code> and server <code>api.stage_timing</code> logs to
@@ -98,7 +98,7 @@ function EnableSpeedData(): JSX.Element {
   );
 }
 
-export function SpeedView({ ownerToken }: { ownerToken: string }): JSX.Element {
+export function SpeedView({ ownerToken }: { ownerToken: string }): ReactElement {
   const [range, setRange] = useState<Report['range']>('24h');
   const [performanceClass, setClass] = useState<Report['class']>('app');
   const [state, setState] = useState('all');
@@ -238,7 +238,7 @@ export function SpeedView({ ownerToken }: { ownerToken: string }): JSX.Element {
   );
 }
 
-function Filter({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
+function Filter({ label, children }: { label: string; children: React.ReactNode }): ReactElement {
   return (
     <div className="grid gap-1 text-xs text-muted-foreground">
       <span>{label}</span>

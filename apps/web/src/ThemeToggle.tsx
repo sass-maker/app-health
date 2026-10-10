@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { Button } from './components/ui/button.js';
-export function ThemeToggle(): JSX.Element {
+export function ThemeToggle(): ReactElement {
   const [dark, setDark] = useState(() => document.documentElement.dataset.theme !== 'light');
   function toggle() {
     const next = !dark;

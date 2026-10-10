@@ -1,3 +1,5 @@
+import type { ReactElement } from 'react';
+
 export function AnalyticsComparison({
   current,
   previous,
@@ -10,7 +12,7 @@ export function AnalyticsComparison({
   label: string;
   sampled?: boolean;
   unique?: boolean;
-}): JSX.Element | null {
+}): ReactElement | null {
   if (previous === undefined) return null;
   if (sampled && unique)
     return (

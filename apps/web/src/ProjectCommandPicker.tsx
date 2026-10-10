@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent, type ReactElement } from 'react';
 import { Check, ChevronsUpDown, Layers3, Search, X } from 'lucide-react';
 import { Dialog } from 'radix-ui';
 
@@ -38,7 +38,7 @@ function readRecentIds(): string[] {
   }
 }
 
-export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props): JSX.Element {
+export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props): ReactElement {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -255,7 +255,7 @@ function PickerOption({
 }: OptionViewProps & {
   option: { appId: string | null; name: string };
   index: number;
-}): JSX.Element {
+}): ReactElement {
   const selected = selectedId === option.appId;
   return (
     <button
@@ -284,7 +284,7 @@ function PickerOptionGroup({
   label: string;
   options: ProjectOption[];
   startIndex: number;
-}): JSX.Element {
+}): ReactElement {
   return (
     <div className="pt-2">
       <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, ReactElement } from 'react';
 import { Badge } from './components/ui/badge.js';
 import {
   Table,
@@ -24,7 +24,7 @@ export function SpeedValue({
   value: number | null;
   metric: string;
   breached?: boolean;
-}): JSX.Element {
+}): ReactElement {
   if (value === null)
     return (
       <span aria-label="No samples" className="text-muted-foreground">
@@ -36,7 +36,7 @@ export function SpeedValue({
   );
 }
 
-function Sustained({ state }: { state: VitalRoute['sustained'] }): JSX.Element {
+function Sustained({ state }: { state: VitalRoute['sustained'] }): ReactElement {
   const labels = { breach: 'Breaching', ok: 'Within budget', insufficient: 'Insufficient windows' };
   return (
     <span className={state === 'breach' ? 'text-warning' : 'text-muted-foreground'}>
@@ -45,7 +45,7 @@ function Sustained({ state }: { state: VitalRoute['sustained'] }): JSX.Element {
   );
 }
 
-function Breaches({ route }: { route: VitalRoute | ServerRoute }): JSX.Element {
+function Breaches({ route }: { route: VitalRoute | ServerRoute }): ReactElement {
   return route.breaches.length ? (
     <ul className="space-y-1 text-xs text-warning">
       {route.breaches.map((breach) => (
@@ -68,7 +68,7 @@ function RouteTable({
   label: string;
   headings: string[];
   children: ReactNode;
-}): JSX.Element {
+}): ReactElement {
   return (
     <Table aria-label={label} className="text-xs">
       <TableHeader>
@@ -83,7 +83,7 @@ function RouteTable({
   );
 }
 
-function VitalsRoutes({ product }: { product: SpeedProduct }): JSX.Element {
+function VitalsRoutes({ product }: { product: SpeedProduct }): ReactElement {
   if (!product.vitals.routes.length)
     return <p className="text-sm text-muted-foreground">No Web Vitals route samples.</p>;
   return (
@@ -124,7 +124,7 @@ function VitalsRoutes({ product }: { product: SpeedProduct }): JSX.Element {
   );
 }
 
-function ServerRoutes({ product }: { product: SpeedProduct }): JSX.Element {
+function ServerRoutes({ product }: { product: SpeedProduct }): ReactElement {
   if (!product.server.routes.length)
     return <p className="text-sm text-muted-foreground">No server route samples.</p>;
   return (
@@ -207,7 +207,7 @@ function ServerRoutes({ product }: { product: SpeedProduct }): JSX.Element {
   );
 }
 
-function DetailList({ entries }: { entries: string[] }): JSX.Element {
+function DetailList({ entries }: { entries: string[] }): ReactElement {
   return entries.length ? (
     <ul className="space-y-1">
       {entries.map((entry) => (
@@ -219,7 +219,7 @@ function DetailList({ entries }: { entries: string[] }): JSX.Element {
   );
 }
 
-export function SpeedRoutes({ product }: { product: SpeedProduct }): JSX.Element {
+export function SpeedRoutes({ product }: { product: SpeedProduct }): ReactElement {
   return (
     <div className="min-w-0 space-y-6 p-4 sm:p-5">
       <div className="flex flex-wrap items-center gap-2">

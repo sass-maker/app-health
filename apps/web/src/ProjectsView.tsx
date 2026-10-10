@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -572,7 +572,7 @@ interface RequestHealthSectionProps {
   onOpen: ProjectsViewProps['onOpen'];
 }
 
-function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
+function RequestHealthSection(props: RequestHealthSectionProps): ReactElement {
   const { rows, health, analytics, loading, error, onOpen } = props;
   const healthReady = Boolean(health.data);
   return (
@@ -708,7 +708,7 @@ function reportHealthScope(report: DailyEngagementReportV1 | null) {
     : null;
 }
 
-export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
+export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): ReactElement {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
   const [reportScope, setReportScope] = useState<{

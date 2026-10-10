@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import type { BrowserReport, BrowserSegmentFilter } from '@app-health/contracts';
 import { countryName } from './country-name.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
@@ -12,7 +13,7 @@ export function AnalyticsAudience({
   breakdown: 'audience' | 'acquisition' | 'technology';
   metric?: 'pageviews' | 'events';
   onFilter?: (key: keyof BrowserSegmentFilter, value: string) => void;
-}): JSX.Element {
+}): ReactElement {
   const audience = report.audience;
   if (!audience)
     return (

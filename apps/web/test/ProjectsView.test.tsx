@@ -419,9 +419,11 @@ it('opens the selected environment from the inventory', async () => {
 it('keeps partial data visible and retries both workspace feeds', async () => {
   const fetch = installFetch({ healthResponse: new Response(null, { status: 503 }) });
   render(<ProjectsView projects={[projects[0]]} ownerToken="" onOpen={() => {}} />);
-  expect(await screen.findByRole('alert')).toHaveTextContent(
-    'Some Watchtower data could not refresh',
-  );
+  // The daily-report mock returns an analytics-shaped fixture, so its own alert may render too.
+  const alerts = await screen.findAllByRole('alert');
+  expect(
+    alerts.some((alert) => alert.textContent?.includes('Some Watchtower data could not refresh')),
+  ).toBe(true);
   expect(screen.getByText('120')).toBeTruthy();
   expect(
     screen.getByText('Request health is unavailable. Retry to check for issues.'),

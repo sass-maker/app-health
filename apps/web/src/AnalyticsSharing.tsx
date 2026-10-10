@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Copy, ExternalLink, Link2 } from 'lucide-react';
 import type { AnalyticsShare } from '@app-health/contracts';
 import { Button } from './components/ui/button.js';
@@ -120,7 +120,7 @@ export function AnalyticsSharing({
 }: {
   project: Project;
   ownerToken: string;
-}): JSX.Element {
+}): ReactElement {
   const [shares, setShares] = useState<AnalyticsShare[]>([]);
   const [created, setCreated] = useState<{ id: string; token: string } | null>(null);
   const [error, setError] = useState('');
