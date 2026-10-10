@@ -70,19 +70,6 @@
       }
     },
     {
-      "project": "gitstat",
-      "journey": "home",
-      "url": "https://git.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>GitStat"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "email-manager",
       "journey": "home",
       "url": "https://mail.significanthobbies.com/",
@@ -143,19 +130,6 @@
         "content_type": "text/html",
         "body_includes": [
           "<title>High Signal Podcasts"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
-      "project": "issue-pages",
-      "journey": "home",
-      "url": "https://issues.sarthakagrawal.dev/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>IssuePages"
         ],
         "first_party_asset": true
       }
@@ -461,19 +435,6 @@
       }
     },
     {
-      "project": "mashup",
-      "journey": "home",
-      "url": "https://mashup.highsignal.app/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Mashup"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "motion",
       "journey": "home",
       "url": "https://motion.significanthobbies.com/",
@@ -482,19 +443,6 @@
         "content_type": "text/html",
         "body_includes": [
           "<title>Motion"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
-      "project": "open-historia",
-      "journey": "home",
-      "url": "https://historia.aliveville.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Open Historia"
         ],
         "first_party_asset": false
       }
@@ -643,19 +591,6 @@
       }
     },
     {
-      "project": "agent-testing",
-      "journey": "home",
-      "url": "https://browser-agents.sarthakagrawal.dev/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>The Map of Browser Agent Testing"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "nutrition-formula-engine",
       "journey": "home",
       "url": "https://formula.significanthobbies.com/",
@@ -692,19 +627,6 @@
           "<title>ContextDaddy"
         ],
         "first_party_asset": false
-      }
-    },
-    {
-      "project": "daddyrad",
-      "journey": "home",
-      "url": "https://daddyrad.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>DaddyRad"
-        ],
-        "first_party_asset": true
       }
     }
   ]
