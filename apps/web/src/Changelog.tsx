@@ -1,13 +1,13 @@
 import type { ReactElement } from 'react';
 import { ProductBrand } from './ProductShell.js';
 import { ThemeToggle } from './ThemeToggle.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 
 const entries = [
   {
     date: '2026-09-12',
-    title: 'Analytics, logs, and endpoint health share one workspace',
+    title: 'analytics, logs, and endpoint health share one workspace',
     outcomes: [
       'Sign in with Google, create projects and environments, and connect each capability when you need it.',
       'Web analytics shows live sessions, historical sessions, page views, referral sources, and named events. Sessions are not unique people; sampled counts are labeled.',
@@ -17,7 +17,7 @@ const entries = [
   },
   {
     date: '2026-07-27',
-    title: 'One product key can now cover multiple environments',
+    title: 'one product key can now cover multiple environments',
     outcomes: [
       'SDK and OpenTelemetry traffic can select a bounded environment while sharing one product-scoped ingest key.',
       'The dashboard switches endpoint health, installation status, and retained failures together.',
@@ -33,7 +33,7 @@ const entries = [
   },
   {
     date: '2026-07-22',
-    title: 'The dashboard made collection boundaries visible',
+    title: 'the dashboard made collection boundaries visible',
     outcomes: [
       'Operators can inspect recent retained failures and the exact fields App Health accepts for an environment.',
       'The product explains aggregate storage, retention, and the request data it never collects.',
@@ -41,7 +41,7 @@ const entries = [
   },
   {
     date: '2026-07-21',
-    title: 'Endpoint health reached production',
+    title: 'endpoint health reached production',
     outcomes: [
       'Node, Go, and OpenTelemetry traffic can feed the same focused view of requests, latency, errors, and last-seen time.',
       'Every accepted route remains discoverable even when sampled metrics are temporarily unavailable.',
@@ -58,18 +58,18 @@ export function Changelog(): ReactElement {
           <nav aria-label="Product links" className="flex items-center gap-2">
             <ThemeToggle />
             <Button asChild variant="ghost">
-              <a href="https://github.com/sass-maker/app-health/issues">Roadmap</a>
+              <a href="https://github.com/sass-maker/app-health/issues">roadmap</a>
             </Button>
             <Button asChild variant="outline">
-              <a href="/app">Dashboard</a>
+              <a href="/app">dashboard</a>
             </Button>
           </nav>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <p className="text-sm font-medium text-muted-foreground">Product history</p>
+        <p className="text-sm font-medium text-muted-foreground">product history</p>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-          What changed, and what it means.
+          what changed, and what it means.
         </h1>
         <p className="mt-4 text-base leading-7 text-muted-foreground">
           A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this

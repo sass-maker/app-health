@@ -162,7 +162,7 @@ it('uses catalog server applicability without hiding measured or out-of-report e
   );
 
   const inventory = screen
-    .getByText('Complete inventory')
+    .getByText('complete inventory')
     .closest<HTMLElement>('[data-slot="card"]')!;
   await waitFor(() =>
     expect(
@@ -172,12 +172,12 @@ it('uses catalog server applicability without hiding measured or out-of-report e
     ).toBeTruthy(),
   );
   const beacon = within(inventory).getByText('Beacon').closest('tr')!;
-  expect(within(beacon).getAllByText('Not applicable')).toHaveLength(2);
+  expect(within(beacon).getAllByText('not applicable')).toHaveLength(2);
   const outside = within(inventory).getByText('Outside').closest('tr')!;
-  expect(within(outside).getByText('Not configured')).toBeTruthy();
-  expect(within(outside).getByText('Never received')).toBeTruthy();
+  expect(within(outside).getByText('not configured')).toBeTruthy();
+  expect(within(outside).getByText('never received')).toBeTruthy();
   const atlas = within(inventory).getAllByText('Atlas')[0].closest('tr')!;
-  expect(within(atlas).getByText('Unhealthy')).toBeTruthy();
+  expect(within(atlas).getByText('unhealthy')).toBeTruthy();
 });
 
 it('scopes briefing health coverage to the daily report and keeps extra workspace issues visible', async () => {
@@ -286,21 +286,21 @@ it('scopes briefing health coverage to the daily report and keeps extra workspac
   );
 
   const summaryRegion = await screen.findByRole('region', { name: 'Selected day summary' });
-  const healthStat = within(summaryRegion).getByText('Measured health issues').parentElement!;
+  const healthStat = within(summaryRegion).getByText('measured health issues').parentElement!;
   await waitFor(() => expect(healthStat.textContent).toContain('13'));
   expect(healthStat.textContent).toContain(
     '17/51 applicable measured · 55 report products · latest 24 hours · 1 issue outside report scope',
   );
-  expect(screen.getByText('Product 0: High 5xx and slow requests')).toBeTruthy();
+  expect(screen.getByText('Product 0: high 5xx and slow requests')).toBeTruthy();
 
-  fireEvent.click(screen.getByText('Request health and collection details'));
+  fireEvent.click(screen.getByText('request health and collection details'));
   const inventoryCard = screen
-    .getByText('Complete inventory', { selector: '[data-slot="card-title"]' })
+    .getByText('complete inventory', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;
   const extraRow = within(inventoryCard).getByText('Workspace extra').closest('tr')!;
   const measuredNaRow = within(inventoryCard).getByText('Product 50').closest('tr')!;
-  expect(within(extraRow).getByText('Unhealthy')).toBeTruthy();
-  expect(within(measuredNaRow).getByText('Unhealthy')).toBeTruthy();
+  expect(within(extraRow).getByText('unhealthy')).toBeTruthy();
+  expect(within(measuredNaRow).getByText('unhealthy')).toBeTruthy();
 });
 
 it('leads with the daily report, keeps alerts nearby, and follows with request health and inventory', async () => {
@@ -313,15 +313,15 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
     name: /Monday, 28 Sept 2026/,
   });
   const alerts = screen.getByText(
-    'Production failures and responses · separate from the selected day',
+    'production failures and responses · separate from the selected day',
     {
       selector: '[data-slot="card-title"]',
     },
   );
-  fireEvent.click(screen.getByText('Request health and collection details'));
-  const requestHealth = screen.getByRole('heading', { name: 'Request health' });
-  const issues = screen.getByText('Request issues', { selector: '[data-slot="card-title"]' });
-  const inventory = screen.getByText('Complete inventory', {
+  fireEvent.click(screen.getByText('request health and collection details'));
+  const requestHealth = screen.getByRole('heading', { name: 'request health' });
+  const issues = screen.getByText('request issues', { selector: '[data-slot="card-title"]' });
+  const inventory = screen.getByText('complete inventory', {
     selector: '[data-slot="card-title"]',
   });
   const precedes = (first: HTMLElement, second: HTMLElement) =>
@@ -336,20 +336,20 @@ it('leads with the daily report, keeps alerts nearby, and follows with request h
 it('keeps slow measured requests separate from unconfigured inventory', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
-  expect(await screen.findByRole('heading', { name: 'Request health' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'request health' })).toBeTruthy();
   expect(screen.getByText(/p95 histogram upper bound against 5xx rate/)).toBeTruthy();
   const queue = screen
-    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+    .getByText('request issues', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;
-  expect(within(queue).getByText(/Slow requests/)).toBeTruthy();
-  expect(within(queue).queryByText(/Endpoint monitoring not configured/)).toBeNull();
+  expect(within(queue).getByText(/slow requests/)).toBeTruthy();
+  expect(within(queue).queryByText(/endpoint monitoring not configured/)).toBeNull();
   expect(within(queue).queryByText('Beacon')).toBeNull();
   const issues = screen
-    .getByText('Request issues', { selector: 'p' })
+    .getByText('request issues', { selector: 'p' })
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(issues).getByText('1')).toBeTruthy();
   const inventory = screen
-    .getByText('Complete inventory')
+    .getByText('complete inventory')
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(inventory).getAllByText('Atlas')).toHaveLength(2);
   expect(within(inventory).getByText('Beacon')).toBeTruthy();
@@ -360,8 +360,8 @@ it('keeps slow measured requests separate from unconfigured inventory', async ()
       /3 workspace environments · 2 connected · 0 waiting for data · 1 unconfigured/,
     ),
   ).toBeTruthy();
-  expect(within(inventory).getByText(/Products without a server endpoint/)).toBeTruthy();
-  expect(screen.getByText(/Requests are server or function calls/)).toBeTruthy();
+  expect(within(inventory).getByText(/products without a server endpoint/)).toBeTruthy();
+  expect(screen.getByText(/requests are server or function calls/)).toBeTruthy();
 });
 
 it('keeps legacy latency uncertainty out of the measured issue queue', async () => {
@@ -369,25 +369,25 @@ it('keeps legacy latency uncertainty out of the measured issue queue', async () 
   uncertainHealth.environments[0].endpoints.metrics!.health_state = 'insufficient-data';
   installFetch({ healthResponse: Response.json(uncertainHealth) });
   render(<ProjectsView projects={projects} ownerToken="owner" onOpen={() => {}} />);
-  await screen.findByText('No measured request issues in the current inventory.');
+  await screen.findByText('no measured request issues in the current inventory.');
   const queue = screen
-    .getByText('Request issues', { selector: '[data-slot="card-title"]' })
+    .getByText('request issues', { selector: '[data-slot="card-title"]' })
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(
-    within(queue).getByText('No measured request issues in the current inventory.'),
+    within(queue).getByText('no measured request issues in the current inventory.'),
   ).toBeTruthy();
   const inventory = screen
-    .getByText('Complete inventory')
+    .getByText('complete inventory')
     .closest<HTMLElement>('[data-slot="card"]')!;
-  expect(within(inventory).getByText('Latency uncertain')).toBeTruthy();
+  expect(within(inventory).getByText('latency uncertain')).toBeTruthy();
   expect(within(inventory).getByText('100 requests')).toBeTruthy();
 });
 
 it('shows exact freshness and never turns missing measurements into zero', async () => {
   installFetch();
   render(<ProjectsView projects={projects} ownerToken="" onOpen={() => {}} />);
-  await screen.findByText('Complete inventory');
-  expect(screen.getAllByText('Never received').length).toBeGreaterThan(0);
+  await screen.findByText('complete inventory');
+  expect(screen.getAllByText('never received').length).toBeGreaterThan(0);
   expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   expect(
     document.querySelector(`time[dateTime="${new Date(now - 60_000).toISOString()}"]`),
@@ -400,19 +400,19 @@ it('searches and filters the complete inventory', async () => {
   const search = await screen.findByRole('textbox', { name: 'Search inventory' });
   fireEvent.change(search, { target: { value: 'Beacon' } });
   const inventory = screen
-    .getByText('Complete inventory')
+    .getByText('complete inventory')
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(inventory).getByText('Beacon')).toBeTruthy();
   expect(within(inventory).queryByText('Atlas')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Request issues only' }));
-  expect(within(inventory).getByText('No environments match this view.')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'request issues only' }));
+  expect(within(inventory).getByText('no environments match this view.')).toBeTruthy();
 });
 
 it('opens the selected environment from the inventory', async () => {
   installFetch();
   const onOpen = vi.fn();
   render(<ProjectsView projects={[projects[2]]} ownerToken="" onOpen={onOpen} />);
-  fireEvent.click(await screen.findByRole('button', { name: /Open/ }));
+  fireEvent.click(await screen.findByRole('button', { name: /open/ }));
   expect(onOpen).toHaveBeenCalledWith(projects[2]);
 });
 
@@ -422,22 +422,22 @@ it('keeps partial data visible and retries both workspace feeds', async () => {
   // The daily-report mock returns an analytics-shaped fixture, so its own alert may render too.
   const alerts = await screen.findAllByRole('alert');
   expect(
-    alerts.some((alert) => alert.textContent?.includes('Some Watchtower data could not refresh')),
+    alerts.some((alert) => alert.textContent?.includes('some Watchtower data could not refresh')),
   ).toBe(true);
   expect(screen.getByText('120')).toBeTruthy();
   expect(
-    screen.getByText('Request health is unavailable. Retry to check for issues.'),
+    screen.getByText('request health is unavailable. retry to check for issues.'),
   ).toBeTruthy();
   const issues = screen
-    .getByText('Request issues', { selector: 'p' })
+    .getByText('request issues', { selector: 'p' })
     .closest<HTMLElement>('[data-slot="card"]')!;
   expect(within(issues).getByText('—')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+  fireEvent.click(screen.getByRole('button', { name: 'try again' }));
   await waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(4));
 });
 
 it('explains the empty workspace state', async () => {
   installFetch();
   render(<ProjectsView projects={[]} ownerToken="" onOpen={() => {}} />);
-  expect(await screen.findByRole('heading', { name: 'No projects yet' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'no projects yet' })).toBeTruthy();
 });

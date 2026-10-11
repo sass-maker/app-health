@@ -1,3 +1,5 @@
+import { DataTable, type DataColumn } from './components/ResourceTable.js';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
 import { useId, type ReactElement } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
 import type { BrowserReport } from '@app-health/contracts';
@@ -18,34 +20,38 @@ function ChartValues({
   return (
     <details className="mt-2 text-xs text-muted-foreground">
       <summary className="inline-flex min-h-11 cursor-pointer items-center gap-2">
-        View chart values
+        view chart values
       </summary>
-      <div className="max-h-52 overflow-auto rounded-md border">
-        <table className="w-full text-left">
-          <thead>
-            <tr>
-              <th className="p-2 font-medium">Interval</th>
-              {columns.map((column) => (
-                <th key={column} className="p-2 font-medium">
-                  {column === 'pageviews' ? 'Page views' : 'Events'}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {series.map((row) => (
-              <tr key={row.timestamp} className="border-t">
-                <td className="p-2">{time(row.timestamp)}</td>
-                {columns.map((column) => (
-                  <td key={column} className="p-2">
-                    {row[column]}
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        data={series}
+        columns={[
+          {
+            id: 'timestamp',
+            header: 'interval',
+            value: (row) => row.timestamp,
+            cell: (row) => time(row.timestamp),
+            sortable: false,
+            hideable: false,
+            minWidth: '6rem',
+          },
+          ...columns.map((column): DataColumn<BrowserReport['series'][number]> => ({
+            id: column,
+            header: column === 'pageviews' ? 'page views' : 'events',
+            value: (row) => row[column],
+            cell: (row) => row[column],
+            sortable: false,
+            hideable: false,
+            align: 'right',
+            minWidth: '5rem',
+          })),
+        ]}
+        getRowId={(row) => String(row.timestamp)}
+        label="Chart values"
+        pageSize={Math.max(1, series.length)}
+        maxHeight="13rem"
+        className="gap-0 [&>div:first-child]:hidden"
+        empty={<EmptyState title="no activity in this period." className="py-8" />}
+      />
     </details>
   );
 }
@@ -62,7 +68,7 @@ export function AnalyticsChart({
   onlyMetric?: boolean;
 }): ReactElement {
   const id = useId().replace(/:/g, '');
-  const label = metric === 'events' ? 'Events' : 'Page views';
+  const label = metric === 'events' ? 'events' : 'page views';
   const color = metric === 'events' ? 'var(--chart-4)' : 'var(--chart-1)';
   const multiDay =
     series.length > 1 && series[series.length - 1].timestamp - series[0].timestamp > 86_400_000;

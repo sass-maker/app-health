@@ -16,7 +16,7 @@ describe('ProjectCommandPicker', () => {
     render(<ProjectCommandPicker projects={projects} selectedId="alpha" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'All projects',
+      'all projects',
       'Alpha',
       'Beta',
       'Zeta',
@@ -37,7 +37,7 @@ describe('ProjectCommandPicker', () => {
     render(<ProjectCommandPicker projects={projects} selectedId={null} onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'All projects',
+      'all projects',
       'Zeta',
       'Alpha',
       'Beta',
@@ -46,7 +46,7 @@ describe('ProjectCommandPicker', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Search projects' }), {
       target: { value: 'missing' },
     });
-    expect(screen.getByRole('status')).toHaveTextContent('No projects found');
+    expect(screen.getByRole('status')).toHaveTextContent('no projects found');
   });
 
   it('supports keyboard selection, dismissal, and the shortcut', async () => {
@@ -71,7 +71,7 @@ describe('ProjectCommandPicker', () => {
     const onSelect = vi.fn();
     render(<ProjectCommandPicker projects={projects} selectedId="alpha" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('combobox', { name: 'Project' }));
-    fireEvent.click(screen.getByRole('option', { name: 'All projects' }));
+    fireEvent.click(screen.getByRole('option', { name: 'all projects' }));
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 

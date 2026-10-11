@@ -3,12 +3,19 @@ import {
   DailyEngagementReportV1,
   type DailyEngagementReportV1 as Report,
 } from '@app-health/contracts';
-import { useEffect, useState, type ReactElement } from 'react';
-import { AlertTriangle, CalendarDays, RefreshCw } from 'lucide-react';
-import { Button } from './components/ui/button.js';
-import { CardContent } from './components/ui/card.js';
-import { Input } from './components/ui/input.js';
-import { Skeleton } from './components/ui/skeleton.js';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { CalendarDays, RefreshCw } from 'lucide-react';
+import { Button } from '@saas-maker/ui/components/button';
+import { CardContent } from '@saas-maker/ui/components/card';
+import { Input } from '@saas-maker/ui/components/input';
+import { CardSkeleton, StatTileSkeleton } from '@saas-maker/ui/blocks/skeletons';
+import { DataTableSkeleton } from './components/ResourceTable.js';
+import { SkeletonContainer } from '@saas-maker/ui/components/skeleton';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
+import { useResource } from '@saas-maker/ui/lib/use-resource';
+import { accountResourceClient } from './lib/account-resource-client.js';
 import {
   PortfolioBriefing,
   type PortfolioAttentionItem,
@@ -48,8 +55,8 @@ function ReportHeader({
   return (
     <header className="flex flex-col gap-5 border-b border-border/70 pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div className="min-w-0">
-        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          Completed India day
+        <p className="text-[11px] font-medium tracking-[0.18em] text-muted-foreground">
+          completed India day
         </p>
         <h2
           id="daily-engagement-title"
@@ -58,14 +65,14 @@ function ReportHeader({
           {dayLabel}
         </h2>
         <p className="mt-2 flex items-center gap-1.5 text-xs leading-5 text-muted-foreground">
-          <CalendarDays className="size-3.5" /> What moved, where it came from, and what needs
+          <CalendarDays className="size-3.5" /> what moved, where it came from, and what needs
           attention.
         </p>
       </div>
-      <div className="flex flex-wrap items-end gap-2">
+      <FilterBar className="items-end">
         <BrowserTrafficPolicy />
         <label className="grid gap-1 text-xs text-muted-foreground">
-          Report date
+          report date
           <Input
             type="date"
             value={date}
@@ -81,7 +88,7 @@ function ReportHeader({
           aria-label="Show latest completed day"
           className="min-h-11"
         >
-          Latest
+          latest
         </Button>
         <Button
           type="button"
@@ -90,9 +97,9 @@ function ReportHeader({
           aria-label="Refresh daily engagement"
           className="min-h-11"
         >
-          <RefreshCw className="size-4" /> Refresh
+          <RefreshCw className="size-4" /> refresh
         </Button>
-      </div>
+      </FilterBar>
     </header>
   );
 }
@@ -123,28 +130,40 @@ function ReportBody(props: ReportBodyProps): ReactElement {
   } = props;
   if (loading)
     return (
-      <div role="status" aria-label="Loading daily engagement" className="space-y-3">
-        <Skeleton className="h-28 w-full rounded-xl" />
-        <Skeleton className="h-52 w-full rounded-xl" />
-        <Skeleton className="h-80 w-full rounded-xl" />
-      </div>
+      <SkeletonContainer aria-label="Loading daily engagement" className="space-y-3">
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[0, 1, 2].map((index) => (
+            <StatTileSkeleton key={index} announce={false} />
+          ))}
+        </div>
+        <CardSkeleton announce={false} className="min-h-52" />
+        <DataTableSkeleton
+          announce={false}
+          rows={5}
+          columns={[
+            { id: 'product', header: 'product', minWidth: '12rem' },
+            { id: 'visitors', header: 'browser visitors', align: 'right' },
+            { id: 'actions', header: 'actions', align: 'right' },
+            { id: 'responses', header: 'responses', align: 'right' },
+          ]}
+        />
+      </SkeletonContainer>
     );
   if (error)
     return (
-      <div
-        role="alert"
-        className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive"
-      >
-        <span className="flex items-start gap-2">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          {error}
-        </span>
-        <Button type="button" variant="outline" className="min-h-11" onClick={onRetry}>
-          Retry daily report
-        </Button>
-      </div>
+      <ErrorState
+        title="daily report is unavailable"
+        description={error}
+        primaryAction={{ label: 'retry daily report', onClick: onRetry }}
+      />
     );
-  if (!report) return <></>;
+  if (!report)
+    return (
+      <EmptyState
+        title="no daily report for this date"
+        primaryAction={{ label: 'try again', onClick: onRetry }}
+      />
+    );
   return (
     <PortfolioBriefing
       ownerToken={ownerToken}
@@ -178,10 +197,26 @@ export function DailyEngagement(props: DailyEngagementProps): ReactElement {
   } = props;
   const [date, setDate] = useState(previousReportDay);
   const [followsLatest, setFollowsLatest] = useState(true);
-  const [report, setReport] = useState<Report | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [retry, setRetry] = useState(0);
+  const client = useMemo(() => accountResourceClient(ownerToken), [ownerToken]);
+  const resource = useResource<Report>(
+    `daily-engagement:${date}`,
+    async (signal) => {
+      const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1&feedback_applicability=1`;
+      const response = await fetch(url, {
+        signal,
+        headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
+      });
+      if (!response.ok) throw new Error(`daily report returned ${response.status}`);
+      return DailyEngagementReportV1.parse(await response.json());
+    },
+    { client, staleTime: 0, retries: 0, revalidateOnFocus: false, revalidateOnReconnect: false },
+  );
+  const report = resource.data ?? null;
+  const error = resource.error?.message ?? '';
+  const loading = resource.status === 'loading';
+  useEffect(() => {
+    onReport?.(report);
+  }, [onReport, report]);
 
   useEffect(() => {
     if (!followsLatest) return;
@@ -205,36 +240,6 @@ export function DailyEngagement(props: DailyEngagementProps): ReactElement {
     };
   }, [followsLatest]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError('');
-    onReport?.(null);
-    const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1&feedback_applicability=1`;
-    void fetch(url, {
-      signal: controller.signal,
-      headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Daily report returned ${response.status}`);
-        return DailyEngagementReportV1.parse(await response.json());
-      })
-      .then((next) => {
-        if (!controller.signal.aborted) {
-          setReport(next);
-          onReport?.(next);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : 'Daily report is unavailable');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [date, ownerToken, onReport, retry]);
-
   return (
     <section
       id="daily-engagement"
@@ -251,15 +256,15 @@ export function DailyEngagement(props: DailyEngagementProps): ReactElement {
           setFollowsLatest(true);
           setDate(previousReportDay());
         }}
-        onRefresh={() => setRetry((value) => value + 1)}
+        onRefresh={() => void resource.retry()}
       />
-      <CardContent className="space-y-6 p-0">
+      <CardContent className="min-h-[40rem] space-y-6 p-0">
         <ReportBody
           ownerToken={ownerToken}
           loading={loading}
           error={error}
           report={report}
-          onRetry={() => setRetry((value) => value + 1)}
+          onRetry={() => void resource.retry()}
           onOpenProduct={onOpenProduct}
           attentionItems={attentionItems}
           healthCoverage={healthCoverage}

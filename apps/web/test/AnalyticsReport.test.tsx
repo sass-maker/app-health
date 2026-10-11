@@ -45,14 +45,14 @@ it('shows the browser-scoped visitor comparison once in the primary metrics row'
     />,
   );
 
-  const visitors = screen.getByText('Visitors', { exact: true });
+  const visitors = screen.getByText('visitors', { exact: true });
   const visitorCard = visitors.closest<HTMLElement>('[data-slot="card"]');
   expect(visitorCard).not.toBeNull();
-  expect(within(visitorCard!).getByText('Recognized browsers in this period')).toBeVisible();
+  expect(within(visitorCard!).getByText('recognized browsers in this period')).toBeVisible();
   expect(within(visitorCard!).getByLabelText('Visitors comparison')).toHaveTextContent(
     '+100% vs previous period',
   );
-  expect(screen.getAllByText('Visitors', { exact: true })).toHaveLength(1);
-  expect(screen.getAllByText('Recognized browsers in this period')).toHaveLength(1);
+  expect(screen.getAllByText('visitors', { exact: true })).toHaveLength(1);
+  expect(screen.getAllByText('recognized browsers in this period')).toHaveLength(1);
   expect(screen.getAllByLabelText('Visitors comparison')).toHaveLength(1);
 });

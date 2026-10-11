@@ -9,10 +9,12 @@ import {
   RefreshCw,
   UserRoundPlus,
 } from 'lucide-react';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
-import { Skeleton } from './components/ui/skeleton.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
+import { QuoteListSkeleton } from '@saas-maker/ui/blocks/skeletons';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
 
 const ALERT_FEED_TIMEOUT_MS = 10_000;
 
@@ -43,19 +45,34 @@ interface Feed {
   probes?: ProbeCoverage[];
 }
 
+// Keep account data in memory only. A changed transport gets its own cache.
+const feedCaches = new WeakMap<typeof fetch, Map<string, { feed: Feed; receivedAt: number }>>();
+function cachedFeed(ownerToken: string): Feed | null {
+  const entry = feedCaches.get(fetch)?.get(ownerToken);
+  return entry && Date.now() - entry.receivedAt < 300_000 ? entry.feed : null;
+}
+function retainFeed(ownerToken: string, feed: Feed): void {
+  let cache = feedCaches.get(fetch);
+  if (!cache) {
+    cache = new Map();
+    feedCaches.set(fetch, cache);
+  }
+  cache.set(ownerToken, { feed, receivedAt: Date.now() });
+}
+
 const JOURNEY_LABELS: Record<string, string> = {
-  'journey.failed': 'Journey failing',
-  'journey.degraded': 'Journey slow',
-  'journey.recovered': 'Journey recovered',
+  'journey.failed': 'journey failing',
+  'journey.degraded': 'journey slow',
+  'journey.recovered': 'journey recovered',
 };
 
 function eventLabel(entry: AlertEntry): string {
   const journey = JOURNEY_LABELS[entry.event];
   if (journey) return journey;
-  if (entry.event === 'feedback.submitted') return 'New feedback';
-  if (entry.event === 'waitlist.join') return 'Waitlist join';
-  if (entry.event === 'newsletter.subscribe') return 'Newsletter subscription';
-  return entry.level === 'error' ? 'Production failure' : 'Service degraded';
+  if (entry.event === 'feedback.submitted') return 'new feedback';
+  if (entry.event === 'waitlist.join') return 'waitlist join';
+  if (entry.event === 'newsletter.subscribe') return 'newsletter subscription';
+  return entry.level === 'error' ? 'production failure' : 'service degraded';
 }
 
 function EventIcon({ event }: { event: AlertEntry['event'] }) {
@@ -111,29 +128,24 @@ function AlertBody({
   loading,
   error,
   feed,
+  onRetry,
 }: {
   loading: boolean;
+  onRetry: () => void;
   error: string;
   feed: Feed | null;
 }): ReactElement {
-  if (loading)
+  if (loading && !feed)
     return (
-      <div role="status" aria-label="Loading alerts" className="space-y-2">
-        <Skeleton className="h-14 w-full" />
-        <Skeleton className="h-14 w-full" />
+      <div role="status" aria-label="Loading alerts">
+        <QuoteListSkeleton rows={2} lines={1} announce={false} />
       </div>
     );
   if (error)
-    return (
-      <div role="alert" className="flex items-start gap-2 text-sm text-destructive">
-        <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" /> {error}
-      </div>
-    );
+    return <ErrorState title="alerts are unavailable" description={error} onRetry={onRetry} />;
   if (!feed?.entries.length)
     return (
-      <p className="text-sm text-muted-foreground">
-        No retained production alerts or response receipts are available in this feed.
-      </p>
+      <EmptyState title="no retained production alerts or response receipts are available in this feed." />
     );
   return <AlertEntries entries={feed.entries} />;
 }
@@ -148,21 +160,17 @@ function AlertHeader({
   onRefresh: () => void;
 }): ReactElement {
   return (
-    <CardHeader className="flex-row items-center justify-between gap-4 border-b px-5 py-4">
+    <CardHeader className="flex flex-col items-start justify-between gap-4 border-b px-5 py-4 sm:flex-row sm:items-center">
       <div>
-        <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Recent alerts
-        </p>
+        <p className="text-xs font-medium tracking-[0.16em] text-muted-foreground">recent alerts</p>
         <CardTitle id="owner-alert-feed-title" className="mt-1 text-lg">
-          Production failures and responses · separate from the selected day
+          production failures and responses · separate from the selected day
         </CardTitle>
       </div>
       <div className="flex items-center gap-3">
-        {!loading && feed && (
-          <span className="text-xs text-muted-foreground" aria-live="polite">
-            {feed.total_count.toLocaleString()} in retention
-          </span>
-        )}
+        <span className="w-24 shrink-0 text-xs text-muted-foreground" aria-live="polite">
+          {!loading && feed ? `${feed.total_count.toLocaleString()} in retention` : '\u00a0'}
+        </span>
         <Button
           type="button"
           variant="outline"
@@ -171,7 +179,7 @@ function AlertHeader({
           aria-label="Refresh alerts"
           className="h-9"
         >
-          <RefreshCw className="size-4" /> Refresh
+          <RefreshCw className="size-4" /> refresh
         </Button>
       </div>
     </CardHeader>
@@ -194,13 +202,13 @@ function ProbeCoverageLine({ feed }: { feed: Feed }): ReactElement | null {
     >
       <RadioTower aria-hidden="true" className="size-4" />
       {feed.probes.length === 0 ? (
-        <span>No synthetic journey probe has reported. Journey coverage is missing.</span>
+        <span>no synthetic journey probe has reported. journey coverage is missing.</span>
       ) : (
         feed.probes.map((probe) => (
           <span key={probe.location} className="flex items-center gap-1.5">
             {probe.location}
             <Badge variant={probe.state === 'stale' ? 'destructive' : 'secondary'}>
-              {probe.state === 'stale' ? 'Stale' : 'Reporting'}
+              {probe.state === 'stale' ? 'stale' : 'reporting'}
             </Badge>
             last run {elapsed(probe.last_seen_at, feed.generated_at)}
           </span>
@@ -211,7 +219,7 @@ function ProbeCoverageLine({ feed }: { feed: Feed }): ReactElement | null {
 }
 
 export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactElement {
-  const [feed, setFeed] = useState<Feed | null>(null);
+  const [feed, setFeed] = useState<Feed | null>(() => cachedFeed(ownerToken));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
@@ -220,13 +228,14 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
     const controller = new AbortController();
     let disposed = false;
     let timedOut = false;
+    setFeed(cachedFeed(ownerToken));
     setLoading(true);
     setError('');
     const timeout = window.setTimeout(() => {
       timedOut = true;
       controller.abort();
       if (!disposed) {
-        setError('Alerts request timed out after 10 seconds. Try again.');
+        setError('alerts request timed out after 10 seconds. try again.');
         setLoading(false);
       }
     }, ALERT_FEED_TIMEOUT_MS);
@@ -235,15 +244,18 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(`Alerts returned ${response.status}`);
+        if (!response.ok) throw new Error(`alerts returned ${response.status}`);
         return (await response.json()) as Feed;
       })
       .then((next) => {
-        if (!disposed && !timedOut) setFeed(next);
+        if (!disposed && !timedOut) {
+          retainFeed(ownerToken, next);
+          setFeed(next);
+        }
       })
       .catch((cause: unknown) => {
         if (!disposed && !timedOut)
-          setError(cause instanceof Error ? cause.message : 'Alerts are unavailable');
+          setError(cause instanceof Error ? cause.message : 'alerts are unavailable');
       })
       .finally(() => {
         window.clearTimeout(timeout);
@@ -273,12 +285,17 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
       className="gap-0 py-0 shadow-none"
     >
       <AlertHeader feed={feed} loading={loading} onRefresh={() => setRetry((value) => value + 1)} />
-      <CardContent className="p-5">
+      <CardContent className="min-h-72 p-5">
         {feed && !loading && !error && <ProbeCoverageLine feed={feed} />}
-        <AlertBody loading={loading} error={error} feed={feed} />
+        <AlertBody
+          loading={loading}
+          error={error}
+          feed={feed}
+          onRetry={() => setRetry((value) => value + 1)}
+        />
         {feed && feed.total_count > feed.entries.length && !loading && !error && (
           <p className="mt-4 border-t pt-3 text-xs text-muted-foreground">
-            Showing the latest {feed.entries.length} of {feed.total_count.toLocaleString()} retained
+            showing the latest {feed.entries.length} of {feed.total_count.toLocaleString()} retained
             alerts.
           </p>
         )}

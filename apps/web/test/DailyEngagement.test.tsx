@@ -38,7 +38,7 @@ it('keeps the latest completed India day current on midnight and focus, and pres
   expect(requestsFor(fetch, '/daily-engagement')).toHaveLength(2);
   expect(requestsFor(fetch, '/daily-engagement')[1]).toContain('date=2026-09-28');
 
-  fireEvent.change(screen.getByLabelText('Report date'), { target: { value: '2026-09-25' } });
+  fireEvent.change(screen.getByLabelText('report date'), { target: { value: '2026-09-25' } });
   await flushPromises();
   vi.setSystemTime(new Date('2026-09-29T18:31:00.000Z'));
   await act(async () => window.dispatchEvent(new Event('focus')));
@@ -67,11 +67,11 @@ it('distinguishes CTA repeats, distinct browsers, unavailable counts and measure
   const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
   for (const ledger of [table, mobile]) {
     expect(within(ledger).getByText('17 events · 3 browsers')).toBeTruthy();
-    expect(within(ledger).getByText('Approx. 8 events · Browser count unavailable')).toBeTruthy();
+    expect(within(ledger).getByText('approx. 8 events · browser count unavailable')).toBeTruthy();
     expect(within(ledger).getByText('0 events · 0 browsers')).toBeTruthy();
-    expect(within(ledger).getByText('Browser counts are per action and can overlap.')).toBeTruthy();
+    expect(within(ledger).getByText('browser counts are per action and can overlap.')).toBeTruthy();
     expect(
-      within(ledger).getByText('Actions and browsers').closest('details')?.hasAttribute('open'),
+      within(ledger).getByText('actions and browsers').closest('details')?.hasAttribute('open'),
     ).toBe(false);
   }
 });
@@ -100,37 +100,37 @@ it('shows browser counts, action intent, response receipts, sources, and applica
 
   const table = await screen.findByRole('table');
   expect(screen.getByText('2 in scope')).toBeTruthy();
-  expect(screen.getByText('Browser pageviews')).toBeTruthy();
+  expect(screen.getByText('browser pageviews')).toBeTruthy();
   expect(
     await screen.findByRole('button', { name: 'Filter projects by Google source for 2026-09-27' }),
   ).toBeTruthy();
   expect(screen.getAllByText('100').length).toBeGreaterThanOrEqual(1);
-  expect(screen.getByText('Download intent')).toBeTruthy();
+  expect(screen.getByText('download intent')).toBeTruthy();
   const primaryActions = within(
     screen.getByRole('region', { name: 'Selected day summary' }),
-  ).getByText('Primary action events').parentElement!;
+  ).getByText('primary action events').parentElement!;
   expect(primaryActions.textContent).toContain('≈ 21');
   expect(primaryActions.textContent).toContain('events, not people');
-  expect(screen.getByText('Confirmed responses')).toBeTruthy();
-  expect(screen.getByText('Measured health issues')).toBeTruthy();
+  expect(screen.getByText('confirmed responses')).toBeTruthy();
+  expect(screen.getByText('measured health issues')).toBeTruthy();
   expect(screen.getByText('Atlas: Slow requests')).toBeTruthy();
 
   const atlas = within(table).getByText('atlas').closest('tr')!;
   expect(within(atlas).getByText('12')).toBeTruthy();
-  expect(within(atlas).getByText('Approx. 21 events')).toBeTruthy();
+  expect(within(atlas).getByText('approx. 21 events')).toBeTruthy();
   expect(within(atlas).getAllByText('2').length).toBeGreaterThan(0);
   expect(
     within(table).getByRole('button', { name: 'Open Google source for 2026-09-27' }),
   ).toBeTruthy();
 
   const beacon = within(table).getByText('beacon').closest('tr')!;
-  expect(within(beacon).getAllByText('Not applicable').length).toBeGreaterThan(0);
-  expect(within(beacon).getAllByText('Unknown').length).toBeGreaterThan(0);
+  expect(within(beacon).getAllByText('not applicable').length).toBeGreaterThan(0);
+  expect(within(beacon).getAllByText('unknown').length).toBeGreaterThan(0);
 
-  fireEvent.click(screen.getByRole('button', { name: /With browser data/ }));
+  fireEvent.click(screen.getByRole('button', { name: /with browser data/ }));
   expect(within(table).getByText('atlas')).toBeTruthy();
   expect(within(table).queryByText('beacon')).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: /All 2/ }));
+  fireEvent.click(screen.getByRole('button', { name: /all 2/ }));
   expect(within(table).getByText('beacon')).toBeTruthy();
 
   fireEvent.click(within(table).getByRole('button', { name: 'Open Google source for 2026-09-27' }));
@@ -159,19 +159,19 @@ it('shows unsupported response metrics as not applicable without hiding real fee
   const table = await screen.findByRole('table');
   const atlas = within(table).getByText('atlas').closest('tr')!;
   const beacon = within(table).getByText('beacon').closest('tr')!;
-  expect(within(atlas).getByText('Feedback').parentElement?.textContent).toContain('2');
-  expect(within(beacon).getByText('Feedback').parentElement?.textContent).toContain(
-    'Not applicable',
+  expect(within(atlas).getByText('feedback').parentElement?.textContent).toContain('2');
+  expect(within(beacon).getByText('feedback').parentElement?.textContent).toContain(
+    'not applicable',
   );
   const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
-  expect(within(mobile).getAllByText('Replies + joins')[1]?.parentElement?.textContent).toContain(
-    'Not applicable',
+  expect(within(mobile).getAllByText('replies + joins')[1]?.parentElement?.textContent).toContain(
+    'not applicable',
   );
-  expect(within(beacon).getByText('Newsletter').parentElement?.textContent).toContain(
-    'Not applicable',
+  expect(within(beacon).getByText('newsletter').parentElement?.textContent).toContain(
+    'not applicable',
   );
-  expect(within(beacon).getByText('Waitlist').parentElement?.textContent).toContain(
-    'Not applicable',
+  expect(within(beacon).getByText('waitlist').parentElement?.textContent).toContain(
+    'not applicable',
   );
   expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('feedback_applicability=1');
 });
@@ -204,12 +204,12 @@ it('makes every breakout available when more than two projects grow', async () =
     ),
   );
   render(<DailyEngagement ownerToken="owner" />);
-  const expand = await screen.findByRole('button', { name: 'Show all 3 breakouts' });
-  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(2);
+  const expand = await screen.findByRole('button', { name: 'show all 3 breakouts' });
+  expect(screen.getAllByText('growth', { exact: true })).toHaveLength(2);
   fireEvent.click(expand);
-  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(3);
-  fireEvent.click(screen.getByRole('button', { name: 'Show the top two' }));
-  expect(screen.getAllByText('Growth', { exact: true })).toHaveLength(2);
+  expect(screen.getAllByText('growth', { exact: true })).toHaveLength(3);
+  fireEvent.click(screen.getByRole('button', { name: 'show the top two' }));
+  expect(screen.getAllByText('growth', { exact: true })).toHaveLength(2);
 });
 
 it('labels missing health coverage separately from measured issue count', async () => {
@@ -219,8 +219,8 @@ it('labels missing health coverage separately from measured issue count', async 
   );
   render(<DailyEngagement ownerToken="owner" attentionItems={[]} />);
   await screen.findByRole('table');
-  expect(screen.queryByText('No measured issues')).toBeNull();
-  expect(screen.getByText('Coverage unknown · latest 24 hours')).toBeTruthy();
+  expect(screen.queryByText('no measured issues')).toBeNull();
+  expect(screen.getByText('coverage unknown · latest 24 hours')).toBeTruthy();
 });
 
 it('does not claim a clear health result before measurements arrive', async () => {
@@ -236,7 +236,7 @@ it('does not claim a clear health result before measurements arrive', async () =
     />,
   );
   await screen.findByRole('table');
-  expect(screen.queryByText('No measured issues')).toBeNull();
+  expect(screen.queryByText('no measured issues')).toBeNull();
   rerender(
     <DailyEngagement
       ownerToken="owner"
@@ -244,7 +244,7 @@ it('does not claim a clear health result before measurements arrive', async () =
       healthCoverage={{ measured: 2, applicable: 2, total: 2 }}
     />,
   );
-  expect(screen.getByText('No measured issues')).toBeTruthy();
+  expect(screen.getByText('no measured issues')).toBeTruthy();
 });
 
 it('times out a hung source response body without blocking the daily report, then retries', async () => {
@@ -275,9 +275,9 @@ it('times out a hung source response body without blocking the daily report, the
   await act(async () => vi.advanceTimersByTimeAsync(10_001));
   expect(screen.getByRole('table')).toBeTruthy();
   expect(screen.getByText('2 in scope')).toBeTruthy();
-  expect(screen.getByText(/Sources and comparisons unavailable/)).toBeTruthy();
+  expect(screen.getByText(/sources and comparisons unavailable/)).toBeTruthy();
   expect(screen.getByRole('table')).toBeTruthy();
-  fireEvent.click(screen.getByRole('button', { name: 'Retry insights' }));
+  fireEvent.click(screen.getByRole('button', { name: 'retry insights' }));
   await act(async () => vi.advanceTimersByTimeAsync(0));
   expect(
     screen.getByRole('button', { name: 'Filter projects by Google source for 2026-09-27' }),
@@ -294,7 +294,7 @@ it('shows a retryable daily-report error without losing selected date behavior',
   vi.stubGlobal('fetch', fetch);
   render(<DailyEngagement ownerToken="owner" />);
   expect(await screen.findByRole('alert')).toHaveTextContent('503');
-  fireEvent.click(screen.getByRole('button', { name: 'Retry daily report' }));
+  fireEvent.click(screen.getByRole('button', { name: 'retry daily report' }));
   await waitFor(() => expect(screen.getByText('2 in scope')).toBeTruthy());
 });
 
@@ -322,21 +322,23 @@ it('applies the Non-bot / Bots / All selection to pageviews, sources, breakouts 
   vi.stubGlobal('fetch', fetch);
   render(<DailyEngagement ownerToken="owner" />);
   await screen.findByRole('table');
-  expect(requestsFor(fetch, '/portfolio-briefing')[0]).toContain('traffic=non_bot');
-  expect(screen.getByRole('button', { name: 'Non-bot' })).toHaveAttribute('aria-pressed', 'true');
+  await waitFor(() =>
+    expect(requestsFor(fetch, '/portfolio-briefing')[0]).toContain('traffic=non_bot'),
+  );
+  expect(screen.getByRole('button', { name: 'non-bot' })).toHaveAttribute('aria-pressed', 'true');
 
-  fireEvent.click(screen.getByRole('button', { name: 'Bots' }));
-  await screen.findByText('Bot pageviews');
+  fireEvent.click(screen.getByRole('button', { name: 'bots' }));
+  await screen.findByText('bot pageviews');
   expect(requestsFor(fetch, '/portfolio-briefing').at(-1)).toContain('traffic=bots');
-  expect(screen.getByText('No comparable breakouts for this day')).toBeTruthy();
+  expect(screen.getByText('no comparable breakouts for this day')).toBeTruthy();
   expect(
     screen.getByRole('button', { name: 'Filter projects by Bing source for 2026-09-27' }),
   ).toBeTruthy();
   const table = screen.getByRole('table');
-  expect(within(table).getAllByText('Not retained').length).toBeGreaterThan(0);
+  expect(within(table).getAllByText('not retained').length).toBeGreaterThan(0);
   expect(within(table).getByText('9')).toBeTruthy();
 
-  fireEvent.click(screen.getByRole('button', { name: 'All' }));
+  fireEvent.click(screen.getByRole('button', { name: 'all' }));
   await waitFor(() =>
     expect(requestsFor(fetch, '/portfolio-briefing').at(-1)).toContain('traffic=all'),
   );

@@ -44,9 +44,9 @@ it('shows recent workspace alerts and total count without exposing submitted det
   );
   vi.stubGlobal('fetch', fetch);
   render(<OwnerAlertFeed ownerToken="owner-token" />);
-  expect(await screen.findByText('New feedback')).toBeTruthy();
-  expect(screen.getByText('Waitlist join')).toBeTruthy();
-  expect(screen.getByText('Newsletter subscription')).toBeTruthy();
+  expect(await screen.findByText('new feedback')).toBeTruthy();
+  expect(screen.getByText('waitlist join')).toBeTruthy();
+  expect(screen.getByText('newsletter subscription')).toBeTruthy();
   expect(screen.getByText('9 in retention')).toBeTruthy();
   expect(screen.getByText(/Atlas/)).toBeTruthy();
   expect(fetch.mock.calls[0][0]).toBe('/v1/workspace/alerts');
@@ -102,12 +102,12 @@ it('shows production failures and degradation with explicit source labels', asyn
     vi.fn(async () => Response.json(healthFeed)),
   );
   render(<OwnerAlertFeed ownerToken="owner-token" />);
-  expect(await screen.findByText('Production failure')).toBeTruthy();
-  expect(screen.getByText('Service degraded')).toBeTruthy();
+  expect(await screen.findByText('production failure')).toBeTruthy();
+  expect(screen.getByText('service degraded')).toBeTruthy();
   expect(screen.getByText(/browser recommendation.failed/)).toBeTruthy();
   expect(screen.getByText(/server recommendation.degraded/)).toBeTruthy();
   expect(screen.getByText('2 in retention')).toBeTruthy();
-  expect(screen.queryByText('Newsletter subscription')).toBeNull();
+  expect(screen.queryByText('newsletter subscription')).toBeNull();
 });
 
 it('times out a hung fetch, recovers on manual retry, and ignores its late response', async () => {
@@ -244,17 +244,40 @@ it('labels synthetic journey incidents and shows probe freshness or missing cove
     .mockResolvedValueOnce(Response.json({ ...journeyFeed, probes: [] }));
   vi.stubGlobal('fetch', fetch);
   render(<OwnerAlertFeed ownerToken="owner-token" />);
-  expect(await screen.findByText('Journey recovered')).toBeTruthy();
-  expect(screen.getByText('Journey slow')).toBeTruthy();
-  expect(screen.getByText('Journey failing')).toBeTruthy();
+  expect(await screen.findByText('journey recovered')).toBeTruthy();
+  expect(screen.getByText('journey slow')).toBeTruthy();
+  expect(screen.getByText('journey failing')).toBeTruthy();
   expect(screen.getAllByText(/anime-search from india-home \(synthetic\)/)).toHaveLength(3);
   const probes = screen.getByLabelText('Synthetic journey probes');
   expect(probes).toHaveTextContent('india-home');
-  expect(probes).toHaveTextContent('Reporting');
+  expect(probes).toHaveTextContent('reporting');
   expect(probes).toHaveTextContent('last run 4 min ago');
-  expect(probes).toHaveTextContent('Stale');
+  expect(probes).toHaveTextContent('stale');
   expect(probes).toHaveTextContent('last run 3 h ago');
   expect(probes).toHaveTextContent('last run 4 d ago');
   fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
-  expect(await screen.findByText(/Journey coverage is missing/)).toBeTruthy();
+  expect(await screen.findByText(/journey coverage is missing/)).toBeTruthy();
+});
+
+it('keeps cached alerts visible on revisit while revalidating the same account', async () => {
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(feed))
+    .mockImplementation(() => new Promise<Response>(() => {}));
+  vi.stubGlobal('fetch', fetch);
+  const first = render(<OwnerAlertFeed ownerToken="owner-token" />);
+  expect(await screen.findByText('new feedback')).toBeTruthy();
+  first.unmount();
+  const revisit = render(<OwnerAlertFeed ownerToken="owner-token" />);
+  expect(screen.getByText('new feedback')).toBeTruthy();
+  expect(screen.queryByRole('status', { name: 'Loading alerts' })).toBeNull();
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(fetch.mock.calls[1]).toEqual([
+    '/v1/workspace/alerts',
+    expect.objectContaining({ headers: { authorization: 'Bearer owner-token' } }),
+  ]);
+  revisit.rerender(<OwnerAlertFeed ownerToken="other-owner" />);
+  expect(screen.queryByText('new feedback')).toBeNull();
+  expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeTruthy();
+  revisit.unmount();
 });

@@ -60,14 +60,14 @@ it('shows focused project traffic, sources and events without a duplicate projec
   expect(await screen.findByText('/pricing')).toBeTruthy();
   expect(screen.getByText('google.com')).toBeTruthy();
   expect(screen.getByText('signup.completed')).toBeTruthy();
-  expect(screen.getByText('Sessions')).toBeTruthy();
-  expect(screen.queryByText('Your projects')).toBeNull();
+  expect(screen.getByText('sessions')).toBeTruthy();
+  expect(screen.queryByText('your projects')).toBeNull();
   expect(screen.queryByRole('combobox', { name: 'Analytics project' })).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: /Install tracker/ }));
+  fireEvent.click(screen.getByRole('button', { name: /install tracker/ }));
   expect(setup).toHaveBeenCalledOnce();
   expect(fetch).toHaveBeenCalledTimes(2);
-  fireEvent.click(screen.getByRole('tab', { name: /Product events/ }));
-  expect(await screen.findByRole('heading', { name: 'Product events over time' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: /product events/ }));
+  expect(await screen.findByRole('heading', { name: 'product events over time' })).toBeTruthy();
 });
 it('queries an event drill-down, project and time filters, and clears the selected event', async () => {
   const mock = install();
@@ -80,22 +80,22 @@ it('queries an event drill-down, project and time filters, and clears the select
       mode="events"
     />,
   );
-  expect(await screen.findByText('Event types')).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Product events over time' })).toBeTruthy();
-  expect(screen.queryByText('Page views')).toBeNull();
-  expect(screen.queryByRole('heading', { name: 'Top pages' })).toBeNull();
-  expect(screen.queryByRole('tab', { name: 'Audience' })).toBeNull();
+  expect(await screen.findByText('event types')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'product events over time' })).toBeTruthy();
+  expect(screen.queryByText('page views')).toBeNull();
+  expect(screen.queryByRole('heading', { name: 'top pages' })).toBeNull();
+  expect(screen.queryByRole('tab', { name: 'audience' })).toBeNull();
   fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
   await waitFor(() =>
     expect(mock.mock.calls.some(([url]) => url.includes('event=signup.completed'))).toBe(true),
   );
-  expect(await screen.findByRole('heading', { name: 'Where this event happens' })).toBeTruthy();
-  expect(screen.getByRole('heading', { name: 'Event referral sources' })).toBeTruthy();
-  expect(screen.getByRole('tab', { name: 'Audience' })).toBeTruthy();
+  expect(await screen.findByRole('heading', { name: 'where this event happens' })).toBeTruthy();
+  expect(screen.getByRole('heading', { name: 'event referral sources' })).toBeTruthy();
+  expect(screen.getByRole('tab', { name: 'audience' })).toBeTruthy();
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });
-  fireEvent.click(await screen.findByRole('option', { name: 'Last hour' }));
+  fireEvent.click(await screen.findByRole('option', { name: 'last hour' }));
   await waitFor(() =>
     expect(
       mock.mock.calls.some(([url]) =>
@@ -125,10 +125,10 @@ it('recovers from unavailable reports and explains empty events', async () => {
   render(
     <AnalyticsView project={project} projects={[project]} ownerToken="" onSelect={() => {}} />,
   );
-  expect(await screen.findByRole('alert')).toHaveTextContent('Reports are unavailable');
+  expect(await screen.findByRole('alert')).toHaveTextContent('reports are unavailable');
   fail = false;
-  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-  expect(await screen.findByText(/Your product has a story/)).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+  expect(await screen.findByText(/your product has a story/)).toBeTruthy();
 });
 it('validates live frames and closes the workspace socket on unmount', async () => {
   class Socket {
@@ -187,11 +187,11 @@ it('stacks clicked page and source filters, preserves them across periods, and c
     expect(url.searchParams.get('path')).toBe('/pricing');
     expect(url.searchParams.get('source')).toBe('google.com');
   });
-  expect(screen.getByText('All project sessions · not filtered')).toBeVisible();
+  expect(screen.getByText('all project sessions · not filtered')).toBeVisible();
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });
-  fireEvent.click(await screen.findByRole('option', { name: 'Last 7 days' }));
+  fireEvent.click(await screen.findByRole('option', { name: 'last 7 days' }));
   await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('range=7d'));
   expect(mock.mock.calls.at(-1)?.[0]).toContain('path=%2Fpricing');
   fireEvent.click(screen.getByRole('button', { name: 'Remove Page: /pricing filter' }));
@@ -199,7 +199,7 @@ it('stacks clicked page and source filters, preserves them across periods, and c
   expect(mock.mock.calls.at(-1)?.[0]).toContain('source=google.com');
   fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
   await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('event=signup.completed'));
-  fireEvent.click(screen.getByRole('button', { name: 'Clear all filters' }));
+  fireEvent.click(screen.getByRole('button', { name: 'clear all filters' }));
   await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).not.toContain('source='));
   expect(screen.queryByRole('button', { name: /Remove Source/ })).toBeNull();
   expect(mock.mock.calls.at(-1)?.[0]).not.toContain('event=');
@@ -229,7 +229,7 @@ it('uses the matching prior-period counts in the main KPI cards', async () => {
     '-50% vs previous period',
   );
   expect(screen.getByLabelText('Sessions comparison')).toHaveTextContent(
-    'No change vs previous period',
+    'no change vs previous period',
   );
   expect(screen.queryByLabelText('Active now comparison')).toBeNull();
 });
@@ -256,7 +256,7 @@ it('keeps briefing source and completed India day in the focused report, then pe
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });
-  fireEvent.click(await screen.findByRole('option', { name: 'Last 7 days' }));
+  fireEvent.click(await screen.findByRole('option', { name: 'last 7 days' }));
   await waitFor(() =>
     expect(
       mock.mock.calls.some(

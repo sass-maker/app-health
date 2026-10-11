@@ -27,12 +27,12 @@ import {
   SidebarTrigger,
   useSidebar,
 } from './components/ui/sidebar.js';
-import { Button } from './components/ui/button.js';
-import { Badge } from './components/ui/badge.js';
-import { Separator } from './components/ui/separator.js';
+import { Button } from '@saas-maker/ui/components/button';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Separator } from '@saas-maker/ui/components/separator';
 import { LabeledSelect } from './LabeledSelect.js';
-import { Input } from './components/ui/input.js';
-import { Tabs, TabsList, TabsTrigger } from './components/ui/tabs.js';
+import { Input } from '@saas-maker/ui/components/input';
+import { Tabs, TabsList, TabsTrigger } from '@saas-maker/ui/components/tabs';
 import { ThemeToggle } from './ThemeToggle.js';
 interface Project {
   appId: string;
@@ -57,19 +57,19 @@ interface Props {
 const productViews = [
   {
     id: 'analytics' as const,
-    label: 'Analytics',
+    label: 'analytics',
     icon: BarChart3,
     activeViews: ['analytics', 'analytics/setup'] as const,
   },
-  { id: 'events' as const, label: 'Events', icon: Zap },
+  { id: 'events' as const, label: 'events', icon: Zap },
   {
     id: 'backend' as const,
-    label: 'Backend',
+    label: 'backend',
     icon: Activity,
     activeViews: ['backend', 'backend/logs', 'backend/diagnostics'] as const,
   },
 ];
-const manageViews = [{ id: 'settings' as const, label: 'Settings', icon: Settings2 }];
+const manageViews = [{ id: 'settings' as const, label: 'settings', icon: Settings2 }];
 type NavigationItem = {
   id: DashboardView;
   label: string;
@@ -124,11 +124,11 @@ function ProjectNavigation({
   return (
     <SidebarGroup className="px-3">
       <SidebarGroupLabel className="justify-between">
-        Projects <span className="tabular-nums">{apps.length}</span>
+        projects <span className="tabular-nums">{apps.length}</span>
       </SidebarGroupLabel>
       <Input
         aria-label="Search projects"
-        placeholder="Search projects…"
+        placeholder="search projects…"
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         className="mb-2 h-9"
@@ -152,7 +152,7 @@ function ProjectNavigation({
           ))}
         </SidebarMenu>
         {!matches.length ? (
-          <p className="px-2 py-4 text-xs text-muted-foreground">No projects match your search.</p>
+          <p className="px-2 py-4 text-xs text-muted-foreground">no projects match your search.</p>
         ) : null}
       </SidebarGroupContent>
     </SidebarGroup>
@@ -173,10 +173,10 @@ function WorkspaceSidebar(props: WorkspaceSidebarProps): ReactElement {
       </SidebarHeader>
       <SidebarContent>
         <NavigationGroup
-          label="Workspace"
+          label="workspace"
           items={[
-            { id: 'overview', label: 'Daily briefing', icon: Layers3 },
-            { id: 'speed', label: 'Speed', icon: Gauge },
+            { id: 'overview', label: 'daily briefing', icon: Layers3 },
+            { id: 'speed', label: 'speed', icon: Gauge },
           ]}
           view={props.view}
           onView={props.onView}
@@ -202,14 +202,14 @@ function WorkspaceSidebarFooter({ onAdd }: Pick<Props, 'onAdd'>): ReactElement {
         }}
       >
         <Plus />
-        Add project
+        add project
       </Button>
       <a
         href="/#integration"
         className="flex min-h-11 items-center gap-2 px-3 text-xs text-muted-foreground hover:text-foreground"
       >
         <CircleHelp className="size-4" />
-        Help with setup
+        help with setup
         <ArrowUpRight className="ml-auto size-3" />
       </a>
     </div>
@@ -264,9 +264,9 @@ function ProjectPicker({
     <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
       <span
         className="min-w-0 flex-1 truncate text-sm font-medium"
-        title={view === 'overview' || view === 'speed' ? 'Portfolio' : project.name}
+        title={view === 'overview' || view === 'speed' ? 'portfolio' : project.name}
       >
-        {view === 'overview' || view === 'speed' ? 'Portfolio' : project.name}
+        {view === 'overview' || view === 'speed' ? 'portfolio' : project.name}
       </span>
       {view !== 'overview' && view !== 'speed' ? (
         <LabeledSelect
@@ -320,7 +320,7 @@ export function ProductShell(props: Props): ReactElement {
               className="h-11 px-2 text-xs text-muted-foreground"
               onClick={props.onLock}
             >
-              {props.accountSession ? 'Sign out' : 'Lock'}
+              {props.accountSession ? 'sign out' : 'lock'}
             </Button>
           </div>
         </header>
@@ -328,7 +328,7 @@ export function ProductShell(props: Props): ReactElement {
           <div className="mb-7 flex items-start justify-between gap-4">
             <div className="flex min-w-0 items-start gap-3.5">
               <div className="min-w-0">
-                <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <p className="text-[0.68rem] font-semibold  tracking-[0.14em] text-muted-foreground">
                   {props.eyebrow}
                 </p>
                 <h1 className="mt-1 text-2xl font-semibold tracking-tight">{props.title}</h1>
@@ -339,7 +339,7 @@ export function ProductShell(props: Props): ReactElement {
             </div>
             {import.meta.env.DEV ? (
               <Badge variant="outline" className="mt-1 shrink-0 text-xs font-normal">
-                Local preview
+                local preview
               </Badge>
             ) : null}
           </div>

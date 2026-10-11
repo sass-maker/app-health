@@ -1,43 +1,43 @@
 import type { CapabilityId } from '@app-health/contracts';
 
 const backend = {
-  eyebrow: 'Application health',
-  title: 'Backend',
+  eyebrow: 'application health',
+  title: 'backend',
   description: 'Monitor requests, failures, latency, and logs for this environment.',
 };
 
 export const DASHBOARD_PAGES = {
   overview: {
-    eyebrow: 'Workspace',
-    title: 'Daily briefing',
+    eyebrow: 'workspace',
+    title: 'daily briefing',
     description: 'Activity, acquisition and meaningful changes across your portfolio.',
   },
   speed: {
-    eyebrow: 'Workspace',
-    title: 'Speed',
+    eyebrow: 'workspace',
+    title: 'speed',
     description: 'Field Web Vitals and server timings against the fleet performance budgets.',
   },
   analytics: {
-    eyebrow: 'Product',
-    title: 'Analytics',
+    eyebrow: 'product',
+    title: 'analytics',
     description: 'See who visits, where they come from, and which pages they use.',
   },
   events: {
-    eyebrow: 'Product',
-    title: 'Events',
+    eyebrow: 'product',
+    title: 'events',
     description: 'Track the actions people take, from signups to downloads.',
   },
   backend,
   'backend/logs': backend,
   'backend/diagnostics': backend,
   'analytics/setup': {
-    eyebrow: 'Analytics',
-    title: 'Set up analytics',
+    eyebrow: 'analytics',
+    title: 'set up analytics',
     description: 'Connect page views, live visitors, and the events you choose to track.',
   },
   settings: {
-    eyebrow: 'Project',
-    title: 'Settings',
+    eyebrow: 'project',
+    title: 'settings',
     description: 'Manage environments, data collection, and access keys.',
   },
 };

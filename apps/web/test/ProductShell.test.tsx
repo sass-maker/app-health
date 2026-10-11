@@ -88,10 +88,10 @@ function projectButtons() {
 describe('ProductShell navigation', () => {
   it('opens Speed at workspace level and enters analytics when choosing a project', () => {
     const { onView, onProject } = renderShell({ view: 'speed' });
-    expect(screen.getByText('Portfolio')).toBeInTheDocument();
+    expect(screen.getByText('portfolio')).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Environment' })).toBeNull();
     expect(screen.queryByRole('tablist', { name: 'Project reports' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Speed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'speed' }));
     expect(onView).toHaveBeenCalledWith('speed');
     fireEvent.click(screen.getByRole('button', { name: 'Product 2' }));
     expect(onProject).toHaveBeenCalledWith(appTwoProduction);
@@ -113,7 +113,7 @@ describe('ProductShell navigation', () => {
       target: { value: 'missing project' },
     });
     expect(projectButtons()).toHaveLength(0);
-    expect(screen.getByText('No projects match your search.')).toBeInTheDocument();
+    expect(screen.getByText('no projects match your search.')).toBeInTheDocument();
   });
 
   it('opens another app in production and moves from overview into analytics', () => {
@@ -151,9 +151,9 @@ describe('ProductShell navigation', () => {
     renderShell({ view: 'analytics', onView });
 
     for (const [label, view] of [
-      ['Events', 'events'],
-      ['Backend', 'backend'],
-      ['Settings', 'settings'],
+      ['events', 'events'],
+      ['backend', 'backend'],
+      ['settings', 'settings'],
     ] as const) {
       fireEvent.mouseDown(screen.getByRole('tab', { name: label }), {
         button: 0,

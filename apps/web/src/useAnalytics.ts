@@ -34,19 +34,19 @@ function responseError(body: unknown, fallback: string) {
 
 async function readSummary(response: Response): Promise<BrowserSummaryData> {
   const body: unknown = await response.json();
-  if (!response.ok) throw new Error(responseError(body, 'Analytics is unavailable.'));
+  if (!response.ok) throw new Error(responseError(body, 'analytics is unavailable.'));
   const parsed = BrowserSummary.safeParse(body);
   if (!parsed.success) {
-    throw new Error('Analytics is unavailable.');
+    throw new Error('analytics is unavailable.');
   }
   return parsed.data;
 }
 
 async function readReport(response: Response): Promise<BrowserReportData> {
-  if (!response.ok) throw new Error('Reports are unavailable. Please try again.');
+  if (!response.ok) throw new Error('reports are unavailable. please try again.');
   const parsed = BrowserReport.safeParse(await response.json());
   if (!parsed.success) {
-    throw new Error('Reports are unavailable. Please try again.');
+    throw new Error('reports are unavailable. please try again.');
   }
   return parsed.data;
 }
@@ -61,7 +61,7 @@ function requestCanUpdate(
 }
 
 function requestError(cause: unknown, timedOut: boolean, fallback: string) {
-  if (timedOut) return `${fallback} request timed out. Please try again.`;
+  if (timedOut) return `${fallback} request timed out. please try again.`;
   return cause instanceof Error ? cause.message : `${fallback} is unavailable.`;
 }
 
@@ -161,7 +161,7 @@ export function useWorkspaceAnalytics(ownerToken: string) {
         if (next.stream) sockets.connect();
       } catch (cause) {
         if (requestCanUpdate(cancelled, hidden, controller, timeout.expired()))
-          setError(requestError(cause, timeout.expired(), 'Analytics'));
+          setError(requestError(cause, timeout.expired(), 'analytics'));
       } finally {
         timeout.clear();
         if (request === controller) {
@@ -226,9 +226,9 @@ export function useWorkspaceHealth(ownerToken: string) {
           cache: 'no-store',
         });
         const body: unknown = await response.json();
-        if (!response.ok) throw new Error(responseError(body, 'Workspace health is unavailable.'));
+        if (!response.ok) throw new Error(responseError(body, 'workspace health is unavailable.'));
         const parsed = WorkspaceHealthSummaryV1.safeParse(body);
-        if (!parsed.success) throw new Error('Workspace health is unavailable.');
+        if (!parsed.success) throw new Error('workspace health is unavailable.');
         if (!cancelled && !hidden && !timeout.controller.signal.aborted) {
           setResult({ data: parsed.data, error: '' });
         }
@@ -236,7 +236,7 @@ export function useWorkspaceHealth(ownerToken: string) {
         if (requestCanUpdate(cancelled, hidden, timeout.controller, timeout.expired()))
           setResult((current) => ({
             ...current,
-            error: requestError(cause, timeout.expired(), 'Workspace health'),
+            error: requestError(cause, timeout.expired(), 'workspace health'),
           }));
       } finally {
         timeout.clear();
@@ -386,7 +386,7 @@ export function useBrowserReport(
         }
       } catch (cause) {
         if (requestCanUpdate(cancelled, hidden, controller, timeout.expired()))
-          state.setError(requestError(cause, timeout.expired(), 'Report'));
+          state.setError(requestError(cause, timeout.expired(), 'report'));
       } finally {
         timeout.clear();
         if (request === controller && (!controller.signal.aborted || timeout.expired()))

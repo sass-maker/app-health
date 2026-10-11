@@ -20,14 +20,14 @@ for (const width of [390, 768, 1440]) {
         return route.fulfill({ json: report });
       });
       await page.goto('/app?demo=populated#speed');
-      await expect(page.getByRole('heading', { name: 'Speed', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'speed', exact: true })).toBeVisible();
       await expect(page.getByRole('tablist', { name: 'Project reports' })).toHaveCount(0);
       await expect(page.getByRole('combobox', { name: 'Environment' })).toHaveCount(0);
       const report = page.locator('#speed-view');
       const table = report.getByRole('table', { name: 'Product speed', exact: true });
       await expect(table.locator('tbody > tr')).toHaveCount(4);
-      await expect(report.getByText(/Samples, not total traffic/)).toContainText(
-        'Rejected events: 3',
+      await expect(report.getByText(/samples, not total traffic/)).toContainText(
+        'rejected events: 3',
       );
       await report.evaluate((content) => {
         const notice = document.createElement('p');
@@ -73,21 +73,21 @@ for (const width of [390, 768, 1440]) {
       await expect(table.locator('tbody > tr')).toHaveCount(1);
       await report.getByRole('textbox', { name: 'Search products' }).fill('');
       await report.getByRole('combobox', { name: 'Speed state' }).click();
-      await page.getByRole('option', { name: 'Insufficient', exact: true }).click();
+      await page.getByRole('option', { name: 'insufficient', exact: true }).click();
       await expect(table.locator('tbody > tr')).toHaveCount(1);
       await expect(table.locator('tbody > tr')).toContainText('Cedar');
       await report.getByRole('combobox', { name: 'Performance class' }).click();
       await page.getByRole('option', { name: 'API', exact: true }).click();
-      await expect(report.getByText(/Samples, not total traffic/)).toContainText(
-        'Budgets (api): no Web Vitals budget',
+      await expect(report.getByText(/samples, not total traffic/)).toContainText(
+        'budgets (api): no Web Vitals budget',
       );
       if (width >= 1440) {
-        await page.getByRole('button', { name: 'Daily briefing', exact: true }).click();
+        await page.getByRole('button', { name: 'daily briefing', exact: true }).click();
         await expect(
-          page.getByRole('heading', { name: 'Daily briefing', exact: true }),
+          page.getByRole('heading', { name: 'daily briefing', exact: true }),
         ).toBeVisible();
-        await page.getByRole('button', { name: 'Speed', exact: true }).click();
-        await expect(page.getByRole('heading', { name: 'Speed', exact: true })).toBeVisible();
+        await page.getByRole('button', { name: 'speed', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'speed', exact: true })).toBeVisible();
       }
     });
   }

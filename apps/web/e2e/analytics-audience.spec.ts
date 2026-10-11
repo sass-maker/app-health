@@ -72,17 +72,17 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
     localStorage.setItem('app-health-v0-project', JSON.stringify(value));
   }, project);
   await page.goto('/app#analytics');
-  await expect(page.getByText('Visitors', { exact: true })).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText('Returning sessions', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Channels', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Countries', exact: true })).toBeVisible();
+  await expect(page.getByText('visitors', { exact: true })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('returning sessions', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'channels', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'countries', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session engagement' })).toBeVisible();
   for (const theme of ['dark', 'light']) {
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.evaluate((value) => localStorage.setItem('app-health-theme', value), theme);
       await page.reload();
-      await expect(page.getByText('Visitors', { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByText('visitors', { exact: true })).toBeVisible({ timeout: 15_000 });
       await expect.poll(() => page.locator('html').getAttribute('data-theme')).toBe(theme);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
@@ -93,9 +93,9 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
       });
     }
   }
-  await page.getByRole('tab', { name: 'Acquisition', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Campaigns', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Mediums', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'acquisition', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'campaigns', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'mediums', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Filter Campaign content by hero-link' }).click();
   await page.getByRole('button', { name: 'Filter Mediums by email' }).click();
   await page.getByRole('button', { name: 'Filter Campaign terms by storage tools' }).click();
@@ -103,14 +103,14 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
     page.getByRole('button', { name: 'Remove Campaign term: storage tools filter' }),
   ).toBeVisible();
   await expect(page.getByLabel('Page views comparison')).toContainText(
-    'No activity in the previous period',
+    'no activity in the previous period',
   );
   for (const theme of ['dark', 'light'])
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       if ((await page.locator('html').getAttribute('data-theme')) !== theme)
         await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
-      await expect(page.getByRole('button', { name: 'Clear all filters' })).toHaveCSS(
+      await expect(page.getByRole('button', { name: 'clear all filters' })).toHaveCSS(
         'color',
         await page.locator('body').evaluate((body) => getComputedStyle(body).color),
       );
@@ -123,23 +123,23 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
         animations: 'disabled',
       });
     }
-  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  await page.getByRole('button', { name: 'clear all filters' }).click();
 
-  await page.getByRole('tab', { name: 'Technology', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible();
+  await page.getByRole('tab', { name: 'technology', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'devices', exact: true })).toBeVisible();
   const period = page.getByRole('combobox', { name: 'Analytics period', exact: true });
   await period.click();
-  await page.getByRole('option', { name: 'Last 7 days', exact: true }).click();
-  await expect(period).toHaveText('Last 7 days');
-  await page.getByRole('button', { name: 'Daily briefing', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
-  const briefingDay = page.getByRole('region').filter({ hasText: 'Completed India day' });
+  await page.getByRole('option', { name: 'last 7 days', exact: true }).click();
+  await expect(period).toHaveText('last 7 days');
+  await page.getByRole('button', { name: 'daily briefing', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'daily briefing', exact: true })).toBeVisible();
+  const briefingDay = page.getByRole('region').filter({ hasText: 'completed India day' });
   await expect(briefingDay.getByRole('heading', { level: 2 })).toBeVisible();
   await page
     .locator('summary')
-    .filter({ hasText: 'Request health and collection details' })
+    .filter({ hasText: 'request health and collection details' })
     .click();
-  await expect(page.getByText('Complete inventory', { exact: true })).toBeVisible();
+  await expect(page.getByText('complete inventory', { exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveCount(0);
   for (const theme of ['dark', 'light']) {
     for (const width of [390, 768, 1440]) {
@@ -166,7 +166,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
     }
   }
   await page.getByRole('button', { name: project.name, exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Analytics', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'analytics', exact: true })).toBeVisible();
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toBeVisible();
-  await expect(page.getByText('Your projects', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('your projects', { exact: true })).toHaveCount(0);
 });

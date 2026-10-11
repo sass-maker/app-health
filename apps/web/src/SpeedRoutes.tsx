@@ -1,13 +1,7 @@
-import type { ReactNode, ReactElement } from 'react';
-import { Badge } from './components/ui/badge.js';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './components/ui/table.js';
+import type { ReactElement } from 'react';
+import { DataTable, type DataColumn } from './components/ResourceTable.js';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { Badge } from '@saas-maker/ui/components/badge';
 import {
   formatSpeed,
   vitalColumns,
@@ -37,7 +31,7 @@ export function SpeedValue({
 }
 
 function Sustained({ state }: { state: VitalRoute['sustained'] }): ReactElement {
-  const labels = { breach: 'Breaching', ok: 'Within budget', insufficient: 'Insufficient windows' };
+  const labels = { breach: 'breaching', ok: 'within budget', insufficient: 'insufficient windows' };
   return (
     <span className={state === 'breach' ? 'text-warning' : 'text-muted-foreground'}>
       {labels[state]}
@@ -56,154 +50,177 @@ function Breaches({ route }: { route: VitalRoute | ServerRoute }): ReactElement 
       ))}
     </ul>
   ) : (
-    <span className="text-muted-foreground">None reported</span>
+    <span className="text-muted-foreground">none reported</span>
   );
 }
 
-function RouteTable({
-  label,
-  headings,
-  children,
-}: {
-  label: string;
-  headings: string[];
-  children: ReactNode;
-}): ReactElement {
-  return (
-    <Table aria-label={label} className="text-xs">
-      <TableHeader>
-        <TableRow>
-          {headings.map((heading) => (
-            <TableHead key={heading}>{heading}</TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>{children}</TableBody>
-    </Table>
-  );
+function routeColumn<T>(
+  id: string,
+  header: string,
+  value: DataColumn<T>['value'],
+  cell: DataColumn<T>['cell'],
+  className?: string,
+): DataColumn<T> {
+  return { id, header, value, cell, className, sortable: false, hideable: false };
 }
 
 function VitalsRoutes({ product }: { product: SpeedProduct }): ReactElement {
-  if (!product.vitals.routes.length)
-    return <p className="text-sm text-muted-foreground">No Web Vitals route samples.</p>;
+  const columns: DataColumn<VitalRoute>[] = [
+    routeColumn('route_group', 'route group', (route) => route.route_group, undefined, 'font-mono'),
+    routeColumn(
+      'samples',
+      'samples',
+      (route) => route.samples,
+      (route) => <SpeedValue value={route.samples || null} metric="samples" />,
+    ),
+    ...vitalColumns.map(({ key, label }) =>
+      routeColumn<VitalRoute>(
+        key,
+        label,
+        (route) => route[key]?.p75,
+        (route) => (
+          <SpeedValue
+            value={route[key]?.p75 ?? null}
+            metric={key}
+            breached={route.breaches.some((breach) => breach.metric === key)}
+          />
+        ),
+      ),
+    ),
+    routeColumn(
+      'breaches',
+      'breaches',
+      () => null,
+      (route) => <Breaches route={route} />,
+    ),
+    routeColumn(
+      'sustained',
+      'sustained LCP',
+      (route) => route.sustained,
+      (route) => <Sustained state={route.sustained} />,
+    ),
+  ];
   return (
-    <RouteTable
+    <DataTable
       label={`${product.name} vitals routes`}
-      headings={[
-        'Route group',
-        'Samples',
-        ...vitalColumns.map((column) => column.label),
-        'Breaches',
-        'Sustained LCP',
-      ]}
-    >
-      {product.vitals.routes.map((route) => (
-        <TableRow key={route.route_group}>
-          <TableCell className="font-mono">{route.route_group}</TableCell>
-          <TableCell>
-            <SpeedValue value={route.samples || null} metric="samples" />
-          </TableCell>
-          {vitalColumns.map(({ key }) => (
-            <TableCell key={key}>
-              <SpeedValue
-                value={route[key]?.p75 ?? null}
-                metric={key}
-                breached={route.breaches.some((breach) => breach.metric === key)}
-              />
-            </TableCell>
-          ))}
-          <TableCell>
-            <Breaches route={route} />
-          </TableCell>
-          <TableCell>
-            <Sustained state={route.sustained} />
-          </TableCell>
-        </TableRow>
-      ))}
-    </RouteTable>
+      data={product.vitals.routes}
+      columns={columns}
+      getRowId={(route) => route.route_group}
+      pageSize={Math.max(1, product.vitals.routes.length)}
+      maxHeight="none"
+      empty={<EmptyState title="no Web Vitals route samples." />}
+    />
   );
 }
 
-function ServerRoutes({ product }: { product: SpeedProduct }): ReactElement {
-  if (!product.server.routes.length)
-    return <p className="text-sm text-muted-foreground">No server route samples.</p>;
+function EdgeCache({ route }: { route: ServerRoute }): ReactElement {
   return (
-    <RouteTable
-      label={`${product.name} server routes`}
-      headings={[
-        'Route template',
-        'Samples',
-        'p50',
-        'p95',
-        'p99',
-        'Error rate',
-        'Edge cache',
-        'Top colos · p95',
-        'Stages · p95',
-        'Breaches',
-        'Sustained p95',
-      ]}
-    >
-      {product.server.routes.map((route) => (
-        <TableRow key={route.route}>
-          <TableCell className="max-w-64 !whitespace-normal break-all font-mono">
-            {route.route}
-          </TableCell>
-          <TableCell>
-            <SpeedValue value={route.samples || null} metric="samples" />
-          </TableCell>
-          {(['p50', 'p95', 'p99'] as const).map((percentile) => (
-            <TableCell key={percentile}>
-              <SpeedValue
-                value={route.total_ms[percentile]}
-                metric={percentile}
-                breached={route.breaches.some(
-                  (breach) => breach.metric === `total_ms.${percentile}`,
-                )}
-              />
-            </TableCell>
+    <div>
+      <div>
+        hit ratio: <SpeedValue value={route.cache.hit_ratio} metric="cache" />
+      </div>
+      <ul className="mt-1 space-y-1 text-muted-foreground">
+        {Object.entries(route.cache)
+          .filter(([key]) => key !== 'hit_ratio')
+          .map(([key, value]) => (
+            <li key={key}>
+              {key}: {value}
+            </li>
           ))}
-          <TableCell>
-            <SpeedValue value={route.samples ? route.error_rate : null} metric="errors" />
-          </TableCell>
-          <TableCell>
-            <div>
-              Hit ratio: <SpeedValue value={route.cache.hit_ratio} metric="cache" />
-            </div>
-            <ul className="mt-1 space-y-1 text-muted-foreground">
-              {Object.entries(route.cache)
-                .filter(([key]) => key !== 'hit_ratio')
-                .map(([key, value]) => (
-                  <li key={key}>
-                    {key}: {value}
-                  </li>
-                ))}
-            </ul>
-          </TableCell>
-          <TableCell>
-            <DetailList
-              entries={route.colos.map(
-                (colo) =>
-                  `${colo.colo}: ${formatSpeed(colo.p95_ms, 'p95')} · ${colo.samples} samples`,
-              )}
-            />
-          </TableCell>
-          <TableCell>
-            <DetailList
-              entries={Object.entries(route.stages_p95_ms).map(
-                ([stage, value]) => `${stage}: ${formatSpeed(value, 'p95')}`,
-              )}
-            />
-          </TableCell>
-          <TableCell>
-            <Breaches route={route} />
-          </TableCell>
-          <TableCell>
-            <Sustained state={route.sustained} />
-          </TableCell>
-        </TableRow>
-      ))}
-    </RouteTable>
+      </ul>
+    </div>
+  );
+}
+
+const serverRouteColumns: DataColumn<ServerRoute>[] = [
+  routeColumn(
+    'route',
+    'route template',
+    (route) => route.route,
+    undefined,
+    'max-w-64 !whitespace-normal break-all font-mono',
+  ),
+  routeColumn(
+    'samples',
+    'samples',
+    (route) => route.samples,
+    (route) => <SpeedValue value={route.samples || null} metric="samples" />,
+  ),
+  ...(['p50', 'p95', 'p99'] as const).map((percentile) =>
+    routeColumn<ServerRoute>(
+      percentile,
+      percentile,
+      (route) => route.total_ms[percentile],
+      (route) => (
+        <SpeedValue
+          value={route.total_ms[percentile]}
+          metric={percentile}
+          breached={route.breaches.some((breach) => breach.metric === `total_ms.${percentile}`)}
+        />
+      ),
+    ),
+  ),
+  routeColumn(
+    'errors',
+    'error rate',
+    (route) => route.error_rate,
+    (route) => <SpeedValue value={route.samples ? route.error_rate : null} metric="errors" />,
+  ),
+  routeColumn(
+    'cache',
+    'edge cache',
+    (route) => route.cache.hit_ratio,
+    (route) => <EdgeCache route={route} />,
+  ),
+  routeColumn(
+    'colos',
+    'top colos · p95',
+    () => null,
+    (route) => (
+      <DetailList
+        entries={route.colos.map(
+          (colo) => `${colo.colo}: ${formatSpeed(colo.p95_ms, 'p95')} · ${colo.samples} samples`,
+        )}
+      />
+    ),
+  ),
+  routeColumn(
+    'stages',
+    'stages · p95',
+    () => null,
+    (route) => (
+      <DetailList
+        entries={Object.entries(route.stages_p95_ms).map(
+          ([stage, value]) => `${stage}: ${formatSpeed(value, 'p95')}`,
+        )}
+      />
+    ),
+  ),
+  routeColumn(
+    'breaches',
+    'breaches',
+    () => null,
+    (route) => <Breaches route={route} />,
+  ),
+  routeColumn(
+    'sustained',
+    'sustained p95',
+    (route) => route.sustained,
+    (route) => <Sustained state={route.sustained} />,
+  ),
+];
+
+function ServerRoutes({ product }: { product: SpeedProduct }): ReactElement {
+  return (
+    <DataTable
+      label={`${product.name} server routes`}
+      data={product.server.routes}
+      columns={serverRouteColumns}
+      getRowId={(route) => route.route}
+      pageSize={Math.max(1, product.server.routes.length)}
+      maxHeight="none"
+      empty={<EmptyState title="no server route samples." />}
+    />
   );
 }
 
@@ -225,23 +242,21 @@ export function SpeedRoutes({ product }: { product: SpeedProduct }): ReactElemen
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-semibold">{product.name} routes</h3>
         <Badge variant="outline">{product.rejected} rejected</Badge>
-        {product.vitals.truncated ? <Badge variant="secondary">Vitals truncated</Badge> : null}
-        {product.server.truncated ? <Badge variant="secondary">Server truncated</Badge> : null}
+        {product.vitals.truncated ? <Badge variant="secondary">vitals truncated</Badge> : null}
+        {product.server.truncated ? <Badge variant="secondary">server truncated</Badge> : null}
       </div>
       <section className="min-w-0 space-y-2" aria-label="Field Web Vitals">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Field Web Vitals
+        <h4 className="text-xs font-medium tracking-wide text-muted-foreground">
+          field Web Vitals
         </h4>
         <VitalsRoutes product={product} />
       </section>
       <section className="min-w-0 space-y-2" aria-label="Server timings">
-        <h4 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Server timings
-        </h4>
+        <h4 className="text-xs font-medium tracking-wide text-muted-foreground">server timings</h4>
         <ServerRoutes product={product} />
       </section>
       <p className="text-xs leading-5 text-muted-foreground">
-        Sustained evaluates LCP p75 and server p95 over four consecutive 15-minute windows, ending
+        sustained evaluates LCP p75 and server p95 over four consecutive 15-minute windows, ending
         at report generation.
       </p>
     </div>

@@ -58,14 +58,14 @@ test('real collected traffic supports stacked source and device filters with cle
   await page.goto('/app#analytics');
   await page.getByRole('button', { name: 'Filter Referral sources by Reddit' }).click();
   await expect(page.getByRole('button', { name: 'Remove Source: Reddit filter' })).toBeVisible();
-  await page.getByRole('tab', { name: 'Technology', exact: true }).click();
+  await page.getByRole('tab', { name: 'technology', exact: true }).click();
   await page.getByRole('button', { name: 'Filter Devices by Mobile' }).click();
   await expect(page.getByRole('button', { name: 'Remove Device: Mobile filter' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /stories' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /desktop' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Filter Top pages by /search' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Session engagement' })).toHaveCount(0);
-  await expect(page.getByText('All project sessions · not filtered')).toBeVisible();
+  await expect(page.getByText('all project sessions · not filtered')).toBeVisible();
   const api = await request.get(
     `/v1/analytics/report?app_id=${created.app.id}&environment_id=${created.environment.id}&source=Reddit&device=Mobile`,
   );
@@ -73,7 +73,7 @@ test('real collected traffic supports stacked source and device filters with cle
   expect(report.pages).toEqual([{ name: '/stories', count: 2 }]);
   expect(report.engagement).toBeUndefined();
   await page.getByRole('combobox', { name: 'Analytics period' }).click();
-  await page.getByRole('option', { name: 'Last 7 days' }).click();
+  await page.getByRole('option', { name: 'last 7 days' }).click();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /stories' })).toBeVisible();
   for (const theme of ['dark', 'light'])
     for (const width of [390, 768, 1440]) {
@@ -81,7 +81,7 @@ test('real collected traffic supports stacked source and device filters with cle
       if ((await page.locator('html').getAttribute('data-theme')) !== theme)
         await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
-      await expect(page.getByRole('button', { name: 'Clear all filters' })).toHaveCSS(
+      await expect(page.getByRole('button', { name: 'clear all filters' })).toHaveCSS(
         'color',
         await page.locator('body').evaluate((body) => getComputedStyle(body).color),
       );
@@ -96,7 +96,7 @@ test('real collected traffic supports stacked source and device filters with cle
     }
   await page.getByRole('button', { name: 'Remove Device: Mobile filter' }).click();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /desktop' })).toBeVisible();
-  await page.getByRole('button', { name: 'Clear all filters' }).click();
+  await page.getByRole('button', { name: 'clear all filters' }).click();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /search' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Session engagement' })).toBeVisible();
 });

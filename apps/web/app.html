@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark" data-theme="dark">
+<html lang="en" class="dark" data-theme="dark" data-mode="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,6 +13,7 @@
       } catch {
         document.documentElement.dataset.theme = 'dark';
       }
+      document.documentElement.dataset.mode = document.documentElement.dataset.theme;
       document.documentElement.classList.toggle(
         'dark',
         document.documentElement.dataset.theme !== 'light',
@@ -23,11 +24,11 @@
       body {
         min-height: 100%;
         margin: 0;
-        background: #09090b;
+        background: #111111;
       }
       html[data-theme='light'],
       html[data-theme='light'] body {
-        background: #fafafa;
+        background: oklch(0.993 0 0);
       }
     </style>
   </head>

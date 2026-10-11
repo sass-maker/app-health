@@ -1,8 +1,11 @@
 import { Fragment, useState, type ReactElement } from 'react';
 import type { SpeedReportV1 } from '@app-health/contracts';
 import { ArrowUpDown, ChevronDown, ChevronRight } from 'lucide-react';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { DataTableSkeleton } from './components/ResourceTable.js';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { Skeleton } from '@saas-maker/ui/components/skeleton';
+import { Button } from '@saas-maker/ui/components/button';
 import {
   Table,
   TableBody,
@@ -10,7 +13,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from './components/ui/table.js';
+} from '@saas-maker/ui/components/table';
 import { SpeedRoutes, SpeedValue } from './SpeedRoutes.js';
 import {
   formatSpeed,
@@ -32,6 +35,10 @@ const columns: { key: SpeedSort; label: string }[] = [
   { key: 'cache', label: 'Cache hit ratio' },
   { key: 'samples', label: 'Samples' },
 ];
+
+function columnHeading(label: string): string {
+  return label.endsWith(' p75') ? label : label.toLowerCase();
+}
 
 function ProductCells({
   product,
@@ -64,7 +71,7 @@ function ProductCells({
           </Badge>
           {isBreaching(product) ? (
             <Badge variant="outline" className="border-warning/30 text-warning">
-              Breaching
+              breaching
             </Badge>
           ) : null}
         </div>
@@ -93,13 +100,13 @@ function BudgetCaption({ report }: { report: SpeedReportV1 }): ReactElement {
       id="speed-bounds"
       className="border-t px-4 py-4 text-xs leading-6 text-muted-foreground sm:px-5"
     >
-      Samples, not total traffic. Percentiles show the worst retained route; error rate and cache
-      hit ratio use retained server routes. Samples combines web and server events. Truncated:{' '}
-      {truncated ? 'yes — some samples or routes may be omitted' : 'no'}. Rejected events:{' '}
-      {rejected.toLocaleString()}. Breaches require {report.min_samples.vitals} samples per web
+      samples, not total traffic. percentiles show the worst retained route; error rate and cache
+      hit ratio use retained server routes. samples combines web and server events. truncated:{' '}
+      {truncated ? 'yes — some samples or routes may be omitted' : 'no'}. rejected events:{' '}
+      {rejected.toLocaleString()}. breaches require {report.min_samples.vitals} samples per web
       metric per route or {report.min_samples.server} per server route; sustained windows require{' '}
-      {report.min_samples.alert_window} samples. Smaller sets can show values but never percentile
-      breaches. Budgets ({report.class}):{' '}
+      {report.min_samples.alert_window} samples. smaller sets can show values but never percentile
+      breaches. budgets ({report.class}):{' '}
       {web
         ? vitalColumns
             .map(
@@ -108,9 +115,9 @@ function BudgetCaption({ report }: { report: SpeedReportV1 }): ReactElement {
             )
             .join(' · ')
         : 'no Web Vitals budget'}
-      . Server API read: p50 {formatSpeed(report.budgets.server.p50, 'p50')} · p95{' '}
+      . server API read: p50 {formatSpeed(report.budgets.server.p50, 'p50')} · p95{' '}
       {formatSpeed(report.budgets.server.p95, 'p95')} · p99{' '}
-      {formatSpeed(report.budgets.server.p99, 'p99')}. Cache hit ratio is HIT / (samples − NONE).
+      {formatSpeed(report.budgets.server.p99, 'p99')}. cache hit ratio is HIT / (samples − NONE).
     </p>
   );
 }
@@ -132,13 +139,13 @@ export function SpeedTable({
   return (
     <div className="min-w-0 rounded-xl border">
       <div className="border-b px-4 py-4 sm:px-5">
-        <h2 className="text-sm font-semibold">Product speed</h2>
+        <h2 className="text-sm font-semibold">product speed</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          {products.length} of {report.products.length} products · Select a product to inspect
+          {products.length} of {report.products.length} products · select a product to inspect
           routes.
         </p>
         <p className="mt-2 text-xs text-muted-foreground lg:hidden">
-          Scroll the table sideways to see all timings.
+          scroll the table sideways to see all timings.
         </p>
       </div>
       <Table aria-label="Product speed" aria-describedby="speed-bounds" className="text-xs">
@@ -149,6 +156,7 @@ export function SpeedTable({
                 key={key}
                 aria-sort={sort === key ? (ascending ? 'ascending' : 'descending') : 'none'}
                 className="px-2"
+                style={{ minWidth: key === 'name' ? '12rem' : '6rem' }}
               >
                 <Button
                   variant="ghost"
@@ -156,7 +164,7 @@ export function SpeedTable({
                   className="h-auto min-h-11 gap-1 px-0 text-left text-xs !whitespace-normal"
                   aria-label={`Sort by ${label}`}
                 >
-                  {label}
+                  {columnHeading(label)}
                   <ArrowUpDown className="!size-3 text-muted-foreground" aria-hidden="true" />
                 </Button>
               </TableHead>
@@ -190,11 +198,35 @@ export function SpeedTable({
         </TableBody>
       </Table>
       {!products.length ? (
-        <p role="status" className="p-6 text-sm text-muted-foreground">
-          No products match these filters. Try another state or search.
-        </p>
+        <EmptyState
+          role="status"
+          title="no products match these filters."
+          description="try another state or search."
+        />
       ) : null}
       <BudgetCaption report={report} />
+    </div>
+  );
+}
+
+export function SpeedTableSkeleton(): ReactElement {
+  return (
+    <div role="status" aria-label="Loading speed report" className="min-w-0 rounded-xl border">
+      <div className="space-y-2 border-b px-4 py-4 sm:px-5">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+      </div>
+      <DataTableSkeleton
+        announce={false}
+        columns={columns.map(({ key, label }) => ({
+          id: key,
+          header: columnHeading(label),
+          minWidth: key === 'name' ? '12rem' : '6rem',
+          className: 'h-16',
+        }))}
+        rows={4}
+        className="[&>div:first-child]:hidden"
+      />
     </div>
   );
 }

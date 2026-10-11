@@ -18,7 +18,7 @@ export function AnalyticsAudience({
   if (!audience)
     return (
       <p className="text-sm text-muted-foreground">
-        Audience identity is unavailable for this period.
+        audience identity is unavailable for this period.
       </p>
     );
   const total = report.series.reduce((sum, row) => sum + row[metric], 0);
@@ -32,12 +32,12 @@ export function AnalyticsAudience({
           ['Unidentified sessions', audience.unidentified_sessions],
         ].map(([label, value]) => (
           <div key={String(label)} className="bg-card p-4">
-            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="text-xs text-muted-foreground">{String(label).toLowerCase()}</p>
             <p className="mt-2 text-2xl font-semibold tabular-nums">
               {Number(value).toLocaleString()}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {report.sampled ? 'Sampled lower bound' : 'Browser-scoped'}
+              {report.sampled ? 'sampled lower bound' : 'browser-scoped'}
             </p>
           </div>
         ))}
@@ -53,7 +53,7 @@ export function AnalyticsAudience({
             tone={String(title) === 'Countries' ? 'var(--chart-3)' : 'var(--chart-2)'}
             description={
               String(title) === 'Countries'
-                ? 'Connection location from the edge. Unknown means location was not recorded, including older events. VPNs may change the reported country.'
+                ? 'connection location from the edge. unknown means location was not recorded, including older events. VPNs may change the reported country.'
                 : undefined
             }
             onSelect={

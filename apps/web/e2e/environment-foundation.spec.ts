@@ -38,7 +38,7 @@ for (const theme of ['dark', 'light']) {
       ).ok(),
     ).toBe(true);
     await page.goto('/app#backend/logs');
-    await expect(page.getByText('Waiting for the first valid logs event')).toBeVisible();
+    await expect(page.getByText('waiting for the first valid logs event')).toBeVisible();
     await checkReadability(page);
     const log = {
       log_id: crypto.randomUUID(),
@@ -55,12 +55,12 @@ for (const theme of ['dark', 'light']) {
     await expect(page.getByText('foundation.completed', { exact: true })).toBeVisible({
       timeout: 12000,
     });
-    await expect(page.getByText('Waiting for the first valid logs event')).toHaveCount(0);
+    await expect(page.getByText('waiting for the first valid logs event')).toHaveCount(0);
     await checkReadability(page);
     await page.goto('/app#analytics');
-    await expect(page.getByText('Install web analytics', { exact: true })).toBeVisible();
+    await expect(page.getByText('install web analytics', { exact: true })).toBeVisible();
     await page.goto('/app#backend');
-    await expect(page.getByText('Waiting for the first valid api monitoring event')).toBeVisible();
+    await expect(page.getByText('waiting for the first valid api monitoring event')).toBeVisible();
     const endpoint = {
       schema_version: 'v1',
       batch_id: crypto.randomUUID(),
@@ -89,7 +89,7 @@ for (const theme of ['dark', 'light']) {
       page.getByText('/foundation', { exact: true }).filter({ visible: true }),
     ).toBeVisible({ timeout: 12000 });
     await page.goto('/app#settings');
-    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'settings', exact: true })).toBeVisible();
     await checkReadability(page);
     await page.getByLabel('New environment name').fill('staging');
     const added = page.waitForResponse(
@@ -97,11 +97,11 @@ for (const theme of ['dark', 'light']) {
         response.url().endsWith(`/v1/apps/${created.app.id}/environments`) &&
         response.request().method() === 'POST',
     );
-    await page.getByRole('button', { name: 'Add environment', exact: true }).click();
+    await page.getByRole('button', { name: 'add environment', exact: true }).click();
     const staging = await (await added).json();
     expect(staging.environment.name).toBe('staging');
     expect(staging.key.environment_id).toBe(staging.environment.id);
-    await expect(page.getByText('Save the private key for staging')).toBeVisible();
+    await expect(page.getByText('save the private key for staging')).toBeVisible();
     await checkReadability(page);
     const state = await (
       await page.request.get(
@@ -126,7 +126,7 @@ for (const theme of ['dark', 'light']) {
     await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText(
       'staging',
     );
-    await expect(page.getByText(`Workspace / ${created.app.name} / staging`)).toBeVisible();
+    await expect(page.getByText(`workspace / ${created.app.name} / staging`)).toBeVisible();
     await checkReadability(page);
     await expect(page.locator('footer')).toHaveCount(0);
   });

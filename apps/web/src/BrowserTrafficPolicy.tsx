@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import { Button } from './components/ui/button.js';
+import { Button } from '@saas-maker/ui/components/button';
 
 /** Collection policy: known bots never enter browser report rows; only counters are retained. */
 export function BrowserTrafficPolicy(): ReactElement {
@@ -9,7 +9,7 @@ export function BrowserTrafficPolicy(): ReactElement {
       <Button asChild variant="outline" className="h-10 cursor-pointer">
         <summary>
           <ShieldCheck className="size-4" />
-          Known bots excluded
+          known bots excluded
         </summary>
       </Button>
       <p className="mt-2 leading-5 text-muted-foreground">

@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react';
 import { NativeKey } from '@app-health/contracts';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
-import { Input } from './components/ui/input.js';
-import { Badge } from './components/ui/badge.js';
+import { Button } from '@saas-maker/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@saas-maker/ui/components/card';
+import { Input } from '@saas-maker/ui/components/input';
+import { Badge } from '@saas-maker/ui/components/badge';
 
 interface Props {
   project: { appId: string; environmentId: string };
@@ -17,7 +23,7 @@ async function nativeRequest(url: string, token: string, method: string, signal?
     headers: token ? { authorization: `Bearer ${token}` } : {},
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body.error ?? 'Native keys are unavailable.');
+  if (!response.ok) throw new Error(body.error ?? 'native keys are unavailable.');
   return body;
 }
 function NativeKeyReveal({ value, origin }: { value: string; origin: string }) {
@@ -29,7 +35,7 @@ function NativeKeyReveal({ value, origin }: { value: string; origin: string }) {
       setCopied(true);
       setCopyError('');
     } catch {
-      setCopyError('Copy unavailable. Select the key above to copy it.');
+      setCopyError('copy unavailable. select the key above to copy it.');
     }
   }
   const snippet = `let health = try AppHealthClient(\n    endpoint: URL(string: "${origin}")!,\n    publicKey: "${value}"\n)\nawait health.track("onboarding.completed")`;
@@ -43,7 +49,7 @@ function NativeKeyReveal({ value, origin }: { value: string; origin: string }) {
         onFocus={(event) => event.currentTarget.select()}
       />
       <Button variant="outline" size="sm" onClick={() => void copy()}>
-        {copied ? 'Copied' : 'Copy native key'}
+        {copied ? 'copied' : 'copy native key'}
       </Button>
       {copyError ? (
         <p role="status" className="text-xs text-muted-foreground">
@@ -63,7 +69,7 @@ function NativeKeyReveal({ value, origin }: { value: string; origin: string }) {
 function parseNativeCreation(body: { record: unknown; key: unknown }) {
   const record = NativeKey.parse(body.record);
   if (typeof body.key !== 'string' || !/^ahk_native_[a-f0-9]{64}$/.test(body.key))
-    throw new Error('Invalid native key response.');
+    throw new Error('invalid native key response.');
   return { record, key: body.key };
 }
 function NativeKeyRows({
@@ -87,10 +93,10 @@ function NativeKeyRows({
             </p>
           </div>
           {key.revoked_at !== null ? (
-            <Badge variant="secondary">Revoked</Badge>
+            <Badge variant="secondary">revoked</Badge>
           ) : confirm === key.id ? (
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs">Apps using this key will stop sending.</span>
+              <span className="text-xs">apps using this key will stop sending.</span>
               <Button
                 size="sm"
                 variant="destructive"
@@ -100,15 +106,15 @@ function NativeKeyRows({
                   setConfirm('');
                 }}
               >
-                Revoke now
+                revoke now
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setConfirm('')}>
-                Cancel
+                cancel
               </Button>
             </div>
           ) : (
             <Button size="sm" variant="outline" disabled={busy} onClick={() => setConfirm(key.id)}>
-              Revoke native key
+              revoke native key
             </Button>
           )}
         </div>
@@ -129,7 +135,7 @@ function NativeKeyError({
     <p role="alert" className="text-sm text-destructive">
       {error}
       <Button variant="link" size="sm" disabled={busy} onClick={retry}>
-        Retry native keys
+        retry native keys
       </Button>
     </p>
   );
@@ -149,14 +155,14 @@ export function NativeKeys({ project, ownerToken, ingestOrigin }: Props) {
     const timer = setTimeout(() => {
       controller.abort();
       setLoading(false);
-      setError('Native keys request timed out.');
+      setError('native keys request timed out.');
     }, 8000);
     void nativeRequest(url, ownerToken, 'GET', controller.signal)
       .then((body) => {
         if (!controller.signal.aborted) setKeys(NativeKey.array().max(25).parse(body.keys));
       })
       .catch(() => {
-        if (!controller.signal.aborted) setError('Native keys could not load.');
+        if (!controller.signal.aborted) setError('native keys could not load.');
       })
       .finally(() => {
         clearTimeout(timer);
@@ -187,7 +193,7 @@ export function NativeKeys({ project, ownerToken, ingestOrigin }: Props) {
         );
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Native key update failed.');
+      setError(cause instanceof Error ? cause.message : 'native key update failed.');
     } finally {
       setBusy(false);
     }
@@ -197,7 +203,7 @@ export function NativeKeys({ project, ownerToken, ingestOrigin }: Props) {
       <CardHeader>
         <CardTitle>Swift apps</CardTitle>
         <CardDescription>
-          Connect your iOS and Mac apps with one small SDK for named events, logs, and foreground
+          connect your iOS and Mac apps with one small SDK for named events, logs, and foreground
           sessions.
         </CardDescription>
       </CardHeader>
@@ -214,7 +220,7 @@ export function NativeKeys({ project, ownerToken, ingestOrigin }: Props) {
           disabled={loading || busy || keys.filter((key) => key.revoked_at === null).length >= 5}
           onClick={() => void mutate('POST')}
         >
-          Create native public key
+          create native public key
         </Button>
         {loading ? <p className="text-sm text-muted-foreground">Loading native keys…</p> : null}
         {reveal ? <NativeKeyReveal value={reveal} origin={ingestOrigin} /> : null}

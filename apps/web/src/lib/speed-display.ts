@@ -15,9 +15,9 @@ export const vitalColumns: { key: VitalMetric; label: string }[] = [
 ];
 
 export const stateLabels = {
-  measured: 'Measured',
-  insufficient: 'Insufficient samples',
-  no_data: 'No data',
+  measured: 'measured',
+  insufficient: 'insufficient samples',
+  no_data: 'no data',
 };
 
 export function isBreaching(product: SpeedProduct): boolean {

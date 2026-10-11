@@ -309,7 +309,7 @@ function installFetch(options?: {
 async function openKeySetup(): Promise<void> {
   installFetch();
   render(<App />);
-  fireEvent.change(screen.getByLabelText('Application name'), {
+  fireEvent.change(screen.getByLabelText('application name'), {
     target: { value: 'orders-api' },
   });
   fireEvent.click(screen.getByRole('button', { name: /create project/i }));
@@ -369,7 +369,7 @@ describe('App Health V0 UI', () => {
     installFetch({ appsFail: true });
     render(<App />);
     expect(await screen.findByRole('alert')).toHaveTextContent('project list could not load');
-    expect(screen.queryByRole('button', { name: 'Create project' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'create project' })).toBeNull();
   });
 
   it('restores the selected project when browser history changes the URL target', async () => {
@@ -424,11 +424,11 @@ describe('App Health V0 UI', () => {
       expectSelectedProject('beta');
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add another project' }));
-    expect(await screen.findByRole('button', { name: 'Back to projects' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to projects' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
-    expect(await screen.findByRole('button', { name: 'Continue with Google' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'back to projects' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'create project' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'back to projects' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'sign out' }));
+    expect(await screen.findByRole('button', { name: 'continue with Google' })).toBeTruthy();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(
       mock.mock.calls.filter(([input]) => String(input).includes('/v1/auth/sign-out')),
@@ -441,25 +441,25 @@ describe('App Health V0 UI', () => {
   it('keeps a failed sign-out recoverable, including an empty workspace', async () => {
     installFetch({ google: true, signOutFail: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Could not sign out');
-    expect(screen.getByRole('button', { name: 'Create project' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'sign out' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not sign out');
+    expect(screen.getByRole('button', { name: 'create project' })).toBeTruthy();
   });
 
   it('keeps Google sign-in available when the signed-out inventory probe is unauthorized', async () => {
     vi.stubEnv('DEV', false);
     installFetch({ google: true, appsFail: true });
     render(<App />);
-    expect(await screen.findByRole('button', { name: 'Continue with Google' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'continue with Google' })).toBeTruthy();
   });
 
   it('offers Google sign-in and reports provider failures without losing the deployment-key option', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 503 })));
     render(<OwnerUnlock onUnlock={vi.fn()} googleEnabled />);
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
+    fireEvent.click(screen.getByRole('button', { name: 'continue with Google' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Google sign-in could not start');
-    expect(screen.getByRole('button', { name: 'Unlock' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Continue with Google' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'unlock' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'continue with Google' })).toBeEnabled();
   });
 
   it('rejects unexpected OAuth destinations and explains callback failure', async () => {
@@ -469,20 +469,20 @@ describe('App Health V0 UI', () => {
       vi.fn().mockResolvedValue(Response.json({ url: 'https://evil.example.com' })),
     );
     render(<OwnerUnlock onUnlock={vi.fn()} googleEnabled />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Sign-in did not complete');
-    fireEvent.click(screen.getByRole('button', { name: 'Continue with Google' }));
-    expect(await screen.findByText('Unexpected sign-in destination.')).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent('sign-in did not complete');
+    fireEvent.click(screen.getByRole('button', { name: 'continue with Google' }));
+    expect(await screen.findByText('unexpected sign-in destination.')).toBeTruthy();
   });
 
   it('renders the product-led landing hero in the initial HTML response', () => {
     const html = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
 
     expect(html).toContain('data-initial-landing-shell');
-    expect(html).toContain('<h1 id="unlock-title">See what people do. Know what to improve.</h1>');
+    expect(html).toContain('<h1 id="unlock-title">see what people do. know what to improve.</h1>');
     expect(html).toContain('Named product events and trends');
-    expect(html).toContain('One browser script');
-    expect(html).toContain('Local preview available');
-    expect(html).toContain('Open App Health');
+    expect(html).toContain('one browser script');
+    expect(html).toContain('local preview available');
+    expect(html).toContain('open App Health');
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 
@@ -493,7 +493,7 @@ describe('App Health V0 UI', () => {
     expect(html).toContain('name="robots" content="noindex, nofollow"');
     expect(html).toContain("localStorage.getItem('app-health-theme')");
     expect(html).not.toContain('data-initial-landing-shell');
-    expect(html).not.toContain('See what people do. Know what to improve.');
+    expect(html).not.toContain('see what people do. know what to improve.');
   });
 
   it.each(PUBLIC_ENTRYPOINTS)('gives $path an exact self-canonical', (entry) => {
@@ -514,10 +514,10 @@ describe('App Health V0 UI', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
     render(<OwnerUnlock onUnlock={onUnlock} />);
-    const input = screen.getByLabelText('Owner key');
+    const input = screen.getByLabelText('owner key');
     expect(input).toHaveAttribute('type', 'password');
     fireEvent.change(input, { target: { value: 'aho_owner-secret' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    fireEvent.click(screen.getByRole('button', { name: 'unlock' }));
     await waitFor(() => expect(onUnlock).toHaveBeenCalledWith('aho_owner-secret', listed));
     expect([...storageValues.values()].join('')).not.toContain('aho_owner-secret');
   });
@@ -528,7 +528,7 @@ describe('App Health V0 UI', () => {
     expect(
       screen.getByRole('heading', { name: /start with a product you want to understand/i }),
     ).toBeTruthy();
-    expect(screen.getByLabelText('Application name')).toBeTruthy();
+    expect(screen.getByLabelText('application name')).toBeTruthy();
     expect(screen.getByText(/named product events/i)).toBeTruthy();
   });
 
@@ -542,7 +542,7 @@ describe('App Health V0 UI', () => {
       );
     expect(JSON.parse(String(createCall?.[1]?.body)).key_scope).toBe('environment');
     fireEvent.click(screen.getByRole('button', { name: /save key and choose capabilities/i }));
-    expect(await screen.findByRole('heading', { name: 'Settings' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'settings' })).toBeTruthy();
     expect(screen.queryByText('ahk_one_time_secret')).toBeNull();
   });
 
@@ -555,7 +555,7 @@ describe('App Health V0 UI', () => {
       ),
     ).toBeTruthy();
     expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('tab', { name: 'Hono Worker' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Hono worker' }));
     expect(screen.getByText(/@saas-maker\/app-health\/hono/)).toBeTruthy();
     expect(screen.getByText(/runtime: 'worker'/)).toBeTruthy();
     expect(screen.getByText(/disableTimer: true/)).toBeTruthy();
@@ -574,11 +574,11 @@ describe('App Health V0 UI', () => {
     expect(screen.getByText(/Environment: "production"/)).toBeTruthy();
     expect(screen.getByText(/Project: "orders-api"/)).toBeTruthy();
     expect(screen.queryByText(/IngestURL/)).toBeNull();
-    fireEvent.click(screen.getByRole('tab', { name: 'Existing OpenTelemetry' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'existing OpenTelemetry' }));
     expect(screen.getByText(/otlphttp\/app_health/)).toBeTruthy();
     expect(screen.getByText(/\/v1\/traces/)).toBeTruthy();
     expect(screen.getByText(/Bearer ahk_one_time_secret/)).toBeTruthy();
-    expect(screen.getByText(/Reload your Collector/)).toBeTruthy();
+    expect(screen.getByText(/reload your collector/)).toBeTruthy();
     expect(localStorage.getItem(STORAGE_KEY)).not.toContain('ahk_one_time_secret');
   });
 
@@ -586,11 +586,11 @@ describe('App Health V0 UI', () => {
     vi.stubGlobal('navigator', Object.assign(Object.create(navigator), { clipboard: undefined }));
     await openKeySetup();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'copy key' }));
 
-    expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+    expect(await screen.findByText('automatic copy unavailable')).toBeTruthy();
     expect(screen.getByText(/select the key above and copy it manually/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy key' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'copy key' })).toBeTruthy();
     expect(screen.getByText('ahk_one_time_secret')).toBeTruthy();
   });
 
@@ -602,11 +602,11 @@ describe('App Health V0 UI', () => {
     );
     await openKeySetup();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy snippet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'copy snippet' }));
 
-    expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+    expect(await screen.findByText('automatic copy unavailable')).toBeTruthy();
     expect(screen.getByText(/select the snippet above and copy it manually/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy snippet' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'copy snippet' })).toBeTruthy();
     expect(screen.getByText(/@saas-maker\/app-health\/express/)).toBeTruthy();
     expect(writeText).toHaveBeenCalledOnce();
     expect(writeText.mock.calls[0][0]).toContain('@saas-maker/app-health/express');
@@ -628,7 +628,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ status: connected, endpointRows: [{ ...endpoints[0], sampled: true }] });
     render(<App />);
-    expect(await screen.findAllByText('Sampled estimate')).toHaveLength(2);
+    expect(await screen.findAllByText('sampled estimate')).toHaveLength(2);
     expect(screen.queryByText('OTel sampled estimate')).toBeNull();
   });
 
@@ -682,7 +682,7 @@ describe('App Health V0 UI', () => {
         '/v1/installation/status',
       ]);
     });
-    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'diagnostics' }));
     await waitFor(() => {
       const failureCall = fetchMock.mock.calls
         .map(([input]) => (input instanceof URL ? input : null))
@@ -748,7 +748,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...savedProject, appId: SEED_APP_ID }));
     installFetch();
     render(<App />);
-    expect(await screen.findByText('Sample data')).toBeTruthy();
+    expect(await screen.findByText('sample data')).toBeTruthy();
     expect(screen.getByText(/seeded fixtures, not traffic received from an SDK/)).toBeTruthy();
     expect(screen.queryByText('SDK connected')).toBeNull();
   });
@@ -774,7 +774,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ endpointInvalid: true });
     render(<App />);
-    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(await screen.findByText('can’t refresh endpoint data')).toBeTruthy();
     expect(screen.getByRole('alert')).toHaveTextContent('Invalid endpoint data response');
   });
 
@@ -782,7 +782,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ statusInvalid: true });
     render(<App />);
-    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
+    expect(await screen.findByText('can’t refresh endpoint data')).toBeTruthy();
     expect(screen.getByRole('alert')).toHaveTextContent('Invalid installation status response');
   });
 
@@ -790,7 +790,7 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     const fetchMock = installFetch({ endpointPending: true });
     render(<App />);
-    expect(await screen.findByText('Loading endpoint count…')).toBeTruthy();
+    expect(await screen.findByText('loading endpoint count…')).toBeTruthy();
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(2));
     fireEvent.click(screen.getByRole('button', { name: '1h' }));
     await waitFor(() => {
@@ -830,7 +830,7 @@ describe('App Health V0 UI', () => {
       ),
     ).toBe(false);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'diagnostics' }));
     expect(await screen.findByText('/orders/:id')).toBeTruthy();
     expect(screen.getByText('503')).toBeTruthy();
     expect(screen.getByText('812 ms')).toBeTruthy();
@@ -839,17 +839,17 @@ describe('App Health V0 UI', () => {
     });
     expect(detailsButton.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(detailsButton);
-    expect(screen.getByText('Retained failure detail')).toBeTruthy();
-    expect(screen.getByText('Exact fields kept for this failed request')).toBeTruthy();
+    expect(screen.getByText('retained failure detail')).toBeTruthy();
+    expect(screen.getByText('exact fields kept for this failed request')).toBeTruthy();
     expect(screen.getByText(/No request body, headers, query values/i)).toBeTruthy();
     const hideDetailsButton = screen.getByRole('button', {
       name: 'Hide details for POST /orders/:id 503',
     });
     expect(hideDetailsButton.getAttribute('aria-expanded')).toBe('true');
     fireEvent.click(hideDetailsButton);
-    expect(screen.queryByText('Retained failure detail')).toBeNull();
-    expect(screen.getByText('The complete accepted shape')).toBeTruthy();
-    expect(screen.getByText('Request bodies')).toBeTruthy();
+    expect(screen.queryByText('retained failure detail')).toBeNull();
+    expect(screen.getByText('the complete accepted shape')).toBeTruthy();
+    expect(screen.getByText('request bodies')).toBeTruthy();
     expect(
       fetchMock.mock.calls.some(
         ([input]) => input instanceof URL && input.pathname === '/v1/failures',
@@ -861,9 +861,9 @@ describe('App Health V0 UI', () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ failureFail: true });
     render(<App />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Diagnostics' }));
-    expect(await screen.findByText('Failure details are unavailable')).toBeTruthy();
-    expect(screen.getByText('Never collected')).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'diagnostics' }));
+    expect(await screen.findByText('failure details are unavailable')).toBeTruthy();
+    expect(screen.getByText('never collected')).toBeTruthy();
     expect(screen.getByText(/2xx and 3xx requests are folded into counts/i)).toBeTruthy();
   });
 
@@ -904,9 +904,9 @@ describe('App Health V0 UI', () => {
       endpointRows: [],
     });
     render(<App />);
-    expect(await screen.findByText('Waiting for traffic')).toBeTruthy();
+    expect(await screen.findByText('waiting for traffic')).toBeTruthy();
     expect(screen.getByRole('status')).toHaveTextContent(/^0 observed/);
-    expect(screen.getByText('No endpoints observed yet')).toBeTruthy();
+    expect(screen.getByText('no endpoints observed yet')).toBeTruthy();
     expect(screen.getByText(/curl http:\/\/localhost:3000\/health/)).toBeTruthy();
   });
 
@@ -923,7 +923,7 @@ describe('App Health V0 UI', () => {
       endpointRows: [],
     });
     const { unmount } = render(<App />);
-    expect(await screen.findByText('Traffic has gone quiet')).toBeTruthy();
+    expect(await screen.findByText('traffic has gone quiet')).toBeTruthy();
     unmount();
     installFetch({
       status: {
@@ -935,7 +935,7 @@ describe('App Health V0 UI', () => {
       endpointRows: [],
     });
     render(<App />);
-    expect(await screen.findByText('Ingest key revoked')).toBeTruthy();
+    expect(await screen.findByText('ingest key revoked')).toBeTruthy();
   });
 
   it('explains the error installation state', async () => {
@@ -950,7 +950,7 @@ describe('App Health V0 UI', () => {
       endpointRows: [],
     });
     render(<App />);
-    expect(await screen.findByText('Installation check unavailable')).toBeTruthy();
+    expect(await screen.findByText('installation check unavailable')).toBeTruthy();
     expect(screen.getByText(/could not verify this installation/i)).toBeTruthy();
   });
 
@@ -961,18 +961,18 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
     expect(await screen.findByText('SDK connected')).toBeTruthy();
-    expect(screen.getByText('Endpoint summaries are arriving.')).toBeTruthy();
+    expect(screen.getByText('endpoint summaries are arriving.')).toBeTruthy();
   });
 
   it('shows an actionable API failure without hiding the app shell', async () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     installFetch({ fail: true });
     render(<App />);
-    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
-    expect(screen.getByText('Endpoint count unavailable')).toBeTruthy();
+    expect(await screen.findByText('can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByText('endpoint count unavailable')).toBeTruthy();
     expect(screen.queryByText(/^0 observed/)).toBeNull();
     expect(screen.getByText(/application is unaffected/i)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeTruthy();
   });
 
   it('keeps a fresh-window endpoint count unknown on failure and restores it after recovery', async () => {
@@ -981,19 +981,19 @@ describe('App Health V0 UI', () => {
     render(<App />);
 
     expect(
-      await screen.findByText('2 observed · Measurements update after each complete minute'),
+      await screen.findByText('2 observed · measurements update after each complete minute'),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '24h' }));
-    expect(await screen.findByText('Can’t refresh endpoint data')).toBeTruthy();
-    expect(screen.getByText('Endpoint count unavailable')).toBeTruthy();
+    expect(await screen.findByText('can’t refresh endpoint data')).toBeTruthy();
+    expect(screen.getByText('endpoint count unavailable')).toBeTruthy();
     expect(screen.queryByText(/^0 observed/)).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '1h' }));
     expect(
-      await screen.findByText('2 observed · Measurements update after each complete minute'),
+      await screen.findByText('2 observed · measurements update after each complete minute'),
     ).toBeTruthy();
-    expect(screen.queryByText('Endpoint count unavailable')).toBeNull();
-    expect(screen.queryByText('Can’t refresh endpoint data')).toBeNull();
+    expect(screen.queryByText('endpoint count unavailable')).toBeNull();
+    expect(screen.queryByText('can’t refresh endpoint data')).toBeNull();
   });
 
   it('shows a recoverable capability error instead of setup when status is unavailable', async () => {
@@ -1001,9 +1001,9 @@ describe('App Health V0 UI', () => {
     const fetchMock = installFetch({ capabilityFail: true });
     render(<App />);
 
-    expect(await screen.findByText('Capability status is unavailable')).toBeTruthy();
-    expect(screen.queryByText(/Waiting for the first valid/)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(await screen.findByText('capability status is unavailable')).toBeTruthy();
+    expect(screen.queryByText(/waiting for the first valid/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'try again' }));
     await waitFor(() => {
       expect(
         fetchMock.mock.calls.filter(
@@ -1026,8 +1026,8 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Open setup' }))[0]);
-    expect(await screen.findByText('Install web analytics')).toBeTruthy();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'open setup' }))[0]);
+    expect(await screen.findByText('install web analytics')).toBeTruthy();
     const saveCall = fetchMock.mock.calls.find(
       ([input, init]) =>
         input instanceof URL && input.pathname === '/v1/capabilities' && init?.method === 'PUT',
@@ -1048,16 +1048,16 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
 
-    expect(await screen.findByRole('tab', { name: 'Analytics' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Events' })).toBeTruthy();
-    fireEvent.mouseDown(screen.getByRole('tab', { name: 'Backend' }), {
+    expect(await screen.findByRole('tab', { name: 'analytics' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'events' })).toBeTruthy();
+    fireEvent.mouseDown(screen.getByRole('tab', { name: 'backend' }), {
       button: 0,
       ctrlKey: false,
     });
     expect(await screen.findByText('API monitoring is not selected')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Enable API monitoring' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Logs' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Diagnostics' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'enable API monitoring' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'logs' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'diagnostics' })).toBeTruthy();
   });
 
   it('keeps capability settings open and explains a failed enable request', async () => {
@@ -1074,9 +1074,9 @@ describe('App Health V0 UI', () => {
     });
     render(<App />);
 
-    fireEvent.click((await screen.findAllByRole('button', { name: 'Open setup' }))[0]);
+    fireEvent.click((await screen.findAllByRole('button', { name: 'open setup' }))[0]);
     expect(await screen.findByText('API returned 503')).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'settings' })).toBeTruthy();
     expect(location.hash).toBe('#settings');
   });
 
@@ -1089,8 +1089,8 @@ describe('App Health V0 UI', () => {
     fireEvent.change(await screen.findByLabelText('New environment name'), {
       target: { value: 'staging' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Add environment' }));
-    expect(await screen.findByText('Save the private key for staging')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'add environment' }));
+    expect(await screen.findByText('save the private key for staging')).toBeTruthy();
     expect(screen.getByText('ahk_staging_one_time')).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('production');
     expect(localStorage.getItem(STORAGE_KEY)).toContain('env-test');
@@ -1099,7 +1099,7 @@ describe('App Health V0 UI', () => {
 
   it.each([
     [{ environmentCreateFail: true }, 'API returned 503'],
-    [{ environmentCreateInvalid: true }, 'The environment response was invalid'],
+    [{ environmentCreateInvalid: true }, 'the environment response was invalid'],
   ] as const)('retains environment input after rejected creation %j', async (options, message) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
     window.history.replaceState({}, '', '/app#settings');
@@ -1107,10 +1107,10 @@ describe('App Health V0 UI', () => {
     render(<App />);
     const input = await screen.findByLabelText('New environment name');
     fireEvent.change(input, { target: { value: 'staging' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Add environment' }));
+    fireEvent.click(screen.getByRole('button', { name: 'add environment' }));
     expect(await screen.findByText(message)).toBeTruthy();
     expect(input).toHaveValue('staging');
-    expect(screen.queryByText('Save the private key for staging')).toBeNull();
+    expect(screen.queryByText('save the private key for staging')).toBeNull();
     expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('production');
   });
 
@@ -1121,17 +1121,17 @@ describe('App Health V0 UI', () => {
       window.history.replaceState({}, '', '/app#settings');
       installFetch({ privateKey });
       render(<App />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Create environment key' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'create environment key' }));
       expect(await screen.findByText('ahk_environment_one_time')).toBeTruthy();
       expect(screen.queryByRole('alertdialog')).toBeNull();
       const writeText = vi.fn().mockResolvedValue(undefined);
       Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-      fireEvent.click(screen.getByRole('button', { name: 'Copy private key' }));
-      expect(await screen.findByRole('button', { name: 'Copied' })).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'copy private key' }));
+      expect(await screen.findByRole('button', { name: 'copied' })).toBeTruthy();
       expect(writeText).toHaveBeenCalledWith('ahk_environment_one_time');
       writeText.mockRejectedValue(new Error('Copy denied'));
-      fireEvent.click(screen.getByRole('button', { name: 'Copied' }));
-      expect(await screen.findByText('Automatic copy unavailable')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'copied' }));
+      expect(await screen.findByText('automatic copy unavailable')).toBeTruthy();
       expect(screen.getByText('ahk_environment_one_time')).toBeTruthy();
     },
   );
@@ -1141,8 +1141,8 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app#settings');
     installFetch({ privateKey: null, keyIssueInvalid: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Create environment key' }));
-    expect(await screen.findByText('The key response was invalid')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'create environment key' }));
+    expect(await screen.findByText('the key response was invalid')).toBeTruthy();
     expect(screen.queryByText('ahk_environment_one_time')).toBeNull();
   });
 
@@ -1152,15 +1152,15 @@ describe('App Health V0 UI', () => {
     installFetch();
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Replace environment key' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'replace environment key' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent(
-      'Replace the key for checkout-api / production?',
+      'replace the key for checkout-api / production?',
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Replace key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'replace key' }));
     expect(await screen.findByText('ahk_environment_one_time')).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Replace environment key' })).toHaveFocus(),
+      expect(screen.getByRole('button', { name: 'replace environment key' })).toHaveFocus(),
     );
   });
 
@@ -1170,12 +1170,12 @@ describe('App Health V0 UI', () => {
     installFetch({ keyIssueFail: true });
     render(<App />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Replace environment key' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Replace key' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'replace environment key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'replace key' }));
     const dialog = screen.getByRole('alertdialog');
     expect(await screen.findByRole('alert')).toHaveTextContent('API returned 503');
     expect(dialog).toContainElement(screen.getByRole('alert'));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Replace key' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'replace key' })).toHaveFocus());
   });
 
   it('normalizes an obsolete dashboard route without preserving an alias', async () => {
@@ -1183,7 +1183,7 @@ describe('App Health V0 UI', () => {
     window.history.replaceState({}, '', '/app#logs');
     installFetch();
     render(<App />);
-    expect(await screen.findByRole('heading', { level: 1, name: 'Analytics' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 1, name: 'analytics' })).toBeTruthy();
     expect(location.hash).toBe('#analytics');
     expect(screen.queryByRole('tablist', { name: 'Backend sections' })).toBeNull();
   });
@@ -1198,8 +1198,8 @@ describe('App Health V0 UI', () => {
       window.history.replaceState({}, '', '/app#backend/logs');
       window.dispatchEvent(new HashChangeEvent('hashchange'));
     });
-    expect(await screen.findByText('Application logs')).toBeTruthy();
-    expect(document.title).toBe('Backend — App Health');
+    expect(await screen.findByText('application logs')).toBeTruthy();
+    expect(document.title).toBe('backend — App Health');
   });
 });
 
@@ -1247,7 +1247,7 @@ describe('Logs view', () => {
       );
     expect(logCalls()).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Logs' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'logs' }));
     expect(await screen.findByText('ada@example.com')).toBeTruthy();
     expect(screen.getByText('payment.failed')).toBeTruthy();
     expect(screen.getByText('card declined')).toBeTruthy();
@@ -1261,24 +1261,24 @@ describe('Logs view', () => {
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Minimum level' }), {
       key: 'ArrowDown',
     });
-    fireEvent.click(await screen.findByRole('option', { name: 'Warn and above' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'warn and above' }));
     await waitFor(() => expect(screen.queryByText('ada@example.com')).toBeNull());
     expect(screen.getByText('payment.failed')).toBeTruthy();
 
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Minimum level' }), {
       key: 'ArrowDown',
     });
-    fireEvent.click(await screen.findByRole('option', { name: 'All levels' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'all levels' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Event name' }), {
       target: { value: 'signup' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'apply' }));
     await waitFor(() => expect(screen.queryByText('payment.failed')).toBeNull());
     expect(screen.getByText('ada@example.com')).toBeTruthy();
     const lastCall = logCalls().at(-1)?.[0] as URL;
     expect(lastCall.searchParams.get('event')).toBe('signup');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    fireEvent.click(screen.getByRole('button', { name: 'refresh' }));
     await waitFor(() => expect(logCalls().length).toBeGreaterThan(3));
   });
 
@@ -1305,14 +1305,14 @@ describe('Logs view', () => {
       ],
     });
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'logs' }));
     expect(await screen.findByText('payment.failed')).toBeTruthy();
     expect(screen.getByText('browser')).toBeTruthy();
 
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Source' }), {
       key: 'ArrowDown',
     });
-    fireEvent.click(await screen.findByRole('option', { name: 'Server only' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'server only' }));
     await waitFor(() => expect(screen.queryByText('payment.failed')).toBeNull());
     expect(screen.getByText('ada@example.com')).toBeTruthy();
     const sourceCall = fetchMock.mock.calls
@@ -1321,14 +1321,14 @@ describe('Logs view', () => {
       .at(-1);
     expect(sourceCall?.searchParams.get('source')).toBe('server');
 
-    expect(await screen.findByText('Browser logging keys (1 active)')).toBeTruthy();
+    expect(await screen.findByText('browser logging keys (1 active)')).toBeTruthy();
     expect(screen.getByText('https://karte.app')).toBeTruthy();
     expect(screen.queryByText('https://other.app')).toBeNull();
 
     fireEvent.change(screen.getByRole('textbox', { name: 'Allowed origins' }), {
       target: { value: 'https://new.app/, http://localhost:5173' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create browser key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'create browser key' }));
     expect(await screen.findByText('ahk_pub_one_time_value')).toBeTruthy();
     expect(screen.getByText(/createWebLogger/)).toBeTruthy();
     const createCall = fetchMock.mock.calls.find(
@@ -1344,25 +1344,25 @@ describe('Logs view', () => {
       name: 'Revoke browser key pubkey-existing',
     });
     fireEvent.click(revokeTrigger);
-    expect(screen.getByText('Revoke this browser key?')).toBeTruthy();
+    expect(screen.getByText('revoke this browser key?')).toBeTruthy();
     fireEvent.keyDown(screen.getByRole('alertdialog'), { key: 'Escape' });
-    await waitFor(() => expect(screen.queryByText('Revoke this browser key?')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('revoke this browser key?')).toBeNull());
     expect(revokeTrigger).toHaveFocus();
 
     fireEvent.click(revokeTrigger);
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByText('Revoke this browser key?')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
+    await waitFor(() => expect(screen.queryByText('revoke this browser key?')).toBeNull());
     expect(revokeTrigger).toHaveFocus();
 
     fireEvent.click(revokeTrigger);
-    fireEvent.click(screen.getByRole('button', { name: 'Revoke key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'revoke key' }));
     expect(await screen.findByText(/revoked/)).toBeTruthy();
   });
 
   it('reports browser key API failures without hiding the logs', async () => {
     installFetch({ logRows, publicKeyFail: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'logs' }));
     expect(await screen.findByText('ada@example.com')).toBeTruthy();
     expect(await screen.findByText('API returned 503')).toBeTruthy();
   });
@@ -1370,18 +1370,18 @@ describe('Logs view', () => {
   it('shows the empty state with a next action and recovers from an API failure', async () => {
     installFetch({ logRows: [] });
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
-    expect(await screen.findByText('No logs match')).toBeTruthy();
+    fireEvent.click(await screen.findByRole('tab', { name: 'logs' }));
+    expect(await screen.findByText('no logs match')).toBeTruthy();
     expect(screen.getByText(/POST/)).toBeTruthy();
   });
 
   it('keeps the shell usable when logs cannot load', async () => {
     installFetch({ logFail: true });
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
-    expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
-    expect(screen.getByRole('tab', { name: 'Backend' })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('tab', { name: 'logs' }));
+    expect(await screen.findByText('logs are unavailable')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'try again' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'backend' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'API monitoring' })).toBeTruthy();
   });
 
@@ -1397,9 +1397,9 @@ describe('Logs view', () => {
       }),
     );
     render(<App />);
-    fireEvent.click(await screen.findByRole('tab', { name: 'Logs' }));
-    expect(await screen.findByText('Logs are unavailable')).toBeTruthy();
-    expect(screen.queryByText('No logs match')).toBeNull();
+    fireEvent.click(await screen.findByRole('tab', { name: 'logs' }));
+    expect(await screen.findByText('logs are unavailable')).toBeTruthy();
+    expect(screen.queryByText('no logs match')).toBeNull();
   });
 
   it('shows capability-specific browser and Cloudflare Worker log setup', async () => {
@@ -1413,17 +1413,17 @@ describe('Logs view', () => {
     });
     render(<App />);
 
-    expect(await screen.findByText('Send browser logs')).toBeTruthy();
-    expect(screen.getByText(/Cloudflare Worker · Hono/i)).toBeTruthy();
+    expect(await screen.findByText('send browser logs')).toBeTruthy();
+    expect(screen.getByText(/Cloudflare worker · Hono/i)).toBeTruthy();
     expect(screen.getByText(/appHealth\.log\('worker\.request_failed'/)).toBeTruthy();
     expect(screen.getByText(/ctx\.waitUntil\(appHealth\.flush\(\)\)/)).toBeTruthy();
     fireEvent.change(screen.getByRole('textbox', { name: 'Allowed origins' }), {
       target: { value: 'https://product.example' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Create browser key' }));
+    fireEvent.click(screen.getByRole('button', { name: 'create browser key' }));
     expect(await screen.findByText(/createWebLogger/)).toBeTruthy();
     expect(screen.getByText(new RegExp(`${window.location.origin}/v1/logs`))).toBeTruthy();
-    expect(screen.queryByText(/window\.appHealth\.track/)).toBeNull();
+    expect(screen.queryByText(/window\.apphealth\.track/)).toBeNull();
   });
 
   it('uses product-event language when the shared browser tracker has no data yet', async () => {
@@ -1437,9 +1437,9 @@ describe('Logs view', () => {
     });
     render(<App />);
 
-    expect(await screen.findByText('Install product events')).toBeTruthy();
-    expect(screen.getByText(/Waiting for the first valid product events event/)).toBeTruthy();
-    expect(screen.queryByText('Install web analytics')).toBeNull();
+    expect(await screen.findByText('install product events')).toBeTruthy();
+    expect(screen.getByText(/waiting for the first valid product events event/)).toBeTruthy();
+    expect(screen.queryByText('install web analytics')).toBeNull();
   });
 });
 

@@ -48,7 +48,7 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
   const authorized = new Map(projects.map((project) => [project.appId, project]));
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matches = (name: string) => name.toLocaleLowerCase().includes(normalizedQuery);
-  const showOverview = !normalizedQuery || matches('All projects') || matches('Overview');
+  const showOverview = !normalizedQuery || matches('all projects') || matches('overview');
   const recent = recentIds
     .map((id) => authorized.get(id))
     .filter((project): project is ProjectOption => Boolean(project))
@@ -58,13 +58,13 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
     .filter((project) => !recentSet.has(project.appId) && matches(project.name))
     .sort((left, right) => left.name.localeCompare(right.name));
   const options = [
-    ...(showOverview ? [{ appId: null, name: 'All projects' }] : []),
+    ...(showOverview ? [{ appId: null, name: 'all projects' }] : []),
     ...recent,
     ...alphabetical,
   ];
   const selectedName = selectedId
-    ? (authorized.get(selectedId)?.name ?? 'Project')
-    : 'All projects';
+    ? (authorized.get(selectedId)?.name ?? 'project')
+    : 'all projects';
 
   useEffect(() => {
     function onShortcut(event: globalThis.KeyboardEvent) {
@@ -161,10 +161,10 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
           className="fixed top-[min(20vh,9rem)] left-1/2 z-50 w-[calc(100vw-2rem)] max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl outline-none"
         >
           <Dialog.Title id={titleId} className="sr-only">
-            Find a project
+            find a project
           </Dialog.Title>
           <Dialog.Description className="sr-only">
-            Search your projects, use arrow keys to move, and press Enter to select.
+            search your projects, use arrow keys to move, and press enter to select.
           </Dialog.Description>
           <div className="flex h-14 items-center gap-3 border-b px-4">
             <Search className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -179,7 +179,7 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
                 options[activeIndex] ? `${listId}-option-${activeIndex}` : undefined
               }
               className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              placeholder="Search projects…"
+              placeholder="search projects…"
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -206,7 +206,7 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
             {showOverview ? (
               <div className="border-b pb-2">
                 <PickerOption
-                  option={{ appId: null, name: 'All projects' }}
+                  option={{ appId: null, name: 'all projects' }}
                   index={0}
                   {...optionView}
                 />
@@ -214,7 +214,7 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
             ) : null}
             {recent.length > 0 ? (
               <PickerOptionGroup
-                label="Recent"
+                label="recent"
                 options={recent}
                 startIndex={showOverview ? 1 : 0}
                 {...optionView}
@@ -222,7 +222,7 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
             ) : null}
             {alphabetical.length > 0 ? (
               <PickerOptionGroup
-                label="Projects"
+                label="projects"
                 options={alphabetical}
                 startIndex={(showOverview ? 1 : 0) + recent.length}
                 {...optionView}
@@ -230,13 +230,13 @@ export function ProjectCommandPicker({ projects, selectedId, onSelect }: Props):
             ) : null}
             {options.length === 0 ? (
               <p className="px-3 py-8 text-center text-sm text-muted-foreground" role="status">
-                No projects found
+                no projects found
               </p>
             ) : null}
           </div>
           <div className="hidden items-center justify-between border-t px-4 py-2 text-[11px] text-muted-foreground sm:flex">
             <span>↑↓ navigate · enter select · esc close</span>
-            <span>⌘K / Ctrl K to open</span>
+            <span>⌘k / ctrl k to open</span>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -287,7 +287,7 @@ function PickerOptionGroup({
 }): ReactElement {
   return (
     <div className="pt-2">
-      <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <p className="px-3 py-1 text-[11px] font-semibold tracking-wider text-muted-foreground">
         {label}
       </p>
       {options.map((option, index) => (

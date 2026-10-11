@@ -13,25 +13,20 @@ import {
   Users,
 } from 'lucide-react';
 import { AnalyticsChart } from './AnalyticsChart.js';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader } from './components/ui/card.js';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './components/ui/table.js';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader } from '@saas-maker/ui/components/card';
+import { DataTable, type DataColumn } from './components/ResourceTable.js';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@saas-maker/ui/components/tabs';
 import { AnalyticsAudience } from './AnalyticsAudience.js';
 
 const periodLabels: Record<string, string> = {
-  '1h': 'Last hour',
-  '24h': 'Last 24 hours',
-  '7d': 'Last 7 days',
-  '30d': 'Last 30 days',
+  '1h': 'last hour',
+  '24h': 'last 24 hours',
+  '7d': 'last 7 days',
+  '30d': 'last 30 days',
 };
 const formatCount = (value: number) => value.toLocaleString();
 const formatLastSeen = (timestamp: number) =>
@@ -53,7 +48,7 @@ function MetricCard(props: {
     <Card className="py-0 shadow-none">
       <CardContent className="p-5">
         <div className="flex items-center justify-between text-muted-foreground">
-          <span className="text-xs font-medium">{label}</span>
+          <span className="text-xs font-medium">{label.toLowerCase()}</span>
           {live ? (
             <span className="size-2 rounded-full bg-success" aria-hidden="true" />
           ) : (
@@ -63,7 +58,7 @@ function MetricCard(props: {
         <p className="mt-3 text-3xl font-semibold tracking-tight tabular-nums">
           {value === null ? '—' : formatCount(value)}
         </p>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{note}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{note.toLowerCase()}</p>
         <AnalyticsComparison
           label={label}
           current={value ?? 0}
@@ -76,6 +71,70 @@ function MetricCard(props: {
   );
 }
 
+function eventColumns(
+  selected: string,
+  onSelect: (event: string) => void,
+): DataColumn<BrowserReport['events'][number]>[] {
+  return [
+    {
+      id: 'name',
+      header: 'event name',
+      value: (row) => row.name,
+      sortable: false,
+      hideable: false,
+      minWidth: '10rem',
+      className: 'max-w-52',
+      cell: (row) => (
+        <button
+          className="w-full truncate text-left font-mono text-xs font-medium hover:text-primary"
+          onClick={() => onSelect(row.name)}
+          aria-pressed={selected === row.name}
+        >
+          {row.name}
+        </button>
+      ),
+    },
+    {
+      id: 'count',
+      header: 'occurrences',
+      value: (row) => row.count,
+      sortable: false,
+      hideable: false,
+      align: 'right',
+      className: 'text-xs font-medium tabular-nums',
+      cell: (row) => formatCount(row.count),
+    },
+    {
+      id: 'last_seen',
+      header: 'last received',
+      value: (row) => row.last_seen,
+      sortable: false,
+      hideable: false,
+      align: 'right',
+      className: 'hidden text-xs text-muted-foreground sm:table-cell',
+      cell: (row) => formatLastSeen(row.last_seen),
+    },
+    {
+      id: 'explore',
+      header: 'explore',
+      value: (row) => row.name,
+      sortable: false,
+      hideable: false,
+      align: 'right',
+      cell: (row) => (
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label={`Explore ${row.name}`}
+          onClick={() => onSelect(row.name)}
+        >
+          <ArrowRight />
+        </Button>
+      ),
+    },
+  ];
+}
+
 function EventTable(props: {
   rows: BrowserReport['events'];
   selected: string;
@@ -86,8 +145,12 @@ function EventTable(props: {
   if (!rows.length && props.filtered)
     return (
       <Card className="shadow-none">
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          No tracked product events in this segment. Remove a filter or choose another period.
+        <CardContent className="p-0">
+          <EmptyState
+            title="no tracked product events in this segment."
+            description="remove a filter or choose another period."
+            className="py-6"
+          />
         </CardContent>
       </Card>
     );
@@ -95,9 +158,9 @@ function EventTable(props: {
     <Card className="overflow-hidden shadow-none">
       <CardHeader className="flex flex-row items-start justify-between gap-4 border-b">
         <div>
-          <h2 className="text-sm font-semibold">Tracked events</h2>
+          <h2 className="text-sm font-semibold">tracked events</h2>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Select an event to inspect its trend and context.
+            select an event to inspect its trend and context.
           </p>
         </div>
         <Badge variant="secondary" className="font-normal">
@@ -106,72 +169,27 @@ function EventTable(props: {
       </CardHeader>
       <CardContent className="p-0">
         {rows.length ? (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="pl-5 text-xs text-muted-foreground">Event name</TableHead>
-                <TableHead className="text-right text-xs text-muted-foreground">
-                  Occurrences
-                </TableHead>
-                <TableHead className="hidden text-right text-xs text-muted-foreground sm:table-cell">
-                  Last received
-                </TableHead>
-                <TableHead className="w-12">
-                  <span className="sr-only">Explore</span>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TableRow
-                  key={row.name}
-                  data-state={selected === row.name ? 'selected' : undefined}
-                >
-                  <TableCell className="max-w-52 pl-5">
-                    <button
-                      className="w-full truncate text-left font-mono text-xs font-medium hover:text-primary"
-                      onClick={() => onSelect(row.name)}
-                      aria-pressed={selected === row.name}
-                    >
-                      {row.name}
-                    </button>
-                  </TableCell>
-                  <TableCell className="text-right text-xs font-medium tabular-nums">
-                    {formatCount(row.count)}
-                  </TableCell>
-                  <TableCell className="hidden text-right text-xs text-muted-foreground sm:table-cell">
-                    {formatLastSeen(row.last_seen)}
-                  </TableCell>
-                  <TableCell className="pr-4 text-right">
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label={`Explore ${row.name}`}
-                      onClick={() => onSelect(row.name)}
-                    >
-                      <ArrowRight />
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            data={rows}
+            columns={eventColumns(selected, onSelect)}
+            getRowId={(row) => row.name}
+            label="Tracked events"
+            selectedId={selected}
+            pageSize={Math.max(1, rows.length)}
+            maxHeight="none"
+            className="gap-0 [&>div:first-child]:hidden [&>div[role=region]]:rounded-none [&>div[role=region]]:border-0 [&_th:nth-child(3)]:hidden sm:[&_th:nth-child(3)]:table-cell [&_th:last-child>span]:sr-only"
+          />
         ) : (
-          <div className="px-6 py-14 text-center">
-            <span className="mx-auto flex size-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-              <MousePointer2 className="size-5" />
-            </span>
-            <h3 className="mt-4 text-sm font-medium">
-              Your product has a story. Start tracking it.
-            </h3>
-            <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-muted-foreground">
-              Send an intentional event when someone signs up, starts a checkout, or completes an
-              important action.
-            </p>
-            <code className="mt-5 inline-block rounded-md bg-muted px-3 py-2 text-xs">
-              window.appHealth.track('signup.completed')
-            </code>
-          </div>
+          <EmptyState
+            icon={<MousePointer2 />}
+            title="your product has a story. start tracking it."
+            description="send an intentional event when someone signs up, starts a checkout, or completes an important action."
+            primaryAction={
+              <code className="rounded-md bg-muted px-3 py-2 text-xs">
+                window.apphealth.track('signup.completed')
+              </code>
+            }
+          />
         )}
       </CardContent>
     </Card>
@@ -289,26 +307,28 @@ function ReportChart(props: AnalyticsReportProps): ReactElement {
           <div>
             <h2 className="text-sm font-semibold">
               {selected
-                ? 'Event activity'
+                ? 'event activity'
                 : mode === 'events'
-                  ? 'Product events over time'
+                  ? 'product events over time'
                   : metric === 'events'
-                    ? 'Product events over time'
-                    : 'Traffic over time'}
+                    ? 'product events over time'
+                    : 'traffic over time'}
             </h2>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock3 className="size-3" /> {periodLabels[range]} · {sourceNote}
             </p>
           </div>
           {showMetricPicker ? (
-            <TabsList aria-label="Chart metric">
-              <TabsTrigger value="pageviews" onClick={() => onMetric('pageviews')}>
-                Page views
-              </TabsTrigger>
-              <TabsTrigger value="events" onClick={() => onMetric('events')}>
-                Product events
-              </TabsTrigger>
-            </TabsList>
+            <FilterBar>
+              <TabsList aria-label="Chart metric">
+                <TabsTrigger value="pageviews" onClick={() => onMetric('pageviews')}>
+                  page views
+                </TabsTrigger>
+                <TabsTrigger value="events" onClick={() => onMetric('events')}>
+                  product events
+                </TabsTrigger>
+              </TabsList>
+            </FilterBar>
           ) : null}
         </CardHeader>
         <CardContent className="pt-5">
@@ -323,8 +343,8 @@ function ReportChart(props: AnalyticsReportProps): ReactElement {
           {totals.pageviews === 0 && totals.events === 0 ? (
             <p className="mt-3 text-center text-xs text-muted-foreground">
               {props.segmented
-                ? 'No events match these filters. Remove a filter or choose another period.'
-                : 'No activity in this period. Install the tracker or choose another project.'}
+                ? 'no events match these filters. remove a filter or choose another period.'
+                : 'no activity in this period. install the tracker or choose another project.'}
             </p>
           ) : null}
         </CardContent>
@@ -350,7 +370,7 @@ function ReportRankings(props: AnalyticsReportProps): ReactElement {
         tone="var(--chart-2)"
         description={
           report.sources.some((row) => row.name === 'Unknown')
-            ? 'Unknown means no referring site was recorded: direct visits, private app handoffs, or older events.'
+            ? 'unknown means no referring site was recorded: direct visits, private app handoffs, or older events.'
             : undefined
         }
         rows={report.sources}
@@ -381,11 +401,13 @@ export function AnalyticsReport(props: AnalyticsReportProps): ReactElement {
       ) : null}
       {mode === 'web' || selected ? (
         <Tabs value={breakdown} onValueChange={(value) => onBreakdown(value as typeof breakdown)}>
-          <TabsList aria-label="Analytics breakdown">
-            <TabsTrigger value="audience">Audience</TabsTrigger>
-            <TabsTrigger value="acquisition">Acquisition</TabsTrigger>
-            <TabsTrigger value="technology">Technology</TabsTrigger>
-          </TabsList>
+          <FilterBar>
+            <TabsList aria-label="Analytics breakdown">
+              <TabsTrigger value="audience">audience</TabsTrigger>
+              <TabsTrigger value="acquisition">acquisition</TabsTrigger>
+              <TabsTrigger value="technology">technology</TabsTrigger>
+            </TabsList>
+          </FilterBar>
           <TabsContent value={breakdown}>
             <AnalyticsAudience
               report={report}
@@ -399,7 +421,7 @@ export function AnalyticsReport(props: AnalyticsReportProps): ReactElement {
       {mode === 'web' ? (
         <details className="rounded-lg border p-4">
           <summary className="cursor-pointer text-sm font-medium">
-            Tracked product events · {report.events.length} types
+            tracked product events · {report.events.length} types
           </summary>
           <div className="mt-4">
             <EventTable

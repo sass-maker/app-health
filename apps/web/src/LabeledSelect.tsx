@@ -5,7 +5,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './components/ui/select.js';
+} from '@saas-maker/ui/components/select';
 
 interface SelectOption {
   value: string;
