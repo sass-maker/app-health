@@ -2,19 +2,29 @@ import type { SharedAnalytics } from '@app-health/contracts/sharing';
 import { AnalyticsChart } from './AnalyticsChart.js';
 import { countryName } from './country-name.js';
 import { AnalyticsRanking } from './AnalyticsRanking.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { Button } from '@saas-maker/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@saas-maker/ui/components/card';
 
 function Statistic({ label, value, note }: { label: string; value: number | null; note: string }) {
   return (
     <Card role="group" aria-label={label} className="gap-3 py-4 shadow-none">
       <CardHeader className="gap-2 px-4 pb-0">
-        <CardDescription>{label}</CardDescription>
+        <CardDescription>{label.toLowerCase()}</CardDescription>
         <CardTitle className="text-3xl tracking-tight tabular-nums">
           {value?.toLocaleString() ?? '—'}
         </CardTitle>
       </CardHeader>
-      <CardContent className="px-4 text-xs leading-5 text-muted-foreground">{note}</CardContent>
+      <CardContent className="px-4 text-xs leading-5 text-muted-foreground">
+        {note.toLowerCase()}
+      </CardContent>
     </Card>
   );
 }
@@ -48,18 +58,18 @@ export function PublicAnalyticsReport({
           />
           {stale
             ? refreshing
-              ? 'Refreshing · showing last received traffic'
-              : 'Connection interrupted · showing last received traffic'
+              ? 'refreshing · showing last received traffic'
+              : 'connection interrupted · showing last received traffic'
             : refreshing
-              ? 'Updating analytics…'
-              : 'Live sessions refresh every 10 seconds'}
+              ? 'updating analytics…'
+              : 'live sessions refresh every 10 seconds'}
         </span>
         {stale ? (
           <Button variant="outline" size="sm" onClick={retry}>
-            Try again
+            try again
           </Button>
         ) : (
-          <span>Last 24 hours</span>
+          <span>last 24 hours</span>
         )}
       </div>
       <section
@@ -97,21 +107,17 @@ export function PublicAnalyticsReport({
       </section>
       <Card className="shadow-none">
         <CardHeader className="border-b">
-          <CardTitle className="text-sm">Traffic over time</CardTitle>
-          <CardDescription>Page views · last 24 hours</CardDescription>
+          <CardTitle className="text-sm">traffic over time</CardTitle>
+          <CardDescription>page views · last 24 hours</CardDescription>
         </CardHeader>
         <CardContent className="pt-5">
           {data.traffic ? (
             <AnalyticsChart series={series} compact={embed} onlyMetric={true} />
           ) : (
-            <p className="py-16 text-center text-sm text-muted-foreground">
-              Traffic is temporarily unavailable.
-            </p>
+            <ErrorState title="traffic is temporarily unavailable." onRetry={retry} />
           )}
           {data.traffic?.pageviews === 0 ? (
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              No page views received in this period.
-            </p>
+            <EmptyState title="no page views received in this period." className="py-4" />
           ) : null}
         </CardContent>
       </Card>
@@ -140,11 +146,11 @@ export function PublicAnalyticsReport({
         </section>
       ) : null}
       <p className="text-xs leading-relaxed text-muted-foreground">
-        {data.source === 'local' ? 'Local development data' : 'Traffic totals may arrive later'}
-        {data.sampled ? ' · Sampled estimates' : ''} · Updated{' '}
+        {data.source === 'local' ? 'local development data' : 'traffic totals may arrive later'}
+        {data.sampled ? ' · sampled estimates' : ''} · updated{' '}
         {new Date(data.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         {details
-          ? ' · Sessions are browser visits, not unique people. Country reflects connection location.'
+          ? ' · sessions are browser visits, not unique people. country reflects connection location.'
           : ''}
       </p>
     </div>

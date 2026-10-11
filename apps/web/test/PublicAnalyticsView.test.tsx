@@ -68,9 +68,9 @@ it('keeps the full public page linked and exposes page views without event colum
     'href',
     '/',
   );
-  fireEvent.click(screen.getByText('View chart values'));
-  expect(screen.getAllByText('Page views').length).toBeGreaterThan(0);
-  expect(screen.queryByText('Events')).toBeNull();
+  fireEvent.click(screen.getByText('view chart values'));
+  expect(screen.getAllByText('page views').length).toBeGreaterThan(0);
+  expect(screen.queryByText('events')).toBeNull();
 });
 
 it.each([
@@ -108,9 +108,9 @@ it('renders sampled historical data and an unavailable traffic state honestly', 
   render(<PublicAnalyticsView />);
   expect(await screen.findByText('Storefront')).toBeTruthy();
   expect(screen.getByText('—')).toBeTruthy();
-  expect(screen.getByText(/Traffic is (temporarily )?unavailable/)).toBeTruthy();
-  expect(screen.getByText(/Traffic totals may arrive later/)).toBeTruthy();
-  expect(screen.getByText(/Sampled estimates/)).toBeTruthy();
+  expect(screen.getByText(/traffic is (temporarily )?unavailable/)).toBeTruthy();
+  expect(screen.getByText(/traffic totals may arrive later/)).toBeTruthy();
+  expect(screen.getByText(/sampled estimates/)).toBeTruthy();
 });
 
 it('erases visible data when the share link is revoked', async () => {
@@ -194,10 +194,10 @@ it('shows approved route and source rankings, session totals and event totals wi
     ),
   );
   render(<PublicAnalyticsView />);
-  expect(await screen.findByRole('heading', { name: 'Top routes' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: 'Top sources' })).toBeVisible();
+  expect(await screen.findByRole('heading', { name: 'top routes' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'top sources' })).toBeVisible();
   expect(screen.getByText('/pricing')).toBeVisible();
-  expect(screen.getByRole('heading', { name: 'Countries' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'countries' })).toBeVisible();
   expect(screen.getByText('India')).toBeVisible();
   expect(screen.getByText('United States')).toBeVisible();
   expect(screen.getByText('50.0%')).toBeVisible();
@@ -223,6 +223,6 @@ it('keeps historical metrics on a failed refresh while hiding the old live count
   await act(async () => await vi.advanceTimersByTimeAsync(10_000));
   expect(screen.getAllByText('28')[0]).toBeVisible();
   expect(screen.queryByText('4')).toBeNull();
-  expect(screen.getByText(/Connection interrupted/)).toBeVisible();
+  expect(screen.getByText(/connection interrupted/)).toBeVisible();
   expect(screen.queryByRole('status', { name: 'Loading shared analytics' })).toBeNull();
 });

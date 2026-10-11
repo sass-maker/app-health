@@ -23,11 +23,11 @@ for (const theme of ['dark', 'light']) {
         );
         if (surface === 'settings')
           await expect(
-            page.getByText('Capabilities in this environment', { exact: true }),
+            page.getByText('capabilities in this environment', { exact: true }),
           ).toBeVisible();
         else
           await expect(
-            page.getByText('Waiting for the first valid', { exact: false }),
+            page.getByText('waiting for the first valid', { exact: false }),
           ).toBeVisible();
         await checkReadability(page);
         await expect(page.locator('footer')).toHaveCount(0);

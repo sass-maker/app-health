@@ -1,10 +1,19 @@
+import { SkeletonText } from '@saas-maker/ui/components/skeleton';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { Copy, ExternalLink, Link2 } from 'lucide-react';
 import type { AnalyticsShare } from '@app-health/contracts';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
-import { Input } from './components/ui/input.js';
-import { Badge } from './components/ui/badge.js';
+import { Button } from '@saas-maker/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@saas-maker/ui/components/card';
+import { Input } from '@saas-maker/ui/components/input';
+import { Badge } from '@saas-maker/ui/components/badge';
 
 interface Project {
   appId: string;
@@ -36,7 +45,7 @@ async function shareRequest(
     share?: AnalyticsShare;
     token?: string;
   };
-  if (!response.ok) throw new Error(body.error ?? 'Sharing is temporarily unavailable.');
+  if (!response.ok) throw new Error(body.error ?? 'sharing is temporarily unavailable.');
   return body;
 }
 function ShareCode({ token, project }: { token: string; project: Project }) {
@@ -46,22 +55,22 @@ function ShareCode({ token, project }: { token: string; project: Project }) {
   async function copy(value: string, fieldId: string) {
     try {
       await navigator.clipboard.writeText(value);
-      setStatus('Copied to clipboard.');
+      setStatus('copied to clipboard.');
     } catch {
-      setStatus('Copy was unavailable. The field is selected so you can copy it.');
+      setStatus('copy was unavailable. the field is selected so you can copy it.');
       document.getElementById(fieldId)?.focus();
     }
   }
   return (
     <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
-      <p className="text-sm font-medium">Your public link is ready</p>
+      <p className="text-sm font-medium">your public link is ready</p>
       <p className="text-xs text-muted-foreground">
-        Copy it now. The full link is shown only once. Anyone with it can see this environment’s
+        copy it now. the full link is shown only once. anyone with it can see this environment’s
         live sessions and traffic until you revoke it.
       </p>
       <div className="space-y-2">
         <label htmlFor="analytics-share-link" className="text-sm font-medium">
-          Public page
+          public page
         </label>
         <Input
           id="analytics-share-link"
@@ -77,19 +86,19 @@ function ShareCode({ token, project }: { token: string; project: Project }) {
             onClick={() => void copy(link, 'analytics-share-link')}
           >
             <Copy />
-            Copy public link
+            copy public link
           </Button>
           <Button variant="ghost" size="sm" className="min-h-11 sm:min-h-0" asChild>
             <a href={link} target="_blank" rel="noopener noreferrer">
               <ExternalLink />
-              Open public page
+              open public page
             </a>
           </Button>
         </div>
       </div>
       <div className="space-y-2">
         <label htmlFor="analytics-share-embed" className="text-sm font-medium">
-          Embed on your product
+          embed on your product
         </label>
         <textarea
           id="analytics-share-embed"
@@ -105,7 +114,7 @@ function ShareCode({ token, project }: { token: string; project: Project }) {
           onClick={() => void copy(embed, 'analytics-share-embed')}
         >
           <Copy />
-          Copy embed code
+          copy embed code
         </Button>
       </div>
       <p role="status" className="text-xs text-muted-foreground">
@@ -145,7 +154,7 @@ export function AnalyticsSharing({
       })
       .catch((cause) => {
         if (!cancelled && scopeRef.current === requestScope)
-          setError(cause instanceof Error ? cause.message : 'Sharing is unavailable.');
+          setError(cause instanceof Error ? cause.message : 'sharing is unavailable.');
       })
       .finally(() => {
         if (!cancelled && scopeRef.current === requestScope) setLoading(false);
@@ -164,14 +173,14 @@ export function AnalyticsSharing({
       });
       if (!body.share || !body.token || !/^ahs_[A-Za-z0-9_-]{43}$/.test(body.token))
         throw new Error(
-          'The public link could not be read. Refresh the link list before retrying.',
+          'the public link could not be read. refresh the link list before retrying.',
         );
       if (scopeRef.current !== requestScope) return;
       setCreated({ id: body.share.id, token: body.token });
       setShares((current) => [body.share!, ...current]);
     } catch (cause) {
       if (scopeRef.current === requestScope)
-        setError(cause instanceof Error ? cause.message : 'Could not create a link.');
+        setError(cause instanceof Error ? cause.message : 'could not create a link.');
     } finally {
       if (scopeRef.current === requestScope) setPending(false);
     }
@@ -189,7 +198,7 @@ export function AnalyticsSharing({
       if (created?.id === id) setCreated(null);
     } catch (cause) {
       if (scopeRef.current === requestScope)
-        setError(cause instanceof Error ? cause.message : 'Could not revoke the link.');
+        setError(cause instanceof Error ? cause.message : 'could not revoke the link.');
     } finally {
       if (scopeRef.current === requestScope) setPending(false);
     }
@@ -208,7 +217,7 @@ export function AnalyticsSharing({
       );
     } catch (cause) {
       if (scopeRef.current === requestScope)
-        setError(cause instanceof Error ? cause.message : 'Could not update the public link.');
+        setError(cause instanceof Error ? cause.message : 'could not update the public link.');
     } finally {
       if (scopeRef.current === requestScope) setPending(false);
     }
@@ -216,7 +225,7 @@ export function AnalyticsSharing({
   return (
     <Card className="shadow-none" id="public-analytics-sharing">
       <CardHeader>
-        <CardTitle>Public live analytics</CardTitle>
+        <CardTitle>public live analytics</CardTitle>
         <CardDescription>
           Let visitors see {project.name}’s live sessions and 24-hour traffic on your website. This
           shares {project.environment} only. Logs, keys, event names and other projects stay
@@ -235,9 +244,9 @@ export function AnalyticsSharing({
             className="mt-0.5 size-4 accent-primary"
           />
           <span>
-            <span className="font-medium">Share top routes, sources and countries</span>
+            <span className="font-medium">share top routes, sources and countries</span>
             <span className="mt-1 block text-xs text-muted-foreground">
-              Includes aggregate sessions, event totals, top routes and referrer hosts. Event names,
+              includes aggregate sessions, event totals, top routes and referrer hosts. event names,
               logs, keys and identities stay private.
             </span>
           </span>
@@ -249,34 +258,33 @@ export function AnalyticsSharing({
           onClick={() => void create()}
         >
           <Link2 />
-          Create public link
+          create public link
         </Button>
         {loading ? (
-          <p role="status" className="text-sm text-muted-foreground">
-            Loading share links…
-          </p>
+          <SkeletonText
+            aria-label="Loading share links"
+            lines={3}
+            className="rounded-lg border p-4"
+          />
         ) : null}
         {error ? (
-          <div role="alert" className="space-y-2 text-sm text-destructive">
-            <p>{error}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-11 sm:min-h-0"
-              onClick={() => setRevision((value) => value + 1)}
-            >
-              Refresh links
-            </Button>
-          </div>
+          <ErrorState
+            title="sharing is unavailable"
+            description={error}
+            primaryAction={{
+              label: 'refresh links',
+              onClick: () => setRevision((value) => value + 1),
+            }}
+          />
         ) : null}
         {created ? <ShareCode token={created.token} project={project} /> : null}
         <ul className="divide-y rounded-lg border">
           {shares.map((share) => (
             <li key={share.id} className="flex flex-wrap items-center justify-between gap-3 p-3">
               <div className="min-w-0">
-                <p className="text-sm font-medium">Link {share.id.slice(0, 8)}</p>
+                <p className="text-sm font-medium">link {share.id.slice(0, 8)}</p>
                 <p className="text-xs text-muted-foreground">
-                  Created {new Date(share.created_at).toLocaleString()}
+                  created {new Date(share.created_at).toLocaleString()}
                 </p>
               </div>
               {share.revoked_at === null ? (
@@ -294,7 +302,7 @@ export function AnalyticsSharing({
                       }
                       disabled={pending}
                     />
-                    Routes and sources
+                    routes and sources
                   </label>
                   <Button
                     variant="outline"
@@ -304,19 +312,21 @@ export function AnalyticsSharing({
                     aria-label={`Revoke link ${share.id.slice(0, 8)}`}
                     onClick={() => void revoke(share.id)}
                   >
-                    Revoke
+                    revoke
                   </Button>
                 </div>
               ) : (
-                <Badge variant="secondary">Revoked</Badge>
+                <Badge variant="secondary">revoked</Badge>
               )}
             </li>
           ))}
         </ul>
         {!error && !loading && !shares.length ? (
-          <p className="text-sm text-muted-foreground">
-            No public links yet. Sharing is off until you create one.
-          </p>
+          <EmptyState
+            title="no public links yet."
+            description="sharing is off until you create one."
+            className="py-6"
+          />
         ) : null}
         <p className="text-xs text-muted-foreground">
           Up to five active links per environment. Revocation blocks new reads immediately; open

@@ -17,3 +17,5 @@ if (!HTMLElement.prototype.hasPointerCapture) HTMLElement.prototype.hasPointerCa
 if (!HTMLElement.prototype.setPointerCapture) HTMLElement.prototype.setPointerCapture = () => {};
 if (!HTMLElement.prototype.releasePointerCapture)
   HTMLElement.prototype.releasePointerCapture = () => {};
+
+if (!HTMLElement.prototype.scrollTo) HTMLElement.prototype.scrollTo = () => {};

@@ -26,8 +26,8 @@ afterEach(() => {
 
 it('introduces analytics and event exploration to product people with honest proof', () => {
   render(<LandingPage />);
-  expect(screen.getByRole('heading', { name: /See what people do/ })).toBeTruthy();
-  expect(screen.getByText('For people shaping digital products')).toBeTruthy();
+  expect(screen.getByRole('heading', { name: /see what people do/ })).toBeTruthy();
+  expect(screen.getByText('for people shaping digital products')).toBeTruthy();
   expect(screen.getByLabelText('Illustrative web analytics preview')).toBeTruthy();
   expect(screen.queryByText(/funnels/i)).toBeNull();
   expect(document.querySelectorAll('studio-footer')).toHaveLength(1);
@@ -38,7 +38,7 @@ it('introduces analytics and event exploration to product people with honest pro
   expect(document.querySelector('link[href="/footer.css"]')).not.toBeNull();
   expect(document.querySelector('script[src="/footer.js"]')).not.toBeNull();
   expect(
-    screen.getAllByRole('link', { name: /Open App Health|Open dashboard/ }).length,
+    screen.getAllByRole('link', { name: /open app health|open dashboard/ }).length,
   ).toBeGreaterThan(0);
 });
 

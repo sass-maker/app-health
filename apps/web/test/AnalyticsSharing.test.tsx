@@ -34,25 +34,25 @@ it('creates a scope-specific public link and embed, exposes copy fallback, then 
   const writeText = vi.fn().mockRejectedValue(new Error('unavailable'));
   vi.stubGlobal('navigator', { clipboard: { writeText } });
   render(<AnalyticsSharing project={project} ownerToken="owner-only" />);
-  const create = screen.getByRole('button', { name: 'Create public link' });
+  const create = screen.getByRole('button', { name: 'create public link' });
   await waitFor(() => expect(create).toBeEnabled());
   fireEvent.click(create);
-  const link = await screen.findByLabelText('Public page');
+  const link = await screen.findByLabelText('public page');
   expect(link).toHaveValue(`${location.origin}/live#token=${token}`);
-  const embed = screen.getByLabelText('Embed on your product') as HTMLTextAreaElement;
+  const embed = screen.getByLabelText('embed on your product') as HTMLTextAreaElement;
   expect(embed.value).toContain('/live?embed=1#token=');
   expect(embed.value).not.toContain('owner-only');
   expect(embed.value).toContain('referrerpolicy="no-referrer"');
-  fireEvent.click(screen.getByRole('button', { name: 'Copy public link' }));
-  expect(await screen.findByText(/The field is selected/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'copy public link' }));
+  expect(await screen.findByText(/the field is selected/)).toBeVisible();
   expect(link).toHaveFocus();
   expect((link as HTMLInputElement).selectionEnd).toBe((link as HTMLInputElement).value.length);
   writeText.mockResolvedValueOnce(undefined);
-  fireEvent.click(screen.getByRole('button', { name: 'Copy embed code' }));
-  expect(await screen.findByText('Copied to clipboard.')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'copy embed code' }));
+  expect(await screen.findByText('copied to clipboard.')).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Revoke link one-link' }));
-  expect(await screen.findByText('Revoked', { exact: true })).toBeVisible();
-  expect(screen.queryByLabelText('Public page')).toBeNull();
+  expect(await screen.findByText('revoked', { exact: true })).toBeVisible();
+  expect(screen.queryByLabelText('public page')).toBeNull();
 });
 
 it('requires an explicit opt-in for breakdowns and updates an active share', async () => {
@@ -70,19 +70,19 @@ it('requires an explicit opt-in for breakdowns and updates an active share', asy
   vi.stubGlobal('fetch', request);
   render(<AnalyticsSharing project={project} ownerToken="owner-only" />);
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Create public link' })).toBeEnabled(),
+    expect(screen.getByRole('button', { name: 'create public link' })).toBeEnabled(),
   );
   const createChoice = screen.getByRole('checkbox', {
     name: /Share top routes, sources and countries/i,
   });
   fireEvent.click(createChoice);
-  fireEvent.click(screen.getByRole('button', { name: 'Create public link' }));
-  await screen.findByLabelText('Public page');
+  fireEvent.click(screen.getByRole('button', { name: 'create public link' }));
+  await screen.findByLabelText('public page');
   expect(JSON.parse(requests.find((entry) => entry.method === 'POST')?.body ?? '{}')).toEqual({
     include_breakdowns: true,
   });
   await waitFor(() =>
-    expect(screen.getByRole('button', { name: 'Create public link' })).toBeEnabled(),
+    expect(screen.getByRole('button', { name: 'create public link' })).toBeEnabled(),
   );
   const activeChoice = document.getElementById(
     'analytics-share-breakdowns-one-link-id',
@@ -103,6 +103,6 @@ it('shows load failure without claiming sharing is off, then retries', async () 
   render(<AnalyticsSharing project={project} ownerToken="" />);
   expect(await screen.findByRole('alert')).toHaveTextContent('Not available');
   expect(screen.queryByText(/Sharing is off/)).toBeNull();
-  fireEvent.click(screen.getByRole('button', { name: 'Refresh links' }));
+  fireEvent.click(screen.getByRole('button', { name: 'refresh links' }));
   expect(await screen.findByRole('button', { name: 'Revoke link one-link' })).toBeVisible();
 });

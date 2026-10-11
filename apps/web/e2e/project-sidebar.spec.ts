@@ -46,7 +46,7 @@ test('searches the 55-project sidebar, selects production, and switches to Event
   await installNavigationFixture(page);
   await page.goto('/app#overview');
 
-  await expect(page.getByRole('heading', { name: 'Daily briefing', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'daily briefing', exact: true })).toBeVisible();
   const projectButtons = page.getByRole('button', { name: /^QA Sidebar Project \d{2}$/ });
   await expect(projectButtons).toHaveCount(projectCount);
 
@@ -60,9 +60,9 @@ test('searches the 55-project sidebar, selects production, and switches to Event
   await expect(page.getByRole('combobox', { name: 'Environment', exact: true })).toHaveText(
     'production',
   );
-  await page.getByRole('tab', { name: 'Events', exact: true }).click();
+  await page.getByRole('tab', { name: 'events', exact: true }).click();
   await expect(page).toHaveURL(/#events$/);
-  await expect(page.getByRole('heading', { name: 'Events', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'events', exact: true })).toBeVisible();
 });
 
 test('mobile sidebar search closes after selection and restores focus to its toggle', async ({

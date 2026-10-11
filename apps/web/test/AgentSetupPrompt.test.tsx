@@ -24,8 +24,8 @@ it('provides accessible clipboard feedback', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.assign(navigator, { clipboard: { writeText } });
   render(<AgentSetupPrompt project={project} capabilities={['analytics']} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('Prompt copied');
+  fireEvent.click(screen.getByRole('button', { name: 'copy prompt' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('prompt copied');
   expect(writeText).toHaveBeenCalledOnce();
 });
 
@@ -50,7 +50,7 @@ it('keeps the complete prompt selectable when clipboard access fails', async () 
     clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
   });
   render(<AgentSetupPrompt project={project} capabilities={['logs']} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Copy prompt' }));
+  fireEvent.click(screen.getByRole('button', { name: 'copy prompt' }));
   expect(await screen.findByRole('status')).toHaveTextContent('selectable');
   expect(screen.getByLabelText('Agent setup prompt')).toHaveProperty('readOnly', true);
 });

@@ -92,7 +92,15 @@ function dashboardHtmlEntry(): Plugin {
 
 export default defineConfig({
   plugins: [dashboardHtmlEntry(), react(), tailwindcss(), localWorkerApi()],
+  optimizeDeps: {
+    include: [
+      '@saas-maker/ui > @tanstack/react-table',
+      '@saas-maker/ui > @tanstack/react-table > @tanstack/react-store > use-sync-external-store/shim/with-selector',
+    ],
+  },
   build: {
+    minify: 'terser',
+    terserOptions: { compress: { passes: 2 } },
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),

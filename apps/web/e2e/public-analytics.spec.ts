@@ -52,11 +52,11 @@ test('public link and embedded live analytics remain scoped and revoke while ope
     },
   });
   await page.goto(`/app?project=${created.app.id}&environment=${created.environment.id}#settings`);
-  await page.getByRole('button', { name: 'Create public link', exact: true }).click();
-  const linkField = page.getByLabel('Public page', { exact: true });
+  await page.getByRole('button', { name: 'create public link', exact: true }).click();
+  const linkField = page.getByLabel('public page', { exact: true });
   await expect(linkField).toHaveValue(/\/live#token=ahs_/);
   const link = await linkField.inputValue();
-  const embed = await page.getByLabel('Embed on your product', { exact: true }).inputValue();
+  const embed = await page.getByLabel('embed on your product', { exact: true }).inputValue();
   expect(embed).toContain('referrerpolicy="no-referrer"');
   expect(embed.includes(created.key.key)).toBe(false);
   const token = new URLSearchParams(new URL(link).hash.slice(1)).get('token')!;
@@ -119,14 +119,14 @@ test('public link and embedded live analytics remain scoped and revoke while ope
   const list = await (await request.get(`/v1/analytics/shares?${scope}`)).json();
   const id = list.shares[0].id;
   await page.getByRole('button', { name: `Revoke link ${id.slice(0, 8)}`, exact: true }).click();
-  await expect(page.getByText('Revoked', { exact: true })).toBeVisible();
+  await expect(page.getByText('revoked', { exact: true })).toBeVisible();
   expect(
     (
       await request.get('/v1/shared/analytics', { headers: { authorization: `Bearer ${token}` } })
     ).status(),
   ).toBe(404);
   await expect(
-    frame.getByRole('heading', { name: 'This analytics link is unavailable', exact: true }),
+    frame.getByRole('heading', { name: 'this analytics link is unavailable', exact: true }),
   ).toBeVisible({ timeout: 15000 });
   await expect(
     frame.getByRole('heading', { name: 'Northstar public storefront', exact: true }),

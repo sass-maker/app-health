@@ -28,16 +28,16 @@ export function AnalyticsEngagement({ report }: { report: BrowserReport }): Reac
       <div className="grid gap-px overflow-hidden rounded-lg border bg-border sm:grid-cols-3">
         {cells.map(([label, value, note]) => (
           <div key={label} className="bg-card p-4">
-            <h2 className="text-xs text-muted-foreground">{label}</h2>
+            <h2 className="text-xs text-muted-foreground">{label.toLowerCase()}</h2>
             <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
-            <p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p>
+            <p className="mt-2 text-xs leading-5 text-muted-foreground">{note.toLowerCase()}</p>
           </div>
         ))}
       </div>
       <p className="text-xs leading-5 text-muted-foreground">
-        {report.sampled ? 'Session engagement is unavailable for sampled data. ' : ''}
-        Based on events inside the selected period. A single recorded event has a zero-second span;
-        this does not measure time spent reading. Exits are the last observed page in each session.
+        {report.sampled ? 'session engagement is unavailable for sampled data. ' : ''}
+        based on events inside the selected period. a single recorded event has a zero-second span;
+        this does not measure time spent reading. exits are the last observed page in each session.
       </p>
       {metrics.exit_pages.length ? (
         <AnalyticsRanking title="Exit pages" label="Sessions" rows={metrics.exit_pages} />

@@ -1,28 +1,45 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { SpeedReportV1, type SpeedReportV1 as Report } from '@app-health/contracts';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
-import { Button } from './components/ui/button.js';
-import { Input } from './components/ui/input.js';
-import { Skeleton } from './components/ui/skeleton.js';
+import { RefreshCw } from 'lucide-react';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { Button } from '@saas-maker/ui/components/button';
+import { Input } from '@saas-maker/ui/components/input';
 import { LabeledSelect } from './LabeledSelect.js';
-import { SpeedTable } from './SpeedTable.js';
+import { SpeedTable, SpeedTableSkeleton } from './SpeedTable.js';
 import { ownerFetch } from './lib/owner-fetch.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
 import { isBreaching, sortSpeedProducts, type SpeedSort } from './lib/speed-display.js';
 
 const reportErrors: Record<number, string> = {
-  400: 'Invalid speed filters (400). Choose a supported range and class, then retry.',
-  403: 'Workspace owner access required (403). Sign in with the workspace owner session.',
-  503: 'Speed reporting is unavailable (503). The report service is not ready; try again shortly.',
+  400: 'invalid speed filters (400). choose a supported range and class, then retry.',
+  403: 'workspace owner access required (403). sign in with the workspace owner session.',
+  503: 'speed reporting is unavailable (503). the report service is not ready; try again shortly.',
 };
+
+// Owner reports stay in memory only, expire after five minutes and never cross sessions.
+const reportCache = new Map<string, { report: Report; expires: number }>();
+
+function cachedReport(key: string): Report | null {
+  const cached = reportCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.report;
+  reportCache.delete(key);
+  return null;
+}
+
+function rememberReport(key: string, report: Report): void {
+  reportCache.set(key, { report, expires: Date.now() + 300_000 });
+  if (reportCache.size > 20) reportCache.delete(reportCache.keys().next().value!);
+}
 
 function useSpeedReport(
   ownerToken: string,
   range: Report['range'],
   performanceClass: Report['class'],
 ) {
-  const [report, setReport] = useState<Report | null>(null);
+  const cacheKey = JSON.stringify([ownerToken, range, performanceClass]);
+  const [report, setReport] = useState<Report | null>(() => cachedReport(cacheKey));
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [retry, setRetry] = useState(0);
@@ -30,9 +47,10 @@ function useSpeedReport(
     let cancelled = false;
     let pending = false;
     let controller: AbortController | undefined;
-    setReport(null);
+    const cached = cachedReport(cacheKey);
+    setReport(cached);
     setError('');
-    setLoading(true);
+    setLoading(!cached);
     async function load(): Promise<void> {
       if (pending || document.visibilityState === 'hidden') return;
       pending = true;
@@ -46,7 +64,7 @@ function useSpeedReport(
         if (!response.ok)
           throw new Error(
             reportErrors[response.status] ??
-              `Speed report returned ${response.status}. Please retry.`,
+              `speed report returned ${response.status}. please retry.`,
           );
         const parsed = SpeedReportV1.safeParse(await response.json());
         if (
@@ -54,8 +72,9 @@ function useSpeedReport(
           parsed.data.range !== range ||
           parsed.data.class !== performanceClass
         )
-          throw new Error('Invalid speed report response. Please retry.');
+          throw new Error('invalid speed report response. please retry.');
         if (!cancelled) {
+          rememberReport(cacheKey, parsed.data);
           setReport(parsed.data);
           setError('');
         }
@@ -64,7 +83,7 @@ function useSpeedReport(
           setError(
             cause instanceof Error
               ? cause.message
-              : 'Could not load the speed report. Please retry.',
+              : 'could not load the speed report. please retry.',
           );
       } finally {
         pending = false;
@@ -78,14 +97,14 @@ function useSpeedReport(
       controller?.abort();
       stop();
     };
-  }, [ownerToken, range, performanceClass, retry]);
+  }, [ownerToken, range, performanceClass, retry, cacheKey]);
   return { report, error, loading, reload: () => setRetry((value) => value + 1) };
 }
 
 function EnableSpeedData(): ReactElement {
   return (
     <p className="text-sm leading-6 text-muted-foreground">
-      Enable tracker <code>data-vitals</code> and server <code>api.stage_timing</code> logs to
+      enable tracker <code>data-vitals</code> and server <code>api.stage_timing</code> logs to
       collect samples; see{' '}
       <a
         className="underline underline-offset-4 hover:text-foreground"
@@ -127,100 +146,94 @@ export function SpeedView({ ownerToken }: { ownerToken: string }): ReactElement 
 
   return (
     <section id="speed-view" aria-label="Workspace speed" className="min-w-0 space-y-5">
-      <div className="flex flex-wrap items-end gap-3 border-b pb-5" aria-label="Speed filters">
-        <Filter label="Range">
-          <LabeledSelect
-            label="Speed range"
-            value={range}
-            options={[
-              { value: '1h', label: '1 hour' },
-              { value: '24h', label: '24 hours' },
-              { value: '7d', label: '7 days' },
-            ]}
-            onValueChange={(value) => setRange(value as Report['range'])}
-            triggerClassName="h-11 w-32"
-          />
-        </Filter>
-        <Filter label="Class">
-          <LabeledSelect
-            label="Performance class"
-            value={performanceClass}
-            options={[
-              { value: 'landing', label: 'Landing' },
-              { value: 'app', label: 'App' },
-              { value: 'api', label: 'API' },
-            ]}
-            onValueChange={(value) => setClass(value as Report['class'])}
-            triggerClassName="h-11 w-32"
-          />
-        </Filter>
-        <Filter label="State">
-          <LabeledSelect
-            label="Speed state"
-            value={state}
-            options={[
-              { value: 'all', label: 'All' },
-              { value: 'breaching', label: 'Breaching' },
-              { value: 'insufficient', label: 'Insufficient' },
-              { value: 'no_data', label: 'No data' },
-            ]}
-            onValueChange={setState}
-            triggerClassName="h-11 w-40"
-          />
-        </Filter>
-        <label className="grid min-w-40 flex-1 gap-1 text-xs text-muted-foreground">
-          Product search
-          <Input
-            aria-label="Search products"
-            placeholder="Search products…"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="h-11"
-          />
-        </label>
-        <Button
-          variant="outline"
-          onClick={reload}
-          className="min-h-11"
-          aria-label="Refresh speed report"
-        >
-          <RefreshCw />
-          Refresh
-        </Button>
+      <div aria-label="Speed filters">
+        <FilterBar className="items-end gap-3 border-b pb-5">
+          <Filter label="range">
+            <LabeledSelect
+              label="Speed range"
+              value={range}
+              options={[
+                { value: '1h', label: '1 hour' },
+                { value: '24h', label: '24 hours' },
+                { value: '7d', label: '7 days' },
+              ]}
+              onValueChange={(value) => setRange(value as Report['range'])}
+              triggerClassName="h-11 w-32"
+            />
+          </Filter>
+          <Filter label="class">
+            <LabeledSelect
+              label="Performance class"
+              value={performanceClass}
+              options={[
+                { value: 'landing', label: 'landing' },
+                { value: 'app', label: 'app' },
+                { value: 'api', label: 'API' },
+              ]}
+              onValueChange={(value) => setClass(value as Report['class'])}
+              triggerClassName="h-11 w-32"
+            />
+          </Filter>
+          <Filter label="state">
+            <LabeledSelect
+              label="Speed state"
+              value={state}
+              options={[
+                { value: 'all', label: 'all' },
+                { value: 'breaching', label: 'breaching' },
+                { value: 'insufficient', label: 'insufficient' },
+                { value: 'no_data', label: 'no data' },
+              ]}
+              onValueChange={setState}
+              triggerClassName="h-11 w-40"
+            />
+          </Filter>
+          <label className="grid min-w-40 flex-1 gap-1 text-xs text-muted-foreground">
+            product search
+            <Input
+              aria-label="Search products"
+              placeholder="search products…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="h-11"
+            />
+          </label>
+          <Button
+            variant="outline"
+            onClick={reload}
+            className="min-h-11"
+            aria-label="Refresh speed report"
+          >
+            <RefreshCw />
+            refresh
+          </Button>
+        </FilterBar>
       </div>
-      {loading ? (
-        <div role="status" aria-label="Loading speed report" className="space-y-3">
-          <Skeleton className="h-16 w-full" />
-          <Skeleton className="h-64 w-full" />
-        </div>
-      ) : null}
+      {loading ? <SpeedTableSkeleton /> : null}
       {error ? (
-        <Alert variant="destructive">
-          <AlertTriangle />
-          <AlertTitle>Could not load speed</AlertTitle>
-          <AlertDescription>
-            {error}
-            <Button variant="outline" onClick={reload} className="mt-3 min-h-11 self-start">
-              Retry speed report
-            </Button>
-          </AlertDescription>
-        </Alert>
+        <ErrorState
+          title="could not load speed"
+          description={error}
+          primaryAction={{ label: 'retry speed report', onClick: reload }}
+        />
       ) : null}
-      {!loading && !error && report ? (
+      {!loading && report ? (
         <>
           <p className="text-xs leading-5 text-muted-foreground">
-            Production samples · Generated{' '}
+            production samples · generated{' '}
             <time dateTime={new Date(report.generated_at).toISOString()}>
               {new Date(report.generated_at).toLocaleString()}
             </time>{' '}
-            · Refreshes every minute while visible.
+            · refreshes every minute while visible.
           </p>
           {!report.products.length ||
           report.products.every((product) => product.state === 'no_data') ? (
-            <div role="status" className="space-y-2 rounded-xl border p-5">
-              <h2 className="text-sm font-semibold">No speed samples yet</h2>
-              <EnableSpeedData />
-            </div>
+            <EmptyState
+              role="status"
+              title="no speed samples yet"
+              description={<EnableSpeedData />}
+              className="rounded-xl border p-5"
+            />
           ) : null}
           <SpeedTable
             products={products}

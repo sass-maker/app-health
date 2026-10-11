@@ -2,3 +2,5 @@ packages:
   - 'apps/*'
   - 'packages/*'
   - 'examples/*'
+patchedDependencies:
+  '@saas-maker/ui@0.1.20': patches/saas-maker-ui-0.1.20.patch

@@ -1,8 +1,14 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SpeedReportV1 } from '@app-health/contracts';
 import { SpeedView } from '../src/SpeedView.js';
 import { speedFixture } from './speed-fixture.js';
+
+let ownerToken = '';
+let ownerSession = 0;
+beforeEach(() => {
+  ownerToken = `owner-${++ownerSession}`;
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -13,7 +19,7 @@ afterEach(() => {
 async function mount(report = speedFixture()) {
   const fetch = vi.fn(async () => Response.json(report));
   vi.stubGlobal('fetch', fetch);
-  const view = render(<SpeedView ownerToken="owner" />);
+  const view = render(<SpeedView ownerToken={ownerToken} />);
   const table = await screen.findByRole('table', { name: 'Product speed' });
   return { fetch, table, ...view };
 }
@@ -34,39 +40,39 @@ it('renders authoritative states, CLS units, missing readings and truthful bound
   const { table, fetch } = await mount();
   const call = (fetch.mock.calls as unknown as [URL, RequestInit][])[0];
   expect(String(call[0])).toContain('/v1/reports/speed?range=24h&class=app');
-  expect(new Headers(call[1].headers).get('authorization')).toBe('Bearer owner');
-  expect(within(productRow(table, 'Atlas')).getByText('Breaching')).toBeInTheDocument();
-  expect(within(productRow(table, 'Beacon')).getByText('Measured')).toBeInTheDocument();
+  expect(new Headers(call[1].headers).get('authorization')).toBe(`Bearer ${ownerToken}`);
+  expect(within(productRow(table, 'Atlas')).getByText('breaching')).toBeInTheDocument();
+  expect(within(productRow(table, 'Beacon')).getByText('measured')).toBeInTheDocument();
   const cedar = productRow(table, 'Cedar');
-  expect(within(cedar).getByText('Insufficient samples')).toBeInTheDocument();
-  expect(within(cedar).queryByText('Breaching')).toBeNull();
+  expect(within(cedar).getByText('insufficient samples')).toBeInTheDocument();
+  expect(within(cedar).queryByText('breaching')).toBeNull();
   expect(within(cedar).getByText('4,000 ms')).not.toHaveClass('text-warning');
   const drift = productRow(table, 'Drift');
-  expect(within(drift).getByText('No data')).toBeInTheDocument();
+  expect(within(drift).getByText('no data')).toBeInTheDocument();
   expect(within(drift).getAllByLabelText('No samples')).toHaveLength(8);
   expect(within(drift).queryByText(/^0/)).toBeNull();
   expect(within(productRow(table, 'Atlas')).getByText('0.075')).toBeInTheDocument();
   expect(within(productRow(table, 'Atlas')).getByText('60%')).toBeInTheDocument();
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent('Truncated: yes');
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent('Rejected events: 3');
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent(
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent('truncated: yes');
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent('rejected events: 3');
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent(
     '50 samples per web metric',
   );
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent(
-    'Budgets (app): LCP p75 2,500 ms',
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent(
+    'budgets (app): LCP p75 2,500 ms',
   );
 });
 
 it('filters state and product search without refetching', async () => {
   const { table, fetch } = await mount();
-  await select('Speed state', 'Breaching');
+  await select('Speed state', 'breaching');
   expect(within(table).getAllByRole('button', { name: /Show routes/ })).toHaveLength(1);
   expect(within(table).getByText('Atlas')).toBeInTheDocument();
-  await select('Speed state', 'Insufficient');
+  await select('Speed state', 'insufficient');
   expect(within(table).getByText('Cedar')).toBeInTheDocument();
-  await select('Speed state', 'No data');
+  await select('Speed state', 'no data');
   expect(within(table).getByText('Drift')).toBeInTheDocument();
-  await select('Speed state', 'All');
+  await select('Speed state', 'all');
   fireEvent.change(screen.getByRole('textbox', { name: 'Search products' }), {
     target: { value: ' bEaCoN ' },
   });
@@ -74,7 +80,7 @@ it('filters state and product search without refetching', async () => {
   fireEvent.change(screen.getByRole('textbox', { name: 'Search products' }), {
     target: { value: 'missing' },
   });
-  expect(screen.getByText(/No products match these filters/)).toBeInTheDocument();
+  expect(screen.getByText(/no products match these filters/)).toBeInTheDocument();
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
@@ -116,10 +122,10 @@ it('expands route metrics, cache counts, colos, stages and sustained flags', asy
     'NONE: 10',
     'db_ms: 90 ms',
     'BOM: 650 ms · 30 samples',
-    'Insufficient windows',
+    'insufficient windows',
   ])
     expect(within(server).getByText(text)).toBeInTheDocument();
-  expect(screen.getByText('Vitals truncated')).toBeInTheDocument();
+  expect(screen.getByText('vitals truncated')).toBeInTheDocument();
   fireEvent.click(button);
   expect(screen.queryByRole('table', { name: 'Atlas server routes' })).toBeNull();
 });
@@ -130,9 +136,9 @@ it.each([400, 403, 503])('shows a distinct %s error and retries', async (status)
     .mockResolvedValueOnce(Response.json({}, { status }))
     .mockResolvedValue(Response.json(speedFixture()));
   vi.stubGlobal('fetch', fetch);
-  render(<SpeedView ownerToken="owner" />);
+  render(<SpeedView ownerToken={ownerToken} />);
   expect(await screen.findByRole('alert')).toHaveTextContent(String(status));
-  fireEvent.click(screen.getByRole('button', { name: 'Retry speed report' }));
+  fireEvent.click(screen.getByRole('button', { name: 'retry speed report' }));
   expect(await screen.findByRole('table', { name: 'Product speed' })).toBeInTheDocument();
 });
 
@@ -143,8 +149,8 @@ it.each([{}, { ...speedFixture(), class: 'landing' }])(
       'fetch',
       vi.fn(async () => Response.json(body)),
     );
-    render(<SpeedView ownerToken="owner" />);
-    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid speed report response');
+    render(<SpeedView ownerToken={ownerToken} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('invalid speed report response');
   },
 );
 
@@ -159,13 +165,13 @@ it('shows loading and an actionable empty state', async () => {
         }),
     ),
   );
-  render(<SpeedView ownerToken="owner" />);
+  render(<SpeedView ownerToken={ownerToken} />);
   expect(screen.getByRole('status', { name: 'Loading speed report' })).toBeInTheDocument();
   const report = speedFixture();
   report.products = [];
   report.summary = { measured: 0, no_data: 0, insufficient: 0, breaching: 0 };
   await act(async () => resolve(Response.json(report)));
-  expect(await screen.findByText('No speed samples yet')).toBeInTheDocument();
+  expect(await screen.findByText('no speed samples yet')).toBeInTheDocument();
   expect(screen.getByText('data-vitals')).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'docs/performance-contract.md' })).toHaveAttribute(
     'href',
@@ -178,9 +184,9 @@ it('keeps no-data products visible alongside setup instructions and truncation f
   report.products = [report.products[3]];
   report.summary = { measured: 0, no_data: 1, insufficient: 0, breaching: 0 };
   const { table } = await mount(report);
-  expect(screen.getByText('No speed samples yet')).toBeInTheDocument();
+  expect(screen.getByText('no speed samples yet')).toBeInTheDocument();
   expect(within(table).getByText('Drift')).toBeInTheDocument();
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent('Truncated: yes');
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent('truncated: yes');
 });
 
 it('uses sample-weighted error rates and cache counts, preserving an unknown all-NONE ratio', async () => {
@@ -218,9 +224,9 @@ it('counts a sustained-only breach and preserves valid zero CLS readings', async
   atlas.server.routes[0].breaches = [];
   atlas.vitals.routes[0].cls_milli = { p75: 0 };
   const { table } = await mount(report);
-  expect(within(productRow(table, 'Atlas')).getByText('Breaching')).toBeInTheDocument();
+  expect(within(productRow(table, 'Atlas')).getByText('breaching')).toBeInTheDocument();
   expect(within(productRow(table, 'Atlas')).getByText('0')).toBeInTheDocument();
-  await select('Speed state', 'Breaching');
+  await select('Speed state', 'breaching');
   expect(within(table).getAllByRole('button', { name: /Show routes/ })).toHaveLength(1);
 });
 
@@ -236,7 +242,7 @@ it('aborts old filter requests so late responses cannot replace the selected ran
     )
     .mockResolvedValue(Response.json({ ...speedFixture(), range: '1h' }));
   vi.stubGlobal('fetch', fetch);
-  render(<SpeedView ownerToken="owner" />);
+  render(<SpeedView ownerToken={ownerToken} />);
   await select('Speed range', '1 hour');
   await screen.findByRole('table', { name: 'Product speed' });
   const oldSignal = (fetch.mock.calls[0][1] as RequestInit).signal;
@@ -256,7 +262,7 @@ it('polls at 60 seconds only while visible, and stops on unmount', async () => {
   );
   const fetch = vi.fn(async () => Response.json(speedFixture()));
   vi.stubGlobal('fetch', fetch);
-  const { unmount } = render(<SpeedView ownerToken="owner" />);
+  const { unmount } = render(<SpeedView ownerToken={ownerToken} />);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(60_000);
   });
@@ -296,7 +302,18 @@ it('refetches range and class and uses the returned budgets', async () => {
   await select('Performance class', 'API');
   await screen.findByRole('table', { name: 'Product speed' });
   expect(String(fetch.mock.calls.at(-1)![0])).toContain('range=7d&class=api');
-  expect(screen.getByText(/Samples, not total traffic/)).toHaveTextContent(
-    'Budgets (api): no Web Vitals budget',
+  expect(screen.getByText(/samples, not total traffic/)).toHaveTextContent(
+    'budgets (api): no Web Vitals budget',
   );
+});
+
+it('shows the cached report on revisit while preserving the refresh request', async () => {
+  const first = await mount();
+  first.unmount();
+  const fetch = vi.fn(() => new Promise<Response>(() => undefined));
+  vi.stubGlobal('fetch', fetch);
+  render(<SpeedView ownerToken={ownerToken} />);
+  expect(screen.getByRole('table', { name: 'Product speed' })).toBeInTheDocument();
+  expect(screen.queryByRole('status', { name: 'Loading speed report' })).toBeNull();
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

@@ -147,7 +147,7 @@ describe('analytics visibility lifecycle', () => {
     vi.stubGlobal('fetch', fetch);
 
     const view = renderHook(() => useWorkspaceAnalytics('owner'));
-    await waitFor(() => expect(view.result.current.error).toBe('Analytics is unavailable.'));
+    await waitFor(() => expect(view.result.current.error).toBe('analytics is unavailable.'));
     malformed = false;
     act(() => view.result.current.reload());
     await waitFor(() => expect(view.result.current.data).toEqual(summary));
@@ -171,7 +171,7 @@ describe('analytics visibility lifecycle', () => {
       await Promise.resolve();
     });
     await act(async () => vi.advanceTimersByTimeAsync(8_000));
-    expect(view.result.current.error).toBe('Report request timed out. Please try again.');
+    expect(view.result.current.error).toBe('report request timed out. please try again.');
     stuck = false;
     act(() => view.result.current.reload());
     await act(async () => {

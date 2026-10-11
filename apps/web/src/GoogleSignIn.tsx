@@ -1,12 +1,12 @@
 import { useState, type ReactElement } from 'react';
-import { Button } from './components/ui/button.js';
+import { Button } from '@saas-maker/ui/components/button';
 
 export function GoogleSignIn(): ReactElement {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(() =>
     new URLSearchParams(window.location.search).has('error') ||
     new URLSearchParams(window.location.search).get('signin') === 'failed'
-      ? 'Sign-in did not complete. Please try again.'
+      ? 'sign-in did not complete. please try again.'
       : '',
   );
   async function signIn(): Promise<void> {
@@ -27,21 +27,21 @@ export function GoogleSignIn(): ReactElement {
           errorCallbackURL,
         }),
       });
-      if (!response.ok) throw new Error('Google sign-in could not start. Please try again.');
+      if (!response.ok) throw new Error('Google sign-in could not start. please try again.');
       const data = (await response.json()) as { url?: string };
       const url = new URL(data.url ?? '');
       if (url.origin !== 'https://accounts.google.com')
-        throw new Error('Unexpected sign-in destination.');
+        throw new Error('unexpected sign-in destination.');
       window.location.assign(url.href);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Sign-in failed.');
+      setError(cause instanceof Error ? cause.message : 'sign-in failed.');
       setPending(false);
     }
   }
   return (
     <div className="space-y-3">
       <Button className="h-11 w-full" disabled={pending} onClick={() => void signIn()}>
-        {pending ? 'Connecting to Google…' : 'Continue with Google'}
+        {pending ? 'connecting to Google…' : 'continue with Google'}
       </Button>
       {error ? (
         <p

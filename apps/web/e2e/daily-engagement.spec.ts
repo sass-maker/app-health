@@ -173,23 +173,23 @@ for (const width of [390, 768, 1440]) {
       await page.goto('/app?demo=populated#overview');
       // Explicit QA label stays in the screenshot; fixtures are never presented as production evidence.
       await expect(
-        page.getByRole('heading', { name: 'Daily briefing', exact: true }),
+        page.getByRole('heading', { name: 'daily briefing', exact: true }),
       ).toBeVisible();
       const report = page.locator('#daily-engagement');
-      await expect(report.getByRole('heading', { name: 'Where traffic came from' })).toBeVisible();
-      await expect(report.getByRole('heading', { name: 'What moved' })).toBeVisible();
+      await expect(report.getByRole('heading', { name: 'where traffic came from' })).toBeVisible();
+      await expect(report.getByRole('heading', { name: 'what moved' })).toBeVisible();
       const browserTotal = daily.products.reduce(
         (sum, product) => sum + (product.browser_visitors ?? 0),
         0,
       );
       await expect(
-        report.getByText('Known browser counts', { exact: true }).locator('..'),
+        report.getByText('known browser counts', { exact: true }).locator('..'),
       ).toContainText(browserTotal.toLocaleString());
       await expect(
-        report.getByText('Confirmed responses', { exact: true }).locator('..'),
+        report.getByText('confirmed responses', { exact: true }).locator('..'),
       ).toContainText('9');
       await expect(
-        report.getByText('Measured health issues', { exact: true }).locator('..'),
+        report.getByText('measured health issues', { exact: true }).locator('..'),
       ).toContainText('latest 24 hours');
       await expect(report.locator('tbody tr')).toHaveCount(55);
       const mobileProducts = report.locator('ul[aria-label="Portfolio project ledger"] > li');
@@ -201,17 +201,17 @@ for (const width of [390, 768, 1440]) {
       });
       const actionDisclosure = actionRow
         .locator('summary')
-        .filter({ hasText: 'Actions and browsers' });
+        .filter({ hasText: 'actions and browsers' });
       await actionDisclosure.focus();
       await page.keyboard.press('Enter');
       for (const event of actionProduct.cta_events) {
         const browsers =
           event.unique_browsers === null
-            ? 'Browser count unavailable'
+            ? 'browser count unavailable'
             : `${event.unique_browsers} ${event.unique_browsers === 1 ? 'browser' : 'browsers'}`;
         await expect(
           actionRow.getByText(
-            `${event.estimated ? 'Approx. ' : ''}${event.count} events · ${browsers}`,
+            `${event.estimated ? 'approx. ' : ''}${event.count} events · ${browsers}`,
             { exact: true },
           ),
         ).toBeVisible();
@@ -231,7 +231,7 @@ for (const width of [390, 768, 1440]) {
         await page.evaluate(() => window.scrollTo(0, 0));
       } else {
         const overflow = await report
-          .locator('[data-slot="table-container"]')
+          .getByRole('region', { name: 'Portfolio project ledger', exact: true })
           .evaluate((node) => node.scrollWidth - node.clientWidth);
         expect(overflow).toBeLessThanOrEqual(1);
       }
@@ -249,23 +249,23 @@ for (const width of [390, 768, 1440]) {
         path: fileURLToPath(new URL(`briefing-after-${width}-${theme}.jpg`, evidence)),
       });
       const sources = report
-        .getByRole('heading', { name: 'Where traffic came from' })
+        .getByRole('heading', { name: 'where traffic came from' })
         .locator('..')
         .locator('..')
         .locator('..');
       await sources
         .getByRole('button', { name: `Filter projects by Google source for ${daily.date}` })
         .click();
-      await expect(report.getByText(/Showing projects where/)).toBeVisible();
+      await expect(report.getByText(/showing projects where/)).toBeVisible();
       await expect(report.locator('tbody tr')).toHaveCount(
         daily.products.filter((product) => Boolean(product.browser_visitors)).length,
       );
-      await report.getByRole('button', { name: 'Clear source filter' }).click();
+      await report.getByRole('button', { name: 'clear source filter' }).click();
       await expect(report.locator('tbody tr')).toHaveCount(55);
-      await report.getByRole('button', { name: 'Show all 3 breakouts' }).click();
-      await expect(report.getByText('Growth', { exact: true })).toHaveCount(3);
-      await report.getByRole('button', { name: 'Show the top two' }).click();
-      await expect(report.getByText('Growth', { exact: true })).toHaveCount(2);
+      await report.getByRole('button', { name: 'show all 3 breakouts' }).click();
+      await expect(report.getByText('growth', { exact: true })).toHaveCount(3);
+      await report.getByRole('button', { name: 'show the top two' }).click();
+      await expect(report.getByText('growth', { exact: true })).toHaveCount(2);
       const search = report.getByRole('textbox', { name: /Search projects/ });
       await search.fill(daily.products[0].catalog_id);
       await expect(report.locator('tbody tr')).toHaveCount(1);
