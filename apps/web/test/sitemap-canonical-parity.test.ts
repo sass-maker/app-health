@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import {
   PUBLIC_ENTRYPOINTS,
   renderPublicEntrypoint,
@@ -65,5 +66,37 @@ describe('sitemap / canonical parity', () => {
 
     expect(indexHtml).not.toContain('clarity.ms/tag');
     expect(changelogHtml).toContain('https://www.clarity.ms/tag/');
+  });
+
+  it('initializes the Clarity command queue before the asynchronous tag can execute', () => {
+    const indexHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+    const html = renderPublicEntrypoint(indexHtml, PUBLIC_ENTRYPOINTS[0]);
+    const bootstrap = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].find((match) =>
+      match[1].includes('https://www.clarity.ms/tag/'),
+    )?.[1];
+    expect(bootstrap).toBeDefined();
+
+    const window: Record<string, unknown> = {};
+    const scripts: { async?: boolean; src?: string }[] = [];
+    const context = {
+      window,
+      document: {
+        createElement: () => ({}),
+        head: {
+          appendChild: (script: (typeof scripts)[number]) => {
+            // The real tag reads clarity.v and enqueues start immediately.
+            runInNewContext('window.clarity.v; window.clarity("start", { projectId: "test" });', {
+              window,
+            });
+            scripts.push(script);
+          },
+        },
+      },
+    };
+    runInNewContext(bootstrap!, context);
+    expect(scripts).toEqual([{ async: true, src: 'https://www.clarity.ms/tag/y6bveiqm8k' }]);
+    expect(typeof window.clarity).toBe('function');
+    const clarity = window.clarity as { q: IArguments[] };
+    expect(Array.from(clarity.q[0])).toEqual(['start', { projectId: 'test' }]);
   });
 });

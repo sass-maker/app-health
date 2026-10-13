@@ -14,7 +14,15 @@ export const PUBLIC_ENTRYPOINTS = [
   },
 ];
 
-const CLARITY_TAG = '<script async src="https://www.clarity.ms/tag/y6bveiqm8k"></script>';
+const CLARITY_TAG = `<script>
+      window.clarity = window.clarity || function () {
+        (window.clarity.q = window.clarity.q || []).push(arguments);
+      };
+      var clarityScript = document.createElement('script');
+      clarityScript.async = true;
+      clarityScript.src = 'https://www.clarity.ms/tag/y6bveiqm8k';
+      document.head.appendChild(clarityScript);
+    </script>`;
 
 function replaceMeta(html, attribute, value) {
   const pattern = new RegExp(`(<meta\\s+${attribute}\\s+content=")[^"]*("\\s*\\/?>)`, 'i');
