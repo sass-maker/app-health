@@ -25,6 +25,7 @@ describe('parseSpec', () => {
       true,
     );
     expect(new Set(spec.journeys.map((item) => item.project)).size).toBeGreaterThan(2);
+    expect(spec.journeys.some((item) => item.project === 'agent-testing')).toBe(false);
   });
 
   it('parses a fixed POST fixture', () => {
