@@ -31,8 +31,6 @@ packages/
   node/       @saas-maker/app-health client plus Express, Hono, and Pages adapters
   go/         Go 1.22 client with net/http and Echo adapters
   swift/      Foundation client for explicit native events and logs
-openspec/specs/   Canonical behavior specifications
-openspec/changes/archive/   Completed and superseded change history
 ```
 
 ## Runtime dependencies (and why)

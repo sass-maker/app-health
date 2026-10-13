@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactElement } from 'react';
 import { Check, Copy, WandSparkles } from 'lucide-react';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 import { createAgentSetupPrompt, type AgentSetupCapability } from './agent-setup-prompt.js';
 
 export function AgentSetupPrompt(props: {
@@ -9,7 +9,7 @@ export function AgentSetupPrompt(props: {
   capabilities: AgentSetupCapability[];
   publicKey?: string;
   analyticsSnippet?: string;
-}): JSX.Element {
+}): ReactElement {
   const [copied, setCopied] = useState(false);
   const CopyIcon = copied ? Check : Copy;
   const prompt = createAgentSetupPrompt(props);
@@ -26,7 +26,7 @@ export function AgentSetupPrompt(props: {
     <Card className="shadow-none">
       <CardHeader className="border-b">
         <CardTitle className="flex items-center gap-2 text-base">
-          <WandSparkles className="size-4 text-primary" /> Give an agent the setup task
+          <WandSparkles className="size-4 text-primary" /> give an agent the setup task
         </CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
           Copy a project-scoped prompt for an authenticated coding agent. It includes the selected
@@ -43,12 +43,12 @@ export function AgentSetupPrompt(props: {
         <div className="flex items-center gap-3">
           <Button type="button" variant="outline" onClick={() => void copy()}>
             <CopyIcon />
-            {copied ? 'Copied' : 'Copy prompt'}
+            {copied ? 'copied' : 'copy prompt'}
           </Button>
           <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
             {copied
-              ? 'Prompt copied to clipboard.'
-              : 'The prompt remains selectable if clipboard access is unavailable.'}
+              ? 'prompt copied to clipboard.'
+              : 'the prompt remains selectable if clipboard access is unavailable.'}
           </span>
         </div>
       </CardContent>

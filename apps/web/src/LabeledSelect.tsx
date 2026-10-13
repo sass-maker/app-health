@@ -1,10 +1,11 @@
+import type { ReactElement } from 'react';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './components/ui/select.js';
+} from '@saas-maker/ui/components/select';
 
 interface SelectOption {
   value: string;
@@ -23,7 +24,7 @@ export function LabeledSelect({
   options: SelectOption[];
   triggerClassName?: string;
   onValueChange: (value: string) => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <Select value={value} onValueChange={onValueChange}>
       <SelectTrigger aria-label={label} className={`bg-background ${triggerClassName ?? ''}`}>

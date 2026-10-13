@@ -1,13 +1,14 @@
 import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
-import { useState } from 'react';
-import { Activity, ArrowRight, RefreshCw, X } from 'lucide-react';
+import { useState, type ReactElement } from 'react';
+import { Activity, ArrowRight, X } from 'lucide-react';
 import { AnalyticsReport, type AnalyticsReportProps } from './AnalyticsReport.js';
 import { useBrowserReport, useWorkspaceAnalytics } from './useAnalytics.js';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent } from './components/ui/card.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { LabeledSelect as ReportSelect } from './LabeledSelect.js';
 import { AnalyticsReportLoading } from './AnalyticsReportLoading.js';
 
@@ -20,17 +21,12 @@ interface Project {
 
 function ReportError({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
-      <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium">Analytics could not refresh</p>
-          <p className="mt-1 text-xs text-muted-foreground">{message}</p>
-        </div>
-        <Button variant="outline" onClick={onRetry}>
-          <RefreshCw /> Try again
-        </Button>
-      </CardContent>
-    </Card>
+    <ErrorState
+      title="analytics could not refresh"
+      description={message}
+      onRetry={onRetry}
+      className="rounded-lg border border-destructive/40 bg-destructive/5"
+    />
   );
 }
 
@@ -65,10 +61,10 @@ interface ReportFiltersProps {
   onInstall?: () => void;
 }
 
-function ReportFilters(props: ReportFiltersProps): JSX.Element {
+function ReportFilters(props: ReportFiltersProps): ReactElement {
   const { mode, range, selected, onRange, onClearEvent, onInstall, date } = props;
   return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
+    <FilterBar className="flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center">
       <div className="flex flex-1 flex-col gap-2 sm:flex-row">
         <ReportSelect
           label="Analytics period"
@@ -77,10 +73,10 @@ function ReportFilters(props: ReportFiltersProps): JSX.Element {
           triggerClassName="h-10 min-w-40"
           options={[
             ...(date ? [{ value: 'briefing', label: `${date} · India day` }] : []),
-            { value: '24h', label: 'Last 24 hours' },
-            { value: '1h', label: 'Last hour' },
-            { value: '7d', label: 'Last 7 days' },
-            { value: '30d', label: 'Last 30 days' },
+            { value: '24h', label: 'last 24 hours' },
+            { value: '1h', label: 'last hour' },
+            { value: '7d', label: 'last 7 days' },
+            { value: '30d', label: 'last 30 days' },
           ]}
         />
       </div>
@@ -94,9 +90,9 @@ function ReportFilters(props: ReportFiltersProps): JSX.Element {
         </Badge>
       ) : null}
       <Button variant="outline" className="h-10 w-full lg:w-auto" onClick={onInstall}>
-        {mode === 'events' ? 'Install event tracking' : 'Install tracker'} <ArrowRight />
+        {mode === 'events' ? 'install event tracking' : 'install tracker'} <ArrowRight />
       </Button>
-    </div>
+    </FilterBar>
   );
 }
 
@@ -122,7 +118,7 @@ type AnalyticsResultsProps = Omit<AnalyticsReportProps, 'report'> & {
   detail: ReturnType<typeof useBrowserReport>;
 };
 
-function AnalyticsResults(props: AnalyticsResultsProps): JSX.Element {
+function AnalyticsResults(props: AnalyticsResultsProps): ReactElement {
   const { workspace, detail } = props;
   return (
     <>
@@ -144,24 +140,24 @@ function AnalyticsResults(props: AnalyticsResultsProps): JSX.Element {
 function AnalyticsFooter(props: {
   sourceNote: string;
   workspace: ReturnType<typeof useWorkspaceAnalytics>;
-}): JSX.Element {
+}): ReactElement {
   const { sourceNote, workspace } = props;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5">
         <Activity className="size-3" /> {sourceNote}
       </span>
-      <span>Active counts describe sessions, not unique people.</span>
+      <span>active counts describe sessions, not unique people.</span>
       {workspace.data?.source !== 'local' && !workspace.connected ? (
-        <span>Live connection reconnecting.</span>
+        <span>live connection reconnecting.</span>
       ) : null}
     </div>
   );
 }
 
 function reportSourceNote(report: ReturnType<typeof useBrowserReport>['report']): string {
-  if (report?.source === 'local') return 'Local development data';
-  return report?.sampled ? 'Sampled analytics estimates' : 'Event totals may arrive later';
+  if (report?.source === 'local') return 'local development data';
+  return report?.sampled ? 'sampled analytics estimates' : 'event totals may arrive later';
 }
 
 function reportTotals(report: ReturnType<typeof useBrowserReport>['report']) {
@@ -204,7 +200,7 @@ function useReportSelection(project: Project) {
   };
 }
 
-export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
+export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
   const { project, ownerToken, mode = 'web', onInstall } = props;
   const { segments, setSegments, appId, environmentId, selected, setSelected, removeSegment } =
     useReportSelection(project);
@@ -259,7 +255,7 @@ export function AnalyticsView(props: AnalyticsViewProps): JSX.Element {
         filters={segments}
         emptyHint={
           mode === 'events' && !selected
-            ? 'Open a named event to reveal its page, source, and audience breakdowns.'
+            ? 'open a named event to reveal its page, source, and audience breakdowns.'
             : undefined
         }
         onClear={() => {

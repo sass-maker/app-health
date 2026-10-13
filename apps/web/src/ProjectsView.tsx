@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -23,20 +23,16 @@ import {
   UNHEALTHY_ERROR_RATE,
   UNHEALTHY_P95_MS,
 } from '@app-health/contracts';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 import { ChartContainer } from './components/ui/chart.js';
-import { Input } from './components/ui/input.js';
-import { Skeleton } from './components/ui/skeleton.js';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from './components/ui/table.js';
+import { Input } from '@saas-maker/ui/components/input';
+import { DataTable, type DataColumn } from './components/ResourceTable.js';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
+import { EmptyState } from '@saas-maker/ui/components/empty-state';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
+import { CardSkeleton } from '@saas-maker/ui/blocks/skeletons';
 import { useWorkspaceAnalytics, useWorkspaceHealth } from './useAnalytics.js';
 import { DailyEngagement } from './DailyEngagement.js';
 import { OwnerAlertFeed } from './OwnerAlertFeed.js';
@@ -92,11 +88,11 @@ const number = (value: number) => value.toLocaleString();
 const percent = (value: number) => `${(value * 100).toFixed(value < 0.01 ? 1 : 0)}%`;
 
 const stateLabels: Record<WorkspaceEndpointStateV1, string> = {
-  connected: 'Connected',
-  stale: 'Stale',
-  waiting: 'Waiting',
-  revoked: 'Key revoked',
-  unconfigured: 'Not configured',
+  connected: 'connected',
+  stale: 'stale',
+  waiting: 'waiting',
+  revoked: 'key revoked',
+  unconfigured: 'not configured',
 };
 
 function age(timestamp: number, now: number): string {
@@ -109,7 +105,7 @@ function age(timestamp: number, now: number): string {
 }
 
 function Freshness({ timestamp, now }: { timestamp: number | null | undefined; now: number }) {
-  if (timestamp == null) return <span className="text-muted-foreground">Never received</span>;
+  if (timestamp == null) return <span className="text-muted-foreground">never received</span>;
   const date = new Date(timestamp);
   return (
     <time dateTime={date.toISOString()} title={date.toLocaleString()}>
@@ -129,34 +125,34 @@ function severity(row: WatchtowerRow): number {
 
 function requestIssueLabel(level: 'unhealthy' | 'degraded', errors: boolean, slow: boolean) {
   if (level === 'unhealthy') {
-    if (errors && slow) return 'High 5xx and slow requests';
-    if (errors) return 'High 5xx error rate';
-    return 'Slow requests';
+    if (errors && slow) return 'high 5xx and slow requests';
+    if (errors) return 'high 5xx error rate';
+    return 'slow requests';
   }
-  if (errors && slow) return 'Elevated 5xx and latency';
-  if (errors) return 'Elevated 5xx error rate';
-  return 'Elevated request latency';
+  if (errors && slow) return 'elevated 5xx and latency';
+  if (errors) return 'elevated 5xx error rate';
+  return 'elevated request latency';
 }
 
 function attentionLabel(row: WatchtowerRow): string {
   const endpoints = row.health?.endpoints;
-  if (!endpoints) return 'Health has not loaded';
+  if (!endpoints) return 'health has not loaded';
   const metrics = endpoints.metrics;
   if (metrics?.health_state === 'unhealthy') {
     const errors = metrics.error_rate >= UNHEALTHY_ERROR_RATE;
     const slow = metrics.p95_ms >= UNHEALTHY_P95_MS;
     return requestIssueLabel('unhealthy', errors, slow);
   }
-  if (endpoints.state === 'revoked') return 'Ingest key revoked';
+  if (endpoints.state === 'revoked') return 'ingest key revoked';
   if (metrics?.health_state === 'degraded') {
     const errors = metrics.error_rate >= DEGRADED_ERROR_RATE;
     const slow = metrics.p95_ms >= DEGRADED_P95_MS;
     return requestIssueLabel('degraded', errors, slow);
   }
-  if (endpoints.state === 'stale') return 'Endpoint data is stale';
-  if (endpoints.state === 'waiting') return 'Waiting for endpoint data';
-  if (endpoints.state === 'unconfigured') return 'Endpoint monitoring not configured';
-  return 'Healthy';
+  if (endpoints.state === 'stale') return 'endpoint data is stale';
+  if (endpoints.state === 'waiting') return 'waiting for endpoint data';
+  if (endpoints.state === 'unconfigured') return 'endpoint monitoring not configured';
+  return 'healthy';
 }
 
 function isAttention(row: WatchtowerRow): boolean {
@@ -165,26 +161,26 @@ function isAttention(row: WatchtowerRow): boolean {
 
 function statusBadge(row: WatchtowerRow) {
   const endpoints = row.health?.endpoints;
-  if (endpointNotApplicable(row)) return <Badge variant="secondary">Not applicable</Badge>;
-  if (!endpoints) return <Badge variant="outline">Unknown</Badge>;
+  if (endpointNotApplicable(row)) return <Badge variant="secondary">not applicable</Badge>;
+  if (!endpoints) return <Badge variant="outline">unknown</Badge>;
   const requestHealth = endpoints.metrics?.health_state;
   if (requestHealth === 'unhealthy')
     return (
       <Badge variant="destructive" className="transition-none">
-        Unhealthy
+        unhealthy
       </Badge>
     );
   if (requestHealth === 'degraded')
-    return <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300">Degraded</Badge>;
+    return <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-300">degraded</Badge>;
   if (endpoints.state !== 'connected')
     return <Badge variant="outline">{stateLabels[endpoints.state]}</Badge>;
   if (requestHealth === 'healthy')
     return (
-      <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Healthy</Badge>
+      <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">healthy</Badge>
     );
   if (endpoints.metrics && endpoints.metrics.request_count >= INSUFFICIENT_DATA_MIN_REQUESTS)
-    return <Badge variant="secondary">Latency uncertain</Badge>;
-  return <Badge variant="secondary">Low volume</Badge>;
+    return <Badge variant="secondary">latency uncertain</Badge>;
+  return <Badge variant="secondary">low volume</Badge>;
 }
 
 function WatchtowerTotals({ rows, healthReady }: { rows: WatchtowerRow[]; healthReady: boolean }) {
@@ -195,27 +191,27 @@ function WatchtowerTotals({ rows, healthReady }: { rows: WatchtowerRow[]; health
   const errors = metrics.reduce((sum, item) => sum + item.error_count, 0);
   const cells = [
     {
-      label: 'Tracked apps',
+      label: 'tracked apps',
       value: new Set(rows.map((row) => row.project.appId)).size,
       note: `${rows.length} environments in inventory`,
       color: 'var(--chart-3)',
     },
     {
-      label: 'Requests',
+      label: 'requests',
       value: metrics.length ? requests : null,
-      note: 'Measured · last 24 hours',
+      note: 'measured · last 24 hours',
       color: 'var(--chart-1)',
     },
     {
-      label: 'Request error rate',
+      label: 'request error rate',
       value: requests ? percent(errors / requests) : metrics.length ? '0%' : null,
       note: '5xx responses · last 24 hours',
       color: 'var(--chart-4)',
     },
     {
-      label: 'Request issues',
+      label: 'request issues',
       value: healthReady ? rows.filter(isAttention).length : null,
-      note: 'Measured latency, 5xx, or revoked key',
+      note: 'measured latency, 5xx, or revoked key',
       color: 'var(--chart-2)',
     },
   ];
@@ -262,9 +258,9 @@ function AttentionQueue({
         <div className="flex items-center justify-between gap-3">
           <div>
             <CardTitle className="flex items-center gap-2 text-sm">
-              <ShieldAlert className="size-4 text-amber-500" /> Request issues
+              <ShieldAlert className="size-4 text-amber-500" /> request issues
             </CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">Measured issues first</p>
+            <p className="mt-1 text-xs text-muted-foreground">measured issues first</p>
           </div>
           <Badge variant={attention.length ? 'outline' : 'secondary'}>
             {healthReady ? attention.length : '—'}
@@ -274,7 +270,7 @@ function AttentionQueue({
       <CardContent className="p-0">
         {!healthReady ? (
           <p className="p-6 text-sm text-muted-foreground">
-            Request health is unavailable. Retry to check for issues.
+            request health is unavailable. retry to check for issues.
           </p>
         ) : attention.length ? (
           <ol className="divide-y">
@@ -299,7 +295,7 @@ function AttentionQueue({
           </ol>
         ) : (
           <div className="flex items-center gap-3 p-6 text-sm text-muted-foreground">
-            <CheckCircle2 className="size-5 text-emerald-500" /> No measured request issues in the
+            <CheckCircle2 className="size-5 text-emerald-500" /> no measured request issues in the
             current inventory.
           </div>
         )}
@@ -330,7 +326,7 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
   return (
     <Card className="gap-0 py-0 shadow-none">
       <CardHeader className="border-b px-5 py-4">
-        <CardTitle className="text-sm">Reliability field</CardTitle>
+        <CardTitle className="text-sm">reliability field</CardTitle>
         <p className="text-xs text-muted-foreground">
           p95 histogram upper bound against 5xx rate · bubble size is request volume
         </p>
@@ -339,7 +335,7 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
         {points.length ? (
           <>
             <ChartContainer
-              config={{ requests: { label: 'Requests', color: 'var(--chart-1)' } }}
+              config={{ requests: { label: 'requests', color: 'var(--chart-1)' } }}
               className="min-h-64 w-full"
             >
               <ScatterChart margin={{ top: 12, right: 18, bottom: 8, left: 0 }}>
@@ -363,7 +359,7 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
           </>
         ) : (
           <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
-            <CircleDashed className="size-4" /> No measured requests in this window
+            <CircleDashed className="size-4" /> no measured requests in this window
           </div>
         )}
       </CardContent>
@@ -371,87 +367,144 @@ function ReliabilityField({ rows }: { rows: WatchtowerRow[] }) {
   );
 }
 
+const inventoryBaseColumns: DataColumn<WatchtowerRow>[] = [
+  {
+    id: 'project',
+    header: 'project',
+    value: (row) => row.project.name,
+    sortable: false,
+    hideable: false,
+    className: 'h-14',
+    minWidth: '12rem',
+    cell: (row) => {
+      return (
+        <div className="pl-5">
+          <p className="font-medium">{row.project.name}</p>
+          <p className="text-xs text-muted-foreground">{row.project.environment}</p>
+        </div>
+      );
+    },
+  },
+  {
+    id: 'browser',
+    header: 'browser usage · 24h',
+    value: (row) => row.analytics?.pageviews,
+    sortable: false,
+    hideable: false,
+    className: 'h-14',
+    minWidth: '9rem',
+    cell: (row) => {
+      return (
+        <div className="">
+          {row.analytics ? (
+            <>
+              <span className="font-medium tabular-nums">{number(row.analytics.pageviews)}</span>
+              <span className="ml-1 text-xs text-muted-foreground">views</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    id: 'health',
+    header: 'request health · 24h',
+    value: () => null,
+    sortable: false,
+    hideable: false,
+    className: 'h-14',
+    minWidth: '9rem',
+    cell: (row) => {
+      return (
+        <div className="">
+          <div className="flex items-center gap-2">
+            {statusBadge(row)}
+            {row.health?.endpoints.metrics ? (
+              <span className="text-xs tabular-nums text-muted-foreground">
+                {number(row.health.endpoints.metrics.request_count)} requests
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    },
+  },
+];
+
+function inventoryColumns(
+  now: number,
+  onOpen: ProjectsViewProps['onOpen'],
+): DataColumn<WatchtowerRow>[] {
+  return [
+    ...inventoryBaseColumns,
+    {
+      id: 'freshness',
+      header: 'endpoint freshness',
+      value: (row) => row.health?.endpoints.last_received_at,
+      sortable: false,
+      hideable: false,
+      className: 'h-14',
+      minWidth: '9rem',
+      cell: (row) => {
+        return (
+          <div className="text-xs">
+            {endpointNotApplicable(row) ? (
+              <span className="text-muted-foreground">not applicable</span>
+            ) : (
+              <Freshness timestamp={row.health?.endpoints.last_received_at} now={now} />
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: 'open',
+      header: 'open',
+      value: () => null,
+      sortable: false,
+      hideable: false,
+      className: 'h-14',
+      minWidth: '9rem',
+      cell: (row) => {
+        return (
+          <div className="pr-5 text-right">
+            <Button type="button" variant="ghost" size="sm" onClick={() => onOpen(row.project)}>
+              open <ArrowUpRight className="size-3.5" />
+            </Button>
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 function InventoryTable({
   rows,
   now,
   onOpen,
+  loading,
 }: {
   rows: WatchtowerRow[];
   now: number;
   onOpen: ProjectsViewProps['onOpen'];
+  loading: boolean;
 }) {
+  const columns = inventoryColumns(now, onOpen);
   return (
     <CardContent className="p-0">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="pl-5">Project</TableHead>
-            <TableHead>Browser usage · 24h</TableHead>
-            <TableHead>Request health · 24h</TableHead>
-            <TableHead>Endpoint freshness</TableHead>
-            <TableHead className="pr-5 text-right">
-              <span className="sr-only">Open</span>
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((row) => {
-            const metrics = row.health?.endpoints.metrics;
-            return (
-              <TableRow key={`${row.project.appId}:${row.project.environmentId}`}>
-                <TableCell className="pl-5">
-                  <p className="font-medium">{row.project.name}</p>
-                  <p className="text-xs text-muted-foreground">{row.project.environment}</p>
-                </TableCell>
-                <TableCell>
-                  {row.analytics ? (
-                    <>
-                      <span className="font-medium tabular-nums">
-                        {number(row.analytics.pageviews)}
-                      </span>
-                      <span className="ml-1 text-xs text-muted-foreground">views</span>
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">—</span>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    {statusBadge(row)}
-                    {metrics ? (
-                      <span className="text-xs tabular-nums text-muted-foreground">
-                        {number(metrics.request_count)} requests
-                      </span>
-                    ) : null}
-                  </div>
-                </TableCell>
-                <TableCell className="text-xs">
-                  {endpointNotApplicable(row) ? (
-                    <span className="text-muted-foreground">Not applicable</span>
-                  ) : (
-                    <Freshness timestamp={row.health?.endpoints.last_received_at} now={now} />
-                  )}
-                </TableCell>
-                <TableCell className="pr-5 text-right">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpen(row.project)}
-                  >
-                    Open <ArrowUpRight className="size-3.5" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-      {!rows.length ? (
-        <p className="p-8 text-center text-sm text-muted-foreground">
-          No environments match this view.
-        </p>
-      ) : null}
+      <DataTable
+        label="Complete inventory"
+        columns={columns}
+        data={rows}
+        loading={loading}
+        skeletonRows={rows.length}
+        getRowId={(row) => `${row.project.appId}:${row.project.environmentId}`}
+        pageSize={Math.max(1, rows.length)}
+        maxHeight="none"
+        empty={<EmptyState title="no environments match this view." />}
+      />
     </CardContent>
   );
 }
@@ -491,11 +544,13 @@ function Inventory({
   now,
   onOpen,
   healthReady,
+  loading,
 }: {
   rows: WatchtowerRow[];
   now: number;
   onOpen: ProjectsViewProps['onOpen'];
   healthReady: boolean;
+  loading: boolean;
 }) {
   const [query, setQuery] = useState('');
   const [attentionOnly, setAttentionOnly] = useState(false);
@@ -510,14 +565,14 @@ function Inventory({
     <Card className="gap-0 py-0 shadow-none">
       <CardHeader className="gap-4 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <CardTitle className="text-sm">Complete inventory</CardTitle>
+          <CardTitle className="text-sm">complete inventory</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            Workspace environments include products outside the 55-product daily report. Products
+            workspace environments include products outside the 55-product daily report. products
             without a server endpoint do not need endpoint monitoring.
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
+        <FilterBar className="flex-col sm:flex-row">
           <label className="relative min-w-60">
             <Search
               className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground"
@@ -527,7 +582,7 @@ function Inventory({
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search projects"
+              placeholder="search projects"
               className="pl-9"
             />
           </label>
@@ -537,11 +592,11 @@ function Inventory({
             onClick={() => setAttentionOnly((value) => !value)}
             aria-pressed={attentionOnly}
           >
-            Request issues only
+            request issues only
           </Button>
-        </div>
+        </FilterBar>
       </CardHeader>
-      <InventoryTable rows={filtered} now={now} onOpen={onOpen} />
+      <InventoryTable rows={filtered} now={now} onOpen={onOpen} loading={loading} />
     </Card>
   );
 }
@@ -552,10 +607,10 @@ function EmptyProjectsView() {
       <Card className="shadow-none">
         <CardContent className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <h2 id="projects-title" className="text-lg font-semibold tracking-tight">
-            No projects yet
+            no projects yet
           </h2>
           <p className="max-w-md text-sm text-muted-foreground">
-            Add an environment to start watching usage and request health.
+            add an environment to start watching usage and request health.
           </p>
         </CardContent>
       </Card>
@@ -572,7 +627,7 @@ interface RequestHealthSectionProps {
   onOpen: ProjectsViewProps['onOpen'];
 }
 
-function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
+function RequestHealthSection(props: RequestHealthSectionProps): ReactElement {
   const { rows, health, analytics, loading, error, onOpen } = props;
   const healthReady = Boolean(health.data);
   return (
@@ -580,16 +635,16 @@ function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 id="request-health-title" className="text-lg font-semibold tracking-tight">
-            Request health
+            request health
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Measured endpoint traffic and issues across workspace environments.
+            measured endpoint traffic and issues across workspace environments.
           </p>
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground">
           {health.data?.refreshed_at ? (
             <span>
-              Refreshed <Freshness timestamp={health.data.refreshed_at} now={Date.now()} />
+              refreshed <Freshness timestamp={health.data.refreshed_at} now={Date.now()} />
             </span>
           ) : null}
           {error ? (
@@ -602,7 +657,7 @@ function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
                 analytics.reload();
               }}
             >
-              <RefreshCw /> Retry
+              <RefreshCw /> retry
             </Button>
           ) : null}
         </div>
@@ -614,9 +669,9 @@ function RequestHealthSection(props: RequestHealthSectionProps): JSX.Element {
           aria-label="Loading Watchtower"
           className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]"
         >
-          <Skeleton className="h-80 w-full rounded-xl" />
-          <Skeleton className="h-80 w-full rounded-xl" />
-          <span className="sr-only">Loading Watchtower…</span>
+          <CardSkeleton className="h-80 w-full" announce={false} />
+          <CardSkeleton className="h-80 w-full" announce={false} />
+          <span className="sr-only">loading watchtower…</span>
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
@@ -641,26 +696,26 @@ function briefingHealth(rows: WatchtowerRow[], reportAppIds: ReadonlySet<string>
       const state = endpoints?.metrics?.health_state;
       const issue = isAttention(row);
       const label = endpointNotApplicable(row)
-        ? 'Not applicable'
+        ? 'not applicable'
         : issue
           ? attentionLabel(row)
           : !endpoints
-            ? 'Unknown'
+            ? 'unknown'
             : endpoints.state !== 'connected'
               ? stateLabels[endpoints.state]
               : state === 'healthy'
-                ? 'Healthy'
+                ? 'healthy'
                 : endpoints.metrics &&
                     endpoints.metrics.request_count >= INSUFFICIENT_DATA_MIN_REQUESTS
-                  ? 'Latency uncertain'
-                  : 'Low volume';
+                  ? 'latency uncertain'
+                  : 'low volume';
       return [
         row.project.appId,
         {
           label,
           tone: issue
             ? ('attention' as const)
-            : label === 'Healthy'
+            : label === 'healthy'
               ? ('healthy' as const)
               : ('muted' as const),
         },
@@ -708,13 +763,10 @@ function reportHealthScope(report: DailyEngagementReportV1 | null) {
     : null;
 }
 
-export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): JSX.Element {
+export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): ReactElement {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
-  const [reportScope, setReportScope] = useState<{
-    appIds: Set<string>;
-    serverRequestsApplicability: Map<string, WatchtowerRow['serverRequestsApplicability']>;
-  } | null>(null);
+  const [reportScope, setReportScope] = useState<ReturnType<typeof reportHealthScope>>(null);
   const onDailyReport = useCallback((report: DailyEngagementReportV1 | null) => {
     setReportScope(reportHealthScope(report));
   }, []);
@@ -749,15 +801,14 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
       className="mx-auto w-full max-w-7xl space-y-6"
     >
       {error ? (
-        <Card role="alert" className="border-destructive/40 bg-destructive/5 shadow-none">
-          <CardContent className="flex items-start gap-3 p-4 text-sm">
-            <AlertTriangle className="mt-0.5 size-4 text-destructive" />
-            <div>
-              <p className="font-medium">Some Watchtower data could not refresh</p>
-              <p className="mt-1 text-xs text-muted-foreground">{error}</p>
-            </div>
-          </CardContent>
-        </Card>
+        <ErrorState
+          title="some Watchtower data could not refresh"
+          detail={error}
+          onRetry={() => {
+            health.reload();
+            analytics.reload();
+          }}
+        />
       ) : null}
       <DailyEngagement
         ownerToken={ownerToken}
@@ -773,9 +824,9 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
       <OwnerAlertFeed ownerToken={ownerToken} />
       <details className="group rounded-xl border bg-card/40">
         <summary className="flex min-h-12 cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium">
-          Request health and collection details
+          request health and collection details
           <span className="text-xs font-normal text-muted-foreground">
-            Last 24 hours · expand to investigate
+            last 24 hours · expand to investigate
           </span>
         </summary>
         <div className="space-y-5 border-t p-4 sm:p-5">
@@ -787,11 +838,17 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
             error={error}
             onOpen={onOpen}
           />
-          <Inventory rows={rows} now={now} onOpen={onOpen} healthReady={Boolean(health.data)} />
+          <Inventory
+            rows={rows}
+            now={now}
+            onOpen={onOpen}
+            healthReady={Boolean(health.data)}
+            loading={loading}
+          />
         </div>
       </details>
       <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Activity className="size-3" /> Requests are server or function calls, never a count of
+        <Activity className="size-3" /> requests are server or function calls, never a count of
         people. Missing data is shown as unknown.
       </p>
     </section>

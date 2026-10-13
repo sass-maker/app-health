@@ -31,6 +31,7 @@ import {
 } from './daily-cta-policy.js';
 import { readOwnerAlertFeed } from './alert-feed.js';
 import { readPortfolioBriefing } from './portfolio-briefing.js';
+import { readSpeedReport, readSpeedReportParts, summarizeSpeedForDay } from './speed-report.js';
 import { writeBotCounterHeartbeat } from './browser-bot-counters.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
@@ -42,6 +43,7 @@ import {
 } from './browser-routes.js';
 import {
   BriefingTraffic,
+  SpeedReportQuery,
   CreateAppRequestV1,
   CatalogImportRequestV1,
   DEFAULT_FAILURE_QUERY_LIMIT,
@@ -673,6 +675,85 @@ function briefingTraffic(url: URL): BriefingTraffic {
   return traffic.data;
 }
 
+async function handleSpeedReportRoute(
+  request: Request,
+  _bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+  env: Env,
+  timings?: OwnerRequestTimings,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/reports/speed') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  if (owner.appId || !owner.workspaceId) return productScopeForbidden();
+  if (!env.DB) return json(503, { error: 'speed report storage is unavailable' }, true);
+  const query = SpeedReportQuery.safeParse(Object.fromEntries(url.searchParams));
+  if (!query.success) return json(400, { error: 'invalid speed report query' }, true);
+  const db = env.DB;
+  const workspaceId = owner.workspaceId;
+  try {
+    const report = await measureOwnerRouteRead(timings, () =>
+      cachedAnalytics(
+        env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+        workspaceId,
+        `speed-report-v1:${JSON.stringify(query.data)}`,
+        () =>
+          readSpeedReport({
+            db,
+            workspaceId,
+            range: query.data.range,
+            now: Date.now(),
+            appId: query.data.app_id,
+            performanceClass: query.data.class,
+          }),
+      ),
+    );
+    return json(200, report, true);
+  } catch {
+    return json(503, { error: 'speed report is unavailable' }, true);
+  }
+}
+
+function dailySpeedClass(url: URL): SpeedReportQuery['class'] | null {
+  if (url.searchParams.get('speed') !== '1') return null;
+  const parsed = SpeedReportQuery.shape.class.safeParse(
+    url.searchParams.get('speed_class') ?? undefined,
+  );
+  if (!parsed.success)
+    throw Object.assign(new Error('speed_class must be landing, app, or api'), { status: 400 });
+  return parsed.data;
+}
+
+async function dailySpeedPayload(
+  env: Env,
+  workspaceId: string,
+  day: Parameters<typeof summarizeSpeedForDay>[1],
+  performanceClass: SpeedReportQuery['class'],
+  now: number,
+) {
+  try {
+    const speed = await cachedAnalytics(
+      env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
+      workspaceId,
+      `daily-speed-v1:${day.date}:${performanceClass}`,
+      async () =>
+        summarizeSpeedForDay(
+          await readSpeedReportParts({
+            db: env.DB!,
+            workspaceId,
+            window: day,
+            now,
+            performanceClass,
+          }),
+          day,
+        ),
+    );
+    return { speed };
+  } catch {
+    return { speed_error: 'unavailable' as const };
+  }
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -734,14 +815,20 @@ async function handleDailyEngagementRoute(
       );
       return json(200, briefing, true);
     }
+    const speedClass = dailySpeedClass(url);
+    const payload = dailyEngagementClientPayload(
+      await measureOwnerRouteRead(timings, loadReport),
+      url.searchParams.get('capture_applicability') === '1',
+      url.searchParams.get('browser_visitor_unknown_reason') === '1',
+      url.searchParams.get('feedback_applicability') === '1',
+    );
+    if (speedClass === null) return json(200, payload, true);
     return json(
       200,
-      dailyEngagementClientPayload(
-        await measureOwnerRouteRead(timings, loadReport),
-        url.searchParams.get('capture_applicability') === '1',
-        url.searchParams.get('browser_visitor_unknown_reason') === '1',
-        url.searchParams.get('feedback_applicability') === '1',
-      ),
+      {
+        ...payload,
+        ...(await dailySpeedPayload(env, workspaceId, day, speedClass, now)),
+      },
       true,
     );
   } catch (error) {
@@ -881,6 +968,8 @@ async function handleOwnerRoutes(
       handleInstallationStatusRoute(req, current, identity, target, options?.timings),
     handleWorkspaceHealthRoute,
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
+      handleSpeedReportRoute(req, current, identity, target, bindings, options?.timings),
+    (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
       handleDailyEngagementRoute(req, current, identity, target, bindings, options?.timings),
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, bindings: Env) =>
       handleOwnerAlertsRoute(req, current, identity, target, bindings, options?.timings),
@@ -962,6 +1051,7 @@ async function handleAccountOwner(
       '/v1/analytics/report',
       '/v1/reports/daily-engagement',
       '/v1/reports/portfolio-briefing',
+      '/v1/reports/speed',
       '/v1/workspace/alerts',
     ].includes(path);
   const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;

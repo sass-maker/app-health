@@ -1,4 +1,4 @@
-import { createElement, useEffect } from 'react';
+import { createElement, useEffect, type ReactElement } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
@@ -13,10 +13,10 @@ import {
 import { AnalyticsChart } from './AnalyticsChart.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { ProductBrand } from './ProductShell.js';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
-import { Separator } from './components/ui/separator.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
+import { Separator } from '@saas-maker/ui/components/separator';
 
 const sample = [
   12, 18, 14, 25, 20, 35, 28, 44, 32, 38, 54, 48, 64, 43, 58, 76, 64, 80, 72, 92, 78, 98, 89, 110,
@@ -42,7 +42,7 @@ function PreviewMetric({ label, value, note }: { label: string; value: string; n
   );
 }
 
-function ProductPreview(): JSX.Element {
+function ProductPreview(): ReactElement {
   const pages = [
     ['/pricing', '482'],
     ['/', '391'],
@@ -66,21 +66,21 @@ function ProductPreview(): JSX.Element {
           <CardTitle className="truncate text-sm">acme.app</CardTitle>
         </div>
         <Badge variant="outline" className="font-normal text-muted-foreground">
-          Illustrative data · 24h
+          illustrative data · 24h
         </Badge>
       </CardHeader>
       <CardContent className="p-0">
         <div className="grid grid-cols-3 divide-x divide-border border-b">
-          <PreviewMetric label="Page views" value="1,313" note="Pages opened" />
-          <PreviewMetric label="Product events" value="263" note="Actions tracked" />
-          <PreviewMetric label="Active now" value="12" note="Browser sessions" />
+          <PreviewMetric label="page views" value="1,313" note="Pages opened" />
+          <PreviewMetric label="product events" value="263" note="Actions tracked" />
+          <PreviewMetric label="active now" value="12" note="Browser sessions" />
         </div>
         <div className="px-3 py-5 sm:px-5">
           <AnalyticsChart series={sample} compact />
         </div>
         <div className="grid gap-px border-t bg-border sm:grid-cols-2">
-          <PreviewList label="Top pages" rows={pages} />
-          <PreviewList label="Product events" rows={events} />
+          <PreviewList label="top pages" rows={pages} />
+          <PreviewList label="product events" rows={events} />
         </div>
       </CardContent>
     </Card>
@@ -90,9 +90,7 @@ function ProductPreview(): JSX.Element {
 function PreviewList({ label, rows }: { label: string; rows: string[][] }) {
   return (
     <div className="bg-card p-5">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-        {label}
-      </p>
+      <p className="mb-3 text-xs font-semibold  tracking-[0.16em] text-muted-foreground">{label}</p>
       {rows.map(([name, value]) => (
         <div
           key={name}
@@ -106,17 +104,17 @@ function PreviewList({ label, rows }: { label: string; rows: string[][] }) {
   );
 }
 
-function Hero(): JSX.Element {
+function Hero(): ReactElement {
   return (
     <section className="relative overflow-hidden px-4 pb-20 pt-10 sm:px-6 sm:pb-28 sm:pt-16 lg:px-8">
       <div className="relative mx-auto max-w-7xl">
         <div className="max-w-4xl">
           <Badge variant="secondary" className="mb-5 px-3 py-1.5 font-medium">
-            For people shaping digital products
+            for people shaping digital products
           </Badge>
           <h1 className="max-w-4xl text-balance text-4xl font-semibold leading-[0.98] tracking-[-0.055em] sm:text-6xl lg:text-[5rem]">
-            See what people do.
-            <span className="block text-muted-foreground">Know what to improve.</span>
+            see what people do.
+            <span className="block text-muted-foreground">know what to improve.</span>
           </h1>
           <p className="mt-5 max-w-2xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
             App Health brings web analytics and meaningful product events into one calm workspace,
@@ -125,18 +123,18 @@ function Hero(): JSX.Element {
           <div className="mt-6 flex gap-3">
             <Button asChild size="lg" className="h-12 px-6">
               <a href="/app" data-app-health-event="dashboard_opened">
-                Open App Health <ArrowRight />
+                open App Health <ArrowRight />
               </a>
             </Button>
             <Button asChild size="lg" variant="outline" className="hidden h-12 px-6 sm:inline-flex">
               <a href="#product" data-app-health-event="product_explored">
-                Explore the product
+                explore the product
               </a>
             </Button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="outline" className="font-normal">
-              Local preview available
+              local preview available
             </Badge>
             <code className="rounded bg-muted px-2 py-1">&lt;script src="/tracker.js"&gt;</code>
             <code className="rounded bg-muted px-2 py-1">track('signup.completed')</code>
@@ -164,38 +162,38 @@ function Hero(): JSX.Element {
 const features = [
   {
     icon: BarChart3,
-    eyebrow: 'Web analytics',
-    title: 'Find the pages earning attention.',
+    eyebrow: 'web analytics',
+    title: 'find the pages earning attention.',
     body: 'Follow page views over time, see where visits come from, and move between one product and your whole workspace.',
-    proof: 'Top pages · Referral sources · 24-hour trends',
+    proof: 'top pages · referral sources · 24-hour trends',
   },
   {
     icon: MousePointer2,
-    eyebrow: 'Product events',
-    title: 'Measure the moments you choose.',
+    eyebrow: 'product events',
+    title: 'measure the moments you choose.',
     body: 'Name the actions that matter to your product. Open any event to see its trend, pages, and referral sources.',
-    proof: 'Event count · Last seen · Event drill-down',
+    proof: 'event count · last seen · event drill-down',
   },
   {
     icon: Activity,
-    eyebrow: 'Application health',
-    title: 'Bring evidence to the handoff.',
+    eyebrow: 'application health',
+    title: 'bring evidence to the handoff.',
     body: 'When product activity changes, inspect route traffic, latency, errors, and logs without leaving the workspace.',
-    proof: 'Observed routes · Latency · Errors · Logs',
+    proof: 'observed routes · latency · errors · logs',
   },
 ];
 
-function ProductSections(): JSX.Element {
+function ProductSections(): ReactElement {
   return (
     <section id="product" className="border-y bg-muted/25 px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+            <p className="text-xs font-semibold  tracking-[0.18em] text-primary">
               One product picture
             </p>
             <h2 className="mt-4 max-w-xl text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-              A visit is only the beginning.
+              a visit is only the beginning.
             </h2>
           </div>
           <p className="max-w-2xl text-pretty text-base leading-7 text-muted-foreground lg:justify-self-end lg:text-lg">
@@ -213,7 +211,7 @@ function ProductSections(): JSX.Element {
                   </span>
                   <span className="font-mono text-xs text-muted-foreground">0{index + 1}</span>
                 </div>
-                <p className="pt-5 text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                <p className="pt-5 text-xs font-semibold  tracking-[0.14em] text-muted-foreground">
                   {feature.eyebrow}
                 </p>
                 <CardTitle className="text-2xl leading-tight tracking-tight">
@@ -233,16 +231,16 @@ function ProductSections(): JSX.Element {
   );
 }
 
-function IntegrationSection(): JSX.Element {
+function IntegrationSection(): ReactElement {
   return (
     <section id="integration" className="px-4 py-20 sm:px-6 sm:py-28 lg:px-8">
       <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
         <div>
           <Badge variant="outline" className="gap-2">
-            <Code2 className="size-3.5" /> Small by design
+            <Code2 className="size-3.5" /> small by design
           </Badge>
           <h2 className="mt-6 text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-            From a product question to a clearer answer.
+            from a product question to a clearer answer.
           </h2>
           <p className="mt-6 max-w-xl text-base leading-7 text-muted-foreground">
             Add one browser snippet for automatic page views, then send named events for the actions
@@ -250,7 +248,7 @@ function IntegrationSection(): JSX.Element {
           </p>
           <Button asChild size="lg" className="mt-8 h-12">
             <a href="/app" data-app-health-event="project_add_started">
-              Add your project <ArrowRight />
+              add your project <ArrowRight />
             </a>
           </Button>
         </div>
@@ -259,7 +257,7 @@ function IntegrationSection(): JSX.Element {
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span className="size-2 rounded-full bg-success" /> your-website.html
             </div>
-            <Badge variant="secondary">Browser</Badge>
+            <Badge variant="secondary">browser</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <pre className="overflow-x-auto p-5 text-xs leading-6 sm:p-7 sm:text-sm">
@@ -273,13 +271,13 @@ window.appHealth.track('signup.completed')`}</code>
             </pre>
             <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border px-5 py-4 text-xs text-muted-foreground sm:px-7">
               <span className="inline-flex items-center gap-1.5">
-                <Zap className="size-3" /> Named events
+                <Zap className="size-3" /> named events
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Radio className="size-3" /> Active sessions
+                <Radio className="size-3" /> active sessions
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Activity className="size-3" /> Backend health
+                <Activity className="size-3" /> backend health
               </span>
             </div>
           </CardContent>
@@ -289,16 +287,14 @@ window.appHealth.track('signup.completed')`}</code>
   );
 }
 
-function HonestStatus(): JSX.Element {
+function HonestStatus(): ReactElement {
   return (
     <section className="border-y bg-primary text-primary-foreground">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_auto] lg:items-center lg:px-8">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] opacity-70">
-            Built in the open
-          </p>
+          <p className="text-xs font-semibold  tracking-[0.18em] opacity-70">Built in the open</p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-            Your traffic, events, and service health.
+            your traffic, events, and service health.
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 opacity-75">
             Sign in with Google, add a project, and connect the capabilities you need. Start with
@@ -307,7 +303,7 @@ function HonestStatus(): JSX.Element {
         </div>
         <Button asChild size="lg" variant="secondary" className="h-12">
           <a href="/changelog">
-            See what shipped <ArrowRight />
+            see what shipped <ArrowRight />
           </a>
         </Button>
       </div>
@@ -315,86 +311,79 @@ function HonestStatus(): JSX.Element {
   );
 }
 
-function ProductFooter(): JSX.Element {
-  return createElement(
-    'fleet-footer-extension',
-    {
-      'product-name': 'App Health',
-      'art-src': '/footer-art/app-health.webp',
-      'art-alt': 'Original App Health illustration',
-      'art-width': '2169',
-      'art-height': '725',
-      'art-position': '50% 50%',
-      'art-credit': 'Original illustration for App Health',
-      surface: 'web',
-      'font-base': '/fonts/fleet-footer-precise-v1/',
-      'data-fleet-footer-project': 'app-health',
-    },
-    <>
-      <div slot="cta" data-fleet-footer-cta className="flex flex-wrap items-center gap-4 py-6">
-        <a
-          className="inline-flex min-h-11 items-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
-          href="/app"
-          data-app-health-event="dashboard_opened"
-        >
-          Open App Health
-        </a>
-        <a
-          className="min-h-11 py-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-          href="#product"
-        >
-          Explore the product
-        </a>
-      </div>
-      <footer
-        slot="navigation"
-        data-fleet-footer-navigation
-        className="flex w-full flex-col gap-4 text-xs text-muted-foreground sm:flex-row sm:items-center"
-      >
-        <ProductBrand />
-        <span>A Fleet product for people who build products.</span>
-        <nav aria-label="Footer navigation" className="flex flex-wrap gap-x-5 gap-y-2 sm:ml-auto">
-          <a className="min-h-11 py-3 hover:text-foreground" href="/changelog">
-            Changelog
-          </a>
-          <a className="min-h-11 py-3 hover:text-foreground" href="/privacy">
-            Privacy
-          </a>
-        </nav>
-      </footer>
-    </>,
-  );
+interface StudioFooterElement extends HTMLElement {
+  config: Record<string, unknown>;
 }
 
-export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
+const footerConfig = {
+  product: 'App Health',
+  url: 'https://health.sassmaker.com',
+  summary: 'a Fleet product for people who build products.',
+  catalogId: 'app-health',
+  capture: 'newsletter',
+  variant: 'studio',
+  art: {
+    src: '/footer-art/app-health.webp',
+    alt: 'original App Health illustration',
+    position: '50% 50%',
+  },
+  groups: [
+    {
+      title: 'product',
+      links: [
+        { label: 'changelog', href: '/changelog' },
+        { label: 'privacy', href: '/privacy' },
+      ],
+    },
+  ],
+  privacyUrl: '/privacy',
+};
+
+/** The framework-free SaaS Maker footer; its stylesheet and element load on the landing page only. */
+function ProductFooter(): ReactElement {
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/footer.css';
+    const script = document.createElement('script');
+    script.type = 'module';
+    script.src = '/footer.js';
+    // Library gap: flex-1 collapses the stacked email field to its content height below 640px.
+    const fix = document.createElement('style');
+    fix.textContent = '@media (max-width:639px){studio-footer input[name="email"]{flex:none}}';
+    document.head.append(link, script, fix);
+    const syncTheme = () => {
+      const element = document.querySelector('studio-footer');
+      if (!element) return;
+      if (document.documentElement.dataset.theme === 'light') element.removeAttribute('data-mode');
+      else element.setAttribute('data-mode', 'dark');
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => {
+      observer.disconnect();
+      link.remove();
+      script.remove();
+      fix.remove();
+    };
+  }, []);
+  return createElement('studio-footer', {
+    ref: (element: StudioFooterElement | null) => {
+      if (element) element.config = footerConfig;
+    },
+  });
+}
+
+export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
   useEffect(() => {
     const controller = new AbortController();
     void redirectSignedInLanding(props.fetchImpl ?? fetch, props.navigate, controller.signal);
     return () => controller.abort();
   }, [props.fetchImpl, props.navigate]);
-  useEffect(() => {
-    const syncFooterTheme = () => {
-      const theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
-      document
-        .querySelectorAll<HTMLScriptElement>(
-          'script[src*="/project-strip.js"], script[src*="/ai-chat-footer.js"]',
-        )
-        .forEach((script) => {
-          script.dataset.theme = theme;
-        });
-      document.querySelector('fleet-footer-extension')?.setAttribute('theme', theme);
-      document
-        .querySelectorAll('portfolio-project-strip, ai-chat-footer, saas-maker-newsletter-capture')
-        .forEach((element) => element.setAttribute('theme', theme));
-    };
-    syncFooterTheme();
-    const observer = new MutationObserver(syncFooterTheme);
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ['data-theme'],
-    });
-    return () => observer.disconnect();
-  }, []);
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-40 border-b bg-background">
@@ -405,27 +394,27 @@ export function LandingPage(props: LandingSessionOptions = {}): JSX.Element {
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               href="#product"
             >
-              Product
+              product
             </a>
             <a
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               href="#integration"
             >
-              Integration
+              integration
             </a>
             <a
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               href="/changelog"
               data-app-health-event="release_status_opened"
             >
-              Changelog
+              changelog
             </a>
           </nav>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
             <ThemeToggle />
             <Button asChild size="sm" className="hidden sm:inline-flex">
               <a href="/app">
-                Open dashboard <ArrowRight />
+                open dashboard <ArrowRight />
               </a>
             </Button>
           </div>

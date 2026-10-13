@@ -7,12 +7,23 @@ import { PanelLeftIcon } from 'lucide-react';
 import { Slot } from 'radix-ui';
 
 import { useIsMobile } from '../../hooks/use-mobile.js';
-import { Button } from './button.js';
-import { Input } from './input.js';
-import { Separator } from './separator.js';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from './sheet.js';
-import { Skeleton } from './skeleton.js';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './tooltip.js';
+import { Button } from '@saas-maker/ui/components/button';
+import { Input } from '@saas-maker/ui/components/input';
+import { Separator } from '@saas-maker/ui/components/separator';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@saas-maker/ui/components/sheet';
+import { Skeleton } from '@saas-maker/ui/components/skeleton';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@saas-maker/ui/components/tooltip';
 
 const SIDEBAR_WIDTH = '16rem';
 const SIDEBAR_WIDTH_MOBILE = '18rem';

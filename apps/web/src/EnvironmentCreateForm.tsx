@@ -1,6 +1,6 @@
-import type { FormEvent } from 'react';
-import { Button } from './components/ui/button.js';
-import { Input } from './components/ui/input.js';
+import type { FormEvent, ReactElement } from 'react';
+import { Button } from '@saas-maker/ui/components/button';
+import { Input } from '@saas-maker/ui/components/input';
 
 interface Props {
   name: string;
@@ -9,7 +9,7 @@ interface Props {
   onSubmit: (event: FormEvent) => Promise<void>;
 }
 
-export function EnvironmentCreateForm(props: Props): JSX.Element {
+export function EnvironmentCreateForm(props: Props): ReactElement {
   const { name, pending, onName, onSubmit } = props;
   return (
     <form
@@ -17,7 +17,7 @@ export function EnvironmentCreateForm(props: Props): JSX.Element {
       onSubmit={(event) => void onSubmit(event)}
     >
       <label className="grid flex-1 gap-2 text-sm font-medium">
-        Add environment
+        add environment
         <Input
           value={name}
           onChange={(event) => onName(event.target.value)}
@@ -27,7 +27,7 @@ export function EnvironmentCreateForm(props: Props): JSX.Element {
         />
       </label>
       <Button type="submit" variant="outline" disabled={pending || !name.trim()}>
-        {pending ? 'Adding…' : 'Add environment'}
+        {pending ? 'adding…' : 'add environment'}
       </Button>
     </form>
   );

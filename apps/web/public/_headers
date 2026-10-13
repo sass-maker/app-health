@@ -1,3 +1,7 @@
 /tracker.js
   Cross-Origin-Resource-Policy: cross-origin
   Access-Control-Allow-Origin: *
+
+/vitals.js
+  Cross-Origin-Resource-Policy: cross-origin
+  Access-Control-Allow-Origin: *

@@ -15,15 +15,15 @@ test('a returning session survives refresh and does not trap Back on the landing
   await page.route('**/v1/apps', (route) => route.fulfill({ json: { apps: [] } }));
   await page.goto('/privacy');
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /See what people do/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /see what people do/ })).toBeVisible();
 
   signedIn = true;
   await page.reload();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole('button', { name: 'Create project', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'create project', exact: true })).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/\/app$/);
-  await expect(page.getByRole('button', { name: 'Create project', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'create project', exact: true })).toBeVisible();
   await page.goBack();
   await expect(page).toHaveURL(/\/privacy$/);
 });
@@ -31,10 +31,10 @@ test('a returning session survives refresh and does not trap Back on the landing
 test('a failed session check leaves the landing page usable', async ({ page }) => {
   await page.route('**/v1/auth/get-session', (route) => route.fulfill({ status: 503 }));
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /See what people do/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /see what people do/ })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('heading', { name: /See what people do/ })).toBeVisible();
-  await page.getByRole('link', { name: 'Open App Health', exact: true }).first().click();
+  await expect(page.getByRole('heading', { name: /see what people do/ })).toBeVisible();
+  await page.getByRole('link', { name: 'open App Health', exact: true }).first().click();
   await expect(page).toHaveURL(/\/app$/);
 });
 

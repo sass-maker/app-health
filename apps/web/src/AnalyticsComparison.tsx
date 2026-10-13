@@ -1,3 +1,5 @@
+import type { ReactElement } from 'react';
+
 export function AnalyticsComparison({
   current,
   previous,
@@ -10,7 +12,7 @@ export function AnalyticsComparison({
   label: string;
   sampled?: boolean;
   unique?: boolean;
-}): JSX.Element | null {
+}): ReactElement | null {
   if (previous === undefined) return null;
   if (sampled && unique)
     return (
@@ -18,23 +20,23 @@ export function AnalyticsComparison({
         aria-label={`${label} comparison`}
         className="mt-2 text-xs leading-5 text-muted-foreground"
       >
-        Comparison unavailable for sampled unique counts
+        comparison unavailable for sampled unique counts
       </p>
     );
   const change = previous ? ((current - previous) / previous) * 100 : null;
   const text =
     previous === 0
       ? current === 0
-        ? 'No change vs previous period'
-        : 'No activity in the previous period'
+        ? 'no change vs previous period'
+        : 'no activity in the previous period'
       : change === 0
-        ? 'No change vs previous period'
+        ? 'no change vs previous period'
         : Number.isFinite(change)
           ? `${change! > 0 ? '+' : ''}${change!.toLocaleString('en', { maximumFractionDigits: 1 })}% vs previous period`
-          : 'Change exceeds display range';
+          : 'change exceeds display range';
   return (
     <p aria-label={`${label} comparison`} className="mt-2 text-xs leading-5 text-muted-foreground">
-      {sampled ? 'Estimated · ' : ''}
+      {sampled ? 'estimated · ' : ''}
       {text}
     </p>
   );

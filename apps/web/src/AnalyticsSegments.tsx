@@ -1,6 +1,8 @@
+import type { ReactElement } from 'react';
 import type { BrowserSegmentFilter } from '@app-health/contracts';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { X } from 'lucide-react';
-import { Button } from './components/ui/button.js';
+import { Button } from '@saas-maker/ui/components/button';
 import { countryName } from './country-name.js';
 
 const labels: Record<keyof BrowserSegmentFilter, string> = {
@@ -27,13 +29,13 @@ export function AnalyticsSegments({
   onRemove: (key: keyof BrowserSegmentFilter) => void;
   onClear: () => void;
   emptyHint?: string;
-}): JSX.Element {
+}): ReactElement {
   const entries = Object.entries(filters) as [keyof BrowserSegmentFilter, string][];
   return (
     <section aria-label="Report filters" className="space-y-2">
       {entries.length ? (
         <>
-          <div className="flex flex-wrap items-center gap-2">
+          <FilterBar>
             {entries.map(([key, value]) => {
               const label = `${labels[key]}: ${key === 'country' ? countryName(value) : value}`;
               return (
@@ -45,23 +47,26 @@ export function AnalyticsSegments({
                   aria-label={`Remove ${label} filter`}
                   onClick={() => onRemove(key)}
                 >
-                  <span className="min-w-0 break-all">{label}</span>
+                  <span className="min-w-0 break-all">
+                    <span>{labels[key].toLowerCase()}: </span>
+                    {key === 'country' ? countryName(value) : value}
+                  </span>
                   <X className="shrink-0" />
                 </Button>
               );
             })}
             <Button variant="ghost" size="sm" onClick={onClear}>
-              Clear all filters
+              clear all filters
             </Button>
-          </div>
+          </FilterBar>
           <p className="text-xs leading-5 text-muted-foreground">
-            Showing events matching every filter, including the previous period. Live sessions
-            remain project-wide. Clear filters to see whole-session engagement.
+            showing events matching every filter, including the previous period. live sessions
+            remain project-wide. clear filters to see whole-session engagement.
           </p>
         </>
       ) : (
         <p className="text-xs text-muted-foreground">
-          {emptyHint ?? 'Click a country, source, page, or audience value to filter this report.'}
+          {emptyHint ?? 'click a country, source, page, or audience value to filter this report.'}
         </p>
       )}
     </section>

@@ -42,6 +42,29 @@ store with a five-second workspace poll. Restarting local Vite clears that data.
 To publish aggregate live counts on a product website, use
 [public live analytics and embeds](public-analytics.md).
 
+### Web vitals
+
+Add `data-vitals` (empty, `"1"`, or `"true"`) to the tracker tag to opt in.
+When its script URL ends in `/tracker.js`, the tracker lazily loads `/vitals.js`
+from the same host (beside `/tracker.js`);
+`vitals.js` is a separate opt-in static file with no runtime dependencies.
+The tracker gzip budget rises from 3250 to **3400 bytes** for the small loader (about 180 bytes); the vitals code itself stays out of the tracker. Vitals emit one `web.vitals`
+log per document, sent on the first hidden transition or pagehide. Optional
+`data-vitals-sample="0.1"` samples once per document; values must be in (0, 1],
+with missing or invalid values defaulting to 1. Webdriver and documents with
+no captured metrics send nothing; restoring from bfcache starts no new report.
+
+The debug-level log sends supported LCP, INP and TTFB in milliseconds, CLS ×
+1000, navigation type, and a lowercased first path segment (root or `/other`
+for invalid segments or concrete IDs). It includes no query, hash, host, or
+analytics identity. The first path segment is what pageview paths already carry; products whose first segment can be an identifying slug set `data-vitals-routes="docs,pricing"` so every other segment becomes `/other`. INP uses the browser's `performance.interactionCount` when available, so slow-event-only observation does not skew the 98th percentile. Prerendered documents are timed from activation, and LCP entries painted after the tab was first hidden are ignored. If `stop()` runs while `vitals.js` is still loading, vitals never start. It reaches the Logs store only, never Slack; performance
+reports and product wiring remain separate work. The same public key must be
+accepted for browser logs with the page's Origin allowed. `data-vitals-endpoint`
+overrides the logs endpoint; otherwise trailing `/v1/browser` becomes `/v1/logs`
+(default `https://ingest.sassmaker.com/v1/logs`). Delivery uses a text/plain
+beacon with a credential-free keepalive fetch fallback; `stop()` removes vitals
+observers and listeners too.
+
 ## Semantics and privacy
 
 - Persistent anonymous visitors are the default for new installations. IDs stay in
@@ -94,7 +117,7 @@ complete India calendar day after activation is the earliest bot-filtered
 visitor qualification candidate; historical days, including October 1, are not
 retroactively classified.
 
-The standalone script has no runtime dependencies and a tested **3 KB gzip**
+The standalone tracker has no runtime dependencies and a tested **3400-byte gzip**
 budget. It queues at most 100 events, sends at most 25 per batch, flushes after
 1.5 seconds, and reuses its batch ID on retry. A request times out after ten
 seconds; retryable failures get at most three attempts with backoff. Permanent
@@ -359,8 +382,8 @@ redirect preserves the browser source without extra landing-request cookies;
 there is no demonstrated need for an edge fallback in this change. A stripped
 referrer cannot be recovered by reading the destination request's Referer header.
 
-The tracker remains dependency-free and below a 3.2 KB gzip budget (raised from
-3 KB for cross-tab coordination and expiry correctness). Delivery is bounded to
+The tracker remains dependency-free with a 3400-byte gzip budget (3250 plus the opt-in vitals loader).
+The opt-in `vitals.js` (about 2.9 KB gzip) is served separately and only loaded on request. Delivery is bounded to
 100 queued/waiting events, 25 per batch and three fetch attempts; retries keep
 stable batch/event IDs. Storage restrictions prevent reliable cross-tab or
 returning-visitor recognition, and browser termination can prevent final delivery.

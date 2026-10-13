@@ -11,7 +11,7 @@ test('native setup creates and revokes a usable scoped public key in both themes
   ).json();
   const scope = `app_id=${created.app.id}&environment_id=${created.environment.id}`;
   await page.goto(`/app?project=${created.app.id}&environment=${created.environment.id}#settings`);
-  await page.getByRole('button', { name: 'Create native public key' }).click();
+  await page.getByRole('button', { name: 'create native public key' }).click();
   const key = await page.getByLabel('Native public key', { exact: true }).inputValue();
   expect(key).toMatch(/^ahk_native_[a-f0-9]{64}$/);
   const card = page.getByText('Swift apps', { exact: true }).locator('../..');
@@ -49,9 +49,9 @@ test('native setup creates and revokes a usable scoped public key in both themes
   expect((await request.post('/v1/native', { data: body })).status()).toBe(202);
   const analytics = await (await request.get(`/v1/analytics/report?range=1h&${scope}`)).json();
   expect(analytics.events).toEqual([expect.objectContaining({ name: 'native.setup', count: 1 })]);
-  await page.getByRole('button', { name: 'Revoke native key' }).click();
-  await page.getByRole('button', { name: 'Revoke now' }).click();
-  await expect(card.getByText('Revoked', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'revoke native key' }).click();
+  await page.getByRole('button', { name: 'revoke now' }).click();
+  await expect(card.getByText('revoked', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Native public key', { exact: true })).toHaveCount(0);
   expect((await request.post('/v1/native', { data: body })).status()).toBe(403);
 });

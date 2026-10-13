@@ -35,19 +35,20 @@ it('creates a scoped native key, provides copy fallback and confirms revocation'
     clipboard: { writeText: vi.fn().mockRejectedValue(new Error('unavailable')) },
   });
   show();
-  const create = screen.getByRole('button', { name: 'Create native public key' });
+  expect(screen.getByText('Swift apps', { exact: true })).toBeVisible();
+  const create = screen.getByRole('button', { name: 'create native public key' });
   await waitFor(() => expect(create).toBeEnabled());
   fireEvent.click(create);
   expect(await screen.findByLabelText('Native public key')).toHaveValue(key);
   expect(screen.getByText(/let health = try AppHealthClient/)).toHaveTextContent(
     'https://ingest.example.com',
   );
-  fireEvent.click(screen.getByRole('button', { name: 'Copy native key' }));
-  expect(await screen.findByRole('status')).toHaveTextContent('Select the key above');
-  fireEvent.click(screen.getByRole('button', { name: 'Revoke native key' }));
+  fireEvent.click(screen.getByRole('button', { name: 'copy native key' }));
+  expect(await screen.findByRole('status')).toHaveTextContent('select the key above');
+  fireEvent.click(screen.getByRole('button', { name: 'revoke native key' }));
   expect(request.mock.calls.filter(([, init]) => init.method === 'DELETE')).toHaveLength(0);
-  fireEvent.click(screen.getByRole('button', { name: 'Revoke now' }));
-  expect(await screen.findByText('Revoked')).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'revoke now' }));
+  expect(await screen.findByText('revoked')).toBeVisible();
   expect(screen.queryByLabelText('Native public key')).toBeNull();
 });
 it('caps active keys and recovers from an invalid list response', async () => {
@@ -67,11 +68,11 @@ it('caps active keys and recovers from an invalid list response', async () => {
   );
   show();
   expect(await screen.findByRole('alert')).toHaveTextContent('could not load');
-  fireEvent.click(screen.getByRole('button', { name: 'Retry native keys' }));
+  fireEvent.click(screen.getByRole('button', { name: 'retry native keys' }));
   await waitFor(() =>
-    expect(screen.getAllByRole('button', { name: 'Revoke native key' })).toHaveLength(5),
+    expect(screen.getAllByRole('button', { name: 'revoke native key' })).toHaveLength(5),
   );
-  expect(screen.getByRole('button', { name: 'Create native public key' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'create native public key' })).toBeDisabled();
 });
 it('times out a stalled load and aborts it when unmounted', async () => {
   vi.useFakeTimers();

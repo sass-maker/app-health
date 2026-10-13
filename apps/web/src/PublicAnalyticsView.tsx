@@ -3,12 +3,11 @@ import {
   parseSharedAnalytics,
   type SharedAnalytics as PublicAnalytics,
 } from '@app-health/contracts/sharing';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { usePublicAnalytics } from './usePublicAnalytics.js';
 import { PublicAnalyticsReport } from './PublicAnalyticsReport.js';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './components/ui/card.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { ErrorState } from '@saas-maker/ui/components/error-state';
 
 const TOKEN_PATTERN = /^ahs_[A-Za-z0-9_-]{43}$/;
 
@@ -21,7 +20,7 @@ function PublicHeader({ data, embed }: { data: PublicAnalytics | null; embed: bo
   return (
     <header className="mb-5 flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <p className="text-xs font-medium text-muted-foreground">Live analytics · App Health</p>
+        <p className="text-xs font-medium text-muted-foreground">live analytics · App Health</p>
         <h1
           className={
             embed
@@ -29,7 +28,7 @@ function PublicHeader({ data, embed }: { data: PublicAnalytics | null; embed: bo
               : 'mt-2 break-words text-3xl font-semibold tracking-tight'
           }
         >
-          {data?.project.name ?? 'Public analytics'}
+          {data?.project.name ?? 'public analytics'}
         </h1>
         {data ? (
           <Badge variant="secondary" className="mt-2">
@@ -43,7 +42,7 @@ function PublicHeader({ data, embed }: { data: PublicAnalytics | null; embed: bo
           href="/"
           rel="noreferrer"
         >
-          About App Health
+          about App Health
         </a>
       ) : null}
     </header>
@@ -51,30 +50,23 @@ function PublicHeader({ data, embed }: { data: PublicAnalytics | null; embed: bo
 }
 function PublicUnavailable({ reason, retry }: { reason: 'link' | 'temporary'; retry: () => void }) {
   return (
-    <Card role="alert" className="border-dashed">
-      <CardHeader>
-        <CardTitle>
-          <h2>
-            {reason === 'link'
-              ? 'This analytics link is unavailable'
-              : 'Analytics are temporarily unavailable'}
-          </h2>
-        </CardTitle>
-        <CardDescription>
-          {reason === 'link'
-            ? 'The owner may have revoked this link.'
-            : 'The latest live count was cleared. We will try again shortly.'}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Button variant="outline" onClick={retry}>
-          Try again
-        </Button>
-      </CardContent>
-    </Card>
+    <ErrorState
+      title={
+        reason === 'link'
+          ? 'this analytics link is unavailable'
+          : 'analytics are temporarily unavailable'
+      }
+      description={
+        reason === 'link'
+          ? 'the owner may have revoked this link.'
+          : 'the latest live count was cleared. we will try again shortly.'
+      }
+      onRetry={retry}
+      className="rounded-lg border border-dashed bg-card"
+    />
   );
 }
-export function PublicAnalyticsView(): JSX.Element {
+export function PublicAnalyticsView(): ReactElement {
   const [token, setToken] = useState(tokenFromLocation);
   useEffect(() => {
     const change = () => setToken(tokenFromLocation());

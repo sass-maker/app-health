@@ -36,7 +36,7 @@ separate Go compatibility job that retains the tagged Echo release canary.
 
 ## Boundaries
 
-- Edit `openspec/` and `PROJECT_STATUS.md` only through the OpenSpec workflow or parent review.
+- Track work in GitHub Issues; use the fleet `spec-driven` skill for large changes. Edit `PROJECT_STATUS.md` only through review.
 - Do not run `wrangler deploy`, create Cloudflare resources, or touch
   credentials, env files, or production configs without explicit production
   approval. Local V0 remains credential-free.

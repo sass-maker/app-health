@@ -63,7 +63,7 @@ for (const theme of ['dark', 'light']) {
           if (state === 'error') await expect(page.getByRole('alert').first()).toBeVisible();
           else if (state === 'empty')
             await expect(
-              page.getByText(/No endpoints observed yet|No retained failures in|No logs match/),
+              page.getByText(/no endpoints observed yet|no retained failures in|no logs match/),
             ).toBeVisible();
           else if (view === 'logs' && state === 'populated')
             await expect(page.getByText('review.error', { exact: true })).toBeVisible();
@@ -88,4 +88,20 @@ for (const theme of ['dark', 'light']) {
       }
     }
   }
+}
+
+for (const path of ['/', '/app?demo=populated']) {
+  test(`defaults to dark despite a light system preference at ${path}`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'light' });
+    await page.addInitScript(() => localStorage.removeItem('app-health-theme'));
+    await page.goto(path);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-mode', 'dark');
+    await page.getByRole('button', { name: 'Switch to light mode', exact: true }).click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+    await expect(page.locator('html')).toHaveAttribute('data-mode', 'light');
+    await expect(
+      page.getByRole('button', { name: 'Switch to dark mode', exact: true }),
+    ).toBeVisible();
+  });
 }

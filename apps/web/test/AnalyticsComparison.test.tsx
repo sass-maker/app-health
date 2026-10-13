@@ -5,9 +5,9 @@ import { AnalyticsComparison } from '../src/AnalyticsComparison.js';
 it.each([
   [20, 10, '+100% vs previous period'],
   [5, 10, '-50% vs previous period'],
-  [10, 10, 'No change vs previous period'],
-  [0, 0, 'No change vs previous period'],
-  [12, 0, 'No activity in the previous period'],
+  [10, 10, 'no change vs previous period'],
+  [0, 0, 'no change vs previous period'],
+  [12, 0, 'no activity in the previous period'],
   [0, 10, '-100% vs previous period'],
 ])('compares %s with %s without inventing zero-baseline growth', (current, previous, expected) => {
   render(<AnalyticsComparison label="Page views" current={current} previous={previous} />);
@@ -19,9 +19,9 @@ it('omits absent baselines and qualifies sampled event totals without comparing 
   expect(screen.queryByLabelText('Sessions comparison')).toBeNull();
   view.rerender(<AnalyticsComparison label="Sessions" current={10} previous={5} sampled unique />);
   expect(screen.getByLabelText('Sessions comparison')).toHaveTextContent(
-    'Comparison unavailable for sampled unique counts',
+    'comparison unavailable for sampled unique counts',
   );
   expect(screen.queryByText(/100%/)).toBeNull();
   view.rerender(<AnalyticsComparison label="Page views" current={10} previous={5} sampled />);
-  expect(screen.getByLabelText('Page views comparison')).toHaveTextContent('Estimated · +100%');
+  expect(screen.getByLabelText('Page views comparison')).toHaveTextContent('estimated · +100%');
 });

@@ -18,6 +18,7 @@ try {
   document.documentElement.dataset.theme = 'dark';
 }
 
+document.documentElement.dataset.mode = document.documentElement.dataset.theme;
 document.documentElement.classList.toggle(
   'dark',
   document.documentElement.dataset.theme !== 'light',

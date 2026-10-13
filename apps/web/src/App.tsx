@@ -1,3 +1,5 @@
+import { DataTable, DataTableSkeleton, type DataColumn } from './components/ResourceTable.js';
+import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { AnalyticsCacheProvider } from './AnalyticsCache.js';
 import {
   DASHBOARD_PAGES,
@@ -9,6 +11,8 @@ import { LabeledSelect as IdentitySelect } from './LabeledSelect.js';
 import { AnalyticsSharing } from './AnalyticsSharing.js';
 import { NativeKeys } from './NativeKeys.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
+import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
+import { SpeedView } from './SpeedView.js';
 import { EnvironmentCreateForm } from './EnvironmentCreateForm.js';
 import { ProductBrand, ProductShell } from './ProductShell.js';
 import { AnalyticsView } from './AnalyticsView.js';
@@ -29,7 +33,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import {
   DEGRADED_ERROR_RATE,
   DEGRADED_P95_MS,
@@ -71,19 +75,19 @@ import {
 } from '@app-health/contracts';
 import { GoogleSignIn } from './GoogleSignIn.js';
 import { GitHubIcon } from './GitHubIcon';
-import { Badge } from './components/ui/badge.js';
-import { Button } from './components/ui/button.js';
-import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card.js';
-import { Input } from './components/ui/input.js';
-import { Skeleton } from './components/ui/skeleton.js';
+import { Badge } from '@saas-maker/ui/components/badge';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
+import { Input } from '@saas-maker/ui/components/input';
+import { Skeleton } from '@saas-maker/ui/components/skeleton';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './components/ui/select.js';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs.js';
+} from '@saas-maker/ui/components/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@saas-maker/ui/components/tabs';
 import { Alert, AlertDescription, AlertTitle } from './components/ui/alert.js';
 import {
   AlertDialog,
@@ -103,11 +107,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from './components/ui/table.js';
+} from '@saas-maker/ui/components/table';
 import { ThemeToggle } from './ThemeToggle.js';
 import { ProjectsView } from './ProjectsView.js';
 
-const API_BASE = (import.meta.env.VITE_APP_HEALTH_API as string | undefined) ?? '';
 const INGEST_ORIGIN =
   (import.meta.env.VITE_APP_HEALTH_INGEST_ORIGIN as string | undefined) ?? window.location.origin;
 const STORAGE_KEY = 'app-health-v0-project';
@@ -135,26 +138,6 @@ const healthWeight: Record<EndpointAggregateV1['health_state'], number> = {
   healthy: 1,
 };
 
-function apiUrl(path: string): URL {
-  const base = API_BASE || window.location.origin;
-  return new URL(path, base);
-}
-
-function ownerHeaders(ownerToken: string, headers?: HeadersInit): Headers {
-  const next = new Headers(headers);
-  if (ownerToken) next.set('authorization', `Bearer ${ownerToken}`);
-  return next;
-}
-
-function ownerFetch(
-  path: string | URL,
-  ownerToken: string,
-  init: RequestInit = {},
-): Promise<Response> {
-  const url = typeof path === 'string' ? apiUrl(path) : path;
-  return fetch(url, { ...init, headers: ownerHeaders(ownerToken, init.headers) });
-}
-
 function readDashboardResponse<T>(
   value: unknown,
   schema: { safeParse: (value: unknown) => { success: boolean; data?: T } },
@@ -178,7 +161,7 @@ function readCapabilities(value: unknown): EnvironmentCapabilities {
     !parsed.success ||
     !CAPABILITY_IDS.every((id) => parsed.data.capabilities.some((item) => item.id === id))
   )
-    throw new Error('Capability status is incomplete');
+    throw new Error('capability status is incomplete');
   return parsed.data;
 }
 
@@ -207,7 +190,7 @@ function useEnvironmentCapabilities(project: SavedProject, ownerToken: string) {
         }
       } catch (cause) {
         if (!cancelled)
-          setError(cause instanceof Error ? cause.message : 'Capability status is unavailable');
+          setError(cause instanceof Error ? cause.message : 'capability status is unavailable');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -234,7 +217,7 @@ function useEnvironmentCapabilities(project: SavedProject, ownerToken: string) {
       setData(readCapabilities(await response.json()));
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save capabilities');
+      setError(cause instanceof Error ? cause.message : 'could not save capabilities');
       return false;
     } finally {
       setSaving(false);
@@ -300,8 +283,8 @@ function requestedProjectFromLocation(): { appId: string; environmentId: string 
 
 function projectUnavailableMessage(target: { appId: string; environmentId: string }): string {
   if (!target.appId || !target.environmentId)
-    return 'This analytics link is incomplete. Choose a project from your workspace.';
-  return 'This project is unavailable in the signed-in workspace. Choose a project from your workspace.';
+    return 'this analytics link is incomplete. choose a project from your workspace.';
+  return 'this project is unavailable in the signed-in workspace. choose a project from your workspace.';
 }
 
 function resolveInventorySelection(
@@ -363,7 +346,7 @@ function formatPercentileUpperBound(milliseconds: number): string {
 }
 
 function formatAge(timestamp: number | null): string {
-  if (timestamp === null) return 'Never';
+  if (timestamp === null) return 'never';
   const seconds = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.round(seconds / 60);
@@ -396,7 +379,7 @@ export function OwnerUnlock({
 }: {
   onUnlock: (token: string, listed: ListAppsResponseV1) => void;
   googleEnabled?: boolean;
-}): JSX.Element {
+}): ReactElement {
   const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -407,12 +390,12 @@ export function OwnerUnlock({
     setError(null);
     try {
       const response = await ownerFetch('/v1/apps', token.trim());
-      if (response.status === 403) throw new Error('That owner key was not accepted');
+      if (response.status === 403) throw new Error('that owner key was not accepted');
       if (!response.ok) throw new Error(`App Health returned ${response.status}`);
       onUnlock(token.trim(), (await response.json()) as ListAppsResponseV1);
       setToken('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not unlock App Health');
+      setError(cause instanceof Error ? cause.message : 'could not unlock App Health');
     } finally {
       setSubmitting(false);
     }
@@ -431,13 +414,13 @@ export function OwnerUnlock({
       <main className="mx-auto grid max-w-6xl gap-12 px-4 py-14 sm:px-6 sm:py-20 lg:grid-cols-[1.12fr_0.88fr] lg:items-center lg:py-28">
         <section aria-labelledby="unlock-title">
           <Badge variant="secondary" className="gap-2 font-medium">
-            <Radio className="size-3.5" /> Private product workspace
+            <Radio className="size-3.5" /> private product workspace
           </Badge>
           <h1
             id="unlock-title"
             className="mt-6 max-w-3xl text-balance text-5xl font-semibold leading-[1.02] tracking-[-0.05em] sm:text-6xl"
           >
-            Understand what people do—and what gets in their way.
+            understand what people do—and what gets in their way.
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
             Bring web traffic and intentional product events into one workspace, with application
@@ -447,18 +430,18 @@ export function OwnerUnlock({
             {[
               {
                 Icon: BarChart3,
-                label: 'Web analytics',
-                copy: 'Page views, sources, and live sessions.',
+                label: 'web analytics',
+                copy: 'page views, sources, and live sessions.',
               },
               {
                 Icon: MousePointer2,
-                label: 'Named events',
-                copy: 'The product actions your team chooses to measure.',
+                label: 'named events',
+                copy: 'the product actions your team chooses to measure.',
               },
               {
                 Icon: Activity,
-                label: 'App health',
-                copy: 'Route traffic, errors, latency, and logs.',
+                label: 'app health',
+                copy: 'route traffic, errors, latency, and logs.',
               },
             ].map(({ Icon, label, copy }) => (
               <Card key={label} className="bg-card/60 shadow-none">
@@ -472,27 +455,27 @@ export function OwnerUnlock({
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
             <Badge variant="outline" className="font-normal">
-              Connect your first project
+              connect your first project
             </Badge>
             <a className="hover:text-foreground" href="/changelog">
-              See what is shipped
+              see what is shipped
             </a>
             <a
               className="inline-flex items-center gap-2 hover:text-foreground"
               href="https://github.com/sass-maker/app-health"
               aria-label="GitHub repository"
             >
-              <GitHubIcon /> Source
+              <GitHubIcon /> source
             </a>
           </div>
         </section>
         <Card aria-label="Unlock App Health" className="border-border/80 shadow-xl">
           <CardHeader>
-            <CardTitle className="text-2xl">Open your workspace</CardTitle>
+            <CardTitle className="text-2xl">open your workspace</CardTitle>
             <p className="text-sm leading-6 text-muted-foreground">
               {googleEnabled
-                ? 'Sign in to see your products and their analytics.'
-                : 'Enter the owner key for this private deployment.'}
+                ? 'sign in to see your products and their analytics.'
+                : 'enter the owner key for this private deployment.'}
             </p>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -505,7 +488,7 @@ export function OwnerUnlock({
             ) : null}
             <form className="space-y-4" onSubmit={(event) => void submit(event)}>
               <label className="grid gap-2 text-sm font-medium">
-                Owner key
+                owner key
                 <Input
                   autoComplete="current-password"
                   autoFocus={!googleEnabled}
@@ -521,12 +504,12 @@ export function OwnerUnlock({
               {error ? (
                 <Alert variant="destructive">
                   <AlertTriangle />
-                  <AlertTitle>Could not open the workspace</AlertTitle>
-                  <AlertDescription>{error}. Check the key and try again.</AlertDescription>
+                  <AlertTitle>could not open the workspace</AlertTitle>
+                  <AlertDescription>{error}. check the key and try again.</AlertDescription>
                 </Alert>
               ) : null}
               <Button className="h-11 w-full" disabled={submitting || !token.trim()} type="submit">
-                {submitting ? 'Checking…' : 'Unlock'}
+                {submitting ? 'checking…' : 'unlock'}
               </Button>
             </form>
             <p className="text-xs leading-5 text-muted-foreground">
@@ -545,7 +528,7 @@ function Setup({
 }: {
   ownerToken: string;
   onCreated: (created: CreateAppResponseV1) => void;
-}): JSX.Element {
+}): ReactElement {
   const [name, setName] = useState('');
   const [environment, setEnvironment] = useState('production');
   const [error, setError] = useState<string | null>(null);
@@ -564,7 +547,7 @@ function Setup({
       if (!response.ok) throw new Error(`Setup API returned ${response.status}`);
       onCreated((await response.json()) as CreateAppResponseV1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create the app');
+      setError(cause instanceof Error ? cause.message : 'could not create the app');
     } finally {
       setSubmitting(false);
     }
@@ -574,13 +557,13 @@ function Setup({
     <main className="mx-auto grid max-w-6xl gap-8 px-4 py-8 sm:px-6 sm:py-14 lg:grid-cols-[1.1fr_0.9fr] lg:items-center lg:gap-12 lg:py-28">
       <section aria-labelledby="setup-title" className="order-2 lg:order-1">
         <Badge variant="secondary" className="gap-2 font-medium">
-          <BarChart3 className="size-3.5" /> Add your product
+          <BarChart3 className="size-3.5" /> add your product
         </Badge>
         <h1
           id="setup-title"
           className="mt-6 max-w-2xl text-balance text-5xl font-semibold leading-[1.02] tracking-[-0.05em] sm:text-6xl"
         >
-          Start with a product you want to understand.
+          start with a product you want to understand.
         </h1>
         <p className="mt-6 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
           Create a project, add the browser tracker, and start with page views and the product
@@ -588,25 +571,25 @@ function Setup({
         </p>
         <div className="mt-8 hidden gap-3 text-sm text-muted-foreground sm:grid sm:grid-cols-2">
           <span className="flex items-center gap-2 rounded-md border bg-card/60 p-3">
-            <BarChart3 className="size-4 text-primary" /> Page views and sources
+            <BarChart3 className="size-4 text-primary" /> page views and sources
           </span>
           <span className="flex items-center gap-2 rounded-md border bg-card/60 p-3">
-            <MousePointer2 className="size-4 text-primary" /> Named product events
+            <MousePointer2 className="size-4 text-primary" /> named product events
           </span>
           <span className="flex items-center gap-2 rounded-md border bg-card/60 p-3">
-            <Radio className="size-4 text-primary" /> Live sessions
+            <Radio className="size-4 text-primary" /> live sessions
           </span>
           <span className="flex items-center gap-2 rounded-md border bg-card/60 p-3">
-            <Activity className="size-4 text-primary" /> Route and log context
+            <Activity className="size-4 text-primary" /> route and log context
           </span>
         </div>
       </section>
       <Card aria-label="Create an App Health project" className="order-1 shadow-xl lg:order-2">
         <CardHeader>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+          <p className="text-xs font-semibold  tracking-[0.16em] text-primary">
             Step 1 · Add a product
           </p>
-          <CardTitle className="text-2xl">Create your project</CardTitle>
+          <CardTitle className="text-2xl">create your project</CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
             Use the name your team knows. You can connect browser analytics after creation.
           </p>
@@ -614,7 +597,7 @@ function Setup({
         <CardContent>
           <form className="space-y-4" onSubmit={(event) => void submit(event)}>
             <label className="grid gap-2 text-sm font-medium">
-              Application name
+              application name
               <Input
                 required
                 maxLength={128}
@@ -625,7 +608,7 @@ function Setup({
               />
             </label>
             <label className="grid gap-2 text-sm font-medium">
-              Environment
+              environment
               <Input
                 required
                 maxLength={64}
@@ -636,18 +619,18 @@ function Setup({
             {error ? (
               <Alert variant="destructive">
                 <AlertTriangle />
-                <AlertTitle>Setup failed</AlertTitle>
-                <AlertDescription>{error}. Check the local API and try again.</AlertDescription>
+                <AlertTitle>setup failed</AlertTitle>
+                <AlertDescription>{error}. check the local API and try again.</AlertDescription>
               </Alert>
             ) : null}
             <Button className="h-11 w-full" disabled={submitting || !name.trim()} type="submit">
-              {submitting ? 'Creating…' : 'Create project'}
+              {submitting ? 'creating…' : 'create project'}
             </Button>
           </form>
           <p className="mt-4 text-xs leading-5 text-muted-foreground">
             {import.meta.env.DEV
-              ? 'Local preview · no cloud resources are created.'
-              : 'Project keys are shown once. Save yours before continuing.'}
+              ? 'local preview · no cloud resources are created.'
+              : 'project keys are shown once. save yours before continuing.'}
           </p>
         </CardContent>
       </Card>
@@ -661,7 +644,7 @@ function KeySetup({
 }: {
   created: CreateAppResponseV1;
   onDone: () => void;
-}): JSX.Element {
+}): ReactElement {
   type SetupRuntime = 'express' | 'hono' | 'pages' | 'echo' | 'otel';
   const [runtime, setRuntime] = useState<SetupRuntime>('express');
   const [copied, setCopied] = useState<string | null>(null);
@@ -683,7 +666,7 @@ function KeySetup({
   async function copy(value: string, label: 'key' | 'snippet'): Promise<void> {
     setCopyError(null);
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard API unavailable');
       await navigator.clipboard.writeText(value);
       setCopied(label);
     } catch {
@@ -708,9 +691,9 @@ function KeySetup({
             <CheckCircle2 className="size-5" />
           </span>
           <div>
-            <Badge variant="secondary">Project ready</Badge>
+            <Badge variant="secondary">project ready</Badge>
             <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-              Save the application health key
+              save the application health key
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
               This server key is shown once. Save it if you want route and latency context; browser
@@ -726,7 +709,7 @@ function KeySetup({
                 <code className="mt-2 block break-all rounded-md bg-muted p-3 text-xs">{key}</code>
               </div>
               <Button variant="outline" onClick={() => void copy(key, 'key')}>
-                {copied === 'key' ? 'Copied' : 'Copy key'}
+                {copied === 'key' ? 'copied' : 'copy key'}
               </Button>
             </div>
             {copyError === 'key' ? <CopyFallback subject="key" /> : null}
@@ -734,13 +717,13 @@ function KeySetup({
         </Card>
         <div className="flex justify-end">
           <Button size="lg" onClick={onDone}>
-            Save key and choose capabilities
+            save key and choose capabilities
           </Button>
         </div>
         <Card className="overflow-hidden shadow-none">
           <Tabs value={runtime} onValueChange={(value) => setRuntime(value as typeof runtime)}>
             <CardHeader className="border-b">
-              <CardTitle className="text-base">Optional application health setup</CardTitle>
+              <CardTitle className="text-base">optional application health setup</CardTitle>
               <p className="text-sm text-muted-foreground">
                 Choose the runtime behind this product to add route, latency, and error context.
               </p>
@@ -752,7 +735,7 @@ function KeySetup({
                   Express
                 </TabsTrigger>
                 <TabsTrigger value="hono" onClick={() => setRuntime('hono')}>
-                  Hono Worker
+                  Hono worker
                 </TabsTrigger>
                 <TabsTrigger value="pages" onClick={() => setRuntime('pages')}>
                   Pages Functions
@@ -761,7 +744,7 @@ function KeySetup({
                   Go + Echo
                 </TabsTrigger>
                 <TabsTrigger value="otel" onClick={() => setRuntime('otel')}>
-                  Existing OpenTelemetry
+                  existing OpenTelemetry
                 </TabsTrigger>
               </TabsList>
             </CardHeader>
@@ -775,14 +758,14 @@ function KeySetup({
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-xs text-muted-foreground">
                         {value === 'otel'
-                          ? 'Reload your Collector and send one traced request to a server route.'
-                          : 'Run your application and make one request to any route.'}
+                          ? 'reload your collector and send one traced request to a server route.'
+                          : 'run your application and make one request to any route.'}
                       </p>
                       <Button
                         variant="outline"
                         onClick={() => void copy(currentSnippet, 'snippet')}
                       >
-                        {copied === 'snippet' ? 'Copied snippet' : 'Copy snippet'}
+                        {copied === 'snippet' ? 'copied snippet' : 'copy snippet'}
                       </Button>
                     </div>
                     {copyError === 'snippet' ? <CopyFallback subject="snippet" /> : null}
@@ -797,13 +780,13 @@ function KeySetup({
   );
 }
 
-function CopyFallback({ subject }: { subject: 'key' | 'snippet' }): JSX.Element {
+function CopyFallback({ subject }: { subject: 'key' | 'snippet' }): ReactElement {
   return (
     <Alert variant="destructive">
       <AlertTriangle />
-      <AlertTitle>Automatic copy unavailable</AlertTitle>
+      <AlertTitle>automatic copy unavailable</AlertTitle>
       <AlertDescription>
-        Select the {subject} above and copy it manually. The value remains visible on this page.
+        select the {subject} above and copy it manually. the value remains visible on this page.
       </AlertDescription>
     </Alert>
   );
@@ -819,36 +802,36 @@ function connectedRuntimeLabel(runtime: Runtime | undefined): string {
   if (runtime === 'node') return 'Node.js';
   if (runtime === 'worker') return 'Cloudflare Worker';
   if (runtime === 'go') return 'Go';
-  return 'Your OpenTelemetry pipeline';
+  return 'your OpenTelemetry pipeline';
 }
 
 function connectedMessage(runtime: Runtime | undefined): string {
   return runtime
     ? `${connectedRuntimeLabel(runtime)} is sending endpoint summaries.`
-    : 'Endpoint summaries are arriving.';
+    : 'endpoint summaries are arriving.';
 }
 
 function statusBannerCopy(status: InstallationStatusV1): [string, string] {
   if (status.state === 'waiting')
     return [
-      'Waiting for traffic',
-      'Start your service and make one request. This page checks automatically.',
+      'waiting for traffic',
+      'start your service and make one request. this page checks automatically.',
     ];
   if (status.state === 'connected')
     return [connectedTitle(status.runtime), connectedMessage(status.runtime)];
   if (status.state === 'stale')
     return [
-      'Traffic has gone quiet',
-      'This source connected before, but no recent events arrived. Check that your service is running.',
+      'traffic has gone quiet',
+      'this source connected before, but no recent events arrived. check that your service is running.',
     ];
   if (status.state === 'revoked')
     return [
-      'Ingest key revoked',
-      'Create a fresh project key before this service can send more endpoint summaries.',
+      'ingest key revoked',
+      'create a fresh project key before this service can send more endpoint summaries.',
     ];
   return [
-    'Installation check unavailable',
-    'The metrics API could not verify this installation. Your application remains unaffected.',
+    'installation check unavailable',
+    'the metrics API could not verify this installation. your application remains unaffected.',
   ];
 }
 
@@ -858,11 +841,11 @@ function StatusBanner({
 }: {
   status: InstallationStatusV1;
   fixture: boolean;
-}): JSX.Element {
+}): ReactElement {
   const [title, message] = fixture
     ? [
-        'Sample data',
-        'These metrics are seeded fixtures, not traffic received from an SDK. Create a project to verify your own service.',
+        'sample data',
+        'these metrics are seeded fixtures, not traffic received from an SDK. create a project to verify your own service.',
       ]
     : statusBannerCopy(status);
   const stateClass =
@@ -880,7 +863,7 @@ function StatusBanner({
         <p>{message}</p>
         {status.state === 'waiting' ? (
           <Badge variant="outline" className="w-fit font-normal">
-            Checking every 10s
+            checking every 10s
           </Badge>
         ) : null}
       </AlertDescription>
@@ -888,70 +871,153 @@ function StatusBanner({
   );
 }
 
-function EndpointTableRow({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Element {
+function EndpointCell({
+  endpoint,
+  column,
+}: {
+  endpoint: EndpointAggregateV1;
+  column: number;
+}): ReactElement {
   const hasMetrics = endpoint.metrics_available !== false;
   const sampled = endpoint.upstream_sampled || endpoint.sampled;
-  return (
-    <TableRow>
-      <TableCell>
-        <Badge variant="outline" className={methodClass(endpoint.method)}>
-          {endpoint.method}
-        </Badge>
-      </TableCell>
-      <TableCell>
-        <div className="grid gap-1">
-          <code className="text-xs font-medium">{endpoint.route}</code>
-          {sampled ? (
-            <span className="text-xs text-muted-foreground">
-              {endpoint.upstream_sampled ? 'OTel sampled estimate' : 'Sampled estimate'}
+  const cells = [
+    <span key="0">
+      <Badge variant="outline" className={methodClass(endpoint.method)}>
+        {endpoint.method}
+      </Badge>
+    </span>,
+    <span key="1">
+      <div className="grid gap-1">
+        <code className="text-xs font-medium">{endpoint.route}</code>
+        {sampled ? (
+          <span className="text-xs text-muted-foreground">
+            {endpoint.upstream_sampled ? 'OTel sampled estimate' : 'sampled estimate'}
+          </span>
+        ) : null}
+      </div>
+    </span>,
+    <span key="2" className="tabular-nums">
+      {hasMetrics ? endpoint.request_count.toLocaleString() : '—'}
+    </span>,
+    <span
+      key="3"
+      className={`tabular-nums ${hasMetrics && endpoint.error_rate >= 0.01 ? 'text-destructive' : ''}`}
+    >
+      {hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'}
+    </span>,
+    <span key="4" className="tabular-nums" title="histogram upper-bound estimate">
+      {hasMetrics ? formatPercentileUpperBound(endpoint.p50_ms) : '—'}
+    </span>,
+    <span key="5" className="tabular-nums" title="histogram upper-bound estimate">
+      {hasMetrics ? formatPercentileUpperBound(endpoint.p95_ms) : '—'}
+    </span>,
+    <span key="6" className="tabular-nums">
+      {hasMetrics ? (
+        <span className="inline-flex items-center gap-1.5">
+          {formatBytes(endpoint.avg_response_bytes)}
+          {endpoint.response_bytes_delta_pct !== null &&
+          endpoint.response_bytes_delta_pct !== undefined ? (
+            <span
+              className={`text-xs ${endpoint.response_bytes_delta_pct > 5 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+              title="average payload size vs the previous window"
+            >
+              {endpoint.response_bytes_delta_pct > 0 ? '+' : ''}
+              {endpoint.response_bytes_delta_pct.toFixed(0)}%
             </span>
           ) : null}
-        </div>
-      </TableCell>
-      <TableCell className="tabular-nums">
-        {hasMetrics ? endpoint.request_count.toLocaleString() : '—'}
-      </TableCell>
-      <TableCell
-        className={`tabular-nums ${hasMetrics && endpoint.error_rate >= 0.01 ? 'text-destructive' : ''}`}
-      >
-        {hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'}
-      </TableCell>
-      <TableCell className="tabular-nums" title="Histogram upper-bound estimate">
-        {hasMetrics ? formatPercentileUpperBound(endpoint.p50_ms) : '—'}
-      </TableCell>
-      <TableCell className="tabular-nums" title="Histogram upper-bound estimate">
-        {hasMetrics ? formatPercentileUpperBound(endpoint.p95_ms) : '—'}
-      </TableCell>
-      <TableCell className="tabular-nums">
-        {hasMetrics ? (
-          <span className="inline-flex items-center gap-1.5">
-            {formatBytes(endpoint.avg_response_bytes)}
-            {endpoint.response_bytes_delta_pct !== null &&
-            endpoint.response_bytes_delta_pct !== undefined ? (
-              <span
-                className={`text-xs ${endpoint.response_bytes_delta_pct > 5 ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
-                title="Average payload size vs the previous window"
-              >
-                {endpoint.response_bytes_delta_pct > 0 ? '+' : ''}
-                {endpoint.response_bytes_delta_pct.toFixed(0)}%
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          '—'
-        )}
-      </TableCell>
-      <TableCell className="text-muted-foreground">{formatAge(endpoint.last_seen)}</TableCell>
-      <TableCell>
-        <Badge variant="outline" className={healthClass(endpoint.health_state)}>
-          {hasMetrics ? endpoint.health_state.replace('-', ' ') : 'metrics unavailable'}
-        </Badge>
-      </TableCell>
-    </TableRow>
-  );
+        </span>
+      ) : (
+        '—'
+      )}
+    </span>,
+    <span key="7" className="text-muted-foreground">
+      {formatAge(endpoint.last_seen)}
+    </span>,
+    <span key="8">
+      <Badge variant="outline" className={healthClass(endpoint.health_state)}>
+        {hasMetrics ? endpoint.health_state.replace('-', ' ') : 'metrics unavailable'}
+      </Badge>
+    </span>,
+  ];
+  return cells[column]!;
 }
 
-function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Element {
+const endpointColumns: DataColumn<EndpointAggregateV1>[] = [
+  {
+    id: 'method',
+    header: 'method',
+    value: (endpoint) => endpoint.method,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={0} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'route',
+    header: 'route',
+    value: (endpoint) => endpoint.route,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={1} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'requests',
+    header: 'requests',
+    value: (endpoint) => endpoint.request_count,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={2} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'error_rate',
+    header: 'error rate',
+    value: (endpoint) => endpoint.error_rate,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={3} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'p50',
+    header: 'p50',
+    value: (endpoint) => endpoint.p50_ms,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={4} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'p95',
+    header: 'p95',
+    value: (endpoint) => endpoint.p95_ms,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={5} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'size',
+    header: 'avg size',
+    value: (endpoint) => endpoint.avg_response_bytes,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={6} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'last_seen',
+    header: 'last seen',
+    value: (endpoint) => endpoint.last_seen,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={7} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'health',
+    header: 'health',
+    value: (endpoint) => endpoint.health_state,
+    cell: (endpoint) => <EndpointCell endpoint={endpoint} column={8} />,
+    sortable: false,
+    hideable: false,
+  },
+];
+
+function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): ReactElement {
   const hasMetrics = endpoint.metrics_available !== false;
   const sampled = endpoint.upstream_sampled || endpoint.sampled;
   return (
@@ -965,7 +1031,7 @@ function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Elem
             <code className="break-all text-xs font-medium">{endpoint.route}</code>
             {sampled ? (
               <span className="text-xs text-muted-foreground">
-                {endpoint.upstream_sampled ? 'OTel sampled estimate' : 'Sampled estimate'}
+                {endpoint.upstream_sampled ? 'OTel sampled estimate' : 'sampled estimate'}
               </span>
             ) : null}
           </div>
@@ -977,13 +1043,13 @@ function EndpointCard({ endpoint }: { endpoint: EndpointAggregateV1 }): JSX.Elem
       <CardContent className="pt-4">
         <dl className="grid grid-cols-2 gap-4">
           {[
-            ['Requests', hasMetrics ? endpoint.request_count.toLocaleString() : '—'],
-            ['Error rate', hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'],
+            ['requests', hasMetrics ? endpoint.request_count.toLocaleString() : '—'],
+            ['error rate', hasMetrics ? `${(endpoint.error_rate * 100).toFixed(1)}%` : '—'],
             ['p50 upper bound', hasMetrics ? formatPercentileUpperBound(endpoint.p50_ms) : '—'],
             ['p95 upper bound', hasMetrics ? formatPercentileUpperBound(endpoint.p95_ms) : '—'],
-            ['Avg size', hasMetrics ? formatBytes(endpoint.avg_response_bytes) : '—'],
+            ['avg size', hasMetrics ? formatBytes(endpoint.avg_response_bytes) : '—'],
             [
-              'Size growth',
+              'size growth',
               hasMetrics && endpoint.response_bytes_delta_pct != null
                 ? `${endpoint.response_bytes_delta_pct > 0 ? '+' : ''}${endpoint.response_bytes_delta_pct.toFixed(0)}% vs prev window`
                 : '—',
@@ -1016,17 +1082,19 @@ function TimeWindowControl({
       role="group"
       aria-label="Time window"
     >
-      {WINDOWS.map((window) => (
-        <Button
-          key={window}
-          size="sm"
-          variant={value === window ? 'secondary' : 'ghost'}
-          aria-pressed={value === window}
-          onClick={() => onChange(window)}
-        >
-          {window}
-        </Button>
-      ))}
+      <FilterBar>
+        {WINDOWS.map((window) => (
+          <Button
+            key={window}
+            size="sm"
+            variant={value === window ? 'secondary' : 'ghost'}
+            aria-pressed={value === window}
+            onClick={() => onChange(window)}
+          >
+            {window}
+          </Button>
+        ))}
+      </FilterBar>
     </div>
   );
 }
@@ -1041,87 +1109,89 @@ function EndpointHealth(props: {
   sortKey: SortKey;
   sortDirection: SortDirection;
   onSort: (key: SortKey) => void;
-}): JSX.Element {
+}): ReactElement {
   const { project, status, error, loading, hasData, endpoints, sortKey, sortDirection, onSort } =
     props;
   const endpointSummary = !hasData
     ? loading
-      ? 'Loading endpoint count…'
-      : 'Endpoint count unavailable'
+      ? 'loading endpoint count…'
+      : 'endpoint count unavailable'
     : error
-      ? `${endpoints.length} observed · Showing last successful result`
+      ? `${endpoints.length} observed · showing last successful result`
       : loading
-        ? `${endpoints.length} observed · Refreshing`
+        ? `${endpoints.length} observed · refreshing`
         : `${endpoints.length} observed`;
   const columns = [
-    ['requests', 'Requests'],
-    ['error_rate', 'Error rate'],
+    ['requests', 'requests'],
+    ['error_rate', 'error rate'],
     ['p95', 'p50'],
     ['p95', 'p95'],
-    ['size', 'Avg size'],
-    ['last_seen', 'Last seen'],
-    ['health', 'Health'],
+    ['size', 'avg size'],
+    ['last_seen', 'last seen'],
+    ['health', 'health'],
   ] as [SortKey, string][];
   return (
     <div className="space-y-5">
       {error ? (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Can’t refresh endpoint data</AlertTitle>
+          <AlertTitle>can’t refresh endpoint data</AlertTitle>
           <AlertDescription className="sm:flex-row sm:items-center sm:justify-between">
-            <p>{error}. Your application is unaffected; the SDK fails open.</p>
+            <p>{error}. your application is unaffected; the SDK fails open.</p>
             <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
-              Try again
+              try again
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
-      {status ? (
-        <StatusBanner
-          status={status}
-          fixture={import.meta.env.DEV && project.appId === SEED_APP_ID}
-        />
-      ) : null}
+      <div className="min-h-32 sm:min-h-24">
+        {status ? (
+          <StatusBanner
+            status={status}
+            fixture={import.meta.env.DEV && project.appId === SEED_APP_ID}
+          />
+        ) : loading ? (
+          <Skeleton className="h-32 w-full sm:h-24" />
+        ) : null}
+      </div>
       <Card className="overflow-hidden shadow-none" aria-busy={loading}>
         <CardHeader className="flex flex-row items-end justify-between gap-4 border-b">
           <div>
-            <CardTitle className="text-base">Observed endpoints</CardTitle>
+            <CardTitle className="text-base">observed endpoints</CardTitle>
             <p className="mt-1 text-xs text-muted-foreground" role="status">
               {endpointSummary}
-              {hasData ? ' · Measurements update after each complete minute' : null}
+              {hasData ? ' · measurements update after each complete minute' : null}
             </p>
           </div>
-          <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-            <span>Sort by</span>
+          <FilterBar className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            <span>sort by</span>
             <Select value={sortKey} onValueChange={(value) => onSort(value as SortKey)}>
               <SelectTrigger aria-label="Sort endpoints" className="w-40 bg-background">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="health">Health</SelectItem>
-                <SelectItem value="requests">Requests</SelectItem>
-                <SelectItem value="error_rate">Error rate</SelectItem>
+                <SelectItem value="health">health</SelectItem>
+                <SelectItem value="requests">requests</SelectItem>
+                <SelectItem value="error_rate">error rate</SelectItem>
                 <SelectItem value="p95">p95 latency</SelectItem>
-                <SelectItem value="last_seen">Last seen</SelectItem>
+                <SelectItem value="last_seen">last seen</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </FilterBar>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="min-h-[28rem] p-0 lg:min-h-72">
           {loading && endpoints.length === 0 ? (
-            <div className="space-y-2 p-4" aria-label="Loading endpoints">
-              <Skeleton className="h-14" />
-              <Skeleton className="h-14" />
-              <Skeleton className="h-14" />
+            <div aria-label="Loading endpoints">
+              <DataTableSkeleton columns={endpointColumns} rows={3} />
             </div>
           ) : null}
           {!loading && !error && endpoints.length === 0 ? (
             <Alert className="m-4 w-auto">
               <Activity />
-              <AlertTitle>No endpoints observed yet</AlertTitle>
+              <AlertTitle>no endpoints observed yet</AlertTitle>
               <AlertDescription>
                 <p>
-                  Start {project.name}, then make a request to any route. Measurements appear after
+                  start {project.name}, then make a request to any route. measurements appear after
                   the minute completes.
                 </p>
                 <code className="mt-3 inline-block rounded-md bg-muted px-3 py-2 text-xs text-foreground">
@@ -1133,39 +1203,36 @@ function EndpointHealth(props: {
           {endpoints.length > 0 ? (
             <>
               <div className="hidden xl:block">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Method</TableHead>
-                      <TableHead>Route</TableHead>
+                <DataTable
+                  label="observed endpoints"
+                  data={endpoints}
+                  columns={endpointColumns}
+                  getRowId={(endpoint) => `${endpoint.method}|${endpoint.route}`}
+                  pageSize={Math.max(1, endpoints.length)}
+                  manual={{ rowCount: endpoints.length, page: 0, onPageChange: () => {} }}
+                  maxHeight="none"
+                  toolbar={() => (
+                    <FilterBar>
                       {columns.map(([key, label]) => (
-                        <TableHead key={`${key}-${label}`}>
-                          <button
-                            className="inline-flex items-center gap-1"
-                            onClick={() => onSort(key)}
-                          >
-                            {label}
-                            {sortKey === key ? (
-                              <span
-                                aria-label={sortDirection === 'desc' ? 'descending' : 'ascending'}
-                              >
-                                {sortDirection === 'desc' ? '↓' : '↑'}
-                              </span>
-                            ) : null}
-                          </button>
-                        </TableHead>
+                        <Button
+                          key={`${key}-${label}`}
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onSort(key)}
+                        >
+                          {label}
+                          {sortKey === key ? (
+                            <span
+                              aria-label={sortDirection === 'desc' ? 'descending' : 'ascending'}
+                            >
+                              {sortDirection === 'desc' ? '↓' : '↑'}
+                            </span>
+                          ) : null}
+                        </Button>
                       ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {endpoints.map((endpoint) => (
-                      <EndpointTableRow
-                        key={`${endpoint.method}|${endpoint.route}`}
-                        endpoint={endpoint}
-                      />
-                    ))}
-                  </TableBody>
-                </Table>
+                    </FilterBar>
+                  )}
+                />
               </div>
               <div className="grid gap-3 p-4 lg:grid-cols-2 xl:hidden">
                 {endpoints.map((endpoint) => (
@@ -1178,7 +1245,7 @@ function EndpointHealth(props: {
       </Card>
       <Card className="shadow-none">
         <CardHeader>
-          <CardTitle className="text-sm">How health is decided</CardTitle>
+          <CardTitle className="text-sm">how health is decided</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-3 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
           <p>
@@ -1209,32 +1276,32 @@ function EndpointHealth(props: {
 }
 
 const receivedFields = [
-  ['batch_id', 'Retry deduplication', 'Short-lived', 'Eligible for cleanup after 1 hour'],
-  ['schema_version', 'Contract validation', 'Not stored', 'Discarded after validation'],
-  ['runtime', 'SDK and installation state', 'Latest + aggregate', 'Node, Worker, Go, or OTel'],
-  ['release', 'Release comparison', 'Aggregate / failure', 'Failure value expires after 24 hours'],
-  ['event_id', 'Failure identity', 'Failures only', 'Queryable for 24 hours'],
-  ['timestamp', 'Windowing and freshness', 'Aggregate / inventory / failure', 'No request content'],
-  ['method', 'Endpoint identity', 'Inventory + aggregate + failure', 'Uppercase HTTP method'],
-  ['route', 'Endpoint identity', 'Inventory + aggregate + failure', 'Normalized template only'],
+  ['batch_id', 'retry deduplication', 'short-lived', 'eligible for cleanup after 1 hour'],
+  ['schema_version', 'contract validation', 'not stored', 'discarded after validation'],
+  ['runtime', 'SDK and installation state', 'latest + aggregate', 'Node, Worker, Go, or OTel'],
+  ['release', 'release comparison', 'aggregate / failure', 'failure value expires after 24 hours'],
+  ['event_id', 'failure identity', 'failures only', 'queryable for 24 hours'],
+  ['timestamp', 'windowing and freshness', 'aggregate / inventory / failure', 'no request content'],
+  ['method', 'endpoint identity', 'inventory + aggregate + failure', 'uppercase HTTP method'],
+  ['route', 'endpoint identity', 'inventory + aggregate + failure', 'normalized template only'],
   [
     'status_code',
-    'Counts and error classification',
-    'Aggregate / failure',
-    'Exact only for 4xx/5xx',
+    'counts and error classification',
+    'aggregate / failure',
+    'exact only for 4xx/5xx',
   ],
-  ['duration_ms', 'Latency histogram', 'Aggregate / failure', 'Exact only for 4xx/5xx'],
+  ['duration_ms', 'latency histogram', 'aggregate / failure', 'exact only for 4xx/5xx'],
 ] as const;
 
 const excludedFields = [
-  'Request bodies',
-  'Response bodies',
-  'Headers',
-  'Cookies',
-  'Query values',
-  'Route parameter values',
-  'User identity',
-  'Logs and stack traces',
+  'request bodies',
+  'response bodies',
+  'headers',
+  'cookies',
+  'query values',
+  'route parameter values',
+  'user identity',
+  'logs and stack traces',
 ];
 
 function formatTimestamp(timestamp: number): string {
@@ -1244,26 +1311,36 @@ function formatTimestamp(timestamp: number): string {
   }).format(new Date(timestamp));
 }
 
+const failureColumns = [
+  'method',
+  'normalized route',
+  'status',
+  'duration',
+  'occurred',
+  'release',
+  'failure id',
+].map((header) => ({ id: header, header, minWidth: '6rem' }));
+
 function FailureDetail({
   failure,
   detailId,
 }: {
   failure: FailureEventV1;
   detailId: string;
-}): JSX.Element {
+}): ReactElement {
   return (
     <TableRow className="bg-muted/25 hover:bg-muted/25">
       <TableCell colSpan={7} className="whitespace-normal p-4 sm:p-5">
         <div id={detailId} className="rounded-lg border bg-card p-4 sm:p-5">
           <div>
-            <strong className="block text-sm">Retained failure detail</strong>
+            <strong className="block text-sm">retained failure detail</strong>
             <span className="mt-1 block text-xs text-muted-foreground">
-              Exact fields kept for this failed request
+              exact fields kept for this failed request
             </span>
           </div>
           <dl className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">Endpoint</dt>
+              <dt className="text-xs text-muted-foreground">endpoint</dt>
               <dd className="mt-1 text-sm">
                 <code className="break-all">
                   {failure.method} {failure.route}
@@ -1271,17 +1348,17 @@ function FailureDetail({
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Status</dt>
+              <dt className="text-xs text-muted-foreground">status</dt>
               <dd className="mt-1 text-sm font-medium">{failure.status_code}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Duration</dt>
+              <dt className="text-xs text-muted-foreground">duration</dt>
               <dd className="mt-1 text-sm font-medium">
                 {failure.duration_ms.toLocaleString()} ms
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Occurred</dt>
+              <dt className="text-xs text-muted-foreground">occurred</dt>
               <dd className="mt-1 text-sm">
                 <time dateTime={new Date(failure.occurred_at).toISOString()}>
                   {formatTimestamp(failure.occurred_at)}
@@ -1289,11 +1366,11 @@ function FailureDetail({
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Release</dt>
-              <dd className="mt-1 text-sm">{failure.release ?? 'Not reported'}</dd>
+              <dt className="text-xs text-muted-foreground">release</dt>
+              <dd className="mt-1 text-sm">{failure.release ?? 'not reported'}</dd>
             </div>
             <div className="min-w-0">
-              <dt className="text-xs text-muted-foreground">Failure ID</dt>
+              <dt className="text-xs text-muted-foreground">failure id</dt>
               <dd className="mt-1 text-sm">
                 <code className="break-all">{failure.failure_id}</code>
               </dd>
@@ -1309,7 +1386,7 @@ function FailureDetail({
   );
 }
 
-function FailureRow({ failure }: { failure: FailureEventV1 }): JSX.Element {
+function FailureRow({ failure }: { failure: FailureEventV1 }): ReactElement {
   const [expanded, setExpanded] = useState(false);
   const detailId = `failure-detail-${failure.failure_id}`;
   const endpointLabel = `${failure.method} ${failure.route} ${failure.status_code}`;
@@ -1349,7 +1426,7 @@ function FailureRow({ failure }: { failure: FailureEventV1 }): JSX.Element {
             aria-label={`${expanded ? 'Hide' : 'View'} details for ${endpointLabel}`}
             onClick={() => setExpanded((value) => !value)}
           >
-            {expanded ? 'Hide details' : 'View details'}
+            {expanded ? 'hide details' : 'view details'}
           </Button>
         </TableCell>
       </TableRow>
@@ -1366,7 +1443,7 @@ function DataReceived({
   project: SavedProject;
   ownerToken: string;
   windowKey: Window;
-}): JSX.Element {
+}): ReactElement {
   const [data, setData] = useState<FailureQueryResponseV1 | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1389,7 +1466,7 @@ function DataReceived({
         }
       } catch (cause) {
         if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Could not load retained failures');
+          setError(cause instanceof Error ? cause.message : 'could not load retained failures');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -1410,7 +1487,7 @@ function DataReceived({
           </span>
           <div className="min-w-0 flex-1">
             <CardTitle id="trust-statement-title" className="text-xl">
-              Every request counts. Only failures leave a row.
+              every request counts. only failures leave a row.
             </CardTitle>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
               2xx and 3xx requests are folded into counts and fixed latency buckets, then their
@@ -1435,48 +1512,46 @@ function DataReceived({
       <Card aria-busy={loading} className="overflow-hidden shadow-none">
         <CardHeader className="flex flex-row items-center justify-between gap-4 border-b">
           <div>
-            <CardTitle className="text-base">Latest retained failures</CardTitle>
+            <CardTitle className="text-base">latest retained failures</CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               {data?.failures.length ?? 0} of up to 50 shown
               {data ? ` · refreshed ${formatAge(data.refreshed_at)}` : ''}
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => setRefresh((value) => value + 1)}>
-            <RefreshCw className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Refreshing…' : 'Refresh'}
+            <RefreshCw />
+            {loading ? 'refreshing…' : 'refresh'}
           </Button>
         </CardHeader>
         <CardContent className="p-0">
           {error ? (
             <Alert variant="destructive" className="m-4 w-auto">
               <AlertTriangle />
-              <AlertTitle>Failure details are unavailable</AlertTitle>
+              <AlertTitle>failure details are unavailable</AlertTitle>
               <AlertDescription className="sm:flex-row sm:items-center sm:justify-between">
-                <p>{error}. Collection policy and aggregate metrics are unchanged.</p>
+                <p>{error}. collection policy and aggregate metrics are unchanged.</p>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setRefresh((value) => value + 1)}
                 >
-                  Try again
+                  try again
                 </Button>
               </AlertDescription>
             </Alert>
           ) : null}
           {loading && !data ? (
-            <div className="space-y-2 p-4" aria-label="Loading recent failures">
-              <Skeleton className="h-12" />
-              <Skeleton className="h-12" />
-              <Skeleton className="h-12" />
+            <div aria-label="Loading recent failures">
+              <DataTableSkeleton columns={failureColumns} rows={3} />
             </div>
           ) : null}
           {!loading && !error && data?.failures.length === 0 ? (
             <Alert className="m-4 w-auto border-emerald-500/25 bg-emerald-500/5">
               <CheckCircle2 className="text-emerald-700 dark:text-emerald-400" />
-              <AlertTitle>No retained failures in the last {WINDOW_LABELS[windowKey]}</AlertTitle>
+              <AlertTitle>no retained failures in the last {WINDOW_LABELS[windowKey]}</AlertTitle>
               <AlertDescription>
-                There are no individual 4xx or 5xx rows in this period. Choose a longer period or
-                check App health for the complete aggregate traffic picture.
+                there are no individual 4xx or 5xx rows in this period. choose a longer period or
+                check app health for the complete aggregate traffic picture.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -1484,13 +1559,13 @@ function DataReceived({
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Normalized route</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Duration</TableHead>
-                  <TableHead>Occurred</TableHead>
-                  <TableHead>Release</TableHead>
-                  <TableHead>Failure ID</TableHead>
+                  <TableHead>method</TableHead>
+                  <TableHead>normalized route</TableHead>
+                  <TableHead>status</TableHead>
+                  <TableHead>duration</TableHead>
+                  <TableHead>occurred</TableHead>
+                  <TableHead>release</TableHead>
+                  <TableHead>failure id</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1506,7 +1581,7 @@ function DataReceived({
       <Card aria-labelledby="field-ledger-title" className="overflow-hidden shadow-none">
         <CardHeader className="border-b">
           <CardTitle id="field-ledger-title" className="text-base">
-            The complete accepted shape
+            the complete accepted shape
           </CardTitle>
           <p className="text-sm leading-6 text-muted-foreground">
             Unknown fields make the entire batch fail validation. App Health does not silently
@@ -1514,30 +1589,31 @@ function DataReceived({
           </p>
         </CardHeader>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Field</TableHead>
-                <TableHead>Why it arrives</TableHead>
-                <TableHead>Where it remains</TableHead>
-                <TableHead>Boundary</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {receivedFields.map(([field, purpose, destination, boundary]) => (
-                <TableRow key={field}>
-                  <TableCell>
-                    <code className="text-xs">{field}</code>
-                  </TableCell>
-                  <TableCell className="whitespace-normal">{purpose}</TableCell>
-                  <TableCell className="whitespace-normal">{destination}</TableCell>
-                  <TableCell className="whitespace-normal text-muted-foreground">
-                    {boundary}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+          <DataTable
+            label="Accepted telemetry fields"
+            data={[...receivedFields]}
+            getRowId={(row) => row[0]}
+            pageSize={receivedFields.length}
+            maxHeight="none"
+            columns={[
+              {
+                id: 'field',
+                header: 'field',
+                value: (row) => row[0],
+                cell: (row) => <code className="text-xs">{row[0]}</code>,
+                sortable: false,
+                hideable: false,
+              },
+              ...['why it arrives', 'where it remains', 'boundary'].map((header, index) => ({
+                id: header,
+                header,
+                value: (row: (typeof receivedFields)[number]) => row[index + 1],
+                sortable: false,
+                hideable: false,
+                className: 'whitespace-normal',
+              })),
+            ]}
+          />
         </CardContent>
       </Card>
 
@@ -1548,7 +1624,7 @@ function DataReceived({
           </span>
           <div>
             <CardTitle id="excluded-data-title" className="text-base">
-              Never collected
+              never collected
             </CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
               These fields are absent from the SDK contract and rejected by the ingest validator.
@@ -1593,10 +1669,10 @@ function DataReceived({
 }
 
 const LEVEL_FILTER_LABELS: Record<LogLevel, string> = {
-  debug: 'All levels',
-  info: 'Info and above',
-  warn: 'Warn and above',
-  error: 'Errors only',
+  debug: 'all levels',
+  info: 'info and above',
+  warn: 'warn and above',
+  error: 'errors only',
 };
 
 const LEVEL_ICONS: Record<LogLevel, string> = { debug: '🔍', info: '🔔', warn: '⚠️', error: '🚨' };
@@ -1605,43 +1681,76 @@ function formatPropValue(value: StoredLogV1['props'][string]): string {
   return value === null ? 'null' : String(value);
 }
 
-function LogRow({ log }: { log: StoredLogV1 }): JSX.Element {
+function LogCell({ log, column }: { log: StoredLogV1; column: number }): ReactElement {
   const props = Object.entries(log.props);
-  return (
-    <TableRow>
-      <TableCell>
-        <div className="flex flex-wrap gap-1.5">
-          <Badge variant={log.level === 'error' ? 'destructive' : 'secondary'}>{log.level}</Badge>
-          {log.source !== 'server' ? <Badge variant="outline">{log.source}</Badge> : null}
-        </div>
-      </TableCell>
-      <TableCell>
-        <span className="mr-2" aria-hidden="true">
-          {log.icon ?? LEVEL_ICONS[log.level]}
-        </span>
-        <code className="text-xs font-medium">{log.event}</code>
-      </TableCell>
-      <TableCell className="min-w-64 whitespace-normal">
-        {log.title ? <strong className="block text-sm">{log.title}</strong> : null}
-        {log.description ? (
-          <p className="text-sm text-muted-foreground">{log.description}</p>
-        ) : null}
-        {props.length > 0 ? (
-          <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Properties">
-            {props.map(([key, value]) => (
-              <li key={key} className="rounded bg-muted px-2 py-1 text-xs">
-                <b>{key}</b> {formatPropValue(value)}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </TableCell>
-      <TableCell className="text-muted-foreground" title={formatTimestamp(log.timestamp)}>
-        {formatAge(log.timestamp)}
-      </TableCell>
-    </TableRow>
-  );
+  const cells = [
+    <span key="0">
+      <div className="flex flex-wrap gap-1.5">
+        <Badge variant={log.level === 'error' ? 'destructive' : 'secondary'}>{log.level}</Badge>
+        {log.source !== 'server' ? <Badge variant="outline">{log.source}</Badge> : null}
+      </div>
+    </span>,
+    <span key="1">
+      <span className="mr-2" aria-hidden="true">
+        {log.icon ?? LEVEL_ICONS[log.level]}
+      </span>
+      <code className="text-xs font-medium">{log.event}</code>
+    </span>,
+    <span key="2" className="min-w-64 whitespace-normal">
+      {log.title ? <strong className="block text-sm">{log.title}</strong> : null}
+      {log.description ? <p className="text-sm text-muted-foreground">{log.description}</p> : null}
+      {props.length > 0 ? (
+        <ul className="mt-2 flex flex-wrap gap-1.5" aria-label="Properties">
+          {props.map(([key, value]) => (
+            <li key={key} className="rounded bg-muted px-2 py-1 text-xs">
+              <b>{key}</b> {formatPropValue(value)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </span>,
+    <span key="3" className="text-muted-foreground" title={formatTimestamp(log.timestamp)}>
+      {formatAge(log.timestamp)}
+    </span>,
+  ];
+  return cells[column]!;
 }
+
+const logColumns: DataColumn<StoredLogV1>[] = [
+  {
+    id: 'level',
+    header: 'level',
+    value: (log) => log.level,
+    cell: (log) => <LogCell log={log} column={0} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'event',
+    header: 'event',
+    value: (log) => log.event,
+    cell: (log) => <LogCell log={log} column={1} />,
+    sortable: false,
+    hideable: false,
+  },
+  {
+    id: 'detail',
+    header: 'detail',
+    value: (log) => log.description,
+    cell: (log) => <LogCell log={log} column={2} />,
+    sortable: false,
+    hideable: false,
+    className: 'min-w-64 whitespace-normal',
+  },
+  {
+    id: 'when',
+    header: 'when',
+    value: (log) => log.timestamp,
+    cell: (log) => <LogCell log={log} column={3} />,
+    sortable: false,
+    hideable: false,
+  },
+];
 
 function LogsSurface({
   data,
@@ -1653,54 +1762,45 @@ function LogsSurface({
   error: string | null;
   loading: boolean;
   onRefresh: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <CardContent className="p-0">
       {error ? (
         <Alert variant="destructive" className="m-4 w-auto">
           <AlertTriangle />
-          <AlertTitle>Logs are unavailable</AlertTitle>
+          <AlertTitle>logs are unavailable</AlertTitle>
           <AlertDescription className="sm:flex-row sm:items-center sm:justify-between">
-            <p>{error}. Your application is unaffected; log delivery fails open.</p>
+            <p>{error}. your application is unaffected; log delivery fails open.</p>
             <Button variant="outline" size="sm" onClick={onRefresh}>
-              Try again
+              try again
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
       {loading && !data ? (
-        <div className="space-y-2 p-4" aria-label="Loading logs">
-          <Skeleton className="h-12" />
-          <Skeleton className="h-12" />
-          <Skeleton className="h-12" />
+        <div aria-label="Loading logs">
+          <DataTableSkeleton columns={logColumns} rows={3} />
         </div>
       ) : null}
       {!loading && !error && data?.logs.length === 0 ? (
         <Alert className="m-4 w-auto">
           <Activity />
-          <AlertTitle>No logs match</AlertTitle>
+          <AlertTitle>no logs match</AlertTitle>
           <AlertDescription>
-            Send one from your app with <code>appHealth.log(&apos;signup&apos;, …)</code> or POST a
-            batch to <code>/v1/logs</code> with your ingest key. It appears here within seconds.
+            send one from your app with <code>apphealth.log(&apos;signup&apos;, …)</code> or POST a
+            batch to <code>/v1/logs</code> with your ingest key. it appears here within seconds.
           </AlertDescription>
         </Alert>
       ) : null}
       {data && data.logs.length > 0 ? (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Level</TableHead>
-              <TableHead>Event</TableHead>
-              <TableHead>Detail</TableHead>
-              <TableHead>When</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.logs.map((log) => (
-              <LogRow key={log.log_id} log={log} />
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable
+          label="application logs"
+          data={data.logs}
+          columns={logColumns}
+          getRowId={(log) => log.log_id}
+          pageSize={Math.max(1, data.logs.length)}
+          maxHeight="none"
+        />
       ) : null}
     </CardContent>
   );
@@ -1732,7 +1832,7 @@ function LogsView({
 }: {
   project: SavedProject;
   ownerToken: string;
-}): JSX.Element {
+}): ReactElement {
   const [filters, setFilters] = useState<LogsFilters>({ level: 'debug', source: '', event: '' });
   const [result, setResult] = useState<LogsResult>({ data: null, error: null, loading: true });
   const [refresh, setRefresh] = useState(0);
@@ -1758,7 +1858,7 @@ function LogsView({
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        const error = cause instanceof Error ? cause.message : 'Could not load logs';
+        const error = cause instanceof Error ? cause.message : 'could not load logs';
         setResult((previous) => ({ ...previous, error, loading: false }));
       })
       .finally(() => window.clearTimeout(timeout));
@@ -1802,11 +1902,11 @@ function LogsToolbar({
   filters: LogsFilters;
   onFilters: (update: (previous: LogsFilters) => LogsFilters) => void;
   onRefresh: () => void;
-}): JSX.Element {
+}): ReactElement {
   return (
     <CardHeader className="gap-5 border-b lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <CardTitle className="text-base">Application logs</CardTitle>
+        <CardTitle className="text-base">application logs</CardTitle>
         <p className="mt-1 text-xs text-muted-foreground">
           {data?.logs.length ?? 0} shown · kept {data?.retention_days ?? 30} days
           {data ? ` · refreshed ${formatAge(data.refreshed_at)}` : ''}
@@ -1820,71 +1920,73 @@ function LogsToolbar({
           onFilters((previous) => ({ ...previous, event: next }));
         }}
       >
-        <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-          <span>Level</span>
-          <Select
-            value={filters.level}
-            onValueChange={(value) =>
-              onFilters((previous) => ({ ...previous, level: value as LogLevel }))
-            }
-          >
-            <SelectTrigger aria-label="Minimum level" className="w-full bg-background lg:w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {LOG_LEVELS.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {LEVEL_FILTER_LABELS[value]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-          <span>Source</span>
-          <Select
-            value={filters.source || 'all'}
-            onValueChange={(value) =>
-              onFilters((previous) => ({
-                ...previous,
-                source: value === 'all' ? '' : (value as LogSource),
-              }))
-            }
-          >
-            <SelectTrigger aria-label="Source" className="w-full bg-background lg:w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sources</SelectItem>
-              {LOG_SOURCES.map((value) => (
-                <SelectItem key={value} value={value}>
-                  {value === 'server'
-                    ? 'Server only'
-                    : value === 'native'
-                      ? 'Native only'
-                      : 'Browser only'}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-          Event
-          <Input
-            name="event"
-            aria-label="Event name"
-            placeholder="signup"
-            defaultValue={filters.event}
-            className="h-10"
-          />
-        </label>
-        <Button type="submit" variant="outline" size="sm" className="h-10">
-          Apply
-        </Button>
-        <Button type="button" variant="outline" size="sm" className="h-10" onClick={onRefresh}>
-          <RefreshCw className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Refreshing…' : 'Refresh'}
-        </Button>
+        <FilterBar className="items-end">
+          <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            <span>level</span>
+            <Select
+              value={filters.level}
+              onValueChange={(value) =>
+                onFilters((previous) => ({ ...previous, level: value as LogLevel }))
+              }
+            >
+              <SelectTrigger aria-label="Minimum level" className="w-full bg-background lg:w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LOG_LEVELS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {LEVEL_FILTER_LABELS[value]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            <span>source</span>
+            <Select
+              value={filters.source || 'all'}
+              onValueChange={(value) =>
+                onFilters((previous) => ({
+                  ...previous,
+                  source: value === 'all' ? '' : (value as LogSource),
+                }))
+              }
+            >
+              <SelectTrigger aria-label="Source" className="w-full bg-background lg:w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">all sources</SelectItem>
+                {LOG_SOURCES.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value === 'server'
+                      ? 'server only'
+                      : value === 'native'
+                        ? 'native only'
+                        : 'browser only'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
+            event
+            <Input
+              name="event"
+              aria-label="Event name"
+              placeholder="signup"
+              defaultValue={filters.event}
+              className="h-10"
+            />
+          </label>
+          <Button type="submit" variant="outline" size="sm" className="h-10">
+            apply
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="h-10" onClick={onRefresh}>
+            <RefreshCw />
+            {loading ? 'refreshing…' : 'refresh'}
+          </Button>
+        </FilterBar>
       </form>
     </CardHeader>
   );
@@ -1901,18 +2003,18 @@ type BrowserKeyPurpose = 'analytics' | 'logs' | 'combined';
 const BROWSER_KEY_COPY: Record<BrowserKeyPurpose, { intro: string; summary: string }> = {
   analytics: {
     intro:
-      'Create an origin-bound public key, then install the generated tracker on your website. It records page views and active browser sessions; your code sends only the named events you choose.',
-    summary: 'Browser tracker keys',
+      'create an origin-bound public key, then install the generated tracker on your website. it records page views and active browser sessions; your code sends only the named events you choose.',
+    summary: 'browser tracker keys',
   },
   logs: {
     intro:
-      'Create an origin-bound public key for explicit browser logs. Use it for client errors and product moments that your server cannot observe.',
-    summary: 'Browser logging keys',
+      'create an origin-bound public key for explicit browser logs. use it for client errors and product moments that your server cannot observe.',
+    summary: 'browser logging keys',
   },
   combined: {
     intro:
-      'Create an origin-bound public key for browser analytics or explicit browser logs. The key is safe to ship only from the origins you allow.',
-    summary: 'Public browser keys',
+      'create an origin-bound public key for browser analytics or explicit browser logs. the key is safe to ship only from the origins you allow.',
+    summary: 'public browser keys',
   },
 };
 
@@ -1931,12 +2033,12 @@ interface PublicKeysPanelProps {
   purpose?: BrowserKeyPurpose;
 }
 
-function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
+function PublicKeysPanel(props: PublicKeysPanelProps): ReactElement {
   const {
     project,
     ownerToken,
     installMode = false,
-    eyebrow = 'Browser analytics setup',
+    eyebrow = 'browser analytics setup',
     title,
     purpose = 'analytics',
   } = props;
@@ -1957,7 +2059,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
-        const error = cause instanceof Error ? cause.message : 'Could not load browser keys';
+        const error = cause instanceof Error ? cause.message : 'could not load browser keys';
         setState((previous) => ({ ...previous, error }));
       });
     return () => {
@@ -1980,7 +2082,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
       setState((previous) => ({ ...previous, created, error: null }));
       setRefresh((value) => value + 1);
     } catch (cause) {
-      const error = cause instanceof Error ? cause.message : 'Could not create browser key';
+      const error = cause instanceof Error ? cause.message : 'could not create browser key';
       setState((previous) => ({ ...previous, error }));
     }
   }
@@ -1994,7 +2096,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
       setState((previous) => ({ ...previous, error: null }));
       setRefresh((value) => value + 1);
     } catch (cause) {
-      const error = cause instanceof Error ? cause.message : 'Could not revoke browser key';
+      const error = cause instanceof Error ? cause.message : 'could not revoke browser key';
       setState((previous) => ({ ...previous, error }));
     }
   }
@@ -2006,7 +2108,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
       {state.error ? (
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Browser key request failed</AlertTitle>
+          <AlertTitle>browser key request failed</AlertTitle>
           <AlertDescription>{state.error}</AlertDescription>
         </Alert>
       ) : null}
@@ -2025,9 +2127,7 @@ function PublicKeysPanel(props: PublicKeysPanelProps): JSX.Element {
     return (
       <Card className="max-w-4xl shadow-none">
         <CardHeader className="border-b">
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
-            {eyebrow}
-          </p>
+          <p className="text-xs font-semibold  tracking-[0.16em] text-primary">{eyebrow}</p>
           <CardTitle className="text-xl">{title ?? `Connect ${project.name}`}</CardTitle>
           <p className="text-sm text-muted-foreground">
             Environment: {project.environment} · keys are restricted to the origins you enter.
@@ -2053,7 +2153,7 @@ function PublicKeyForm({
   onCreate,
 }: {
   onCreate: (origins: string[]) => Promise<void>;
-}): JSX.Element {
+}): ReactElement {
   return (
     <form
       className="flex flex-col gap-3 sm:flex-row sm:items-end"
@@ -2066,7 +2166,7 @@ function PublicKeyForm({
       }}
     >
       <label className="grid flex-1 gap-2 text-sm font-medium">
-        Allowed origins
+        allowed origins
         <Input
           name="origins"
           aria-label="Allowed origins"
@@ -2075,7 +2175,7 @@ function PublicKeyForm({
         />
       </label>
       <Button type="submit" variant="outline" className="h-10">
-        Create browser key
+        create browser key
       </Button>
     </form>
   );
@@ -2091,13 +2191,13 @@ function PublicKeyReveal({
   project: SavedProject;
   environment: string;
   purpose: BrowserKeyPurpose;
-}): JSX.Element {
+}): ReactElement {
   const [identityMode, setIdentityMode] = useState('persistent');
   const logsSnippet = `import { createWebLogger } from '@saas-maker/app-health/web';\n\nconst logs = createWebLogger({\n  publicKey: '${created.key}',\n  environment: ${JSON.stringify(environment)},\n  endpoint: '${INGEST_ORIGIN}/v1/logs',\n});\n\nlogs.warn('network.retry_scheduled', { props: { attempt: 2 } });`;
   const analyticsSnippet = `<script defer src="${location.origin}/tracker.js" data-key="${created.key}" data-project="${created.record.app_id}" data-identity="${identityMode}" data-endpoint="${INGEST_ORIGIN}/v1/browser"></script>\n\n<!-- After the tracker loads: window.appHealth.track('signup.completed') -->`;
   return (
     <div className="space-y-3 rounded-lg border border-primary/25 bg-primary/5 p-4">
-      <strong className="block text-sm">Copy this key now; it is shown once.</strong>
+      <strong className="block text-sm">copy this key now; it is shown once.</strong>
       <code className="block break-all rounded-md bg-muted p-3 text-xs">{created.key}</code>
       {purpose !== 'logs' ? (
         <>
@@ -2109,8 +2209,8 @@ function PublicKeyReveal({
             value={identityMode}
             onValueChange={setIdentityMode}
             options={[
-              { value: 'persistent', label: 'Persistent anonymous visitors' },
-              { value: 'session', label: 'Session only' },
+              { value: 'persistent', label: 'persistent anonymous visitors' },
+              { value: 'session', label: 'session only' },
             ]}
           />
           <p className="text-xs text-muted-foreground">
@@ -2131,7 +2231,7 @@ function PublicKeyReveal({
       {purpose !== 'analytics' ? (
         <>
           <p className="text-sm font-medium">
-            {purpose === 'combined' ? 'Structured browser logs' : 'Send a browser log'}
+            {purpose === 'combined' ? 'structured browser logs' : 'send a browser log'}
           </p>
           <pre className="overflow-x-auto rounded-md bg-zinc-950 p-4 text-xs leading-6 text-zinc-100">
             <code>{logsSnippet}</code>
@@ -2148,7 +2248,7 @@ function PublicKeyList({
 }: {
   keys: PublicLogKeyV1[];
   onRevoke: (keyId: string) => Promise<void>;
-}): JSX.Element {
+}): ReactElement {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   async function confirmRevoke(keyId: string): Promise<void> {
@@ -2183,19 +2283,19 @@ function PublicKeyList({
                   variant="outline"
                   aria-label={`Revoke browser key ${key.id}`}
                 >
-                  Revoke
+                  revoke
                 </Button>
               </AlertDialogTrigger>
               <AlertDialogContent>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>Revoke this browser key?</AlertDialogTitle>
+                  <AlertDialogTitle>revoke this browser key?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Browser analytics and logs from {key.allowed_origins.join(', ')} will stop until
+                    browser analytics and logs from {key.allowed_origins.join(', ')} will stop until
                     that site receives another active key.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogCancel>cancel</AlertDialogCancel>
                   <AlertDialogAction
                     variant="destructive"
                     disabled={pendingKey === key.id}
@@ -2204,7 +2304,7 @@ function PublicKeyList({
                       void confirmRevoke(key.id);
                     }}
                   >
-                    {pendingKey === key.id ? 'Revoking…' : 'Revoke key'}
+                    {pendingKey === key.id ? 'revoking…' : 'revoke key'}
                   </AlertDialogAction>
                 </AlertDialogFooter>
               </AlertDialogContent>
@@ -2225,18 +2325,18 @@ const CAPABILITY_COPY: Record<
   { title: string; description: string; icon: typeof Activity }
 > = {
   analytics: {
-    title: 'Web analytics',
-    description: 'Page views, live sessions, sources, and named product events.',
+    title: 'web analytics',
+    description: 'page views, live sessions, sources, and named product events.',
     icon: BarChart3,
   },
   endpoints: {
     title: 'API monitoring',
-    description: 'Request volume, error rate, and latency from your application routes.',
+    description: 'request volume, error rate, and latency from your application routes.',
     icon: Activity,
   },
   logs: {
-    title: 'Logs',
-    description: 'Structured diagnostic records from browsers and servers, organized by level.',
+    title: 'logs',
+    description: 'structured diagnostic records from browsers and servers, organized by level.',
     icon: SlidersHorizontal,
   },
 };
@@ -2246,12 +2346,12 @@ type CapabilityController = ReturnType<typeof useEnvironmentCapabilities>;
 function CapabilityErrorNotice({
   message,
   onRetry,
-  title = 'Capability status could not be updated',
+  title = 'capability status could not be updated',
 }: {
   message: string;
   onRetry: () => void;
   title?: string;
-}): JSX.Element {
+}): ReactElement {
   return (
     <Alert variant="destructive">
       <AlertTriangle />
@@ -2259,7 +2359,7 @@ function CapabilityErrorNotice({
       <AlertDescription className="sm:flex-row sm:items-center sm:justify-between">
         <p>{message}</p>
         <Button variant="outline" size="sm" onClick={onRetry}>
-          Try again
+          try again
         </Button>
       </AlertDescription>
     </Alert>
@@ -2270,18 +2370,18 @@ function CapabilityStatus({ state }: { state: EnvironmentCapabilities['capabilit
   if (state.first_received_at !== null)
     return (
       <Badge variant="secondary" className="font-normal">
-        Receiving data
+        receiving data
       </Badge>
     );
   if (state.enabled)
     return (
       <Badge variant="outline" className="font-normal">
-        Setup required
+        setup required
       </Badge>
     );
   return (
     <Badge variant="outline" className="font-normal text-muted-foreground">
-      Not enabled
+      not enabled
     </Badge>
   );
 }
@@ -2292,13 +2392,13 @@ function CapabilitySettings({
 }: {
   controller: CapabilityController;
   onOpen: (id: CapabilityId) => void;
-}): JSX.Element {
+}): ReactElement {
   if (controller.loading && !controller.data)
     return <Skeleton className="h-64 w-full" aria-label="Loading capabilities" />;
   if (!controller.data)
     return (
       <CapabilityErrorNotice
-        title="Capability status is unavailable"
+        title="capability status is unavailable"
         message={controller.error || 'App Health could not load this environment.'}
         onRetry={controller.reload}
       />
@@ -2313,7 +2413,7 @@ function CapabilitySettings({
   return (
     <Card className="shadow-none">
       <CardHeader className="border-b">
-        <CardTitle className="text-base">Capabilities in this environment</CardTitle>
+        <CardTitle className="text-base">capabilities in this environment</CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
           Choose which tools collect data for this environment. Every tool stays reachable with
           setup guidance, and incoming valid data activates its capability automatically.
@@ -2354,7 +2454,7 @@ function CapabilitySettings({
                       disabled={controller.saving}
                       onClick={() => void open(state)}
                     >
-                      {state.first_received_at === null ? 'Open setup' : 'Open report'}
+                      {state.first_received_at === null ? 'open setup' : 'open report'}
                     </Button>
                     <Button
                       size="sm"
@@ -2369,7 +2469,7 @@ function CapabilitySettings({
                         )
                       }
                     >
-                      {state.enabled ? 'Disable' : 'Enable'}
+                      {state.enabled ? 'disable' : 'enable'}
                     </Button>
                   </div>
                 </CardContent>
@@ -2382,12 +2482,12 @@ function CapabilitySettings({
   );
 }
 
-function OneTimeEnvironmentKey({ result }: { result: EnvironmentKeyResponse }): JSX.Element {
+function OneTimeEnvironmentKey({ result }: { result: EnvironmentKeyResponse }): ReactElement {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
   async function copy(): Promise<void> {
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
       await navigator.clipboard.writeText(result.key.key);
       setCopied(true);
       setCopyFailed(false);
@@ -2400,14 +2500,14 @@ function OneTimeEnvironmentKey({ result }: { result: EnvironmentKeyResponse }): 
     <div className="space-y-3">
       <Alert className="border-primary/25 bg-primary/5">
         <KeyRound />
-        <AlertTitle>Save the private key for {result.environment.name}</AlertTitle>
+        <AlertTitle>save the private key for {result.environment.name}</AlertTitle>
         <AlertDescription className="space-y-3">
-          <p>This environment-scoped key is shown once and stays only in memory on this page.</p>
+          <p>this environment-scoped key is shown once and stays only in memory on this page.</p>
           <code className="block break-all rounded-md bg-muted p-3 text-xs text-foreground">
             {result.key.key}
           </code>
           <Button size="sm" variant="outline" onClick={() => void copy()}>
-            {copied ? 'Copied' : 'Copy private key'}
+            {copied ? 'copied' : 'copy private key'}
           </Button>
         </AlertDescription>
       </Alert>
@@ -2420,7 +2520,7 @@ function PrivateKeySummary({
   current,
 }: {
   current: EnvironmentCapabilities['private_key'];
-}): JSX.Element {
+}): ReactElement {
   if (!current)
     return <p className="text-sm text-muted-foreground">No active private key is available.</p>;
   return (
@@ -2429,12 +2529,12 @@ function PrivateKeySummary({
         <code className="block truncate text-xs">{current.id}</code>
         <p className="mt-1 text-xs text-muted-foreground">
           {current.environment_id === null
-            ? 'Legacy project-wide key · preserved for compatibility'
+            ? 'legacy project-wide key · preserved for compatibility'
             : `Environment key · created ${formatAge(current.created_at)}`}
         </p>
       </div>
       <Badge variant="secondary" className="w-fit font-normal">
-        Active
+        active
       </Badge>
     </div>
   );
@@ -2450,7 +2550,7 @@ interface PrivateKeyActionProps {
   onIssue: () => Promise<boolean>;
 }
 
-function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
+function PrivateKeyAction(props: PrivateKeyActionProps): ReactElement {
   const { replacesEnvironmentKey, pending, confirming, error, scopeLabel, onConfirming, onIssue } =
     props;
   const actionContainerRef = useRef<HTMLDivElement>(null);
@@ -2468,14 +2568,14 @@ function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
   if (!replacesEnvironmentKey)
     return (
       <Button variant="outline" disabled={pending} onClick={() => void onIssue()}>
-        {pending ? 'Creating…' : 'Create environment key'}
+        {pending ? 'creating…' : 'create environment key'}
       </Button>
     );
   return (
     <AlertDialog open={confirming} onOpenChange={onConfirming}>
       <AlertDialogTrigger asChild>
         <Button ref={triggerRef} variant="outline">
-          Replace environment key
+          replace environment key
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent
@@ -2485,9 +2585,9 @@ function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
         }}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle>Replace the key for {scopeLabel}?</AlertDialogTitle>
+          <AlertDialogTitle>replace the key for {scopeLabel}?</AlertDialogTitle>
           <AlertDialogDescription>
-            This replaces only the private key for {scopeLabel}. The current key will stop accepting
+            this replaces only the private key for {scopeLabel}. the current key will stop accepting
             writes, so update every server using it with the new one-time value.
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -2495,11 +2595,11 @@ function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
           {error ? (
             <Alert variant="destructive" className="mb-2 text-left sm:mr-auto">
               <AlertTriangle />
-              <AlertTitle>Private key request failed</AlertTitle>
+              <AlertTitle>private key request failed</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           ) : null}
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>cancel</AlertDialogCancel>
           <div ref={actionContainerRef} className="contents">
             <AlertDialogAction
               disabled={pending}
@@ -2508,7 +2608,7 @@ function PrivateKeyAction(props: PrivateKeyActionProps): JSX.Element {
                 void replace();
               }}
             >
-              {pending ? 'Replacing…' : 'Replace key'}
+              {pending ? 'replacing…' : 'replace key'}
             </AlertDialogAction>
           </div>
         </AlertDialogFooter>
@@ -2525,7 +2625,7 @@ function PrivateKeyManager({
   project: SavedProject;
   ownerToken: string;
   controller: CapabilityController;
-}): JSX.Element {
+}): ReactElement {
   const [result, setResult] = useState<EnvironmentKeyResponse | null>(null);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(false);
@@ -2543,12 +2643,12 @@ function PrivateKeyManager({
       );
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const parsed = EnvironmentKeyResponseSchema.safeParse(await response.json());
-      if (!parsed.success) throw new Error('The key response was invalid');
+      if (!parsed.success) throw new Error('the key response was invalid');
       setResult(parsed.data);
       controller.reload();
       return true;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not issue a private key');
+      setError(cause instanceof Error ? cause.message : 'could not issue a private key');
       return false;
     } finally {
       setPending(false);
@@ -2557,7 +2657,7 @@ function PrivateKeyManager({
   return (
     <Card className="shadow-none">
       <CardHeader className="border-b">
-        <CardTitle className="text-base">Private server key</CardTitle>
+        <CardTitle className="text-base">private server key</CardTitle>
         <p className="text-sm text-muted-foreground">
           Write-only access for endpoint summaries and explicit server logs in {project.environment}
           .
@@ -2568,7 +2668,7 @@ function PrivateKeyManager({
         {error && !replacesEnvironmentKey ? (
           <Alert variant="destructive">
             <AlertTriangle />
-            <AlertTitle>Private key request failed</AlertTitle>
+            <AlertTitle>private key request failed</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
@@ -2594,7 +2694,7 @@ interface EnvironmentManagerProps {
   onCreated: (environment: SavedProject) => void;
 }
 
-function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
+function EnvironmentManager(props: EnvironmentManagerProps): ReactElement {
   const { project, projects, ownerToken, onCreated } = props;
   const [name, setName] = useState('');
   const [result, setResult] = useState<EnvironmentKeyResponse | null>(null);
@@ -2617,7 +2717,7 @@ function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
       );
       if (!response.ok) throw new Error(`API returned ${response.status}`);
       const parsed = EnvironmentKeyResponseSchema.safeParse(await response.json());
-      if (!parsed.success) throw new Error('The environment response was invalid');
+      if (!parsed.success) throw new Error('the environment response was invalid');
       setResult(parsed.data);
       setName('');
       onCreated({
@@ -2627,7 +2727,7 @@ function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
         environment: parsed.data.environment.name,
       });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not add the environment');
+      setError(cause instanceof Error ? cause.message : 'could not add the environment');
     } finally {
       setPending(false);
     }
@@ -2635,7 +2735,7 @@ function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
   return (
     <Card className="shadow-none">
       <CardHeader className="border-b">
-        <CardTitle className="text-base">Environments</CardTitle>
+        <CardTitle className="text-base">environments</CardTitle>
         <p className="text-sm text-muted-foreground">
           Each environment keeps its own capabilities, reports, and write-only keys.
         </p>
@@ -2656,7 +2756,7 @@ function EnvironmentManager(props: EnvironmentManagerProps): JSX.Element {
         {error ? (
           <Alert variant="destructive">
             <AlertTriangle />
-            <AlertTitle>Environment could not be added</AlertTitle>
+            <AlertTitle>environment could not be added</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         ) : null}
@@ -2679,17 +2779,17 @@ interface ProjectSettingsProps {
   actions: ProjectSettingsActions;
 }
 
-const ProjectSettings = (props: ProjectSettingsProps): JSX.Element => {
+const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
   const { project, projects, ownerToken, controller, actions } = props;
   return (
     <div className="space-y-5">
       <Alert>
         <Globe2 />
         <AlertTitle>
-          Workspace / {project.name} / {project.environment}
+          workspace / {project.name} / {project.environment}
         </AlertTitle>
         <AlertDescription>
-          Settings on this page apply only to the selected environment.
+          settings on this page apply only to the selected environment.
         </AlertDescription>
       </Alert>
       <CapabilitySettings controller={controller} onOpen={actions.onOpen} />
@@ -2717,8 +2817,8 @@ const ProjectSettings = (props: ProjectSettingsProps): JSX.Element => {
         project={project}
         ownerToken={ownerToken}
         installMode={true}
-        eyebrow="Public environment keys"
-        title="Browser analytics and logs"
+        eyebrow="public environment keys"
+        title="browser analytics and logs"
         purpose="combined"
       />
     </div>
@@ -2735,7 +2835,7 @@ interface CapabilityBoundaryProps {
   children: ReactNode;
 }
 
-function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
+function CapabilityBoundary(props: CapabilityBoundaryProps): ReactElement {
   const { id, displayTitle, project, ownerToken, controller, onManage, children } = props;
   const capabilityTitle = displayTitle ?? CAPABILITY_COPY[id].title;
   if (controller.loading && !controller.data)
@@ -2743,7 +2843,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
   if (!controller.data)
     return (
       <CapabilityErrorNotice
-        title="Capability status is unavailable"
+        title="capability status is unavailable"
         message={controller.error || 'App Health could not load this environment.'}
         onRetry={controller.reload}
       />
@@ -2752,7 +2852,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
   if (!state)
     return (
       <CapabilityErrorNotice
-        title="Capability status is incomplete"
+        title="capability status is incomplete"
         message="Refresh this environment before continuing."
         onRetry={controller.reload}
       />
@@ -2765,7 +2865,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
         ) : null}
         <Card className="shadow-none">
           <CardContent className="flex flex-col items-start gap-4 p-6">
-            <Badge variant="outline">Not enabled</Badge>
+            <Badge variant="outline">not enabled</Badge>
             <div>
               <h2 className="text-lg font-semibold">{capabilityTitle} is not selected</h2>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -2784,7 +2884,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
                 ])
               }
             >
-              Enable {capabilityTitle}
+              enable {capabilityTitle}
             </Button>
           </CardContent>
         </Card>
@@ -2813,9 +2913,9 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): JSX.Element {
       ) : null}
       <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge variant="secondary" className="font-normal">
-          Connected
+          connected
         </Badge>
-        First valid data {formatAge(state.first_received_at)} · last valid data{' '}
+        first valid data {formatAge(state.first_received_at)} · last valid data{' '}
         {state.last_received_at === null ? 'unknown' : formatAge(state.last_received_at)}
       </p>
       {children}
@@ -2833,7 +2933,7 @@ function ServerCapabilitySetup({
   project: SavedProject;
   privateKey: EnvironmentCapabilities['private_key'];
   onManage: () => void;
-}): JSX.Element {
+}): ReactElement {
   const snippet =
     id === 'endpoints'
       ? `import { createAppHealthClient } from '@saas-maker/app-health';\nimport { honoMiddleware } from '@saas-maker/app-health/hono';\n\napp.use('*', honoMiddleware({\n  client: (c) => createAppHealthClient({\n    key: c.env.APP_HEALTH_INGEST_KEY,\n    environment: ${JSON.stringify(project.environment)},\n    endpoint: '${INGEST_ORIGIN}/v1/ingest',\n    runtime: 'worker',\n    disableTimer: true,\n  }),\n}));`
@@ -2841,16 +2941,16 @@ function ServerCapabilitySetup({
   return (
     <Card className="shadow-none">
       <CardHeader className="border-b">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+        <p className="text-xs font-semibold  tracking-[0.16em] text-primary">
           Cloudflare Worker · Hono
         </p>
         <CardTitle className="text-base">
-          {id === 'endpoints' ? 'Connect API monitoring' : 'Send a server log'}
+          {id === 'endpoints' ? 'connect API monitoring' : 'send a server log'}
         </CardTitle>
         <p className="text-sm leading-6 text-muted-foreground">
           {privateKey
             ? `An active ${privateKey.environment_id === null ? 'legacy project' : 'environment'} key exists. Read its saved value from the APP_HEALTH_INGEST_KEY secret.`
-            : 'Create a private environment key, save its one-time value as APP_HEALTH_INGEST_KEY, then add this integration.'}
+            : 'create a private environment key, save its one-time value as APP_HEALTH_INGEST_KEY, then add this integration.'}
         </p>
       </CardHeader>
       <CardContent className="space-y-4 pt-5">
@@ -2862,7 +2962,7 @@ function ServerCapabilitySetup({
           origin-bound key.
         </p>
         <Button variant="outline" onClick={onManage}>
-          Manage private key
+          manage private key
         </Button>
       </CardContent>
     </Card>
@@ -2876,7 +2976,7 @@ function CapabilitySetup(props: {
   ownerToken: string;
   privateKey: EnvironmentCapabilities['private_key'];
   onManage: () => void;
-}): JSX.Element {
+}): ReactElement {
   const { id, displayTitle, project, ownerToken, privateKey, onManage } = props;
   const copy = {
     ...CAPABILITY_COPY[id],
@@ -2886,10 +2986,10 @@ function CapabilitySetup(props: {
     <div className="space-y-5">
       <Alert>
         <Clock3 />
-        <AlertTitle>Waiting for the first valid {copy.title.toLowerCase()} event</AlertTitle>
+        <AlertTitle>waiting for the first valid {copy.title.toLowerCase()} event</AlertTitle>
         <AlertDescription>
-          Setup stays here until App Health accepts valid data for {project.name} /{' '}
-          {project.environment}. Failed validation or delivery never marks it connected.
+          setup stays here until App Health accepts valid data for {project.name} /{' '}
+          {project.environment}. failed validation or delivery never marks it connected.
         </AlertDescription>
       </Alert>
       <AgentSetupPrompt project={project} capabilities={[id]} />
@@ -2898,8 +2998,8 @@ function CapabilitySetup(props: {
           project={project}
           ownerToken={ownerToken}
           installMode
-          eyebrow={id === 'analytics' ? 'Public browser key' : 'Browser log key'}
-          title={id === 'analytics' ? `Install ${copy.title.toLowerCase()}` : 'Send browser logs'}
+          eyebrow={id === 'analytics' ? 'public browser key' : 'browser log key'}
+          title={id === 'analytics' ? `install ${copy.title.toLowerCase()}` : 'send browser logs'}
           purpose={id === 'logs' ? 'logs' : 'analytics'}
         />
       ) : null}
@@ -2992,10 +3092,10 @@ function useEndpointData(
         if (!cancelled)
           setError(
             cause instanceof DOMException && cause.name === 'AbortError'
-              ? 'Endpoint data request timed out'
+              ? 'endpoint data request timed out'
               : cause instanceof Error
                 ? cause.message
-                : 'Unknown API error',
+                : 'unknown API error',
           );
       } finally {
         window.clearTimeout(activeTimeout);
@@ -3062,7 +3162,7 @@ interface EndpointPanelProps {
   onManage: () => void;
 }
 
-function EndpointPanel(props: EndpointPanelProps): JSX.Element {
+function EndpointPanel(props: EndpointPanelProps): ReactElement {
   const {
     project,
     ownerToken,
@@ -3130,7 +3230,7 @@ function isBackendView(view: DashboardView): view is BackendView {
   return view === 'backend' || view === 'backend/logs' || view === 'backend/diagnostics';
 }
 
-function DashboardBackend(props: DashboardContentProps & { view: BackendView }): JSX.Element {
+function DashboardBackend(props: DashboardContentProps & { view: BackendView }): ReactElement {
   const { view, project, ownerToken, capabilities } = props;
   let content: ReactNode;
 
@@ -3200,14 +3300,14 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
           className="group-data-[orientation=horizontal]/tabs:after:bottom-[-4px]"
           onClick={() => props.onView('backend/logs')}
         >
-          Logs
+          logs
         </TabsTrigger>
         <TabsTrigger
           value="backend/diagnostics"
           className="group-data-[orientation=horizontal]/tabs:after:bottom-[-4px]"
           onClick={() => props.onView('backend/diagnostics')}
         >
-          Diagnostics
+          diagnostics
         </TabsTrigger>
       </TabsList>
       <TabsContent value={view}>{content}</TabsContent>
@@ -3215,8 +3315,9 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
   );
 }
 
-function DashboardContent(props: DashboardContentProps): JSX.Element {
+function DashboardContent(props: DashboardContentProps): ReactElement {
   const { view } = props;
+  if (view === 'speed') return <SpeedView ownerToken={props.ownerToken} />;
   if (isBackendView(view)) return <DashboardBackend {...props} view={view} />;
   return view === 'analytics' || view === 'events' ? (
     <DashboardAnalytics {...props} />
@@ -3225,12 +3326,12 @@ function DashboardContent(props: DashboardContentProps): JSX.Element {
   );
 }
 
-function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
+function DashboardAnalytics(props: DashboardContentProps): ReactElement {
   const { view, project, projects, ownerToken, handlers, capabilities } = props;
   return (
     <CapabilityBoundary
       id="analytics"
-      displayTitle={view === 'events' ? 'Product events' : undefined}
+      displayTitle={view === 'events' ? 'product events' : undefined}
       project={project}
       ownerToken={ownerToken}
       controller={capabilities}
@@ -3252,7 +3353,7 @@ function DashboardAnalytics(props: DashboardContentProps): JSX.Element {
   );
 }
 
-function DashboardManagement(props: DashboardContentProps): JSX.Element {
+function DashboardManagement(props: DashboardContentProps): ReactElement {
   const { view, project, projects, ownerToken, handlers, capabilities } = props;
   if (view === 'overview')
     return (
@@ -3300,7 +3401,7 @@ function Dashboard({
   projects: SavedProject[];
   ownerToken: string;
   handlers: DashboardHandlers;
-}): JSX.Element {
+}): ReactElement {
   const [view, changeView] = useDashboardNavigation();
   const [windowKey, setWindowKey] = useState<Window>('15m');
   const [sortKey, setSortKey] = useState<SortKey>('health');
@@ -3390,7 +3491,7 @@ interface ProjectSetupShellProps {
   lock: () => Promise<void>;
   handleCreated: (created: CreateAppResponseV1) => void;
 }
-function ProjectSetupShell(props: ProjectSetupShellProps): JSX.Element {
+function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b">
@@ -3399,12 +3500,12 @@ function ProjectSetupShell(props: ProjectSetupShellProps): JSX.Element {
           <nav className="ml-auto flex items-center gap-2" aria-label="Workspace">
             {props.projects.length > 0 ? (
               <Button variant="outline" onClick={() => props.selectProject(props.projects[0])}>
-                Back to projects
+                back to projects
               </Button>
             ) : null}
             {props.accountSession ? (
               <Button variant="ghost" onClick={() => void props.lock()}>
-                Sign out
+                sign out
               </Button>
             ) : null}
             <ThemeToggle />
@@ -3414,14 +3515,14 @@ function ProjectSetupShell(props: ProjectSetupShellProps): JSX.Element {
       {props.sessionError ? (
         <Alert variant="destructive" className="mx-auto mt-4 max-w-6xl">
           <AlertTriangle />
-          <AlertTitle>Account action failed</AlertTitle>
+          <AlertTitle>account action failed</AlertTitle>
           <AlertDescription>{props.sessionError}</AlertDescription>
         </Alert>
       ) : null}
       {props.selectionError ? (
         <Alert variant="destructive" className="mx-auto mt-4 max-w-6xl">
           <AlertTriangle />
-          <AlertTitle>Project unavailable</AlertTitle>
+          <AlertTitle>project unavailable</AlertTitle>
           <AlertDescription>{props.selectionError}</AlertDescription>
         </Alert>
       ) : null}
@@ -3436,10 +3537,24 @@ async function requestSignOut(): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: '{}',
   });
-  if (!response.ok) throw new Error('Could not sign out. Please try again.');
+  if (!response.ok) throw new Error('could not sign out. please try again.');
 }
 
-export function App(): JSX.Element {
+function WorkspaceLoading(): ReactElement {
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="flex h-16 items-center justify-between border-b px-6">
+        <ProductBrand />
+        <ThemeToggle />
+      </header>
+      <main className="mx-auto max-w-7xl p-6" aria-label="Loading workspace project">
+        <DataTableSkeleton columns={endpointColumns} rows={3} />
+      </main>
+    </div>
+  );
+}
+
+export function App(): ReactElement {
   const [googleEnabled, setGoogleEnabled] = useState(false);
   const [accountSession, setAccountSession] = useState(false);
   const [sessionError, setSessionError] = useState('');
@@ -3516,7 +3631,7 @@ export function App(): JSX.Element {
       } catch {
         if (!cancelled && strictRequestedProject) {
           setProject(null);
-          setInventoryError('The workspace project list could not load. Try again.');
+          setInventoryError('the workspace project list could not load. try again.');
           setInventoryLoading(false);
         }
       }
@@ -3669,7 +3784,7 @@ export function App(): JSX.Element {
         setAccountSession(false);
         reset();
       } catch {
-        setSessionError('Could not sign out. Please try again.');
+        setSessionError('could not sign out. please try again.');
         return;
       }
     }
@@ -3690,22 +3805,17 @@ export function App(): JSX.Element {
         }}
       />
     );
-  if (strictRequestedProject && inventoryLoading)
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
-        Loading workspace project…
-      </div>
-    );
+  if (strictRequestedProject && inventoryLoading) return <WorkspaceLoading />;
   if (strictRequestedProject && inventoryError)
     return (
       <div className="mx-auto flex min-h-screen max-w-2xl items-center px-4">
         <Alert variant="destructive">
           <AlertTriangle />
-          <AlertTitle>Project link unavailable</AlertTitle>
+          <AlertTitle>project link unavailable</AlertTitle>
           <AlertDescription className="space-y-3">
             <p>{inventoryError}</p>
             <Button variant="outline" onClick={() => setInventoryRetry((value) => value + 1)}>
-              Try again
+              try again
             </Button>
           </AlertDescription>
         </Alert>
@@ -3730,7 +3840,7 @@ export function App(): JSX.Element {
       {sessionError ? (
         <Alert variant="destructive" className="fixed right-4 top-4 z-50 max-w-sm shadow-lg">
           <AlertTriangle />
-          <AlertTitle>Account action failed</AlertTitle>
+          <AlertTitle>account action failed</AlertTitle>
           <AlertDescription>{sessionError}</AlertDescription>
         </Alert>
       ) : null}

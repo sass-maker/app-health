@@ -77,14 +77,14 @@ test('public breakdowns require owner opt-in and render a responsive report', as
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: resolve(evidence, 'loading-dark-1440.png'), fullPage: true });
   release();
-  await expect(page.getByRole('heading', { name: 'Top routes' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'top routes' })).toBeVisible();
   await page.unroute('**/v1/shared/analytics');
   for (const theme of ['dark', 'light'])
     for (const width of [390, 768, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
       await page.goto(`/live?theme=${theme}#token=${share.token}`);
-      await expect(page.getByRole('heading', { name: 'Top sources' })).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Countries' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'top sources' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'countries' })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
@@ -95,14 +95,14 @@ test('public breakdowns require owner opt-in and render a responsive report', as
       });
     }
   await page.goto(`/live?embed=1#token=${share.token}`);
-  await expect(page.getByRole('heading', { name: 'Top routes' })).toBeVisible();
-  await expect(page.getByRole('link', { name: 'About App Health' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'top routes' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'about App Health' })).toHaveCount(0);
   await expect(page.locator('body')).not.toContainText(share.token);
   await page.screenshot({ path: resolve(evidence, 'embed-1440.png'), fullPage: true });
   await request.patch(`/v1/analytics/shares?${scope}&id=${share.share.id}`, {
     data: { include_breakdowns: false },
   });
   await page.reload();
-  await expect(page.getByText('Page views', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Top routes' })).toHaveCount(0);
+  await expect(page.getByText('page views', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'top routes' })).toHaveCount(0);
 });

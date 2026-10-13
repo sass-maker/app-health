@@ -58,14 +58,14 @@ for (const theme of ['dark', 'light']) {
         await response;
 
         if (surface === 'events') {
-          await expect(page.getByRole('heading', { level: 1, name: 'Events' })).toBeVisible();
+          await expect(page.getByRole('heading', { level: 1, name: 'events' })).toBeVisible();
           await expect(
-            page.getByRole('heading', { name: 'Product events over time' }),
+            page.getByRole('heading', { name: 'product events over time' }),
           ).toBeVisible();
-          await expect(page.getByRole('heading', { name: 'Top pages' })).toHaveCount(0);
-          await expect(page.getByRole('tab', { name: 'Audience' })).toHaveCount(0);
+          await expect(page.getByRole('heading', { name: 'top pages' })).toHaveCount(0);
+          await expect(page.getByRole('tab', { name: 'audience' })).toHaveCount(0);
         } else {
-          await expect(page.getByRole('heading', { level: 1, name: 'Backend' })).toBeVisible();
+          await expect(page.getByRole('heading', { level: 1, name: 'backend' })).toBeVisible();
           await expect(page.getByRole('tab', { name: 'API monitoring' })).toHaveAttribute(
             'aria-selected',
             'true',

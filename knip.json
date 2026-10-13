@@ -8,7 +8,7 @@
       "ignoreDependencies": ["@vitest/coverage-v8", "jscpd"]
     },
     "apps/web": {
-      "entry": ["public/tracker.d.ts", "src/public-main.tsx"],
+      "entry": ["public/tracker.d.ts", "public/footer.{js,css}", "src/public-main.tsx"],
       "ignoreIssues": {
         "src/components/ui/button.tsx": ["exports", "types"],
         "src/components/ui/card.tsx": ["exports", "types"],

@@ -16,24 +16,24 @@ for (const theme of ['dark', 'light']) {
       await expect(
         page.locator('script[src*="project-strip.js"], script[src*="ai-chat-footer.js"]'),
       ).toHaveCount(0);
-      await page.getByLabel('Application name').fill(`Theme check ${theme} ${width} ${Date.now()}`);
+      await page.getByLabel('application name').fill(`Theme check ${theme} ${width} ${Date.now()}`);
       await checkReadability(page);
-      await page.getByRole('button', { name: 'Create project', exact: true }).click();
-      await expect(page.getByRole('button', { name: 'Copy key', exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'create project', exact: true }).click();
+      await expect(page.getByRole('button', { name: 'copy key', exact: true })).toBeVisible();
       await checkReadability(page);
       await expect(page.getByRole('tabpanel')).toHaveCount(1);
       await page.evaluate(() =>
         Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }),
       );
-      await page.getByRole('button', { name: 'Copy key', exact: true }).click();
-      await expect(page.getByText('Automatic copy unavailable')).toBeVisible();
+      await page.getByRole('button', { name: 'copy key', exact: true }).click();
+      await expect(page.getByText('automatic copy unavailable')).toBeVisible();
       await checkReadability(page);
-      await page.getByRole('button', { name: 'Save key and choose capabilities' }).click();
-      await page.getByRole('button', { name: 'Open setup', exact: true }).first().click();
-      await expect(page.getByText('Install web analytics', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'save key and choose capabilities' }).click();
+      await page.getByRole('button', { name: 'open setup', exact: true }).first().click();
+      await expect(page.getByText('install web analytics', { exact: true })).toBeVisible();
       await page.getByLabel('Allowed origins').fill('http://127.0.0.1:5194');
-      await page.getByRole('button', { name: 'Create browser key', exact: true }).click();
-      await expect(page.getByText('Copy this key now; it is shown once.')).toBeVisible();
+      await page.getByRole('button', { name: 'create browser key', exact: true }).click();
+      await expect(page.getByText('copy this key now; it is shown once.')).toBeVisible();
       await checkReadability(page);
       const snippet = await page.locator('pre').filter({ hasText: '/tracker.js' }).innerText();
       const key = snippet.match(/data-key="([^"]+)"/)?.[1];
@@ -55,13 +55,13 @@ for (const theme of ['dark', 'light']) {
         key!,
       );
       await accepted;
-      await expect(page.getByText('Waiting for the first valid web analytics event')).toHaveCount(
+      await expect(page.getByText('waiting for the first valid web analytics event')).toHaveCount(
         0,
         { timeout: 12000 },
       );
-      await expect(page.getByText('First valid data', { exact: false })).toBeVisible();
+      await expect(page.getByText('first valid data', { exact: false })).toBeVisible();
       await page.goto('/app#settings');
-      await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'settings', exact: true })).toBeVisible();
       const revoke = page.getByRole('button', { name: /Revoke browser key/ });
       await revoke.click();
       const dialog = page.getByRole('alertdialog');
@@ -71,10 +71,10 @@ for (const theme of ['dark', 'light']) {
       await expect(dialog).toHaveCount(0);
       await expect(revoke).toBeFocused();
       await revoke.click();
-      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+      await dialog.getByRole('button', { name: 'cancel', exact: true }).click();
       await expect(revoke).toBeFocused();
       await revoke.click();
-      await dialog.getByRole('button', { name: 'Revoke key', exact: true }).click();
+      await dialog.getByRole('button', { name: 'revoke key', exact: true }).click();
       await expect(dialog).toHaveCount(0);
       await expect(page.getByText(/revoked .*ago/)).toBeVisible();
       await expect(revoke).toHaveCount(0);

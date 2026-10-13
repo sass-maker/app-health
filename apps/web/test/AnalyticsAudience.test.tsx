@@ -34,13 +34,13 @@ const report = {
 
 it('uses page views as the ranking denominator and labels identity states', () => {
   render(<AnalyticsAudience report={report} breakdown="audience" />);
-  expect(screen.getAllByText('Page views').length).toBeGreaterThan(0);
-  expect(screen.getByText('Returning sessions')).toBeTruthy();
-  expect(screen.getByText('Unidentified sessions')).toBeTruthy();
+  expect(screen.getAllByText('page views').length).toBeGreaterThan(0);
+  expect(screen.getByText('returning sessions')).toBeTruthy();
+  expect(screen.getByText('unidentified sessions')).toBeTruthy();
   expect(screen.getByText('100.0%')).toBeTruthy();
   expect(screen.queryByText('500.0%')).toBeNull();
   expect(screen.queryByLabelText('Visitors comparison')).toBeNull();
-  expect(screen.queryByText('Recognized browsers in this period')).toBeNull();
+  expect(screen.queryByText('recognized browsers in this period')).toBeNull();
   expect(screen.queryByText('+100% vs previous period')).toBeNull();
 });
 
@@ -86,7 +86,7 @@ it('labels observed session metrics and preserves unavailable values', () => {
   );
   expect(screen.getAllByText('—')).toHaveLength(3);
   expect(screen.getByText(/unavailable for sampled data/)).toBeVisible();
-  expect(screen.queryByText('Exit pages')).toBeNull();
+  expect(screen.queryByText('exit pages')).toBeNull();
 });
 
 it('uses the original country code when a readable country ranking is selected', () => {
@@ -113,8 +113,8 @@ it('shows stored acquisition dimensions and emits exact content filters', () => 
       onFilter={onFilter}
     />,
   );
-  expect(screen.getByRole('heading', { name: 'Mediums' })).toBeVisible();
-  expect(screen.getByRole('heading', { name: 'Campaign terms' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'mediums' })).toBeVisible();
+  expect(screen.getByRole('heading', { name: 'campaign terms' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Filter Campaign content by hero-link' }));
   expect(onFilter).toHaveBeenCalledWith('content', 'hero-link');
 });

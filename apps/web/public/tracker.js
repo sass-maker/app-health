@@ -325,6 +325,7 @@
     }),
     stop() {
       stopped = true;
+      window.appHealthVitals?.stop();
       request?.abort();
       clearTimeout(timer);
       clearInterval(heartbeat);
@@ -339,5 +340,18 @@
       delete window.appHealth;
     },
   };
+  if (['', '1', 'true'].includes(script.dataset.vitals) && /\/tracker\.js$/.test(script.src)) {
+    window.appHealthVitals ||= {
+      stop() {
+        this.stopped = true;
+      },
+    };
+    const vitals = document.createElement('script');
+    vitals.defer = true;
+    vitals.src = script.src.replace(/tracker\.js$/, 'vitals.js');
+    Object.assign(vitals.dataset, script.dataset);
+    vitals.dataset.vitalsPath = location.pathname;
+    document.head.appendChild(vitals);
+  }
   page();
 })();
