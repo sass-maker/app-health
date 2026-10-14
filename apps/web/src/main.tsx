@@ -1,9 +1,5 @@
-import { StrictMode } from 'react';
+import { StrictMode, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
-import { App } from './App.js';
-import { LandingPage } from './LandingPage.js';
-import { PrivacyPage } from './PrivacyPage.js';
-import { Changelog } from './Changelog.js';
 import { loadProductAnalytics } from './lib/product-analytics.js';
 import './shadcn.css';
 
@@ -25,14 +21,25 @@ document.documentElement.classList.toggle(
 );
 const root = document.getElementById('root');
 if (!root) throw new Error('root element missing');
-const RootView =
-  window.location.pathname === '/privacy'
-    ? PrivacyPage
-    : window.location.pathname === '/changelog'
-      ? Changelog
-      : window.location.pathname === '/' && !window.location.search.includes('demo=')
-        ? LandingPage
-        : App;
+const path = window.location.pathname;
+const isLanding = path === '/' && !window.location.search.includes('demo=');
+const view: Promise<{ component: ComponentType; title: string }> =
+  path === '/privacy'
+    ? import('./PrivacyPage.js').then(({ PrivacyPage }) => ({
+        component: PrivacyPage,
+        title: 'Privacy — App Health',
+      }))
+    : path === '/changelog'
+      ? import('./Changelog.js').then(({ Changelog }) => ({
+          component: Changelog,
+          title: 'Changelog — App Health',
+        }))
+      : isLanding
+        ? import('./LandingPage.js').then(({ LandingPage }) => ({
+            component: LandingPage,
+            title: 'App Health — Web analytics, product events, and app health',
+          }))
+        : import('./App.js').then(({ App }) => ({ component: App, title: 'App Health' }));
 const analyticsReady =
   window.location.pathname === '/live' ? Promise.resolve() : loadProductAnalytics();
 document.addEventListener('click', (event) => {
@@ -69,16 +76,11 @@ document.addEventListener('click', (event) => {
     .catch(() => undefined)
     .finally(navigate);
 });
-document.title =
-  RootView === PrivacyPage
-    ? 'Privacy — App Health'
-    : RootView === Changelog
-      ? 'Changelog — App Health'
-      : RootView === LandingPage
-        ? 'App Health — Web analytics, product events, and app health'
-        : 'App Health';
-createRoot(root).render(
-  <StrictMode>
-    <RootView />
-  </StrictMode>,
-);
+void view.then(({ component: RootView, title }) => {
+  document.title = title;
+  createRoot(root).render(
+    <StrictMode>
+      <RootView />
+    </StrictMode>,
+  );
+});
