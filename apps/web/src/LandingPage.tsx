@@ -1,4 +1,4 @@
-import { createElement, useEffect, type ReactElement } from 'react';
+import { createElement, lazy, Suspense, useEffect, type ReactElement } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
@@ -10,7 +10,6 @@ import {
   Radio,
   Zap,
 } from 'lucide-react';
-import { AnalyticsChart } from './AnalyticsChart.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { ProductBrand } from './ProductShell.js';
 import { Badge } from '@saas-maker/ui/components/badge';
@@ -31,6 +30,10 @@ const proofPoints = [
   'Named events with one line',
   'App health when you need context',
 ];
+
+const AnalyticsChart = lazy(() =>
+  import('./AnalyticsChart.js').then(({ AnalyticsChart }) => ({ default: AnalyticsChart })),
+);
 
 function PreviewMetric({ label, value, note }: { label: string; value: string; note: string }) {
   return (
@@ -76,7 +79,9 @@ function ProductPreview(): ReactElement {
           <PreviewMetric label="active now" value="12" note="Browser sessions" />
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <AnalyticsChart series={sample} compact />
+          <Suspense fallback={<div className="h-44 w-full" aria-hidden="true" />}>
+            <AnalyticsChart series={sample} compact />
+          </Suspense>
         </div>
         <div className="grid gap-px border-t bg-border sm:grid-cols-2">
           <PreviewList label="top pages" rows={pages} />
