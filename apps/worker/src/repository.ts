@@ -142,6 +142,13 @@ export interface LogRepository {
     source: LogSource,
   ): Promise<void>;
   listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]>;
+  aggregateCacheSummary(
+    appId: string,
+    envId: string,
+    start: number,
+    end: number,
+    now: number,
+  ): Promise<import('./cache-summary-aggregate.js').CacheSummaryAggregateResult>;
 }
 
 /**

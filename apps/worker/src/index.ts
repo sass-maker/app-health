@@ -65,6 +65,7 @@ import {
   type AnalyticsEngineDatasetLike,
 } from './analytics-engine.js';
 import { D1ControlPlane, type D1DatabaseLike } from './d1-adapter.js';
+import { MAX_CACHE_SUMMARY_WINDOW_MS } from './cache-summary-aggregate.js';
 import { InMemoryAdapter, DEDUPE_WINDOW_MS } from './in-memory-adapter.js';
 import type { AppHealthRepositories } from './repository.js';
 import {
@@ -524,6 +525,43 @@ async function handleLogsQueryRoute(
   );
 }
 
+async function handleCacheSummaryAggregateRoute(
+  request: Request,
+  bundle: AdapterBundle,
+  owner: OwnerIdentity,
+  url: URL,
+): Promise<Response | null> {
+  if (url.pathname !== '/v1/logs/cache-summary') return null;
+  if (request.method !== 'GET') return json(405, { error: 'method not allowed' }, true);
+  const appId = url.searchParams.get('app_id');
+  const environmentId = url.searchParams.get('environment_id');
+  const rawStart = url.searchParams.get('start');
+  const rawEnd = url.searchParams.get('end');
+  const start = Number(rawStart);
+  const end = Number(rawEnd);
+  const now = Date.now();
+  if (
+    !appId ||
+    !environmentId ||
+    rawStart === null ||
+    rawEnd === null ||
+    !Number.isSafeInteger(start) ||
+    !Number.isSafeInteger(end) ||
+    start < 0 ||
+    end <= start ||
+    end - start > MAX_CACHE_SUMMARY_WINDOW_MS ||
+    end > now
+  ) {
+    return json(400, { error: 'invalid cache summary window' }, true);
+  }
+  if (!ownerCanAccessApp(owner, appId)) return productScopeForbidden();
+  return json(
+    200,
+    await bundle.service.aggregateCacheSummary(appId, environmentId, start, end, now),
+    true,
+  );
+}
+
 async function handleAppsRoute(
   request: Request,
   bundle: AdapterBundle,
@@ -976,6 +1014,7 @@ async function handleOwnerRoutes(
     (req: Request, current: AdapterBundle, identity: OwnerIdentity, target: URL, _env: Env) =>
       handleEndpointsRoute(req, current, identity, target, options?.timings),
     handleFailuresRoute,
+    handleCacheSummaryAggregateRoute,
     handleLogsQueryRoute,
     handlePublicKeysRoute,
   ];

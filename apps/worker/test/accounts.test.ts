@@ -831,6 +831,9 @@ describe('Google account boundary with real D1 SQL', () => {
     for (const route of ['endpoints', 'failures', 'logs', 'public-keys', 'installation/status']) {
       expect((await request(`/v1/${route}?${query}`, bobCookie)).status).toBe(403);
     }
+    const cacheWindow = `${query}&start=${Date.now() - 60_000}&end=${Date.now() - 1}`;
+    expect((await request(`/v1/logs/cache-summary?${cacheWindow}`, bobCookie)).status).toBe(403);
+    expect((await request(`/v1/logs/cache-summary?${cacheWindow}`, '')).status).toBe(401);
     expect(
       (
         await request(
