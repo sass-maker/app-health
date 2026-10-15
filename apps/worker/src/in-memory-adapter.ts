@@ -37,6 +37,7 @@ import {
   logLevelAtLeast,
 } from '@app-health/contracts';
 import { MemoryCapabilities } from './capability-store.js';
+import { CacheSummaryAggregate, CACHE_SUMMARY_EVENT } from './cache-summary-aggregate.js';
 import { generateRawKey, hashKey } from './crypto.js';
 import type {
   AppHealthRepositories,
@@ -540,6 +541,28 @@ export class InMemoryAdapter
       const key = `${appId}|${envId}|${log.log_id}`;
       if (!this.logEvents.has(key)) this.logEvents.set(key, { ...log, source });
     }
+  }
+  async aggregateCacheSummary(
+    appId: string,
+    envId: string,
+    start: number,
+    end: number,
+    now: number,
+  ) {
+    const aggregate = new CacheSummaryAggregate(start, end, now);
+    const prefix = `${appId}|${envId}|`;
+    const retainedFrom = now - LOG_RETENTION_DAYS * 86_400_000;
+    for (const [key, log] of this.logEvents) {
+      if (
+        key.startsWith(prefix) &&
+        log.event === CACHE_SUMMARY_EVENT &&
+        log.timestamp >= Math.max(start, retainedFrom) &&
+        log.timestamp < end
+      ) {
+        aggregate.add(log);
+      }
+    }
+    return aggregate.result();
   }
   async listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]> {
     const prefix = `${appId}|${envId}|`;

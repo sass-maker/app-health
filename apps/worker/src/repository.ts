@@ -7,6 +7,7 @@
 // never persisted: ingest updates one-minute aggregate buckets only.
 
 import type { DurableEndpointWriter } from './endpoint-durable.js';
+import type { CacheSummaryAggregateResult } from './cache-summary-aggregate.js';
 
 import type {
   CapabilityId,
@@ -142,6 +143,13 @@ export interface LogRepository {
     source: LogSource,
   ): Promise<void>;
   listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]>;
+  aggregateCacheSummary(
+    appId: string,
+    envId: string,
+    start: number,
+    end: number,
+    now: number,
+  ): Promise<CacheSummaryAggregateResult>;
 }
 
 /**

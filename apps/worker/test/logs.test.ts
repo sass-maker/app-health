@@ -106,6 +106,72 @@ describe('log ingest and query routes', () => {
     expect(byEvent.logs).toHaveLength(1);
   });
 
+  it('returns a bounded owner aggregate without returning raw log properties', async () => {
+    const end = Date.now() - 1;
+    const start = end - 60_000;
+    const summary = {
+      scope: 'worker_executed',
+      started_at: end - 2_000,
+      ended_at: end - 1_000,
+      version: 'a'.repeat(40),
+      version_source: 'reader_source',
+      hits: 3,
+      misses: 1,
+      bypasses: 0,
+      eligible: 4,
+      unknown_hits: 3,
+      unknown_misses: 1,
+      unknown_bypasses: 0,
+      unknown_eligible: 4,
+      declared_publisher_hits: 0,
+      declared_publisher_misses: 0,
+      declared_publisher_bypasses: 0,
+      declared_publisher_eligible: 0,
+      declared_diagnostic_hits: 0,
+      declared_diagnostic_misses: 0,
+      declared_diagnostic_bypasses: 0,
+      declared_diagnostic_eligible: 0,
+      private_note: 'never-return-this',
+    };
+    const posted = await call(
+      'POST',
+      '/v1/logs',
+      LOCAL_ENV,
+      batch([log(800, { timestamp: end - 900, event: 'web.cache.summary', props: summary })]),
+      bearer(SEED_KEY),
+    );
+    expect(posted.status).toBe(202);
+    const query = `app_id=${SEED_APP_ID}&environment_id=${SEED_ENV_ID}&start=${start}&end=${end}`;
+    const response = await call('GET', `/v1/logs/cache-summary?${query}`, LOCAL_ENV);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    const result = await response.json();
+    expect(result).toMatchObject({
+      scope: { app_id: SEED_APP_ID, environment_id: SEED_ENV_ID, event: 'web.cache.summary' },
+      contributing_rows: 1,
+      totals: { hits: 3, misses: 1, eligible: 4, eligible_hit_percent: 75 },
+    });
+    expect(JSON.stringify(result)).not.toContain('never-return-this');
+    expect(
+      (
+        await call(
+          'GET',
+          `/v1/logs/cache-summary?${query.replace(`end=${end}`, `end=${end + 60_000}`)}`,
+          LOCAL_ENV,
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          'GET',
+          `/v1/logs/cache-summary?${query.replace(`start=${start}`, `start=${end - 86_400_001}`)}`,
+          LOCAL_ENV,
+        )
+      ).status,
+    ).toBe(400);
+  });
+
   it('rejects missing keys, invalid batches, wrong methods, and bad queries', async () => {
     expect((await call('POST', '/v1/logs', LOCAL_ENV, batch([log(1)]))).status).toBe(401);
     const invalid = await call(

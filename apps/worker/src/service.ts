@@ -732,6 +732,20 @@ export class AppHealthService {
     });
   }
 
+  async aggregateCacheSummary(
+    appId: string,
+    envId: string,
+    start: number,
+    end: number,
+    now: number,
+  ) {
+    if (!this.repos.logs) throw new Error('Log repository is unavailable');
+    return {
+      scope: { app_id: appId, environment_id: envId, event: 'web.cache.summary' },
+      ...(await this.repos.logs.aggregateCacheSummary(appId, envId, start, end, now)),
+    };
+  }
+
   async queryFailures(
     appId: string,
     envId: string,

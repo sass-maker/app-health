@@ -19,6 +19,11 @@ import {
   PUBLIC_LOG_KEY_PREFIX,
 } from '@app-health/contracts';
 import { D1Capabilities } from './capability-store.js';
+import {
+  CacheSummaryAggregate,
+  CACHE_SUMMARY_EVENT,
+  type CacheSummaryRow,
+} from './cache-summary-aggregate.js';
 import { generateRawKey, hashKey } from './crypto.js';
 import type {
   AppHealthRepositories,
@@ -803,6 +808,47 @@ export class D1ControlPlane
         .all<LogRow>()
     ).results;
     return rows.map(logFromRow);
+  }
+  async aggregateCacheSummary(
+    appId: string,
+    envId: string,
+    start: number,
+    end: number,
+    now: number,
+  ) {
+    const aggregate = new CacheSummaryAggregate(start, end, now);
+    const retainedFrom = Math.max(start, now - LOG_RETENTION_DAYS * 86_400_000);
+    let cursor: { timestamp: number; log_id: string } | null = null;
+    // A keyset scan avoids the public log API's 500-row cap and large OFFSETs.
+    // The primary key deduplicates stored IDs; the accumulator also guards page overlap.
+    for (;;) {
+      const rows: CacheSummaryRow[] = (
+        await this.db
+          .prepare(
+            `SELECT log_id, timestamp, source, props FROM log_events
+           WHERE app_id = ? AND environment_id = ? AND event = ?
+             AND timestamp >= ? AND timestamp < ?
+             AND (timestamp > ? OR (timestamp = ? AND log_id > ?))
+           ORDER BY timestamp, log_id LIMIT 500`,
+          )
+          .bind(
+            appId,
+            envId,
+            CACHE_SUMMARY_EVENT,
+            retainedFrom,
+            end,
+            cursor?.timestamp ?? -1,
+            cursor?.timestamp ?? -1,
+            cursor?.log_id ?? '',
+          )
+          .all<CacheSummaryRow>()
+      ).results;
+      for (const row of rows) aggregate.add(row);
+      if (rows.length < 500) break;
+      const last = rows[rows.length - 1];
+      cursor = { timestamp: last.timestamp, log_id: last.log_id };
+    }
+    return aggregate.result();
   }
   async createPublicKey(
     appId: string,
