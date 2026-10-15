@@ -4,7 +4,7 @@ export const CACHE_SUMMARY_EVENT = 'web.cache.summary';
 export const MAX_CACHE_SUMMARY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const COHORTS = ['unknown', 'declared_publisher', 'declared_diagnostic'] as const;
 export type Cohort = (typeof COHORTS)[number];
-export type CountKey = 'hits' | 'misses' | 'bypasses' | 'eligible';
+type CountKey = 'hits' | 'misses' | 'bypasses' | 'eligible';
 export type Counts = Record<CountKey, number>;
 
 export interface CacheSummaryRow {
