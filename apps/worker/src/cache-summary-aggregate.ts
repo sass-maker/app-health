@@ -72,6 +72,63 @@ function finish(target: Bucket) {
   target.eligible_hit_percent = target.eligible ? (100 * target.hits) / target.eligible : null;
 }
 
+interface ParsedSummary {
+  startedAt: number;
+  endedAt: number;
+  overall: Counts;
+  byCohort: Counts[];
+  version: string;
+  versionSource: string;
+}
+
+function decodeProps(raw: unknown): Record<string, unknown> | null {
+  let props = raw;
+  if (typeof props === 'string') {
+    try {
+      props = JSON.parse(props);
+    } catch {
+      return null;
+    }
+  }
+  return props && typeof props === 'object' && !Array.isArray(props)
+    ? (props as Record<string, unknown>)
+    : null;
+}
+
+function readSummary(value: Record<string, unknown>): ParsedSummary | null {
+  const overall = readCounts(value);
+  const byCohort = COHORTS.map((cohort) => readCounts(value, `${cohort}_`));
+  const versionSource = value.version_source;
+  if (
+    value.scope !== 'worker_executed' ||
+    !integer(value.started_at) ||
+    !integer(value.ended_at) ||
+    value.started_at > value.ended_at ||
+    !overall ||
+    byCohort.some((entry) => !entry) ||
+    typeof value.version !== 'string' ||
+    value.version.length > 128 ||
+    typeof versionSource !== 'string' ||
+    !['app_health_release', 'reader_source', 'cache_build', 'unknown'].includes(versionSource)
+  )
+    return null;
+  const cohorts = byCohort as Counts[];
+  if (
+    (['hits', 'misses', 'bypasses', 'eligible'] as const).some(
+      (key) => cohorts.reduce((sum, entry) => sum + entry[key], 0) !== overall[key],
+    )
+  )
+    return null;
+  return {
+    startedAt: value.started_at,
+    endedAt: value.ended_at,
+    overall,
+    byCohort: cohorts,
+    version: value.version,
+    versionSource,
+  };
+}
+
 /** Accumulate retained rows without returning owner-authored log properties. */
 export class CacheSummaryAggregate {
   private readonly seen = new Set<string>();
@@ -101,67 +158,38 @@ export class CacheSummaryAggregate {
       this.otherSource += 1;
       return;
     }
-    let props: unknown = row.props;
-    if (typeof props === 'string') {
-      try {
-        props = JSON.parse(props);
-      } catch {
-        this.malformed += 1;
-        return;
-      }
-    }
-    if (!props || typeof props !== 'object' || Array.isArray(props)) {
+    const value = decodeProps(row.props);
+    const summary = value && readSummary(value);
+    if (!summary) {
       this.malformed += 1;
       return;
     }
-    const value = props as Record<string, unknown>;
-    const overall = readCounts(value);
-    const byCohort = COHORTS.map((cohort) => readCounts(value, `${cohort}_`));
-    const versionSource = value.version_source;
-    if (
-      value.scope !== 'worker_executed' ||
-      !integer(value.started_at) ||
-      !integer(value.ended_at) ||
-      value.started_at > value.ended_at ||
-      !overall ||
-      byCohort.some((entry) => !entry) ||
-      typeof value.version !== 'string' ||
-      value.version.length > 128 ||
-      typeof versionSource !== 'string' ||
-      !['app_health_release', 'reader_source', 'cache_build', 'unknown'].includes(versionSource) ||
-      (['hits', 'misses', 'bypasses', 'eligible'] as const).some(
-        (key) => byCohort.reduce((sum, entry) => sum + (entry?.[key] ?? 0), 0) !== overall[key],
-      )
-    ) {
-      this.malformed += 1;
-      return;
-    }
-    if (value.started_at < this.start || value.ended_at > this.end) {
+    if (summary.startedAt < this.start || summary.endedAt > this.end) {
       this.crossBoundary += 1;
       return;
     }
-    add(this.total, overall);
+    add(this.total, summary.overall);
     this.total.rows += 1;
     this.earliest =
-      this.earliest === null ? value.started_at : Math.min(this.earliest, value.started_at);
-    this.latest = this.latest === null ? value.ended_at : Math.max(this.latest, value.ended_at);
-    const versionLabel = publicVersion(value.version, versionSource);
-    const versionKey = `${value.version_source}\u0000${versionLabel}`;
+      this.earliest === null ? summary.startedAt : Math.min(this.earliest, summary.startedAt);
+    this.latest = this.latest === null ? summary.endedAt : Math.max(this.latest, summary.endedAt);
+    const versionLabel = publicVersion(summary.version, summary.versionSource);
+    const versionKey = `${summary.versionSource}\u0000${versionLabel}`;
     let version = this.versions.get(versionKey);
     if (!version) {
       version = {
         ...bucket(),
         version: versionLabel,
-        version_source: versionSource,
+        version_source: summary.versionSource,
         cohorts: cohortBuckets(),
       };
       this.versions.set(versionKey, version);
     }
-    add(version, overall);
+    add(version, summary.overall);
     version.rows += 1;
     for (let i = 0; i < COHORTS.length; i += 1) {
       const cohort = COHORTS[i];
-      const cohortCounts = byCohort[i] as Counts;
+      const cohortCounts = summary.byCohort[i];
       add(this.cohorts[cohort], cohortCounts);
       add(version.cohorts[cohort], cohortCounts);
       if (Object.values(cohortCounts).some((count) => count > 0)) {
