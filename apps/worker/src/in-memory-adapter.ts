@@ -542,28 +542,6 @@ export class InMemoryAdapter
       if (!this.logEvents.has(key)) this.logEvents.set(key, { ...log, source });
     }
   }
-  async listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]> {
-    const prefix = `${appId}|${envId}|`;
-    const reference = query.now ?? Date.now();
-    const cutoff = reference - LOG_RETENTION_DAYS * 86_400_000;
-    return [...this.logEvents.entries()]
-      .filter(
-        ([key, log]) =>
-          key.startsWith(prefix) &&
-          log.timestamp >= cutoff &&
-          log.timestamp <= reference + 5 * 60 * 1000 &&
-          logLevelAtLeast(log.level, query.minLevel) &&
-          (query.source === undefined || log.source === query.source) &&
-          (query.event === undefined || log.event === query.event),
-      )
-      .map(([, log]) => log)
-      .sort((left, right) =>
-        right.timestamp === left.timestamp
-          ? right.log_id.localeCompare(left.log_id)
-          : right.timestamp - left.timestamp,
-      )
-      .slice(0, query.limit);
-  }
   async aggregateCacheSummary(
     appId: string,
     envId: string,
@@ -585,6 +563,28 @@ export class InMemoryAdapter
       }
     }
     return aggregate.result();
+  }
+  async listLogs(appId: string, envId: string, query: LogListQuery): Promise<StoredLogV1[]> {
+    const prefix = `${appId}|${envId}|`;
+    const reference = query.now ?? Date.now();
+    const cutoff = reference - LOG_RETENTION_DAYS * 86_400_000;
+    return [...this.logEvents.entries()]
+      .filter(
+        ([key, log]) =>
+          key.startsWith(prefix) &&
+          log.timestamp >= cutoff &&
+          log.timestamp <= reference + 5 * 60 * 1000 &&
+          logLevelAtLeast(log.level, query.minLevel) &&
+          (query.source === undefined || log.source === query.source) &&
+          (query.event === undefined || log.event === query.event),
+      )
+      .map(([, log]) => log)
+      .sort((left, right) =>
+        right.timestamp === left.timestamp
+          ? right.log_id.localeCompare(left.log_id)
+          : right.timestamp - left.timestamp,
+      )
+      .slice(0, query.limit);
   }
   async createPublicKey(
     appId: string,
