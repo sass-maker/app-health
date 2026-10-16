@@ -90,8 +90,43 @@ function dashboardHtmlEntry(): Plugin {
   };
 }
 
+/** Discover the private route's modules with the document instead of after main.js. */
+function dashboardModulePreloads(): Plugin {
+  return {
+    name: 'app-health-dashboard-preloads',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      const app = Object.values(bundle).find(
+        (output) => output.type === 'chunk' && output.facadeModuleId?.endsWith('/src/App.tsx'),
+      );
+      const document = bundle['app.html'];
+      if (!app || document?.type !== 'asset' || typeof document.source !== 'string')
+        throw new Error('Private dashboard build output is missing');
+      const modules = new Set<string>();
+      const collect = (file: string) => {
+        if (modules.has(file)) return;
+        modules.add(file);
+        const output = bundle[file];
+        if (output?.type === 'chunk') output.imports.forEach(collect);
+      };
+      collect(app.fileName);
+      const links = [...modules]
+        .filter((file) => !document.source.toString().includes(`href="/${file}"`))
+        .map((file) => `<link rel="modulepreload" crossorigin href="/${file}">`)
+        .join('\n');
+      document.source = document.source.replace('</head>', `${links}\n</head>`);
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [dashboardHtmlEntry(), react(), tailwindcss(), localWorkerApi()],
+  plugins: [
+    dashboardHtmlEntry(),
+    dashboardModulePreloads(),
+    react(),
+    tailwindcss(),
+    localWorkerApi(),
+  ],
   optimizeDeps: {
     include: [
       '@saas-maker/ui > @tanstack/react-table',
