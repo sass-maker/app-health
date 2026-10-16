@@ -9,7 +9,7 @@ export function BrowserTrafficPolicy(): ReactElement {
       <Button asChild variant="outline" className="h-10 cursor-pointer">
         <summary>
           <ShieldCheck className="size-4" />
-          known bots excluded
+          counting policy
         </summary>
       </Button>
       <p className="mt-2 leading-5 text-muted-foreground">
