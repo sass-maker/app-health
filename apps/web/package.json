@@ -6,7 +6,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "node scripts/generate-public-entrypoints.mjs && vite build",
+    "build": "node scripts/generate-public-entrypoints.mjs && vite build && node scripts/prerender-landing.mjs",
     "dev": "vite",
     "preview": "vite preview",
     "clean": "rimraf dist *.tsbuildinfo",

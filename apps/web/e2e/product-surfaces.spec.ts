@@ -21,8 +21,15 @@ for (const theme of ['dark', 'light']) {
                 new URL(response.url()).pathname === '/v1/analytics/report' && response.ok(),
             )
           : Promise.resolve();
+        const footerStyle =
+          surface === 'landing'
+            ? page.waitForResponse(
+                (response) => new URL(response.url()).pathname === '/footer.css' && response.ok(),
+              )
+            : Promise.resolve();
         await page.goto(url);
         await report;
+        await footerStyle;
         if (surface !== 'landing')
           await expect(
             page.locator('script[src*="project-strip.js"], script[src*="ai-chat-footer.js"]'),
@@ -31,6 +38,17 @@ for (const theme of ['dark', 'light']) {
         await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0);
         await checkReadability(page);
         await expect(page.locator('footer')).toHaveCount(surface === 'landing' ? 1 : 0);
+        if (surface === 'landing') {
+          const navigation = page.getByRole('navigation', { name: 'Main navigation' });
+          const dashboardLink = page.getByRole('link', { name: 'open dashboard', exact: true });
+          if (width >= 768) {
+            await expect(navigation).toBeVisible();
+            await expect(dashboardLink).toBeVisible();
+          } else {
+            await expect(navigation).toBeHidden();
+            await expect(dashboardLink).toBeHidden();
+          }
+        }
         await testInfo.attach('rendered-view', {
           body: await page.screenshot({ fullPage: true }),
           contentType: 'image/png',
