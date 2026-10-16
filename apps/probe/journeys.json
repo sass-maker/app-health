@@ -122,19 +122,6 @@
       }
     },
     {
-      "project": "research-papers",
-      "journey": "home",
-      "url": "https://papers.highsignal.app/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Research Papers"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "knowledge-base",
       "journey": "home",
       "url": "https://knowledgebase.sassmaker.com/",
@@ -422,19 +409,6 @@
       }
     },
     {
-      "project": "ph-catalog",
-      "journey": "home",
-      "url": "https://ph.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>PH Catalog"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "web-playables",
       "journey": "home",
       "url": "https://idle.aliveville.com/",
@@ -474,19 +448,6 @@
       }
     },
     {
-      "project": "reddit-insights",
-      "journey": "home",
-      "url": "https://reddit-insights.highsignal.app/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Reddit Insights"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "anchor",
       "journey": "home",
       "url": "https://anchor.significanthobbies.com/",
@@ -497,19 +458,6 @@
           "<title>Anchor"
         ],
         "first_party_asset": false
-      }
-    },
-    {
-      "project": "nomad-data-adventure",
-      "journey": "home",
-      "url": "https://nomad.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Nomad Atlas"
-        ],
-        "first_party_asset": true
       }
     },
     {
