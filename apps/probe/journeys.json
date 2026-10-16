@@ -70,19 +70,6 @@
       }
     },
     {
-      "project": "email-manager",
-      "journey": "home",
-      "url": "https://mail.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Kinetic"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "chatgpt-memory-insights",
       "journey": "home",
       "url": "https://chatgpt.significanthobbies.com/",
@@ -432,19 +419,6 @@
             "equals": true
           }
         ]
-      }
-    },
-    {
-      "project": "motion",
-      "journey": "home",
-      "url": "https://motion.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Motion"
-        ],
-        "first_party_asset": false
       }
     },
     {
