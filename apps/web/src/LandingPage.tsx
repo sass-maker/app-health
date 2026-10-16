@@ -1,4 +1,4 @@
-import { createElement, lazy, Suspense, useEffect, type ReactElement } from 'react';
+import { createElement, lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
   Activity,
@@ -46,6 +46,8 @@ function PreviewMetric({ label, value, note }: { label: string; value: string; n
 }
 
 function ProductPreview(): ReactElement {
+  const [showChart, setShowChart] = useState(false);
+  useEffect(() => setShowChart(true), []);
   const pages = [
     ['/pricing', '482'],
     ['/', '391'],
@@ -79,9 +81,13 @@ function ProductPreview(): ReactElement {
           <PreviewMetric label="active now" value="12" note="Browser sessions" />
         </div>
         <div className="px-3 py-5 sm:px-5">
-          <Suspense fallback={<div className="h-44 w-full" aria-hidden="true" />}>
-            <AnalyticsChart series={sample} compact />
-          </Suspense>
+          {showChart ? (
+            <Suspense fallback={<div className="h-44 w-full" aria-hidden="true" />}>
+              <AnalyticsChart series={sample} compact />
+            </Suspense>
+          ) : (
+            <div className="h-44 w-full" aria-hidden="true" />
+          )}
         </div>
         <div className="grid gap-px border-t bg-border sm:grid-cols-2">
           <PreviewList label="top pages" rows={pages} />
@@ -131,7 +137,12 @@ function Hero(): ReactElement {
                 open App Health <ArrowRight />
               </a>
             </Button>
-            <Button asChild size="lg" variant="outline" className="hidden h-12 px-6 sm:inline-flex">
+            <Button
+              asChild
+              size="lg"
+              variant="outline"
+              className="hidden h-12 px-6 sm:!inline-flex"
+            >
               <a href="#product" data-app-health-event="product_explored">
                 explore the product
               </a>
@@ -394,7 +405,7 @@ export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
       <header className="sticky top-0 z-40 border-b bg-background">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-6 px-4 sm:px-6 lg:px-8">
           <ProductBrand />
-          <nav aria-label="Main navigation" className="ml-auto hidden items-center gap-6 md:flex">
+          <nav aria-label="Main navigation" className="ml-auto hidden items-center gap-6 md:!flex">
             <a
               className="text-sm text-muted-foreground transition-colors hover:text-foreground"
               href="#product"
@@ -417,7 +428,7 @@ export function LandingPage(props: LandingSessionOptions = {}): ReactElement {
           </nav>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
             <ThemeToggle />
-            <Button asChild size="sm" className="hidden sm:inline-flex">
+            <Button asChild size="sm" className="hidden sm:!inline-flex">
               <a href="/app">
                 open dashboard <ArrowRight />
               </a>

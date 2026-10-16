@@ -1,5 +1,5 @@
 import { StrictMode, type ComponentType } from 'react';
-import { createRoot } from 'react-dom/client';
+import { createRoot, hydrateRoot } from 'react-dom/client';
 import { loadProductAnalytics } from './lib/product-analytics.js';
 import './shadcn.css';
 
@@ -78,9 +78,11 @@ document.addEventListener('click', (event) => {
 });
 void view.then(({ component: RootView, title }) => {
   document.title = title;
-  createRoot(root).render(
+  const content = (
     <StrictMode>
       <RootView />
-    </StrictMode>,
+    </StrictMode>
   );
+  if (isLanding && root.dataset.prerendered === 'landing') hydrateRoot(root, content);
+  else createRoot(root).render(content);
 });

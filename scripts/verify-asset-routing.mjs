@@ -130,7 +130,13 @@ try {
     { ...navigate, redirect: 'manual' },
   );
   assert.notEqual(callback.headers.get('content-type')?.split(';')[0], 'text/html');
-  assert.equal((await callback.text()).includes('<div id="root">'), false);
+  assert.doesNotMatch(await callback.text(), /<div id="root"(?:\s|>)/);
+  const home = await globalThis.fetch(`${origin}/`, navigate);
+  assert.equal(home.status, 200);
+  const homeHtml = await home.text();
+  assert.match(homeHtml, /<div id="root" data-prerendered="landing">/);
+  assert.match(homeHtml, /see what people do\./);
+  assert.equal((homeHtml.match(/<h1\b/g) ?? []).length, 1);
   const live = await globalThis.fetch(`${origin}/live`, { ...navigate, redirect: 'manual' });
   assert.equal(live.status, 200);
   assert.equal(live.headers.get('referrer-policy'), 'no-referrer');
@@ -150,8 +156,8 @@ try {
   const spa = await globalThis.fetch(`${origin}/projects/unknown`, navigate);
   assert.equal(spa.status, 200);
   assert.equal(spa.headers.get('content-type')?.split(';')[0], 'text/html');
-  assert.match(await spa.text(), /<div id="root">/);
-  log('Asset routing: callback, /live, /app, and ordinary SPA navigation verified.');
+  assert.match(await spa.text(), /<div id="root"(?:\s|>)/);
+  log('Asset routing: callback, public home, /live, /app, and ordinary SPA navigation verified.');
 } finally {
   if (child.exitCode === null) {
     child.kill('SIGTERM');

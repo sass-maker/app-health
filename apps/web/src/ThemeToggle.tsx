@@ -1,8 +1,11 @@
-import { useState, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { Button } from '@saas-maker/ui/components/button';
 export function ThemeToggle(): ReactElement {
-  const [dark, setDark] = useState(() => document.documentElement.dataset.theme !== 'light');
+  const [dark, setDark] = useState(true);
+  useEffect(() => {
+    setDark(document.documentElement.dataset.theme !== 'light');
+  }, []);
   function toggle() {
     const next = !dark;
     setDark(next);
