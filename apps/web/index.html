@@ -226,7 +226,8 @@
       </main>
     </div>
     <script>
-      if (window.location.pathname !== '/') document.getElementById('root').textContent = '';
+      if (!['/', '/changelog'].includes(window.location.pathname))
+        document.getElementById('root').textContent = '';
     </script>
     <noscript>
       <p class="noscript-note">

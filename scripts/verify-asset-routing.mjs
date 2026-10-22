@@ -137,6 +137,13 @@ try {
   assert.match(homeHtml, /<div id="root" data-prerendered="landing">/);
   assert.match(homeHtml, /see what people do\./);
   assert.equal((homeHtml.match(/<h1\b/g) ?? []).length, 1);
+  const changelog = await globalThis.fetch(`${origin}/changelog`, navigate);
+  assert.equal(changelog.status, 200);
+  const changelogHtml = await changelog.text();
+  assert.match(changelogHtml, /<div id="root" data-prerendered="changelog">/);
+  assert.match(changelogHtml, /what changed, and what it means\./);
+  assert.equal((changelogHtml.match(/<h1\b/g) ?? []).length, 1);
+  assert.equal((changelogHtml.match(/<time\b/g) ?? []).length, 5);
   const live = await globalThis.fetch(`${origin}/live`, { ...navigate, redirect: 'manual' });
   assert.equal(live.status, 200);
   assert.equal(live.headers.get('referrer-policy'), 'no-referrer');
@@ -157,7 +164,7 @@ try {
   assert.equal(spa.status, 200);
   assert.equal(spa.headers.get('content-type')?.split(';')[0], 'text/html');
   assert.match(await spa.text(), /<div id="root"(?:\s|>)/);
-  log('Asset routing: callback, public home, /live, /app, and ordinary SPA navigation verified.');
+  log('Asset routing: callback, public home, changelog, /live, /app, and SPA navigation verified.');
 } finally {
   if (child.exitCode === null) {
     child.kill('SIGTERM');
