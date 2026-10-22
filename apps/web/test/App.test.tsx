@@ -396,6 +396,81 @@ describe('App Health V0 UI', () => {
     await waitFor(() => expectSelectedProject('alpha'));
   });
 
+  it('keeps credentials hidden until both configuration and the existing session resolve', async () => {
+    vi.stubEnv('DEV', false);
+    let resolveConfig!: (response: Response) => void;
+    let resolveSession!: (response: Response) => void;
+    const config = new Promise<Response>((resolve) => {
+      resolveConfig = resolve;
+    });
+    const session = new Promise<Response>((resolve) => {
+      resolveSession = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string) => (input === '/v1/account/config' ? config : session)),
+    );
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+    expect(screen.queryByLabelText('owner key')).toBeNull();
+    expect(screen.getByLabelText('Loading workspace project')).toBeVisible();
+    await act(async () => resolveConfig(Response.json({ google: true })));
+    expect(screen.queryByLabelText('owner key')).toBeNull();
+    expect(screen.getByLabelText('Loading workspace project')).toBeVisible();
+    await act(async () => resolveSession(Response.json({ apps: [] })));
+    expect(await screen.findByRole('button', { name: 'create project' })).toBeVisible();
+    expect(screen.queryByLabelText('owner key')).toBeNull();
+  });
+
+  it('shows the legacy owner-key mode only after configuration explicitly disables Google', async () => {
+    vi.stubEnv('DEV', false);
+    let resolveConfig!: (response: Response) => void;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveConfig = resolve;
+          }),
+      ),
+    );
+    render(<App />);
+    expect(screen.queryByLabelText('owner key')).toBeNull();
+    await act(async () => resolveConfig(Response.json({ google: false })));
+    expect(await screen.findByLabelText('owner key')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'continue with Google' })).toBeNull();
+  });
+
+  it.each(['config', 'session', 'network', 'invalid-config'])(
+    'retries a failed %s bootstrap without silently falling back to a key',
+    async (failure) => {
+      vi.stubEnv('DEV', false);
+      let failing = true;
+      const fetchMock = vi.fn(async (input: string) => {
+        if (input === '/v1/account/config') {
+          if (failing && failure === 'network') throw new Error('offline');
+          if (failing && failure === 'config') return new Response(null, { status: 503 });
+          if (failing && failure === 'invalid-config') return Response.json({});
+          return Response.json({ google: true });
+        }
+        return new Response(null, { status: failing ? 503 : 403 });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      render(<App />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('could not open the workspace');
+      expect(screen.queryByLabelText('owner key')).toBeNull();
+      failing = false;
+      fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+      expect(await screen.findByRole('button', { name: 'continue with Google' })).toBeVisible();
+      expect(fetchMock.mock.calls.filter(([input]) => input === '/v1/account/config')).toHaveLength(
+        2,
+      );
+    },
+  );
+
   it('resumes a Google workspace once in StrictMode, switches projects, and signs out without persisting credentials', async () => {
     vi.stubEnv('DEV', false);
     const apps = ['alpha', 'beta'].map((name) => ({
