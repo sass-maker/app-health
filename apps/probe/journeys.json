@@ -109,19 +109,6 @@
       }
     },
     {
-      "project": "on-record",
-      "journey": "home",
-      "url": "https://podcasts.highsignal.app/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>High Signal Podcasts"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "knowledge-base",
       "journey": "home",
       "url": "https://knowledgebase.sassmaker.com/",
