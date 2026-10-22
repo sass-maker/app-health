@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
@@ -153,12 +153,59 @@ function fixtureInsights(report: ReturnType<typeof fixtureReport>) {
   };
 }
 
+async function installBriefingSession(page: Page, report: ReturnType<typeof fixtureReport>) {
+  const live = { measured_at: report.generated_at, ttl_ms: 45_000, total: 0, projects: [] };
+  await page.route('**/v1/analytics', (route) =>
+    route.fulfill({
+      json: { enabled: true, source: 'local', sampled: false, stream: false, projects: [], live },
+    }),
+  );
+  await page.routeWebSocket('**/v1/analytics/live', (socket) => socket.send(JSON.stringify(live)));
+  await page.route('**/v1/workspace/health', (route) =>
+    route.fulfill({
+      json: {
+        refreshed_at: report.generated_at,
+        window_end: report.generated_at,
+        window: '24h',
+        environments: [],
+      },
+    }),
+  );
+  await page.route('**/v1/workspace/alerts', (route) =>
+    route.fulfill({ json: { generated_at: report.generated_at, total_count: 0, entries: [] } }),
+  );
+  await page.route('**/v1/auth/get-session', (route) =>
+    route.fulfill({
+      json: { user: { emailVerified: true }, session: { id: 'qa-only-briefing-session' } },
+    }),
+  );
+  await page.route('**/v1/account/config', (route) => route.fulfill({ json: { google: true } }));
+  await page.route('**/v1/apps', (route) =>
+    route.fulfill({
+      json: {
+        apps: report.products.map((product) => ({
+          app: { id: product.app_id, name: product.name, created_at: report.from },
+          environments: [
+            {
+              id: `${product.app_id}-production`,
+              app_id: product.app_id,
+              name: 'production',
+              created_at: report.from,
+            },
+          ],
+        })),
+      },
+    }),
+  );
+}
+
 for (const width of [390, 768, 1440]) {
   for (const theme of ['light', 'dark']) {
     test(`two-minute briefing has truthful totals and all 55 projects at ${width}px ${theme}`, async ({
       page,
     }) => {
       const daily = fixtureReport();
+      await installBriefingSession(page, daily);
       await page.setViewportSize({ width, height: 1000 });
       await page.addInitScript(
         (selectedTheme) => localStorage.setItem('app-health-theme', selectedTheme),
@@ -170,7 +217,7 @@ for (const width of [390, 768, 1440]) {
       await page.route('**/v1/reports/portfolio-briefing?**', (route) =>
         route.fulfill({ json: fixtureInsights(daily) }),
       );
-      await page.goto('/app?demo=populated#overview');
+      await page.goto('/app#overview');
       // Explicit QA label stays in the screenshot; fixtures are never presented as production evidence.
       await expect(
         page.getByRole('heading', { name: 'daily briefing', exact: true }),
@@ -273,4 +320,71 @@ for (const width of [390, 768, 1440]) {
       await expect(report.locator('tbody tr')).toHaveCount(55);
     });
   }
+}
+
+for (const width of [390, 768, 1440]) {
+  test(`pageviews distinguish pending, measured and unavailable at ${width}px`, async ({
+    page,
+  }) => {
+    const daily = fixtureReport();
+    await installBriefingSession(page, daily);
+    const insights = fixtureInsights(daily);
+    let releaseSources = () => {};
+    let observeSources = () => {};
+    const sourcesRequested = new Promise<void>((resolve) => {
+      observeSources = resolve;
+    });
+    const sourcesReleased = new Promise<void>((resolve) => {
+      releaseSources = resolve;
+    });
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/v1/reports/daily-engagement?**', (route) =>
+      route.fulfill({ json: daily }),
+    );
+    await page.route('**/v1/reports/portfolio-briefing?**', async (route) => {
+      if (route.request().url().includes('traffic=bots')) {
+        await route.fulfill({ status: 503, json: { error: 'QA unavailable source fixture' } });
+        return;
+      }
+      observeSources();
+      await sourcesReleased;
+      await route.fulfill({ json: insights });
+    });
+    await page.goto('/app#overview');
+    const summary = page.getByRole('region', { name: 'Selected day summary', exact: true });
+    await expect(
+      summary.getByRole('status', { name: 'Loading browser pageviews', exact: true }),
+    ).toBeVisible();
+    await expect(summary.getByText('source aggregate unavailable', { exact: true })).toHaveCount(0);
+    const evidence = new URL(
+      process.env.APP_HEALTH_EVIDENCE_DIRECTORY ?? '../../../.fleet/evidence/loading-20261022/',
+      import.meta.url,
+    );
+    mkdirSync(fileURLToPath(evidence), { recursive: true });
+    await page.screenshot({ path: fileURLToPath(new URL(`pending-${width}.png`, evidence)) });
+    await sourcesRequested;
+    releaseSources();
+    await expect(summary.getByRole('status')).toHaveCount(0);
+    const pageviews = insights.products.reduce((sum, product) => sum + (product.pageviews ?? 0), 0);
+    await expect(
+      summary.getByText('browser pageviews', { exact: true }).locator('..'),
+    ).toContainText(pageviews.toLocaleString());
+    await page.screenshot({ path: fileURLToPath(new URL(`measured-${width}.png`, evidence)) });
+    await page.getByRole('button', { name: 'bots', exact: true }).click();
+    const botCard = summary.getByText('bot pageviews', { exact: true }).locator('..');
+    await expect(botCard).toContainText('source aggregate unavailable');
+    const unknown = botCard.getByText('unknown', { exact: true });
+    await expect(unknown).toBeVisible();
+    expect(
+      await unknown.evaluate((node) => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        return range.getClientRects().length;
+      }),
+    ).toBe(1);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+    ).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: fileURLToPath(new URL(`unavailable-${width}.png`, evidence)) });
+  });
 }

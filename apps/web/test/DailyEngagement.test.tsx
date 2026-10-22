@@ -298,6 +298,38 @@ it('shows a retryable daily-report error without losing selected date behavior',
   await waitFor(() => expect(screen.getByText('2 in scope')).toBeTruthy());
 });
 
+it('keeps pending pageviews distinct from an unavailable source aggregate', async () => {
+  let finishSources: (response: Response) => void = () => {};
+  const fetch = vi.fn((input: RequestInfo | URL): Promise<Response> =>
+    String(input).includes('/portfolio-briefing')
+      ? new Promise((resolve) => {
+          finishSources = resolve;
+        })
+      : Promise.resolve(Response.json(report)),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(<DailyEngagement ownerToken="owner" />);
+  const summary = await screen.findByRole('region', { name: 'Selected day summary' });
+  expect(within(summary).getByRole('status', { name: 'Loading browser pageviews' })).toBeTruthy();
+  expect(within(summary).queryByText('source aggregate unavailable')).toBeNull();
+
+  await act(async () => finishSources(Response.json(briefing)));
+  await waitFor(() => expect(within(summary).getByText('100')).toBeTruthy());
+  expect(within(summary).queryByRole('status', { name: 'Loading browser pageviews' })).toBeNull();
+
+  fireEvent.click(screen.getByRole('button', { name: 'bots' }));
+  expect(within(summary).getByRole('status', { name: 'Loading bot pageviews' })).toBeTruthy();
+  expect(within(summary).queryByText('source aggregate unavailable')).toBeNull();
+  await waitFor(() =>
+    expect(requestsFor(fetch, '/portfolio-briefing').at(-1)).toContain('traffic=bots'),
+  );
+  await act(async () => finishSources(new Response(null, { status: 503 })));
+  await waitFor(() =>
+    expect(within(summary).getByText('source aggregate unavailable')).toBeTruthy(),
+  );
+  expect(within(summary).queryByRole('status', { name: 'Loading bot pageviews' })).toBeNull();
+});
+
 it('applies the Non-bot / Bots / All selection to pageviews, sources, breakouts and rows', async () => {
   const bots = {
     ...briefing,

@@ -16,6 +16,7 @@ import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { EmptyState } from '@saas-maker/ui/components/empty-state';
 import { ErrorState } from '@saas-maker/ui/components/error-state';
 import { CardSkeleton } from '@saas-maker/ui/blocks/skeletons';
+import { Skeleton } from '@saas-maker/ui/components/skeleton';
 
 type DailyProduct = DailyEngagementReportV1['products'][number];
 type ProductFocus = 'analytics' | 'events' | 'backend';
@@ -275,26 +276,34 @@ function Stat({
   label,
   value,
   detail,
+  loading = false,
   className = '',
 }: {
   label: string;
   value: string;
   detail: string;
+  loading?: boolean;
   tone?: 'neutral' | 'sky' | 'green' | 'amber';
   className?: string;
 }): ReactElement {
   return (
     <div className={`min-w-0 rounded-lg border bg-card p-4 ${className}`}>
       <p className="text-[11px] font-medium tracking-[0.03em] text-muted-foreground">{label}</p>
-      <p
-        className={`mt-3 break-words font-medium tabular-nums text-foreground ${
-          value.length > 12
+      <div
+        className={`mt-3 min-h-10 break-words font-medium tabular-nums text-foreground ${
+          !loading && (value.length > 12 || /[a-z]/i.test(value))
             ? 'text-xl leading-tight tracking-tight'
             : 'text-[clamp(1.65rem,3vw,2.45rem)] leading-none tracking-[-0.055em]'
         }`}
       >
-        {value}
-      </p>
+        {loading ? (
+          <div role="status" aria-label={`Loading ${label}`} aria-busy="true">
+            <Skeleton className="h-10 w-16 max-w-full" />
+          </div>
+        ) : (
+          value
+        )}
+      </div>
       <p className="mt-2 text-[11px] leading-[1.5] text-muted-foreground">{detail}</p>
     </div>
   );
@@ -1067,12 +1076,14 @@ const PAGEVIEW_LABEL: Record<BriefingTraffic, string> = {
 function Summary({
   report,
   data,
+  loading,
   traffic,
   attentionItems,
   healthCoverage,
 }: {
   report: DailyEngagementReportV1;
   data: PortfolioBriefingData | null;
+  loading: boolean;
   traffic: BriefingTraffic;
   attentionItems: PortfolioAttentionItem[];
   healthCoverage?: PortfolioHealthCoverage;
@@ -1154,10 +1165,13 @@ function Summary({
         <Stat
           label={PAGEVIEW_LABEL[traffic]}
           value={data && pageviewProducts ? formatNumber(pageviews) : 'unknown'}
+          loading={loading && !data}
           detail={
-            data
-              ? `${pageviewProducts} products with source data${pageviewsEstimated ? ' · estimated' : ''}`
-              : 'source aggregate unavailable'
+            loading && !data
+              ? 'loading selected traffic…'
+              : data
+                ? `${pageviewProducts} products with source data${pageviewsEstimated ? ' · estimated' : ''}`
+                : 'source aggregate unavailable'
           }
         />
         <Stat
@@ -1257,6 +1271,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
       <Summary
         report={report}
         data={data}
+        loading={loading}
         traffic={traffic}
         attentionItems={attentionItems}
         healthCoverage={healthCoverage}
