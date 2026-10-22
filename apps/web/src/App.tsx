@@ -12,6 +12,7 @@ import { AnalyticsSharing } from './AnalyticsSharing.js';
 import { NativeKeys } from './NativeKeys.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
 import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
+import { useAccountBootstrap } from './lib/account-bootstrap.js';
 import { SpeedView } from './SpeedView.js';
 import { EnvironmentCreateForm } from './EnvironmentCreateForm.js';
 import { ProductBrand, ProductShell } from './ProductShell.js';
@@ -3540,22 +3541,58 @@ async function requestSignOut(): Promise<void> {
   if (!response.ok) throw new Error('could not sign out. please try again.');
 }
 
-function WorkspaceLoading(): ReactElement {
+function WorkspaceLoading({
+  error = '',
+  onRetry,
+}: {
+  error?: string;
+  onRetry?: () => void;
+}): ReactElement {
   return (
     <div className="min-h-screen bg-background">
       <header className="flex h-16 items-center justify-between border-b px-6">
         <ProductBrand />
         <ThemeToggle />
       </header>
-      <main className="mx-auto max-w-7xl p-6" aria-label="Loading workspace project">
-        <DataTableSkeleton columns={endpointColumns} rows={3} />
+      <main
+        className="mx-auto max-w-7xl p-6"
+        aria-label={error ? 'Workspace unavailable' : 'Loading workspace project'}
+        aria-busy={!error}
+      >
+        {error ? (
+          <Alert variant="destructive" className="max-w-xl">
+            <AlertTriangle />
+            <AlertTitle>could not open the workspace</AlertTitle>
+            <AlertDescription className="space-y-3">
+              <p>{error}</p>
+              <Button variant="outline" className="min-h-11" onClick={onRetry}>
+                try again
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <DataTableSkeleton columns={endpointColumns} rows={3} />
+        )}
       </main>
     </div>
   );
 }
 
+type WorkspaceUnlock = (token: string, listed: ListAppsResponseV1) => void;
+
+function workspaceEntry(
+  bootstrap: ReturnType<typeof useAccountBootstrap>,
+  applied: boolean,
+  onUnlock: WorkspaceUnlock,
+): ReactElement {
+  if (bootstrap.pending || bootstrap.error || (bootstrap.result?.listed && !applied))
+    return <WorkspaceLoading error={bootstrap.error} onRetry={bootstrap.retry} />;
+  return <OwnerUnlock onUnlock={onUnlock} googleEnabled={bootstrap.result?.google ?? false} />;
+}
+
 export function App(): ReactElement {
-  const [googleEnabled, setGoogleEnabled] = useState(false);
+  const bootstrap = useAccountBootstrap();
+  const bootstrapApplied = useRef(false);
   const [accountSession, setAccountSession] = useState(false);
   const [sessionError, setSessionError] = useState('');
   const [ownerToken, setOwnerToken] = useState<string | null>(() =>
@@ -3573,10 +3610,6 @@ export function App(): ReactElement {
   const [created, setCreated] = useState<CreateAppResponseV1 | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
-  const accountBootstrap = useRef<Promise<{
-    google: boolean;
-    listed: ListAppsResponseV1 | null;
-  } | null> | null>(null);
 
   useEffect(() => {
     if (ownerToken === null) return;
@@ -3678,28 +3711,13 @@ export function App(): ReactElement {
   }, [projects]);
 
   useEffect(() => {
-    let cancelled = false;
-    accountBootstrap.current ??= (async () => {
-      const config = await fetch('/v1/account/config');
-      if (!config.ok) return null;
-      const options = (await config.json()) as { google?: boolean };
-      if (!options.google) return { google: false, listed: null };
-      const response = await fetch('/v1/apps').catch(() => null);
-      if (!response?.ok) return { google: true, listed: null };
-      return { google: true, listed: (await response.json()) as ListAppsResponseV1 };
-    })().catch(() => null);
-    void accountBootstrap.current.then((result) => {
-      if (!result || cancelled) return;
-      if (result.google) setGoogleEnabled(true);
-      if (!result.listed) return;
-      prefetchedInventory.current = { token: '', available: availableProjects(result.listed) };
-      handleUnlock('', result.listed);
-      setAccountSession(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    const listed = bootstrap.result?.listed;
+    if (!listed) return;
+    bootstrapApplied.current = true;
+    prefetchedInventory.current = { token: '', available: availableProjects(listed) };
+    handleUnlock('', listed);
+    setAccountSession(true);
+  }, [bootstrap.result]);
 
   function selectProject(value: SavedProject, replaceHistory = false): void {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
@@ -3793,8 +3811,8 @@ export function App(): ReactElement {
     setCreated(null);
   }
 
-  if (ownerToken === null)
-    return <OwnerUnlock onUnlock={handleUnlock} googleEnabled={googleEnabled} />;
+  if (ownerToken === null) return workspaceEntry(bootstrap, bootstrapApplied.current, handleUnlock);
+
   if (created)
     return (
       <KeySetup
