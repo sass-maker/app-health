@@ -253,6 +253,8 @@ it('keeps briefing source and completed India day in the focused report, then pe
   expect(screen.getByRole('combobox', { name: 'Analytics period' })).toHaveTextContent(
     '2026-09-30 · India day',
   );
+  const chartHeading = await screen.findByRole('heading', { name: 'traffic over time' });
+  expect(chartHeading.parentElement).toHaveTextContent('2026-09-30 · India day');
   fireEvent.keyDown(screen.getByRole('combobox', { name: 'Analytics period' }), {
     key: 'ArrowDown',
   });
@@ -266,4 +268,12 @@ it('keeps briefing source and completed India day in the focused report, then pe
     ).toBe(true),
   );
   expect(location.search).not.toContain('briefing_date');
+  await waitFor(() =>
+    expect(
+      screen.getByRole('heading', { name: 'traffic over time' }).parentElement,
+    ).toHaveTextContent('last 7 days'),
+  );
+  expect(
+    screen.getByRole('heading', { name: 'traffic over time' }).parentElement,
+  ).not.toHaveTextContent('2026-09-30');
 });

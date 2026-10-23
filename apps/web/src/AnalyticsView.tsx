@@ -275,6 +275,7 @@ export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
         selected={selected}
         metric={metric}
         range={range}
+        date={date}
         sourceNote={sourceNote}
         active={active}
         totals={totalsValue}
