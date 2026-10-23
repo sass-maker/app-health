@@ -388,3 +388,111 @@ for (const width of [390, 768, 1440]) {
     await page.screenshot({ path: fileURLToPath(new URL(`unavailable-${width}.png`, evidence)) });
   });
 }
+
+for (const width of [390, 768, 1440]) {
+  test(`dated acquisition drill-down keeps its project, source and day at ${width}px`, async ({
+    page,
+  }) => {
+    const daily = fixtureReport();
+    const insights = fixtureInsights(daily);
+    const product = daily.products.find((item) => (item.browser_visitors ?? 0) > 0)!;
+    const insight = insights.products.find((item) => item.app_id === product.app_id)!;
+    insight.top_sources = [{ name: 'No referrer', pageviews: insight.pageviews!, share: 1 }];
+    await installBriefingSession(page, daily);
+    await page.setViewportSize({ width, height: 1000 });
+    await page.route('**/v1/reports/daily-engagement?**', (route) =>
+      route.fulfill({ json: daily }),
+    );
+    await page.route('**/v1/reports/portfolio-briefing?**', (route) =>
+      route.fulfill({ json: insights }),
+    );
+    await page.route('**/v1/capabilities?**', (route) => {
+      const url = new URL(route.request().url());
+      return route.fulfill({
+        json: {
+          app_id: url.searchParams.get('app_id'),
+          environment_id: url.searchParams.get('environment_id'),
+          capabilities: ['analytics', 'endpoints', 'logs'].map((id) => ({
+            id,
+            enabled: true,
+            first_received_at: 1,
+            last_received_at: 1,
+          })),
+          private_key: null,
+        },
+      });
+    });
+    await page.route('**/v1/installation/status?**', (route) =>
+      route.fulfill({
+        json: {
+          state: 'connected',
+          runtime: 'node',
+          first_seen: 1,
+          last_seen: 1,
+          next_action: 'Connected',
+        },
+      }),
+    );
+    await page.route('**/v1/analytics/report?**', (route) =>
+      route.fulfill({
+        json: {
+          from: daily.from,
+          to: daily.to,
+          source: 'local',
+          sampled: false,
+          series: [{ timestamp: daily.from, pageviews: insight.pageviews!, events: 0 }],
+          pages: [{ name: '/dated-fixture', count: insight.pageviews! }],
+          sources: [{ name: 'Unknown', count: insight.pageviews! }],
+          events: [],
+          sessions: 1,
+        },
+      }),
+    );
+    await page.goto('/app#overview');
+    const report = page.locator('#daily-engagement');
+    const ledger =
+      width < 1024
+        ? report.getByRole('list', { name: 'Portfolio project ledger' })
+        : report.getByRole('table', { name: 'Portfolio project ledger' });
+    const sourceButton = ledger
+      .locator(width < 1024 ? 'li' : 'tbody tr')
+      .filter({ has: page.getByText(product.catalog_id, { exact: true }) })
+      .getByRole('button', { name: `Open No referrer source for ${daily.date}`, exact: true });
+    const request = page.waitForRequest((value) => {
+      const url = new URL(value.url());
+      return (
+        url.pathname === '/v1/analytics/report' &&
+        url.searchParams.get('date') === daily.date &&
+        url.searchParams.get('source') === 'Unknown' &&
+        url.searchParams.get('breakdown') === 'acquisition'
+      );
+    });
+    await sourceButton.click();
+    const url = new URL((await request).url());
+    expect(url.searchParams.get('app_id')).toBe(product.app_id);
+    expect(url.searchParams.get('environment_id')).toBe(`${product.app_id}-production`);
+    await expect(page.getByRole('combobox', { name: 'Analytics period' })).toContainText(
+      `${daily.date} · India day`,
+    );
+    await expect(page.getByRole('tab', { name: 'acquisition', exact: true })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(
+      page.getByRole('heading', { name: 'traffic over time', exact: true }).locator('..'),
+    ).toContainText(`${daily.date} · India day`);
+    await expect(page.getByText('/dated-fixture', { exact: true })).toBeVisible();
+    const current = new URL(page.url());
+    expect(current.searchParams.get('briefing_date')).toBe(daily.date);
+    expect(current.searchParams.get('briefing_source')).toBe('Unknown');
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+    ).toBeLessThanOrEqual(1);
+    const evidence = new URL(
+      '../../../.fleet/evidence/briefing-dated-drilldown-20261023/',
+      import.meta.url,
+    );
+    mkdirSync(fileURLToPath(evidence), { recursive: true });
+    await page.screenshot({ path: fileURLToPath(new URL(`dated-source-${width}.png`, evidence)) });
+  });
+}

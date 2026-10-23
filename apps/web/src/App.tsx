@@ -3362,6 +3362,7 @@ function DashboardManagement(props: DashboardContentProps): ReactElement {
         projects={projects}
         ownerToken={ownerToken}
         onOpen={(selected, focus = 'analytics', source, date) => {
+          handlers.onProjectChange(selected);
           const url = new URL(location.href);
           url.searchParams.set('project', selected.appId);
           url.searchParams.set('environment', selected.environmentId);
@@ -3371,7 +3372,6 @@ function DashboardManagement(props: DashboardContentProps): ReactElement {
             url.searchParams.set('briefing_source', source === 'No referrer' ? 'Unknown' : source);
           if (date && focus !== 'backend') url.searchParams.set('briefing_date', date);
           history.replaceState(null, '', url);
-          handlers.onProjectChange(selected);
           props.onView(focus);
         }}
       />

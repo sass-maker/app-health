@@ -202,6 +202,7 @@ export interface AnalyticsReportProps {
   selected: string;
   metric: 'pageviews' | 'events';
   range: string;
+  date?: string;
   sourceNote: string;
   active: number | null;
   totals: { pageviews: number; events: number };
@@ -298,7 +299,7 @@ function ReportMetrics(props: AnalyticsReportProps): ReactElement {
 }
 
 function ReportChart(props: AnalyticsReportProps): ReactElement {
-  const { report, mode, selected, metric, range, sourceNote, totals, onMetric } = props;
+  const { report, mode, selected, metric, range, date, sourceNote, totals, onMetric } = props;
   const showMetricPicker = mode === 'web' && !selected;
   return (
     <Card className="shadow-none">
@@ -315,7 +316,8 @@ function ReportChart(props: AnalyticsReportProps): ReactElement {
                     : 'traffic over time'}
             </h2>
             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock3 className="size-3" /> {periodLabels[range]} · {sourceNote}
+              <Clock3 className="size-3" /> {date ? `${date} · India day` : periodLabels[range]} ·{' '}
+              {sourceNote}
             </p>
           </div>
           {showMetricPicker ? (
