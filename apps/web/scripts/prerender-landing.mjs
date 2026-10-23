@@ -42,7 +42,7 @@ try {
     const end = html.lastIndexOf('</div>');
     if (start < 0 || end < start) throw new Error(`${name} root is missing from built HTML`);
     const rendered = `${html.slice(0, start)}<div id="root" data-prerendered="${name}">${markup}</div>${html.slice(end + 6)}`;
-    const criticalCss = createCriticalCss(name === 'landing' ? 'media' : false);
+    const criticalCss = createCriticalCss('media');
     await writeFile(output, await criticalCss.process(rendered));
   }
 } finally {
