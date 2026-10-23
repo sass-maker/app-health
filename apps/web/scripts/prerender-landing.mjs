@@ -8,15 +8,18 @@ import { createServer } from 'vite';
 import Beasties from 'beasties';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const criticalCss = new Beasties({
-  path: fileURLToPath(new URL('../dist/', import.meta.url)),
-  publicPath: '/',
-  preload: false,
-  pruneSource: false,
-  reduceInlineStyles: false,
-  inlineFonts: false,
-  logLevel: 'warn',
-});
+const createCriticalCss = (preload) =>
+  new Beasties({
+    path: fileURLToPath(new URL('../dist/', import.meta.url)),
+    publicPath: '/',
+    preload,
+    // Root theme rules sit outside Beasties' default body container.
+    allowRules: preload ? ['[data-mode=dark]', 'html[data-theme=light]'] : [],
+    pruneSource: false,
+    reduceInlineStyles: false,
+    inlineFonts: false,
+    logLevel: 'warn',
+  });
 const server = await createServer({
   root,
   configFile: false,
@@ -39,7 +42,8 @@ try {
     const end = html.lastIndexOf('</div>');
     if (start < 0 || end < start) throw new Error(`${name} root is missing from built HTML`);
     const rendered = `${html.slice(0, start)}<div id="root" data-prerendered="${name}">${markup}</div>${html.slice(end + 6)}`;
-    await writeFile(output, name === 'changelog' ? await criticalCss.process(rendered) : rendered);
+    const criticalCss = createCriticalCss(name === 'landing' ? 'media' : false);
+    await writeFile(output, await criticalCss.process(rendered));
   }
 } finally {
   await server.close();
