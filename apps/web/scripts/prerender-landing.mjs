@@ -5,8 +5,18 @@ import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import react from '@vitejs/plugin-react';
 import { createServer } from 'vite';
+import Beasties from 'beasties';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
+const criticalCss = new Beasties({
+  path: fileURLToPath(new URL('../dist/', import.meta.url)),
+  publicPath: '/',
+  preload: false,
+  pruneSource: false,
+  reduceInlineStyles: false,
+  inlineFonts: false,
+  logLevel: 'warn',
+});
 const server = await createServer({
   root,
   configFile: false,
@@ -28,10 +38,8 @@ try {
     const start = html.indexOf('<div id="root">');
     const end = html.lastIndexOf('</div>');
     if (start < 0 || end < start) throw new Error(`${name} root is missing from built HTML`);
-    await writeFile(
-      output,
-      `${html.slice(0, start)}<div id="root" data-prerendered="${name}">${markup}</div>${html.slice(end + 6)}`,
-    );
+    const rendered = `${html.slice(0, start)}<div id="root" data-prerendered="${name}">${markup}</div>${html.slice(end + 6)}`;
+    await writeFile(output, name === 'changelog' ? await criticalCss.process(rendered) : rendered);
   }
 } finally {
   await server.close();
