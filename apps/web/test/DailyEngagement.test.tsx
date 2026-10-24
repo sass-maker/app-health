@@ -99,6 +99,7 @@ it('shows browser counts, action intent, response receipts, sources, and applica
   );
 
   const table = await screen.findByRole('table');
+  expect(screen.getByRole('button', { name: 'export 30-day usage' })).toBeTruthy();
   expect(screen.getByText('2 in scope')).toBeTruthy();
   expect(screen.getByText('browser pageviews')).toBeTruthy();
   expect(
