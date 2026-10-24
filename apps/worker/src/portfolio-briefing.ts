@@ -1,6 +1,7 @@
 import {
   ANALYTICS_SOURCE_HOSTS,
   ANALYTICS_SOURCE_ALIASES,
+  MAX_PORTFOLIO_CATALOG_PRODUCTS,
   PortfolioBriefingV1,
   normalizeAnalyticsSource,
   type BriefingTraffic,
@@ -15,7 +16,7 @@ import type { D1DatabaseLike } from './d1-adapter.js';
 import { dailyEngagementWindow, type CatalogProductRow } from './daily-engagement-report.js';
 
 const DAY_MS = 86_400_000;
-const MAX_CATALOG = 55;
+const MAX_CATALOG = MAX_PORTFOLIO_CATALOG_PRODUCTS;
 const MAX_SOURCE_ROWS = 10_000;
 const MAX_ANALYTICS_SQL_BYTES = 10_000;
 const BOT_FILTER_CUTOVER = Date.UTC(2026, 9, 1, 6, 25, 40, 421);

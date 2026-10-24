@@ -156,7 +156,7 @@ export const DAILY_CTA_NOT_APPLICABLE_IDS = [
 ] as const;
 const notApplicableIds = new Set<string>(DAILY_CTA_NOT_APPLICABLE_IDS);
 
-/** All 55 in-scope products; candidate names never become report counts. */
+/** Policies for linked catalog products; candidate names never become report counts. */
 export const DAILY_CTA_POLICY: Readonly<Record<string, DailyCtaPolicy>> = Object.freeze(
   Object.fromEntries([
     ...Object.entries(candidateNames).map(([catalogId, clarityCandidate]) => [

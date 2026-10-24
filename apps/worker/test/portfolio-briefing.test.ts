@@ -60,6 +60,43 @@ const briefingArgs = (overrides: Partial<Parameters<typeof readPortfolioBriefing
 });
 
 describe('readPortfolioBriefing', () => {
+  it('accepts 56 linked products and rejects a 61-product catalog', async () => {
+    const makeCatalog = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        catalog_id: `product-${String(index).padStart(3, '0')}`,
+        app_id: `app-${String(index).padStart(3, '0')}`,
+        catalog_name: `Product ${index}`,
+        environment_id: `env-${String(index).padStart(3, '0')}`,
+        analytics_first_received_at: CURRENT_FROM - 86_400_000,
+      }));
+    const linked = makeCatalog(56);
+    const result = await readPortfolioBriefing({
+      db: db(linked),
+      workspaceId: 'workspace-1',
+      date: '2026-10-03',
+      now: NOW,
+      currentReport: {
+        products: linked.map((row) => ({ app_id: row.app_id, browser_visitors: null })),
+      },
+      query: async () => [],
+    });
+    expect(PortfolioBriefingV1.parse(result).products).toHaveLength(56);
+
+    const overLimit = makeCatalog(61);
+    await expect(
+      readPortfolioBriefing({
+        db: db(overLimit),
+        workspaceId: 'workspace-1',
+        date: '2026-10-03',
+        now: NOW,
+        currentReport: {
+          products: overLimit.map((row) => ({ app_id: row.app_id, browser_visitors: null })),
+        },
+        query: async () => [],
+      }),
+    ).rejects.toThrow('portfolio exceeds catalog capacity');
+  });
+
   it('reads source aggregates while the daily report is pending and preserves the result', async () => {
     let finishReport!: (report: {
       products: { app_id: string; browser_visitors: number }[];

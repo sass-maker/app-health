@@ -5,6 +5,9 @@
 export const SCHEMA_VERSION = 'v1' as const;
 export type SchemaVersion = typeof SCHEMA_VERSION;
 
+/** Maximum linked Fleet products supported by portfolio aggregate reports. */
+export const MAX_PORTFOLIO_CATALOG_PRODUCTS = 60;
+
 /** Maximum events accepted in a single batch. */
 export const MAX_BATCH_EVENTS = 1000;
 

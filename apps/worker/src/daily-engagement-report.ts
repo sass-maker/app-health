@@ -16,6 +16,7 @@
 
 import {
   DAILY_ENGAGEMENT_SCHEMA,
+  MAX_PORTFOLIO_CATALOG_PRODUCTS,
   DailyEngagementReportV1,
   ReportDate,
   type DailyEngagementProductReportV1,
@@ -522,11 +523,8 @@ function reportNotes(input: DailyEngagementInputs, unmappedLogs: number): string
   const notes = [
     ...(input.notes ?? []),
     'Native sessions count only observed, unsampled native heartbeats; missing or sampled rows are unknown. Server requests count accepted durable endpoint aggregates and do not represent people. Browser visitors count recognized browsers, not people.',
+    `${input.catalog.length} active catalog product(s) are linked to this workspace; products not linked to its catalog are outside this report.`,
   ];
-  if (input.catalog.length !== 55)
-    notes.push(
-      `Only ${input.catalog.length} catalog product(s) are imported; 55 active Fleet products are expected. Missing products are outside this report.`,
-    );
   if (Object.keys(input.ctaEventNamesByCatalogId).length === 0)
     notes.push(
       `No qualified primary CTA events are reportable for ${input.date}; counts are unknown.`,
@@ -946,10 +944,12 @@ async function readDailyEngagementCatalog(
        LEFT JOIN environment_capabilities ac ON ac.app_id = c.app_id
          AND ac.environment_id = e.id AND ac.capability = 'analytics'
        WHERE c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
-       ORDER BY c.catalog_id`,
+       ORDER BY c.catalog_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,
     )
     .bind(workspaceId)
     .all<CatalogProductRow>();
+  if (result.results.length > MAX_PORTFOLIO_CATALOG_PRODUCTS)
+    throw new Error('daily engagement catalog exceeds portfolio capacity');
   return result.results;
 }
 
@@ -982,7 +982,7 @@ export async function readDailyApiActivity(
        AND lower(e.name) = 'production'
      JOIN catalog_project_imports c ON c.app_id = r.app_id
        AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
-     GROUP BY r.app_id LIMIT 56`,
+     GROUP BY r.app_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,
     )
     .bind(...values);
   const { hotRows: historyRows, coldRows } = await readEndpointHistory<ApiActivityRow>({
@@ -996,7 +996,8 @@ export async function readDailyApiActivity(
     to,
     now: Date.now(),
   });
-  if (historyRows.length > 55) throw new Error('Daily endpoint query exceeded row limit');
+  if (historyRows.length > MAX_PORTFOLIO_CATALOG_PRODUCTS)
+    throw new Error('Daily endpoint query exceeded row limit');
   const allowedApps = new Set(catalog.flatMap((row) => (row.environment_id ? [row.app_id] : [])));
   const seen = new Set<string>();
   const hotRows = historyRows.map((row) => {
@@ -1256,7 +1257,7 @@ export async function composeDailyEngagementReport(args: {
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
   const catalog = await readDailyEngagementCatalog(args.db, args.workspaceId);
   const appIds = catalog.map((row) => row.app_id);
-  const sourceCatalogIds = catalog.slice(0, 55).map((row) => row.catalog_id);
+  const sourceCatalogIds = catalog.map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};
   const ctaEventNames = [...new Set(Object.values(ctaEventNamesByCatalogId).flat())];
   const exactBrowserVisitorsPromise = readExactBrowserVisitorsForReport(

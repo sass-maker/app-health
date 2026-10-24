@@ -291,7 +291,7 @@ it('rejects non-canonical uppercase catalog identifiers before requests', async 
   expect(fetcher).not.toHaveBeenCalled();
 });
 
-it('cancels the export and rejects portfolios over the catalog cap', async () => {
+it('cancels the export, accepts 56 linked products, and rejects portfolios over the cap', async () => {
   const controller = new AbortController();
   const fetcher = vi.fn(
     (_input: RequestInfo | URL, init?: RequestInit) =>
@@ -310,20 +310,44 @@ it('cancels the export and rejects portfolios over the catalog cap', async () =>
   });
   controller.abort();
   await expect(task).rejects.toThrow();
+  const linkedProducts = Array.from({ length: 56 }, (_, index) => ({
+    catalog_id: `project-${String(index).padStart(3, '0')}`,
+    app_id: `app-${String(index).padStart(3, '0')}`,
+    name: `Project ${index}`,
+    browser_visitors_applicability: 'applicable' as const,
+    coverage: 'full' as const,
+  }));
+  const accepted = await createPortfolioUsageExport({
+    ownerToken: '',
+    products: linkedProducts,
+    projects: linkedProducts.map((product) => ({
+      appId: product.app_id,
+      environmentId: `env-${product.app_id.slice(4)}`,
+      name: product.name,
+      environment: 'production',
+    })),
+    signal: new AbortController().signal,
+    fetcher: vi.fn(async () => Response.json(browserReport())) as typeof fetch,
+  });
+  expect(Object.keys(accepted.usage.records)).toHaveLength(56);
+
+  const fetchOverLimit = vi.fn();
   await expect(
     createPortfolioUsageExport({
       ownerToken: '',
-      products: Array.from({ length: 56 }, (_, index) => ({
-        catalog_id: `project-${index}`,
-        app_id: `app-${index}`,
+      products: Array.from({ length: 61 }, (_, index) => ({
+        catalog_id: `project-${String(index).padStart(3, '0')}`,
+        app_id: `app-${String(index).padStart(3, '0')}`,
         name: `Project ${index}`,
         browser_visitors_applicability: 'applicable' as const,
         coverage: 'full' as const,
       })),
       projects: [],
       signal: new AbortController().signal,
+      fetcher: fetchOverLimit as typeof fetch,
     }),
-  ).rejects.toThrow('limited to 55');
+  ).rejects.toThrow('limited to 60');
+  expect(fetchOverLimit).not.toHaveBeenCalled();
 });
 
 it('stamps each record after its delayed report and stamps the export at completion', async () => {
