@@ -183,7 +183,7 @@ function CatalogLinkForm({
       setMessage(
         catalogCount === null
           ? 'The linked catalog count is unavailable; refresh the report before adding a link.'
-          : 'The linked catalog capacity is full. Remove or reconcile an existing catalog entry before adding another.',
+          : 'The reporting catalog is at capacity. No link was added.',
       );
       return;
     }
@@ -291,7 +291,7 @@ function CatalogLinkForm({
             <p role="status" className="text-xs text-muted-foreground sm:col-span-2">
               {catalogCount === null
                 ? 'Linked catalog count is unavailable; refresh the report before adding a link.'
-                : 'Linked catalog capacity is full. Remove or reconcile an existing catalog entry before adding another.'}
+                : 'The reporting catalog is at capacity. No link was added.'}
             </p>
           ) : null}
           <label className="grid gap-1 text-xs text-muted-foreground">

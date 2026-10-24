@@ -381,7 +381,7 @@ it('blocks catalog linking when the imported catalog is at capacity', async () =
   );
   await screen.findByRole('table');
   fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
-  expect(screen.getByText(/Linked catalog capacity is full/)).toBeTruthy();
+  expect(screen.getByText(/reporting catalog is at capacity/)).toBeTruthy();
   expect(screen.getByRole('button', { name: 'declare catalog link' })).toHaveProperty(
     'disabled',
     true,
