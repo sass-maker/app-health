@@ -1,12 +1,23 @@
 import {
+  CatalogImportRequestV1,
+  MAX_PORTFOLIO_CATALOG_PRODUCTS,
   PortfolioBriefingV1,
   type BriefingTraffic,
   type DailyEngagementReportV1,
   type PortfolioBriefingV1 as PortfolioBriefingData,
 } from '@app-health/contracts';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+  type ReactElement,
+} from 'react';
 import { useResource } from '@saas-maker/ui/lib/use-resource';
 import { accountResourceClient } from './lib/account-resource-client.js';
+import { ownerFetch } from './lib/owner-fetch.js';
 import {
   AlertTriangle,
   ArrowUpDown,
@@ -65,6 +76,7 @@ interface PortfolioBriefingProps {
   attentionItems?: PortfolioAttentionItem[];
   healthCoverage?: PortfolioHealthCoverage;
   projectHealth?: Record<string, PortfolioHealthState>;
+  onCatalogLinked?: () => void;
 }
 
 const TRAFFIC_OPTIONS: { id: BriefingTraffic; label: string }[] = [
@@ -110,6 +122,254 @@ function TrafficSelector({
           ? 'known bots excluded; unrecognized automation can remain.'
           : 'pageviews and sources include known bots. browsers and actions stay non-bot only.'}
       </p>
+    </div>
+  );
+}
+
+function confirmedCatalogLink(value: unknown, catalogId: string, appId: string): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  const response = value as { schema_version?: unknown; projects?: unknown };
+  if (response.schema_version !== 1 || !Array.isArray(response.projects)) return false;
+  if (response.projects.length !== 1) return false;
+  const project = response.projects[0];
+  if (typeof project !== 'object' || project === null) return false;
+  const record = project as {
+    catalog_id?: unknown;
+    app_id?: unknown;
+    verification_state?: unknown;
+  };
+  return (
+    record.catalog_id === catalogId &&
+    record.app_id === appId &&
+    record.verification_state === 'declared'
+  );
+}
+
+function CatalogLinkForm({
+  ownerToken,
+  projects,
+  catalogCount,
+  linked,
+}: {
+  ownerToken: string;
+  projects: PortfolioUsageProject[];
+  catalogCount: number | null;
+  linked: () => void;
+}): ReactElement {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [declared, setDeclared] = useState(false);
+  const [message, setMessage] = useState('');
+  const submitLock = useRef(false);
+  const requestController = useRef<AbortController | null>(null);
+  const capacityAvailable = catalogCount !== null && catalogCount < MAX_PORTFOLIO_CATALOG_PRODUCTS;
+  useEffect(() => () => requestController.current?.abort(), [ownerToken]);
+  const existingProjects = useMemo(
+    () =>
+      [
+        ...new Map(
+          projects
+            .filter((project) => project.environment === 'production')
+            .map((project) => [project.appId, project]),
+        ).values(),
+      ].sort((left, right) => left.name.localeCompare(right.name)),
+    [projects],
+  );
+
+  async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (submitLock.current || declared) return;
+    if (!capacityAvailable) {
+      setMessage(
+        catalogCount === null
+          ? 'The linked catalog count is unavailable; refresh the report before adding a link.'
+          : 'The reporting catalog is at capacity. No link was added.',
+      );
+      return;
+    }
+    submitLock.current = true;
+    setSaving(true);
+    setMessage('');
+    const controller = new AbortController();
+    requestController.current = controller;
+    const form = new FormData(event.currentTarget);
+    try {
+      const request = CatalogImportRequestV1.parse({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: String(form.get('catalog_id') ?? '').trim(),
+            name: String(form.get('name') ?? '').trim(),
+            lifecycle: 'active',
+            repository: String(form.get('repository') ?? '').trim() || null,
+            hostname: String(form.get('hostname') ?? '').trim() || null,
+            existing_app_id: String(form.get('existing_app_id') ?? ''),
+          },
+        ],
+      });
+      const response = await ownerFetch('/v1/catalog/import', ownerToken, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify(request),
+      });
+      if (controller.signal.aborted) return;
+      if (response.status === 409) {
+        setMessage(
+          'This catalog ID or App Health project is already linked and cannot be changed.',
+        );
+        return;
+      }
+      if (!response.ok) {
+        setMessage(
+          `Catalog link was not saved (HTTP ${response.status}). Your entries are still here.`,
+        );
+        return;
+      }
+      let confirmation: unknown;
+      try {
+        confirmation = await response.json();
+      } catch {
+        setMessage(
+          'The server did not return a valid link confirmation. Your entries are still here.',
+        );
+        return;
+      }
+      if (controller.signal.aborted) return;
+      if (
+        !confirmedCatalogLink(
+          confirmation,
+          request.projects[0]!.catalog_id,
+          request.projects[0]!.existing_app_id!,
+        )
+      ) {
+        setMessage(
+          'The server did not confirm this exact catalog link. Your entries are still here.',
+        );
+        return;
+      }
+      setDeclared(true);
+      setMessage('Catalog link declared. This does not verify tracking or meaningful product use.');
+      linked();
+    } catch (error) {
+      if (!controller.signal.aborted)
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : 'Catalog link failed. Your entries are still here.',
+        );
+    } finally {
+      submitLock.current = false;
+      if (requestController.current === controller) requestController.current = null;
+      if (!controller.signal.aborted) setSaving(false);
+    }
+  }
+
+  return (
+    <div className="w-full">
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
+        {open ? 'close catalog link' : 'link existing project'}
+      </Button>
+      {open ? (
+        <form
+          onSubmit={(event) => void submit(event)}
+          className="mt-3 grid gap-3 rounded-lg border border-border/70 bg-background/50 p-3 sm:grid-cols-2"
+        >
+          <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">
+            Link a canonical catalog ID to an existing production project in this workspace. This is
+            an immutable declaration; it does not create a project, change keys, or verify
+            ownership, tracking, or product use. The portfolio supports up to{' '}
+            {MAX_PORTFOLIO_CATALOG_PRODUCTS} linked projects.
+          </p>
+          {!capacityAvailable ? (
+            <p role="status" className="text-xs text-muted-foreground sm:col-span-2">
+              {catalogCount === null
+                ? 'Linked catalog count is unavailable; refresh the report before adding a link.'
+                : 'The reporting catalog is at capacity. No link was added.'}
+            </p>
+          ) : null}
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            existing production project
+            <select
+              name="existing_app_id"
+              required
+              defaultValue=""
+              disabled={saving || declared}
+              className="min-h-11 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+            >
+              <option value="" disabled>
+                select an existing project
+              </option>
+              {existingProjects.map((project) => (
+                <option key={project.appId} value={project.appId}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            canonical catalog ID
+            <Input
+              name="catalog_id"
+              required
+              pattern="[a-z0-9][a-z0-9-]{0,99}"
+              maxLength={100}
+              disabled={saving || declared}
+              className="min-h-11"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            canonical name
+            <Input
+              name="name"
+              required
+              maxLength={100}
+              disabled={saving || declared}
+              className="min-h-11"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            public GitHub repository (optional)
+            <Input
+              name="repository"
+              type="url"
+              placeholder="https://github.com/owner/repository"
+              disabled={saving || declared}
+              className="min-h-11"
+            />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">
+            public hostname (optional)
+            <Input
+              name="hostname"
+              placeholder="example.com"
+              disabled={saving || declared}
+              className="min-h-11"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <Button
+              type="submit"
+              variant="outline"
+              className="min-h-11"
+              disabled={saving || declared || existingProjects.length === 0 || !capacityAvailable}
+            >
+              {saving ? 'linking project' : declared ? 'link declared' : 'declare catalog link'}
+            </Button>
+            {message ? (
+              <p role="status" className="text-xs text-muted-foreground">
+                {message}
+              </p>
+            ) : null}
+          </div>
+        </form>
+      ) : null}
     </div>
   );
 }
@@ -1226,7 +1486,9 @@ function Summary({
         />
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-3 text-[11px] text-muted-foreground">
-        <span>{report.product_count}/55 products in scope</span>
+        <span>
+          {report.product_count} linked products · capacity {MAX_PORTFOLIO_CATALOG_PRODUCTS}
+        </span>
         <span aria-hidden="true">·</span>
         <span>{browserProducts} products with reportable browser counts</span>
         <span aria-hidden="true">·</span>
@@ -1258,6 +1520,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
     attentionItems = [],
     healthCoverage,
     projectHealth,
+    onCatalogLinked,
   } = props;
   const [traffic, setTraffic] = useState<BriefingTraffic>('non_bot');
   const { data, loading, error, retry } = usePortfolioBriefing(ownerToken, date, traffic);
@@ -1345,6 +1608,16 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
           qualified yet.
         </p>
         <div className="flex flex-wrap items-center gap-2">
+          <CatalogLinkForm
+            key={ownerToken}
+            ownerToken={ownerToken}
+            projects={projects}
+            catalogCount={data?.products.length ?? null}
+            linked={() => {
+              void retry();
+              onCatalogLinked?.();
+            }}
+          />
           <Button
             type="button"
             variant="outline"

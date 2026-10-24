@@ -177,6 +177,7 @@ function ReportBody(props: ReportBodyProps): ReactElement {
       attentionItems={attentionItems}
       healthCoverage={healthCoverage}
       projectHealth={projectHealth}
+      onCatalogLinked={onRetry}
     />
   );
 }

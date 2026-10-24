@@ -25,14 +25,25 @@ any preceding project creation. Use batches of ten for larger catalogs.
 The response reports `verification_state: "declared"`. This is metadata supplied
 by the account, not proof of hostname/repository ownership, an instrumentation
 claim, or a provider evidence import. Domain proof, activation, transfer of new
-provider bindings and an owner UI remain separate incomplete work. Existing
+provider bindings remain separate operations. The owner Portfolio briefing now
+has a link form that submits one canonical declaration for an explicitly chosen
+existing production project. It does not create a project or environment, issue
+or change keys, establish ownership, or verify tracking or product use. Existing
 bindings on explicitly linked projects remain untouched.
+
+The form uses the loaded briefing's imported-product count and blocks submission
+when that count is unavailable or is at the shared 60-product report capacity.
+This is a UI guard only: the import route does not enforce a global report
+capacity, so direct API callers must not infer that limit from route validation.
 
 ## Activation
 
 Additive migration `0018_catalog_imports.sql` must exist before the route can
 succeed. It is replayable and its triggers enforce transactional workspace scope
-and immutable import identity. This implementation does not apply that migration
-or perform any production import. Missing schema returns unavailable without a
-successful-import claim. Rollback to the previous Worker leaves the additive
-tables and existing projects intact; it does not delete imported declarations.
+and immutable import identity. The route does not apply this migration. Missing
+schema returns unavailable without a successful-import claim. A code rollback
+leaves the additive tables and existing projects intact; it does not delete
+imported declarations. However, after the linked catalog exceeds 55 active
+products, a 55-product-cap Worker cannot safely serve the report. Keep a
+capacity-compatible release as the recovery floor and repair forward if the
+60-product release has a reporting regression.

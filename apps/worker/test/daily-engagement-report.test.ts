@@ -187,6 +187,17 @@ describe('buildDailyEngagementReport', () => {
     }
   });
 
+  it('rejects a catalog above the bounded 60-product report capacity', async () => {
+    await expect(
+      composeDailyEngagementReport({
+        db: new MockDatabase(catalog(61), []),
+        workspaceId: 'workspace-1',
+        date: DAY,
+        now: NOW,
+      }),
+    ).rejects.toThrow('daily engagement catalog exceeds portfolio capacity');
+  });
+
   it('labels a product with no applicable visitor CTA without inventing a count', () => {
     const report = buildDailyEngagementReport({
       catalog: catalog(1),

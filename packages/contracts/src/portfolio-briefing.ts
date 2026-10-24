@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_PORTFOLIO_CATALOG_PRODUCTS } from './constants.js';
 import { ReportDate } from './daily-engagement.js';
 
 /**
@@ -39,7 +40,7 @@ export const PortfolioBriefingV1 = z
     timezone: z.literal('Asia/Kolkata'),
     traffic: BriefingTraffic,
     generated_at: z.number().int().min(0),
-    products: z.array(PortfolioBriefingProductV1).max(55),
+    products: z.array(PortfolioBriefingProductV1).max(MAX_PORTFOLIO_CATALOG_PRODUCTS),
     sources: z.array(PortfolioBriefingSourceV1).max(10),
     comparison_note: z.string().min(1).max(300),
     filter_note: z.string().min(1).max(300),

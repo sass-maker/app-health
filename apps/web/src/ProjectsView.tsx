@@ -568,8 +568,8 @@ function Inventory({
           <CardTitle className="text-sm">complete inventory</CardTitle>
           <p className="mt-1 text-xs text-muted-foreground">{summary}</p>
           <p className="mt-1 text-xs text-muted-foreground">
-            workspace environments include products outside the 55-product daily report. products
-            without a server endpoint do not need endpoint monitoring.
+            workspace environments can include products that are not linked to the daily report.
+            products without a server endpoint do not need endpoint monitoring.
           </p>
         </div>
         <FilterBar className="flex-col sm:flex-row">

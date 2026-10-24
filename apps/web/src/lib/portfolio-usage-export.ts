@@ -1,4 +1,8 @@
-import { BrowserReport, type BrowserReport as BrowserReportData } from '@app-health/contracts';
+import {
+  BrowserReport,
+  MAX_PORTFOLIO_CATALOG_PRODUCTS,
+  type BrowserReport as BrowserReportData,
+} from '@app-health/contracts';
 
 export interface PortfolioUsageProject {
   appId: string;
@@ -67,7 +71,7 @@ interface ExportOptions {
   fetcher?: typeof fetch;
 }
 
-const MAX_PRODUCTS = 55;
+const MAX_PRODUCTS = MAX_PORTFOLIO_CATALOG_PRODUCTS;
 const MAX_EVENTS = 100;
 const DEFAULT_CONCURRENCY = 4;
 const DEFAULT_TIMEOUT_MS = 8_000;

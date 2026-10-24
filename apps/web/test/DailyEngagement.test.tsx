@@ -139,6 +139,256 @@ it('shows browser counts, action intent, response receipts, sources, and applica
   expect(requestsFor(fetch, '/daily-engagement')[0]).toContain('browser_visitor_unknown_reason=1');
 });
 
+it('links a canonical ID only to an explicitly selected existing project', async () => {
+  const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+    String(input).includes('/v1/catalog/import')
+      ? Response.json({
+          schema_version: 1,
+          projects: [
+            {
+              catalog_id: 'techdata',
+              app_id: 'app-techdata',
+              verification_state: 'declared',
+            },
+          ],
+        })
+      : responseFor(input),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <DailyEngagement
+      ownerToken="owner"
+      projects={[
+        {
+          appId: 'app-techdata',
+          environmentId: 'env-techdata-prod',
+          name: 'TechData',
+          environment: 'production',
+        },
+      ]}
+    />,
+  );
+  await screen.findByRole('table');
+  fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
+  fireEvent.change(screen.getByLabelText('canonical catalog ID'), {
+    target: { value: 'techdata' },
+  });
+  fireEvent.change(screen.getByLabelText('canonical name'), { target: { value: 'TechData' } });
+  fireEvent.change(screen.getByLabelText('public GitHub repository (optional)'), {
+    target: { value: 'https://github.com/High-Signal-App/techdata' },
+  });
+  fireEvent.change(screen.getByLabelText('public hostname (optional)'), {
+    target: { value: 'data.highsignal.app' },
+  });
+
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+  expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(0);
+
+  fireEvent.change(screen.getByLabelText('existing production project'), {
+    target: { value: 'app-techdata' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+  expect(await screen.findByText(/Catalog link declared/)).toBeTruthy();
+  const catalogRequest = fetch.mock.calls.find(([input]) =>
+    String(input).includes('/v1/catalog/import'),
+  );
+  expect(catalogRequest).toBeTruthy();
+  const payload = JSON.parse(String(catalogRequest?.[1]?.body));
+  expect(payload).toEqual({
+    schema_version: 1,
+    projects: [
+      {
+        catalog_id: 'techdata',
+        name: 'TechData',
+        lifecycle: 'active',
+        repository: 'https://github.com/High-Signal-App/techdata',
+        hostname: 'data.highsignal.app',
+        existing_app_id: 'app-techdata',
+      },
+    ],
+  });
+  expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(1);
+});
+
+it('keeps catalog entries when a 200 response does not confirm the submitted link', async () => {
+  const fetch = vi.fn(async (input: RequestInfo | URL) =>
+    String(input).includes('/v1/catalog/import')
+      ? Response.json({ schema_version: 1, projects: [] })
+      : responseFor(input),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <DailyEngagement
+      ownerToken="owner"
+      projects={[
+        {
+          appId: 'app-techdata',
+          environmentId: 'env-techdata-prod',
+          name: 'TechData',
+          environment: 'production',
+        },
+      ]}
+    />,
+  );
+  await screen.findByRole('table');
+  fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
+  fireEvent.change(screen.getByLabelText('canonical catalog ID'), {
+    target: { value: 'techdata' },
+  });
+  fireEvent.change(screen.getByLabelText('canonical name'), { target: { value: 'TechData' } });
+  fireEvent.change(screen.getByLabelText('existing production project'), {
+    target: { value: 'app-techdata' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+
+  expect(await screen.findByText(/server did not confirm this exact catalog link/)).toBeTruthy();
+  expect((screen.getByLabelText('canonical catalog ID') as HTMLInputElement).value).toBe(
+    'techdata',
+  );
+  expect(screen.queryByText(/Catalog link declared/)).toBeNull();
+});
+
+it('preserves a conflicting catalog link and allows the owner to retry', async () => {
+  let importAttempts = 0;
+  const fetch = vi.fn(async (input: RequestInfo | URL) => {
+    if (!String(input).includes('/v1/catalog/import')) return responseFor(input);
+    importAttempts += 1;
+    return importAttempts === 1
+      ? new Response(null, { status: 409 })
+      : Response.json({
+          schema_version: 1,
+          projects: [
+            {
+              catalog_id: 'techdata',
+              app_id: 'app-techdata',
+              verification_state: 'declared',
+            },
+          ],
+        });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <DailyEngagement
+      ownerToken="owner"
+      projects={[
+        {
+          appId: 'app-techdata',
+          environmentId: 'env-techdata-prod',
+          name: 'TechData',
+          environment: 'production',
+        },
+      ]}
+    />,
+  );
+  await screen.findByRole('table');
+  fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
+  fireEvent.change(screen.getByLabelText('canonical catalog ID'), {
+    target: { value: 'techdata' },
+  });
+  fireEvent.change(screen.getByLabelText('canonical name'), { target: { value: 'techdata' } });
+  fireEvent.change(screen.getByLabelText('existing production project'), {
+    target: { value: 'app-techdata' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+  expect(await screen.findByText(/already linked and cannot be changed/)).toBeTruthy();
+  expect((screen.getByLabelText('canonical catalog ID') as HTMLInputElement).value).toBe(
+    'techdata',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+  expect(await screen.findByText(/Catalog link declared/)).toBeTruthy();
+  expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(2);
+});
+
+it('aborts a pending catalog link when the owner changes and ignores its late response', async () => {
+  let completeImport: ((response: Response) => void) | undefined;
+  let importSignal: AbortSignal | undefined;
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).includes('/v1/catalog/import')) return Promise.resolve(responseFor(input));
+    importSignal = init?.signal as AbortSignal;
+    return new Promise<Response>((resolve) => {
+      completeImport = resolve;
+    });
+  });
+  vi.stubGlobal('fetch', fetch);
+  const projects = [
+    {
+      appId: 'app-techdata',
+      environmentId: 'env-techdata-prod',
+      name: 'TechData',
+      environment: 'production' as const,
+    },
+  ];
+  const view = render(<DailyEngagement ownerToken="owner-one" projects={projects} />);
+  await screen.findByRole('table');
+  fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
+  fireEvent.change(screen.getByLabelText('canonical catalog ID'), {
+    target: { value: 'techdata' },
+  });
+  fireEvent.change(screen.getByLabelText('canonical name'), { target: { value: 'techdata' } });
+  fireEvent.change(screen.getByLabelText('existing production project'), {
+    target: { value: 'app-techdata' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'declare catalog link' }));
+  await waitFor(() => expect(importSignal).toBeTruthy());
+
+  view.rerender(<DailyEngagement ownerToken="owner-two" projects={projects} />);
+  expect(importSignal?.aborted).toBe(true);
+  await act(async () => {
+    completeImport?.(
+      Response.json({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'techdata',
+            app_id: 'app-techdata',
+            verification_state: 'declared',
+          },
+        ],
+      }),
+    );
+  });
+  expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(1);
+  expect(screen.queryByText(/Catalog link declared/)).toBeNull();
+});
+
+it('blocks catalog linking when the imported catalog is at capacity', async () => {
+  const fullBriefing = {
+    ...briefing,
+    products: Array.from({ length: 60 }, (_, index) => ({
+      ...briefing.products[0],
+      app_id: `app-${index}`,
+      catalog_id: `product-${index}`,
+    })),
+  };
+  const fetch = vi.fn(async (input: RequestInfo | URL) =>
+    String(input).includes('/portfolio-briefing')
+      ? Response.json(fullBriefing)
+      : responseFor(input),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(
+    <DailyEngagement
+      ownerToken="owner"
+      projects={[
+        {
+          appId: 'app-techdata',
+          environmentId: 'env-techdata-prod',
+          name: 'TechData',
+          environment: 'production',
+        },
+      ]}
+    />,
+  );
+  await screen.findByRole('table');
+  fireEvent.click(screen.getByRole('button', { name: 'link existing project' }));
+  expect(screen.getByText(/reporting catalog is at capacity/)).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'declare catalog link' })).toHaveProperty(
+    'disabled',
+    true,
+  );
+  expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(0);
+});
+
 it('shows unsupported response metrics as not applicable without hiding real feedback', async () => {
   const daily = {
     ...report,
