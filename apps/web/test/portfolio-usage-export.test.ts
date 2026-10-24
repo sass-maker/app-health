@@ -239,6 +239,41 @@ it('discards otherwise valid counts when the report window is not exact or ends 
   }
 });
 
+it('omits fractional browser/session proxy counts without rounding', async () => {
+  const response = browserReport();
+  response.audience.visitors = 3.5;
+  const result = await createPortfolioUsageExport({
+    ownerToken: '',
+    products: products.slice(0, 1),
+    projects,
+    signal: new AbortController().signal,
+    fetcher: async () => Response.json(response),
+  });
+  expect(result.usage.records.atlas.proxy).toEqual({
+    count: null,
+    unit: 'browsers',
+    precision: 'unknown',
+  });
+  expect(result.usage.records.atlas.limitations).toContain('omitted without rounding');
+});
+
+it('keeps an empty applicable report unknown when no source qualification is supplied', async () => {
+  const response = browserReport();
+  response.events = [];
+  const result = await createPortfolioUsageExport({
+    ownerToken: '',
+    products: products.slice(0, 1),
+    projects,
+    signal: new AbortController().signal,
+    fetcher: async () => Response.json(response),
+  });
+  expect(result.usage.records.atlas.proxy).toEqual({
+    count: null,
+    unit: 'browsers',
+    precision: 'unknown',
+  });
+});
+
 it('rejects non-canonical uppercase catalog identifiers before requests', async () => {
   const fetcher = vi.fn();
   await expect(

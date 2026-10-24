@@ -7,7 +7,6 @@ import {
   MAX_METHOD_LENGTH,
   MAX_ROUTE_LENGTH,
   WINDOWS,
-  type HealthState,
   type Window,
 } from './constants.js';
 
@@ -57,7 +56,7 @@ export const EndpointAggregateV1 = z.object({
   /** Percentage growth of average payload size, second half of window vs first half. */
   response_bytes_delta_pct: z.number().nullable().optional(),
   last_seen: z.number().int().min(0).nullable(),
-  health_state: z.enum(HEALTH_STATES) as z.ZodEnum<[HealthState, ...HealthState[]]>,
+  health_state: z.enum(HEALTH_STATES),
   /** False when the endpoint inventory survived but WAE sampled out its metrics. */
   metrics_available: z.boolean().optional(),
   /** True when counts and percentiles include trace-derived sampled estimates. */
@@ -116,7 +115,7 @@ export const WorkspaceRequestMetricsV1 = z.object({
   error_rate: z.number().min(0).max(1),
   p95_ms: z.number().min(0),
   last_seen: z.number().int().min(0).nullable(),
-  health_state: z.enum(HEALTH_STATES) as z.ZodEnum<[HealthState, ...HealthState[]]>,
+  health_state: z.enum(HEALTH_STATES),
   upstream_sampled: z.boolean().optional(),
 });
 export type WorkspaceRequestMetricsV1 = z.infer<typeof WorkspaceRequestMetricsV1>;

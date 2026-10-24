@@ -16,14 +16,14 @@ export interface PortfolioUsageCatalogProduct {
   coverage: 'full' | 'partial' | 'unknown';
 }
 
-export interface PortfolioUsageEvent {
+interface PortfolioUsageEvent {
   name: string;
   count: number;
   lastSeen: string | null;
   precision: 'exact' | 'estimate';
 }
 
-export interface PortfolioUsageRecord {
+interface PortfolioUsageRecord {
   windowStart: string;
   windowEnd: string;
   checkedAt: string;
@@ -109,53 +109,68 @@ function unknownRecord(checkedAt: string, requestedAt: number, note: string): Po
   };
 }
 
-function reportRecord(
-  report: BrowserReportData,
-  checkedAt: string,
-  product: PortfolioUsageCatalogProduct,
-): PortfolioUsageRecord {
+interface ReportWindow {
+  windowStart: string;
+  windowEnd: string;
+}
+
+interface ProxyAggregate {
+  count: number | null;
+  unit: 'browsers' | 'sessions';
+  precision: PortfolioUsageRecord['proxy']['precision'];
+  omittedInvalidCount: boolean;
+}
+
+interface SafeEventAggregates {
+  entries: PortfolioUsageEvent[];
+  rejected: number;
+}
+
+function validReportWindow(report: BrowserReportData, checkedAt: string): ReportWindow | null {
   const validWindowStart = iso(report.from);
   const validWindowEnd = iso(report.to);
-  const checkedAtMs = Date.parse(checkedAt);
-  const exactThirtyDayWindow =
-    validWindowStart !== null &&
-    validWindowEnd !== null &&
-    report.to - report.from === THIRTY_DAYS_MS &&
-    report.to <= checkedAtMs;
-  if (!exactThirtyDayWindow) {
-    return unknownRecord(
-      checkedAt,
-      checkedAtMs,
-      'Report window was malformed, not exactly 30 days, or ended after collection; counts were discarded.',
-    );
-  }
-  const window = { windowStart: validWindowStart, windowEnd: validWindowEnd };
+  if (!validWindowStart || !validWindowEnd) return null;
+  if (report.to - report.from !== THIRTY_DAYS_MS) return null;
+  if (report.to > Date.parse(checkedAt)) return null;
+  return { windowStart: validWindowStart, windowEnd: validWindowEnd };
+}
+
+function hasReportSignal(report: BrowserReportData): boolean {
   const reportedVisitors = report.audience?.visitors;
-  const sessions = report.sessions;
   const pageviews = report.series.reduce((total, point) => total + point.pageviews, 0);
   const eventSignal = report.events.some((event) => event.count > 0);
-  const hasReportSignal =
-    (reportedVisitors ?? 0) > 0 || sessions > 0 || pageviews > 0 || eventSignal;
-  const dailySourceQualified =
+  return (reportedVisitors ?? 0) > 0 || report.sessions > 0 || pageviews > 0 || eventSignal;
+}
+
+function usableReport(report: BrowserReportData, product: PortfolioUsageCatalogProduct): boolean {
+  if (report.source !== 'analytics-engine') return false;
+  if (product.browser_visitors_applicability === 'not_applicable') return false;
+  if (hasReportSignal(report)) return true;
+  return (
     product.browser_visitors_applicability === 'applicable' &&
-    product.browser_visitors_unknown_reason !== 'no_qualifying_analytics_receipt';
-  const reportSourceQualified = report.source === 'analytics-engine';
-  const isUsable =
-    product.browser_visitors_applicability !== 'not_applicable' &&
-    reportSourceQualified &&
-    (hasReportSignal || dailySourceQualified);
-  const useSessions = (reportedVisitors === 0 || reportedVisitors === undefined) && sessions > 0;
-  const proxyCount = !isUsable
-    ? null
-    : useSessions
-      ? sessions
-      : reportedVisitors && reportedVisitors > 0
-        ? reportedVisitors
-        : null;
-  const proxyUnit = useSessions ? 'sessions' : 'browsers';
-  const proxyPrecision = proxyCount === null ? 'unknown' : report.sampled ? 'lower_bound' : 'exact';
-  const eventEntries: PortfolioUsageEvent[] = [];
-  let rejectedEvents = 0;
+    product.browser_visitors_unknown_reason !== 'no_qualifying_analytics_receipt'
+  );
+}
+
+function proxyAggregate(report: BrowserReportData, usable: boolean): ProxyAggregate {
+  const visitors = report.audience?.visitors;
+  const useSessions = (visitors === 0 || visitors === undefined) && report.sessions > 0;
+  let candidate: number | null = null;
+  if (usable && useSessions) candidate = report.sessions;
+  else if (usable && visitors !== undefined && visitors > 0) candidate = visitors;
+  const count =
+    candidate !== null && Number.isSafeInteger(candidate) && candidate >= 0 ? candidate : null;
+  return {
+    count,
+    unit: useSessions ? 'sessions' : 'browsers',
+    precision: count === null ? 'unknown' : report.sampled ? 'lower_bound' : 'exact',
+    omittedInvalidCount: candidate !== null && count === null,
+  };
+}
+
+function safeEventAggregates(report: BrowserReportData): SafeEventAggregates {
+  const entries: PortfolioUsageEvent[] = [];
+  let rejected = 0;
   for (const event of report.events.slice(0, MAX_EVENTS)) {
     if (
       !SAFE_EVENT_NAME.test(event.name) ||
@@ -163,45 +178,71 @@ function reportRecord(
       event.count < 0 ||
       event.count > Number.MAX_SAFE_INTEGER
     ) {
-      rejectedEvents += 1;
+      rejected += 1;
       continue;
     }
     const lastSeen = iso(event.last_seen);
-    eventEntries.push({
+    entries.push({
       name: event.name,
       count: event.count,
       lastSeen,
       precision: report.sampled ? 'estimate' : 'exact',
     });
   }
-  const limitations = [
-    'Recognized browser hashes are not people or devices; sessions fallback is session count, not user count.',
+  return { entries, rejected };
+}
+
+function reportLimitations(
+  report: BrowserReportData,
+  product: PortfolioUsageCatalogProduct,
+  usable: boolean,
+  proxy: ProxyAggregate,
+  events: SafeEventAggregates,
+): string {
+  const notes = [
+    'Recognized browser hashes are project and environment scoped: default random IDs may persist in first-party local storage up to 90 days, while integrations may be session-only. They are not people or devices and do not link across projects or devices; sessions fallback is session count, not user count.',
     'Core action is unreviewed; named event occurrences do not establish meaningful product use or verified owner use.',
     'The report API has no first/last-valid-data freshness field; event lastSeen is only an event receipt timestamp.',
-    ...(!validWindowStart || !validWindowEnd
-      ? ['The report returned invalid window timestamps; a request-time 30-day window is shown.']
-      : []),
-    ...(report.sampled
-      ? ['Sampled audience counts are lower bounds and event counts are estimates.']
-      : []),
-    ...(report.source === 'local'
-      ? ['Report source is local analytics; production coverage is unverified.']
-      : []),
-    ...(product.browser_visitors_unknown_reason
-      ? [`Daily source qualification: ${product.browser_visitors_unknown_reason}.`]
-      : []),
-    ...(product.coverage !== 'full' ? [`Daily report coverage: ${product.coverage}.`] : []),
-    ...(!isUsable ? ['Production browser usage was not verified; counts are unknown.'] : []),
-    ...(rejectedEvents
-      ? [`Omitted ${rejectedEvents} event name(s) that did not match the safe identifier rule.`]
-      : []),
-    ...(report.events.length > MAX_EVENTS ? ['Event list was capped at 100 entries.'] : []),
   ];
+  if (report.sampled)
+    notes.push('Sampled audience counts are lower bounds and event counts are estimates.');
+  if (report.source === 'local')
+    notes.push('Report source is local analytics; production coverage is unverified.');
+  if (product.browser_visitors_unknown_reason)
+    notes.push(`Daily source qualification: ${product.browser_visitors_unknown_reason}.`);
+  if (product.coverage !== 'full') notes.push(`Daily report coverage: ${product.coverage}.`);
+  if (!usable) notes.push('Production browser usage was not verified; counts are unknown.');
+  if (proxy.omittedInvalidCount)
+    notes.push('Proxy count was not a nonnegative safe integer; it was omitted without rounding.');
+  if (events.rejected)
+    notes.push(
+      `Omitted ${events.rejected} event name(s) that did not match the safe identifier rule.`,
+    );
+  if (report.events.length > MAX_EVENTS) notes.push('Event list was capped at 100 entries.');
+  return notes.join(' ').slice(0, 2_000);
+}
+
+function reportRecord(
+  report: BrowserReportData,
+  checkedAt: string,
+  product: PortfolioUsageCatalogProduct,
+): PortfolioUsageRecord {
+  const window = validReportWindow(report, checkedAt);
+  if (!window) {
+    return unknownRecord(
+      checkedAt,
+      Date.parse(checkedAt),
+      'Report window was malformed, not exactly 30 days, or ended after collection; counts were discarded.',
+    );
+  }
+  const usable = usableReport(report, product);
+  const proxy = proxyAggregate(report, usable);
+  const events = safeEventAggregates(report);
   return {
     windowStart: window.windowStart,
     windowEnd: window.windowEnd,
     checkedAt,
-    proxy: { count: proxyCount, unit: proxyUnit, precision: proxyPrecision },
+    proxy: { count: proxy.count, unit: proxy.unit, precision: proxy.precision },
     core: {
       count: null,
       definition: CORE_UNQUALIFIED,
@@ -210,7 +251,7 @@ function reportRecord(
       precision: 'unknown',
       coverage: 'unknown',
     },
-    tracking: isUsable ? 'partial' : 'missing',
+    tracking: usable ? 'partial' : 'missing',
     evidence: [
       {
         source: EVIDENCE_SOURCE,
@@ -218,8 +259,8 @@ function reportRecord(
         note: 'Aggregate rolling 30-day report; no owner or person attribution.',
       },
     ],
-    limitations: limitations.join(' ').slice(0, 2_000),
-    events: isUsable ? eventEntries : [],
+    limitations: reportLimitations(report, product, usable, proxy, events),
+    events: usable ? events.entries : [],
   };
 }
 
@@ -308,33 +349,25 @@ async function readProject(
   }
 }
 
-export async function createPortfolioUsageExport(
-  options: ExportOptions,
-): Promise<PortfolioUsageExport> {
-  if (options.products.length > MAX_PRODUCTS) {
-    throw new Error(`Portfolio export is limited to ${MAX_PRODUCTS} catalog products.`);
+function validateProjectIds(projects: PortfolioUsageProject[]): void {
+  for (const project of projects) {
+    const validApp = /^[A-Za-z0-9-]{1,100}$/.test(project.appId);
+    const validEnvironment = /^[A-Za-z0-9-]{1,100}$/.test(project.environmentId);
+    if (!validApp || !validEnvironment)
+      throw new Error('Portfolio export contains an invalid App Health environment mapping.');
   }
-  const clock = options.now ?? Date.now;
+}
+
+function validateCatalogProducts(products: PortfolioUsageCatalogProduct[]): void {
   const catalogIds = new Set<string>();
   const appCatalogIds = new Map<string, string>();
-  for (const project of options.projects) {
-    if (
-      !/^[A-Za-z0-9-]{1,100}$/.test(project.appId) ||
-      !/^[A-Za-z0-9-]{1,100}$/.test(project.environmentId)
-    ) {
-      throw new Error('Portfolio export contains an invalid App Health environment mapping.');
-    }
-  }
-  for (const product of options.products) {
-    if (
-      !/^[a-z0-9][a-z0-9-]{0,99}$/.test(product.catalog_id) ||
-      !/^[A-Za-z0-9-]{1,100}$/.test(product.app_id)
-    ) {
+  for (const product of products) {
+    const validCatalogId = /^[a-z0-9][a-z0-9-]{0,99}$/.test(product.catalog_id);
+    const validAppId = /^[A-Za-z0-9-]{1,100}$/.test(product.app_id);
+    if (!validCatalogId || !validAppId)
       throw new Error('Portfolio export contains an invalid catalog or App Health project ID.');
-    }
-    if (catalogIds.has(product.catalog_id)) {
+    if (catalogIds.has(product.catalog_id))
       throw new Error('Portfolio export contains duplicate catalog IDs.');
-    }
     catalogIds.add(product.catalog_id);
     const previousCatalogId = appCatalogIds.get(product.app_id);
     if (previousCatalogId && previousCatalogId !== product.catalog_id) {
@@ -342,47 +375,73 @@ export async function createPortfolioUsageExport(
     }
     appCatalogIds.set(product.app_id, product.catalog_id);
   }
-  const projectByApp = new Map<string, PortfolioUsageProject>();
+}
+
+function productionProjects(projects: PortfolioUsageProject[]) {
+  const byApp = new Map<string, PortfolioUsageProject>();
   const ambiguousApps = new Set<string>();
-  for (const project of options.projects) {
+  for (const project of projects) {
     if (project.environment !== 'production') continue;
-    const previous = projectByApp.get(project.appId);
-    if (previous && previous.environmentId !== project.environmentId)
+    const previous = byApp.get(project.appId);
+    if (previous && previous.environmentId !== project.environmentId) {
       ambiguousApps.add(project.appId);
-    else projectByApp.set(project.appId, project);
+    } else {
+      byApp.set(project.appId, project);
+    }
   }
+  return { byApp, ambiguousApps };
+}
+
+async function readCatalogProduct(
+  product: PortfolioUsageCatalogProduct,
+  options: ExportOptions,
+  projects: ReturnType<typeof productionProjects>,
+  clock: () => number,
+): Promise<[string, PortfolioUsageRecord]> {
+  const project = projects.byApp.get(product.app_id);
+  const mappingIssue = projects.ambiguousApps.has(product.app_id)
+    ? 'Multiple production environments map to this App Health project; record left unknown.'
+    : undefined;
+  return readProject(product, project, mappingIssue, options, clock);
+}
+
+async function collectCatalogRecords(
+  options: ExportOptions,
+  clock: () => number,
+): Promise<Record<string, PortfolioUsageRecord>> {
+  const projects = productionProjects(options.projects);
   const records: Record<string, PortfolioUsageRecord> = {};
   let cursor = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(options.concurrency ?? DEFAULT_CONCURRENCY, 4)) },
-    async () => {
-      while (!options.signal.aborted) {
-        const index = cursor++;
-        if (index >= options.products.length) return;
-        const product = options.products[index];
-        if (records[product.catalog_id]) continue;
-        const project = projectByApp.get(product.app_id);
-        const mappingIssue = ambiguousApps.has(product.app_id)
-          ? 'Multiple production environments map to this App Health project; record left unknown.'
-          : undefined;
-        const [catalogId, record] = await readProject(
-          product,
-          project,
-          mappingIssue,
-          {
-            ...options,
-            fetcher: options.fetcher ?? fetch,
-            requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS,
-          },
-          clock,
-        );
-        records[catalogId] = record;
-      }
-    },
-  );
-  await Promise.all(workers);
+  const worker = async () => {
+    while (!options.signal.aborted) {
+      const index = cursor++;
+      if (index >= options.products.length) return;
+      const [catalogId, record] = await readCatalogProduct(
+        options.products[index],
+        options,
+        projects,
+        clock,
+      );
+      records[catalogId] = record;
+    }
+  };
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? DEFAULT_CONCURRENCY, 4));
+  await Promise.all(Array.from({ length: concurrency }, worker));
   if (options.signal.aborted)
     throw options.signal.reason ?? new DOMException('Export canceled', 'AbortError');
+  return records;
+}
+
+export async function createPortfolioUsageExport(
+  options: ExportOptions,
+): Promise<PortfolioUsageExport> {
+  if (options.products.length > MAX_PRODUCTS) {
+    throw new Error(`Portfolio export is limited to ${MAX_PRODUCTS} catalog products.`);
+  }
+  validateProjectIds(options.projects);
+  validateCatalogProducts(options.products);
+  const clock = options.now ?? Date.now;
+  const records = await collectCatalogRecords(options, clock);
   const updatedAt = new Date(clock()).toISOString();
   return {
     kind: 'portfolio-usage',
