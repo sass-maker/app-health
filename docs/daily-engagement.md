@@ -1,8 +1,9 @@
 # Daily Fleet engagement report
 
 The App Health **Overview → Daily engagement** section is the owner's chosen
-destination for the daily 55-product report. It loads the latest completed
-Asia/Kolkata calendar day on opening, follows the next completed day at India
+destination for the daily linked-catalog report, up to the 60-product capacity.
+It loads the latest completed Asia/Kolkata calendar day on opening, follows the
+next completed day at India
 midnight or when the tab regains focus, and can read a manually selected older
 date until the owner chooses **Latest**.
 The owner-only API is `GET /v1/reports/daily-engagement?date=YYYY-MM-DD`.
@@ -29,11 +30,21 @@ Without opt-in the response is unchanged; portfolio briefing does not include sp
 
 ## What a row means
 
+The **Export 30-day usage** action builds a local JSON aggregate bundle from
+authenticated per-project reports for a rolling 30-day UTC window. Proxy counts
+retain their unit: browsers where reportable, or sessions as a fallback;
+sampled distinct counts remain lower bounds. Missing or unsupported data is
+unknown, not zero. Named events are unqualified candidates, not reviewed core
+actions. The bundle contains aggregate counts and event names, without visitor
+identities or private event content, and can be imported into the private SaaS
+Maker scoreboard.
+
 - Scope comes from active or primary rows in the workspace's
-  `catalog_project_imports`. The response
-  reports the imported count and warns when fewer than 55 active products are
-  present. Missing imports cannot have rows. Import is a declaration only; it
-  does not prove an installed SDK, accepted event, or live coverage.
+  `catalog_project_imports`. The response reports the current linked count;
+  products without catalog links are outside the report. The report supports up
+  to 60 linked products and does not assert an expected total Fleet count.
+  Missing imports cannot have rows. Import is a declaration only; it does not
+  prove an installed SDK, accepted event, or live coverage.
 - Browser visitors are distinct recognized browser hashes in a production
   environment for that day. They are browsers, not people. Sampled visitor
   groups are shown as unknown because distinct counts cannot be scaled. The
