@@ -16,6 +16,7 @@ import { EmptyState } from '@saas-maker/ui/components/empty-state';
 import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { useResource } from '@saas-maker/ui/lib/use-resource';
 import { accountResourceClient } from './lib/account-resource-client.js';
+import type { PortfolioUsageProject } from './lib/portfolio-usage-export.js';
 import {
   PortfolioBriefing,
   type PortfolioAttentionItem,
@@ -106,6 +107,7 @@ function ReportHeader({
 
 interface ReportBodyProps {
   ownerToken: string;
+  projects: PortfolioUsageProject[];
   loading: boolean;
   error: string;
   report: Report | null;
@@ -119,6 +121,7 @@ interface ReportBodyProps {
 function ReportBody(props: ReportBodyProps): ReactElement {
   const {
     ownerToken,
+    projects,
     loading,
     error,
     report,
@@ -167,6 +170,7 @@ function ReportBody(props: ReportBodyProps): ReactElement {
   return (
     <PortfolioBriefing
       ownerToken={ownerToken}
+      projects={projects}
       date={report.date}
       report={report}
       onOpenProduct={onOpenProduct}
@@ -179,6 +183,7 @@ function ReportBody(props: ReportBodyProps): ReactElement {
 
 interface DailyEngagementProps {
   ownerToken: string;
+  projects?: PortfolioUsageProject[];
   onReport?: (report: Report | null) => void;
   onOpenProduct?: (appId: string, focus?: ProductFocus, source?: string, date?: string) => void;
   attentionItems?: PortfolioAttentionItem[];
@@ -189,6 +194,7 @@ interface DailyEngagementProps {
 export function DailyEngagement(props: DailyEngagementProps): ReactElement {
   const {
     ownerToken,
+    projects = [],
     onReport,
     onOpenProduct,
     attentionItems = [],
@@ -261,6 +267,7 @@ export function DailyEngagement(props: DailyEngagementProps): ReactElement {
       <CardContent className="min-h-[40rem] space-y-6 p-0">
         <ReportBody
           ownerToken={ownerToken}
+          projects={projects}
           loading={loading}
           error={error}
           report={report}

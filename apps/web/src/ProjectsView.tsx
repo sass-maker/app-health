@@ -812,6 +812,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
       ) : null}
       <DailyEngagement
         ownerToken={ownerToken}
+        projects={projects}
         onReport={onDailyReport}
         {...briefing}
         onOpenProduct={(appId, focus, source, date) => {

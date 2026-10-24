@@ -4,10 +4,19 @@ import {
   type DailyEngagementReportV1,
   type PortfolioBriefingV1 as PortfolioBriefingData,
 } from '@app-health/contracts';
-import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
 import { useResource } from '@saas-maker/ui/lib/use-resource';
 import { accountResourceClient } from './lib/account-resource-client.js';
-import { AlertTriangle, ArrowUpDown, ExternalLink, Search, Signal } from 'lucide-react';
+import {
+  AlertTriangle,
+  ArrowUpDown,
+  Download,
+  ExternalLink,
+  LoaderCircle,
+  Search,
+  Signal,
+  X,
+} from 'lucide-react';
 import { Badge } from '@saas-maker/ui/components/badge';
 import { Button } from '@saas-maker/ui/components/button';
 import { Input } from '@saas-maker/ui/components/input';
@@ -17,6 +26,10 @@ import { EmptyState } from '@saas-maker/ui/components/empty-state';
 import { ErrorState } from '@saas-maker/ui/components/error-state';
 import { CardSkeleton } from '@saas-maker/ui/blocks/skeletons';
 import { Skeleton } from '@saas-maker/ui/components/skeleton';
+import {
+  createPortfolioUsageExport,
+  type PortfolioUsageProject,
+} from './lib/portfolio-usage-export.js';
 
 type DailyProduct = DailyEngagementReportV1['products'][number];
 type ProductFocus = 'analytics' | 'events' | 'backend';
@@ -45,6 +58,7 @@ export interface PortfolioHealthCoverage {
 
 interface PortfolioBriefingProps {
   ownerToken: string;
+  projects: PortfolioUsageProject[];
   date: string;
   report: DailyEngagementReportV1;
   onOpenProduct?: (appId: string, focus?: ProductFocus, source?: string, date?: string) => void;
@@ -1237,6 +1251,7 @@ function Summary({
 export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
   const {
     ownerToken,
+    projects,
     date,
     report,
     onOpenProduct,
@@ -1249,6 +1264,16 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
   const [query, setQuery] = useState('');
   const [sourceFilter, setSourceFilter] = useState<string | null>(null);
   const [showAllBreakouts, setShowAllBreakouts] = useState(false);
+  const [exportingUsage, setExportingUsage] = useState(false);
+  const [usageExportMessage, setUsageExportMessage] = useState('');
+  const usageExportController = useRef<AbortController | null>(null);
+  const usageExportLock = useRef(false);
+  useEffect(
+    () => () => {
+      usageExportController.current?.abort();
+    },
+    [ownerToken],
+  );
   const breakoutItems = useMemo(
     () => (data?.products ?? []).filter((product) => product.breakout),
     [data],
@@ -1259,8 +1284,93 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
   const open = (appId: string, focus: ProductFocus, source?: string) =>
     onOpenProduct?.(appId, focus, source, data?.date ?? date);
 
+  async function exportUsage(): Promise<void> {
+    if (usageExportLock.current) return;
+    usageExportLock.current = true;
+    const controller = new AbortController();
+    usageExportController.current = controller;
+    setExportingUsage(true);
+    setUsageExportMessage('');
+    try {
+      const result = await createPortfolioUsageExport({
+        ownerToken,
+        products: report.products.map((product) => ({
+          catalog_id: product.catalog_id,
+          app_id: product.app_id,
+          name: product.name,
+          browser_visitors_applicability: product.browser_visitors_applicability,
+          browser_visitors_unknown_reason: product.browser_visitors_unknown_reason,
+          coverage: product.coverage,
+        })),
+        projects,
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      const blob = new Blob([`${JSON.stringify(result, null, 2)}\n`], {
+        type: 'application/json',
+      });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = `app-health-portfolio-usage-${new Date().toISOString().slice(0, 10)}.json`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      setUsageExportMessage(
+        `Exported ${Object.keys(result.usage.records).length} catalog records. Browser counts are proxies; core use remains unqualified.`,
+      );
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setUsageExportMessage(
+          error instanceof Error ? error.message : 'Usage export failed. Please try again.',
+        );
+      } else {
+        setUsageExportMessage('Usage export canceled.');
+      }
+    } finally {
+      if (usageExportController.current === controller) usageExportController.current = null;
+      usageExportLock.current = false;
+      setExportingUsage(false);
+    }
+  }
+
+  function cancelUsageExport(): void {
+    usageExportController.current?.abort(new DOMException('Export canceled', 'AbortError'));
+  }
+
   return (
     <div className="space-y-8 sm:space-y-10">
+      <div className="flex flex-col gap-2 rounded-lg border bg-card/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs leading-5 text-muted-foreground">
+          rolling 30-day aggregate export; recognized browsers are not people, and no core action is
+          qualified yet.
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="min-h-11"
+            disabled={exportingUsage}
+            onClick={() => void exportUsage()}
+          >
+            {exportingUsage ? (
+              <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Download className="size-4" aria-hidden="true" />
+            )}
+            {exportingUsage ? 'exporting 30-day usage' : 'export 30-day usage'}
+          </Button>
+          {exportingUsage ? (
+            <Button type="button" variant="ghost" className="min-h-11" onClick={cancelUsageExport}>
+              <X className="size-4" aria-hidden="true" /> cancel
+            </Button>
+          ) : null}
+          {usageExportMessage ? (
+            <p role="status" className="w-full text-xs text-muted-foreground sm:w-auto">
+              {usageExportMessage}
+            </p>
+          ) : null}
+        </div>
+      </div>
       <TrafficSelector
         traffic={traffic}
         onChange={(next) => {
