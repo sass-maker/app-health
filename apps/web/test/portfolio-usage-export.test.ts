@@ -132,6 +132,9 @@ it('exports allowlisted rolling aggregates, keeps core use unknown, and falls ba
   expect(JSON.stringify(result.usage.records.atlas.evidence)).not.toContain('app-atlas');
   expect(result.usage.records.atlas.evidence[0].source).toBe('app-health.browser-report');
   expect(typeof result.usage.records.atlas.limitations).toBe('string');
+  expect(result.usage.records.atlas.limitations).toContain(
+    'audience counts do not establish human demand',
+  );
 });
 
 it('keeps missing environments, disabled sources, and API failures unknown', async () => {

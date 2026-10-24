@@ -203,6 +203,7 @@ function reportLimitations(
     'Recognized browser hashes are project and environment scoped: default random IDs may persist in first-party local storage up to 90 days, while integrations may be session-only. They are not people or devices and do not link across projects or devices; sessions fallback is session count, not user count.',
     'Core action is unreviewed; named event occurrences do not establish meaningful product use or verified owner use.',
     'The report API has no first/last-valid-data freshness field; event lastSeen is only an event receipt timestamp.',
+    'This export does not qualify full-period bot filtering, QA/automation exclusion or uninterrupted collection; audience counts do not establish human demand.',
   ];
   if (report.sampled)
     notes.push('Sampled audience counts are lower bounds and event counts are estimates.');
