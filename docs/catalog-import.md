@@ -40,7 +40,10 @@ capacity, so direct API callers must not infer that limit from route validation.
 
 Additive migration `0018_catalog_imports.sql` must exist before the route can
 succeed. It is replayable and its triggers enforce transactional workspace scope
-and immutable import identity. This implementation does not apply that migration
-or apply it automatically. Missing schema returns unavailable without a
-successful-import claim. Rollback to the previous Worker leaves the additive
-tables and existing projects intact; it does not delete imported declarations.
+and immutable import identity. The route does not apply this migration. Missing
+schema returns unavailable without a successful-import claim. A code rollback
+leaves the additive tables and existing projects intact; it does not delete
+imported declarations. However, after the linked catalog exceeds 55 active
+products, a 55-product-cap Worker cannot safely serve the report. Keep a
+capacity-compatible release as the recovery floor and repair forward if the
+60-product release has a reporting regression.
