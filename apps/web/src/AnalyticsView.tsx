@@ -1,6 +1,8 @@
 import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
+import { Conversions, SavedSegments } from './Conversions.js';
+import { Revenue } from './Revenue.js';
 import { useState, type ReactElement } from 'react';
 import { Activity, ArrowRight, X } from 'lucide-react';
 import { AnalyticsReport, type AnalyticsReportProps } from './AnalyticsReport.js';
@@ -200,8 +202,8 @@ function useReportSelection(project: Project) {
   };
 }
 
-export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
-  const { project, ownerToken, mode = 'web', onInstall } = props;
+function useReportController(props: AnalyticsViewProps) {
+  const { project, ownerToken, mode = 'web' } = props;
   const { segments, setSegments, appId, environmentId, selected, setSelected, removeSegment } =
     useReportSelection(project);
   const [range, setRange] = useState('24h');
@@ -229,32 +231,66 @@ export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
     setSelected(event);
     setMetric('events');
   };
+  return {
+    segments,
+    setSegments,
+    appId,
+    environmentId,
+    selected,
+    setSelected,
+    removeSegment,
+    range,
+    setRange,
+    date,
+    setDate,
+    metric,
+    setMetric,
+    breakdown,
+    setBreakdown,
+    workspace,
+    detail,
+    totalsValue,
+    active,
+    sourceNote,
+    selectEvent,
+  };
+}
+
+export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
+  const { ownerToken, mode = 'web', onInstall } = props;
+  const v = useReportController(props);
+  const query = {
+    app_id: v.appId,
+    environment_id: v.environmentId,
+    range: v.range as '1h' | '24h' | '7d' | '30d',
+    filters: v.segments,
+  };
+  const scopeKey = `${ownerToken}:${v.appId}:${v.environmentId}`;
   return (
     <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
         mode={mode}
-        range={range}
-        selected={selected}
-        date={date}
+        range={v.range}
+        selected={v.selected}
+        date={v.date}
         onRange={(next) => {
           if (next === 'briefing') return;
-          setDate(undefined);
+          v.setDate(undefined);
           const url = new URL(location.href);
           url.searchParams.delete('briefing_date');
           history.replaceState(null, '', url);
-          setRange(next);
+          v.setRange(next);
         }}
         onClearEvent={() => {
-          setSelected('');
-          setMetric(mode === 'events' ? 'events' : 'pageviews');
+          v.setSelected('');
+          v.setMetric(mode === 'events' ? 'events' : 'pageviews');
         }}
         onInstall={onInstall}
       />
-
       <AnalyticsSegments
-        filters={segments}
+        filters={v.segments}
         emptyHint={
-          mode === 'events' && !selected
+          mode === 'events' && !v.selected
             ? 'open a named event to reveal its page, source, and audience breakdowns.'
             : undefined
         }
@@ -262,31 +298,49 @@ export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
           const url = new URL(location.href);
           url.searchParams.delete('briefing_source');
           history.replaceState(null, '', url);
-          setSegments({});
-          setSelected('');
-          setMetric(mode === 'events' ? 'events' : 'pageviews');
+          v.setSegments({});
+          v.setSelected('');
+          v.setMetric(mode === 'events' ? 'events' : 'pageviews');
         }}
-        onRemove={removeSegment}
+        onRemove={v.removeSegment}
       />
+      {v.appId !== 'all' ? (
+        <SavedSegments
+          key={`segments:${scopeKey}`}
+          query={query}
+          ownerToken={ownerToken}
+          onApply={v.setSegments}
+        />
+      ) : null}
       <AnalyticsResults
-        workspace={workspace}
-        detail={detail}
+        workspace={v.workspace}
+        detail={v.detail}
         mode={mode}
-        selected={selected}
-        metric={metric}
-        range={range}
-        date={date}
-        sourceNote={sourceNote}
-        active={active}
-        totals={totalsValue}
-        onMetric={setMetric}
-        onEvent={selectEvent}
-        breakdown={breakdown}
-        onBreakdown={setBreakdown}
-        segmented={Object.keys(segments).length > 0}
-        onFilter={(key, value) => setSegments((current) => ({ ...current, [key]: value }))}
+        selected={v.selected}
+        metric={v.metric}
+        range={v.range}
+        date={v.date}
+        sourceNote={v.sourceNote}
+        active={v.active}
+        totals={v.totalsValue}
+        onMetric={v.setMetric}
+        onEvent={v.selectEvent}
+        breakdown={v.breakdown}
+        onBreakdown={v.setBreakdown}
+        segmented={Object.keys(v.segments).length > 0}
+        onFilter={(key, value) => v.setSegments((current) => ({ ...current, [key]: value }))}
       />
-      <AnalyticsFooter sourceNote={sourceNote} workspace={workspace} />
+      <AnalyticsFooter sourceNote={v.sourceNote} workspace={v.workspace} />
+      {v.appId !== 'all' && mode === 'events' && !v.date ? (
+        <>
+          <Conversions
+            key={`conversions:${scopeKey}`}
+            query={{ ...query, event: v.selected || undefined }}
+            ownerToken={ownerToken}
+          />
+          <Revenue key={`revenue:${scopeKey}`} query={query} ownerToken={ownerToken} />
+        </>
+      ) : null}
     </section>
   );
 }

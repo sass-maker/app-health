@@ -221,6 +221,12 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0029_expanded_browser_facts.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
@@ -1392,8 +1398,11 @@ describe('exact browser visitor daily ledger', () => {
 
   it('does not return 202 when D1 receipt acceptance fails for a hashless batch after Queue.send', async () => {
     const failedDb = {
-      prepare: vi.fn(),
-      batch: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
+      prepare: db.prepare.bind(db),
+      batch: vi
+        .fn()
+        .mockImplementationOnce(db.batch.bind(db))
+        .mockRejectedValue(new Error('D1 unavailable')),
     };
     const send = vi.fn().mockResolvedValue(undefined);
     const env = {

@@ -6,11 +6,13 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build": "node scripts/generate-public-entrypoints.mjs && vite build && node scripts/prerender-landing.mjs",
+    "build": "node scripts/build-tracker.mjs && node scripts/generate-public-entrypoints.mjs && vite build && node scripts/prerender-landing.mjs",
     "dev": "vite",
     "preview": "vite preview",
     "clean": "rimraf dist *.tsbuildinfo",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "pretest": "node scripts/build-tracker.mjs --check",
+    "predev": "node scripts/build-tracker.mjs"
   },
   "dependencies": {
     "@app-health/contracts": "workspace:*",

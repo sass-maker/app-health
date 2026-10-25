@@ -2,6 +2,7 @@ import type { CollectedBrowserBatch } from './browser-analytics.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import {
   BROWSER_EVENT_FACTS_DIGEST_VERSION,
+  browserFactsDigestVersion,
   digestBrowserEventFacts,
 } from './browser-facts-digest.js';
 
@@ -496,9 +497,12 @@ export async function acceptBrowserVisitorBatch(
   });
   const fingerprint = await batchFingerprint(normalizedBatch, days);
   const factsDigest = await digestBrowserEventFacts(normalizedBatch);
+  const version = batch.facts_digest_version ?? browserFactsDigestVersion(normalizedBatch);
+  const legacyDigest =
+    version === 2 ? await digestBrowserEventFacts(normalizedBatch, 1) : factsDigest;
   if (
-    (batch.facts_digest_version !== undefined &&
-      batch.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION) ||
+    (version !== 1 && version !== 2) ||
+    (browserFactsDigestVersion(normalizedBatch) === 2 && version !== 2) ||
     (batch.facts_digest !== undefined && batch.facts_digest !== factsDigest)
   )
     throw new Error('Browser event facts digest mismatch');
@@ -537,14 +541,15 @@ export async function acceptBrowserVisitorBatch(
       .prepare(
         `INSERT INTO browser_visitor_batch_receipts
            (workspace_id, app_id, environment_id, batch_id, fingerprint, expires_at, accepted_at, event_count,
-            facts_digest_version, facts_digest)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${openFencesSql}
+            facts_digest_version, facts_digest, expanded_facts_digest)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${openFencesSql}
          ON CONFLICT (workspace_id, app_id, environment_id, batch_id)
          DO UPDATE SET expires_at = MAX(browser_visitor_batch_receipts.expires_at, excluded.expires_at)
          WHERE browser_visitor_batch_receipts.fingerprint = excluded.fingerprint
            AND (browser_visitor_batch_receipts.facts_digest IS NULL
              OR (browser_visitor_batch_receipts.facts_digest_version = excluded.facts_digest_version
                AND browser_visitor_batch_receipts.facts_digest = excluded.facts_digest))
+           AND browser_visitor_batch_receipts.expanded_facts_digest IS excluded.expanded_facts_digest
            AND (browser_visitor_batch_receipts.event_count IS NULL
              OR browser_visitor_batch_receipts.event_count = excluded.event_count)
            AND ${openFencesSql}`,
@@ -559,7 +564,8 @@ export async function acceptBrowserVisitorBatch(
         now,
         batch.events.length,
         BROWSER_EVENT_FACTS_DIGEST_VERSION,
-        factsDigest,
+        legacyDigest,
+        version === 2 ? factsDigest : null,
         ...openFencesBindings,
         ...openFencesBindings,
       ),
@@ -636,7 +642,8 @@ export async function acceptBrowserVisitorBatch(
     db
       .prepare(
         `SELECT receipt.fingerprint, receipt.accepted_at, receipt.event_count,
-                receipt.facts_digest_version, receipt.facts_digest,
+                CASE WHEN receipt.expanded_facts_digest IS NULL THEN receipt.facts_digest_version ELSE 2 END AS facts_digest_version,
+                COALESCE(receipt.expanded_facts_digest, receipt.facts_digest) AS facts_digest,
                 (SELECT COUNT(*) FROM browser_visitor_receipt_days day_receipt
                  WHERE day_receipt.workspace_id = receipt.workspace_id
                    AND day_receipt.app_id = receipt.app_id
@@ -686,7 +693,7 @@ export async function acceptBrowserVisitorBatch(
     receipt?.fingerprint !== fingerprint ||
     (!matchingLegacyReceipt &&
       (!indexedReceipt ||
-        receipt.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION ||
+        receipt.facts_digest_version !== version ||
         receipt.facts_digest !== factsDigest))
   )
     throw new Error('Browser batch identity reused with different facts');
@@ -729,7 +736,8 @@ export async function readBrowserVisitorReceiptPage(
        )
        SELECT receipt.app_id, receipt.environment_id, receipt.batch_id,
               receipt.fingerprint, receipt.accepted_at, receipt.event_count,
-              receipt.facts_digest_version, receipt.facts_digest
+              CASE WHEN receipt.expanded_facts_digest IS NULL THEN receipt.facts_digest_version ELSE 2 END AS facts_digest_version,
+              COALESCE(receipt.expanded_facts_digest, receipt.facts_digest) AS facts_digest
        FROM requested
        JOIN browser_visitor_receipt_days day_receipt
          ON day_receipt.workspace_id = ?
@@ -1029,6 +1037,14 @@ export async function cleanupBrowserVisitorDays(
       ? Math.min(limit, MAX_RETENTION_ROWS_PER_TABLE_PER_RUN)
       : MAX_RETENTION_ROWS_PER_TABLE_PER_RUN;
   const results = await deleteExpiredBrowserVisitorRows(db, now, boundedLimit);
+  await db
+    .prepare(
+      `DELETE FROM browser_expanded_batch_claims WHERE rowid IN (
+    SELECT rowid FROM browser_expanded_batch_claims WHERE expires_at <= ? ORDER BY expires_at LIMIT ?
+  )`,
+    )
+    .bind(now, boundedLimit)
+    .run();
   const backlog = await findExpiredBrowserVisitorBacklog(db, now);
   return {
     visitors: results[0]?.meta.changes ?? 0,

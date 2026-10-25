@@ -17,6 +17,17 @@ export const BrowserEventV1 = z
       .string()
       .regex(/^[a-z][a-z0-9_.:-]{0,63}$/)
       .optional(),
+    properties: z
+      .record(
+        z
+          .string()
+          .regex(/^[a-z][a-z0-9_]{0,39}$/)
+          .refine((key) => key !== 'constructor' && key !== 'prototype'),
+        z.union([z.string().max(200), z.number().finite().min(-1e12).max(1e12), z.boolean()]),
+      )
+      .refine((properties) => Object.keys(properties).length <= 20)
+      .optional(),
+    value: z.number().finite().min(-1e12).max(1e12).optional(),
     referrer: z
       .string()
       .max(253)
@@ -25,7 +36,9 @@ export const BrowserEventV1 = z
   })
   .strict()
   .refine((event) =>
-    event.type === 'pageview' ? event.name === undefined : event.name !== undefined,
+    event.type === 'pageview'
+      ? event.name === undefined && event.properties === undefined && event.value === undefined
+      : event.name !== undefined,
   );
 export type BrowserEventV1 = z.infer<typeof BrowserEventV1>;
 

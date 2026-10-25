@@ -2,7 +2,12 @@
   const script = globalThis.document.currentScript;
   if (!script || !script.dataset.key?.startsWith('ahk_pub_')) return;
   // The tracker leaves a stopped placeholder when it is stopped while this file is downloading.
-  if (globalThis.window.appHealthVitals?.stopped) return;
+  if (
+    globalThis.window.appHealthVitals?.stopped ||
+    (script.dataset.vitalsGeneration &&
+      script.dataset.vitalsGeneration !== globalThis.window.appHealthVitals?.generation)
+  )
+    return;
   const endpoint = script.dataset.endpoint || 'https://ingest.sassmaker.com/v1/browser';
   let stopVitals = () => {};
 
@@ -211,7 +216,10 @@
     globalThis.window.addEventListener('pagehide', report);
   }
 
-  globalThis.window.appHealthVitals = { stop: () => stopVitals() };
+  globalThis.window.appHealthVitals = {
+    generation: script.dataset.vitalsGeneration,
+    stop: () => stopVitals(),
+  };
   try {
     startVitals();
   } catch {

@@ -55,6 +55,8 @@ export type BrowserArchiveDayAuditInput = {
   archive: BrowserArchiveDayAuditArchive;
   history: Pick<R2Bucket, 'get'>;
 };
+type ArchiveSegmentReadInput = Pick<BrowserArchiveDayAuditInput, 'workspace' | 'history'> &
+  Partial<BrowserArchiveDayAuditInput>;
 
 export type BrowserArchiveDayAudit = {
   day: string;
@@ -151,7 +153,7 @@ function isArchiveEvent(event: unknown): boolean {
 }
 
 async function readVerifiedSegment(
-  input: BrowserArchiveDayAuditInput,
+  input: ArchiveSegmentReadInput,
   reference: SegmentReference,
   byteState: { compressed: number; decompressed: number },
 ): Promise<{ batches: CollectedBrowserBatch[]; content_sha256: string }> {
@@ -175,7 +177,7 @@ async function readVerifiedSegment(
 
 /** Read and verify one indexed archive object for a bounded resumable operator slice. */
 export async function readBrowserArchiveAuditSegment(
-  input: BrowserArchiveDayAuditInput,
+  input: ArchiveSegmentReadInput,
   reference: SegmentReference,
   byteState: { compressed: number; decompressed: number },
 ): Promise<{ batches: CollectedBrowserBatch[]; content_sha256: string }> {
@@ -183,7 +185,7 @@ export async function readBrowserArchiveAuditSegment(
 }
 
 async function readCompressedSegment(
-  input: BrowserArchiveDayAuditInput,
+  input: ArchiveSegmentReadInput,
   reference: SegmentReference,
   object: R2ObjectBody,
   byteState: { compressed: number; decompressed: number },

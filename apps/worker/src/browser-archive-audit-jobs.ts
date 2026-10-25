@@ -228,8 +228,8 @@ function isLegacyAuditReceipt(row: AuditFactRow) {
 
 function archiveDigestsMatch(row: AuditFactRow) {
   return (
-    row.receipt_digest_version === 1 &&
-    row.archive_digest_version === 1 &&
+    (row.receipt_digest_version === 1 || row.receipt_digest_version === 2) &&
+    row.archive_digest_version === row.receipt_digest_version &&
     isHex(row.receipt_digest, 64) &&
     isHex(row.archive_digest, 64) &&
     row.receipt_digest === row.archive_digest
@@ -495,7 +495,9 @@ async function readReceiptSlice(
   const page = await db
     .prepare(
       `SELECT receipt.rowid AS row_id, receipt.app_id, receipt.environment_id,
-              receipt.batch_id, receipt.facts_digest_version, receipt.facts_digest,
+              receipt.batch_id,
+              CASE WHEN receipt.expanded_facts_digest IS NULL THEN receipt.facts_digest_version ELSE 2 END AS facts_digest_version,
+              COALESCE(receipt.expanded_facts_digest, receipt.facts_digest) AS facts_digest,
               EXISTS (
                 SELECT 1 FROM browser_queue_stage_receipts staged
                 WHERE staged.workspace_id = receipt.workspace_id

@@ -35,8 +35,10 @@ telemetry never captures request bodies, headers, cookies, or identities.
 Google accounts and workspace-owned project onboarding are implemented locally
 in the current account slice. Production activation and real Google callback
 verification are separate. Do not advertise them as live before that verification.
-General browser analytics, portfolio live viewers, and broader DataFast capability
-coverage are tracked in issue #58; account onboarding does not establish parity.
+General browser analytics and portfolio live viewers came through issue #58.
+The owner's 2026-10-25 request adds DataBull, Traks and Minilytics coverage in
+[#219](https://github.com/sass-maker/app-health/issues/219); account onboarding
+does not establish parity.
 
 The dashboard leads with web analytics and a dedicated Events view. Application
 health, logs, and collection details support investigation. The public landing
@@ -88,5 +90,10 @@ and Diagnostics. Setup is part of the relevant product; it is not another produc
 Dashboard routes use those names directly, without old route aliases. Persisted data
 and ingestion contracts are independent of dashboard navigation.
 
-Keep advanced funnels, cohorts, revenue attribution, experiments, team management,
-and session replay out of the current scope. Clarity covers replay and heat maps.
+The 2026-10-25 request supersedes the earlier deferral of funnels, revenue and
+team management. Implement those within this navigation and privacy boundary.
+Rich explicit events, editable goals/funnels/segments and the custom-payment ledger
+are implemented on the feature branch; production activation and full reference
+coverage are unverified. Provider connections, historical import, identity-linked
+attribution, teams, MCP and longer history remain tracked in #219. Experiments
+remain outside this expansion; Clarity covers replay and heat maps.

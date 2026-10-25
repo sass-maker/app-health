@@ -1,4 +1,6 @@
 import { readEndpointBuckets } from './endpoint-read.js';
+import { handleAnalysisOwner } from './analysis-routes.js';
+import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
 import { D1EndpointWriter } from './endpoint-durable.js';
 import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
@@ -941,6 +943,8 @@ async function handleIngestHostRoutes(
   url: URL,
   ctx: WorkerContext | undefined,
 ): Promise<Response | null> {
+  const paymentResponse = await handlePaymentIngest(request, env, bundle.repos, bundle.local);
+  if (paymentResponse) return paymentResponse;
   const browserResponse = await handleBrowserIngest(request, env, bundle.repos, bundle.local);
   if (browserResponse) return browserResponse;
   const nativeResponse = await handleNativeIngest(request, env, bundle.repos, bundle.local);
@@ -966,6 +970,16 @@ async function handleOwnerRoutes(
   },
 ): Promise<Response> {
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
+  const paymentResponse = await handlePaymentOwner(request, env, owner, bundle.repos, bundle.local);
+  if (paymentResponse) return paymentResponse;
+  const analysisResponse = await handleAnalysisOwner(
+    request,
+    env,
+    owner,
+    bundle.repos,
+    bundle.local,
+  );
+  if (analysisResponse) return analysisResponse;
   const shareResponse = await handleAnalyticsShareOwner(
     request,
     env,

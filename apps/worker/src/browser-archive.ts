@@ -2,10 +2,7 @@ import { projectBrowserBatch } from './browser-projection.js';
 import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
-import {
-  BROWSER_EVENT_FACTS_DIGEST_VERSION,
-  digestBrowserEventFacts,
-} from './browser-facts-digest.js';
+import { browserFactsDigestVersion, digestBrowserEventFacts } from './browser-facts-digest.js';
 
 const FLUSH_BYTES = 1024 * 1024;
 const MAX_PENDING_BYTES = 8 * FLUSH_BYTES;
@@ -73,6 +70,21 @@ export type ArchiveDayIndexPage = {
   /** Monotonic index high-water captured by the first page of this listing. */
   snapshot_sequence: number;
 };
+export type ArchiveScopeWindow = {
+  app_id: string;
+  environment_id: string;
+  from: number;
+  to: number;
+};
+export type ArchiveScopeCursor = {
+  scope_key: string;
+  object_key: string;
+  snapshot_sequence: number;
+};
+export type ArchiveScopePage = {
+  segments: Array<{ segment_id: string; object_key: string }>;
+  next_cursor: ArchiveScopeCursor | null;
+};
 type ArchiveBatchIndexEntry = { segment_id: string; object_key: string };
 
 function eventIndiaDay(timestamp: number): string {
@@ -104,6 +116,33 @@ function validDayIndexCursor(day: string, cursor: ArchiveDayIndexCursor | null):
   );
 }
 
+function scopeWindowKey(scope: ArchiveScopeWindow): string {
+  if (
+    [scope.app_id, scope.environment_id].some(
+      (id) => typeof id !== 'string' || !id || id.length > 200,
+    ) ||
+    !Number.isSafeInteger(scope.from) ||
+    !Number.isSafeInteger(scope.to) ||
+    scope.from < 0 ||
+    scope.to <= scope.from ||
+    scope.to - scope.from > 30 * 86400000
+  )
+    throw new Error('Invalid archive scope window');
+  return JSON.stringify([scope.app_id, scope.environment_id, scope.from, scope.to]);
+}
+function validScopePage(key: string, cursor: ArchiveScopeCursor | null, limit: number): boolean {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE)
+    return false;
+  return (
+    cursor === null ||
+    (cursor.scope_key === key &&
+      typeof cursor.object_key === 'string' &&
+      cursor.object_key.length <= 1024 &&
+      Number.isSafeInteger(cursor.snapshot_sequence) &&
+      cursor.snapshot_sequence >= 0)
+  );
+}
+
 async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch> {
   const names = [batch.workspace, batch.app_id, batch.environment_id, batch.batch_id];
   if (names.some((name) => typeof name !== 'string' || !name.length || name.length > 200))
@@ -111,28 +150,32 @@ async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch
   if (!Array.isArray(batch.events) || !batch.events.length)
     throw new Error('Archive batches must contain events');
   const factsDigest = await digestBrowserEventFacts(batch);
+  const version = batch.facts_digest_version ?? browserFactsDigestVersion(batch);
   if (
-    (batch.facts_digest_version !== undefined &&
-      batch.facts_digest_version !== BROWSER_EVENT_FACTS_DIGEST_VERSION) ||
+    (version !== 1 && version !== 2) ||
+    (browserFactsDigestVersion(batch) === 2 && version !== 2) ||
     (batch.facts_digest !== undefined && batch.facts_digest !== factsDigest)
   )
     throw new Error('Browser event facts digest mismatch');
   const payload = JSON.stringify({
     ...batch,
-    facts_digest_version: BROWSER_EVENT_FACTS_DIGEST_VERSION,
+    facts_digest_version: version,
     facts_digest: factsDigest,
   });
   const bytes = new TextEncoder().encode(`${payload}\n`).byteLength;
   if (bytes > MAX_BATCH_BYTES) throw new Error('Archive batch exceeds 64 KiB');
   // Collector retries may update received_at without changing the accepted events.
-  const content = JSON.stringify([
-    ...names,
-    batch.events,
-    batch.session_hash,
-    batch.visitor_hash,
-    batch.visit_type,
-    batch.attribution,
-  ]);
+  const content =
+    version === 2
+      ? JSON.stringify([...names, factsDigest])
+      : JSON.stringify([
+          ...names,
+          batch.events,
+          batch.session_hash,
+          batch.visitor_hash,
+          batch.visit_type,
+          batch.attribution,
+        ]);
   const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
   const fingerprint = Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join(
     '',
@@ -192,6 +235,12 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         UNIQUE (event_day, object_key)
       );
       CREATE INDEX IF NOT EXISTS archive_day_segments_expiry ON archive_day_segments(indexed_at);
+      CREATE TABLE IF NOT EXISTS archive_scope_segments (
+        object_key TEXT NOT NULL, app_id TEXT NOT NULL, environment_id TEXT NOT NULL,
+        min_event_at INTEGER NOT NULL, max_event_at INTEGER NOT NULL, indexed_at INTEGER NOT NULL,
+        PRIMARY KEY (object_key, app_id, environment_id)
+      );
+      CREATE INDEX IF NOT EXISTS archive_scope_segments_expiry ON archive_scope_segments(indexed_at);
       CREATE TABLE IF NOT EXISTS archive_batch_segments (
         app_id TEXT NOT NULL, environment_id TEXT NOT NULL, batch_id TEXT NOT NULL,
         segment_id TEXT NOT NULL, object_key TEXT NOT NULL, indexed_at INTEGER NOT NULL,
@@ -408,6 +457,59 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     };
   }
 
+  /** Scope/time pruning retains unindexed legacy candidates rather than excluding unknown history. */
+  archiveSegmentsForScope(
+    scope: ArchiveScopeWindow,
+    cursor: ArchiveScopeCursor | null = null,
+    limit = MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE,
+  ): ArchiveScopePage {
+    const key = scopeWindowKey(scope);
+    if (!validScopePage(key, cursor, limit))
+      throw new Error('Invalid archive scope cursor or page limit');
+    const snapshot =
+      cursor?.snapshot_sequence ??
+      this.ctx.storage.sql
+        .exec<{ value: number }>(
+          'SELECT COALESCE(MAX(index_seq), 0) AS value FROM archive_day_segments',
+        )
+        .one().value;
+    // Legacy segments without scope metadata remain candidates; never silently omit them.
+    const rows = this.ctx.storage.sql
+      .exec<{ segment_id: string; object_key: string }>(
+        `SELECT DISTINCT d.segment_id, d.object_key FROM archive_day_segments d
+       WHERE d.event_day >= ? AND d.event_day <= ? AND d.index_seq <= ? AND d.indexed_at > ?
+         AND (? IS NULL OR d.object_key > ?)
+         AND (NOT EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key)
+           OR EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key
+             AND s.app_id = ? AND s.environment_id = ? AND s.max_event_at >= ? AND s.min_event_at < ?))
+       ORDER BY d.object_key LIMIT ?`,
+        eventIndiaDay(scope.from),
+        eventIndiaDay(scope.to - 1),
+        snapshot,
+        Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        cursor?.object_key ?? null,
+        cursor?.object_key ?? null,
+        scope.app_id,
+        scope.environment_id,
+        scope.from,
+        scope.to,
+        limit + 1,
+      )
+      .toArray();
+    const segments = rows.slice(0, limit);
+    return {
+      segments,
+      next_cursor:
+        rows.length > limit
+          ? {
+              scope_key: key,
+              object_key: segments[segments.length - 1]!.object_key,
+              snapshot_sequence: snapshot,
+            }
+          : null,
+    };
+  }
+
   /** A successful archive receipt candidate for one batch identity in this shard. */
   archiveSegmentForBatch(
     appId: string,
@@ -553,6 +655,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     const objectKey = this.ctx.storage.sql
       .exec<{ object_key: string }>('SELECT object_key FROM archive_segments WHERE id = ?', segment)
       .one().object_key;
+    this.indexScopeSegments(objectKey, batches, now);
     for (const day of days) {
       this.ctx.storage.sql.exec(
         'INSERT OR IGNORE INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
@@ -591,6 +694,46 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     this.ctx.storage.sql.exec('DELETE FROM archive_pending WHERE segment_id = ?', segment);
     this.ctx.storage.sql.exec('DELETE FROM archive_segments WHERE id = ?', segment);
     this.ctx.storage.sql.exec('UPDATE archive_meta SET retry_after = 0 WHERE id = 1');
+  }
+
+  private indexScopeSegments(
+    objectKey: string,
+    batches: CollectedBrowserBatch[],
+    now: number,
+  ): void {
+    const scopes = new Map<
+      string,
+      { app: string; environment: string; min: number; max: number }
+    >();
+    for (const batch of batches) {
+      const key = JSON.stringify([batch.app_id, batch.environment_id]);
+      const scope = scopes.get(key) ?? {
+        app: batch.app_id,
+        environment: batch.environment_id,
+        min: Infinity,
+        max: -Infinity,
+      };
+      for (const event of batch.events) {
+        scope.min = Math.min(scope.min, event.timestamp);
+        scope.max = Math.max(scope.max, event.timestamp);
+      }
+      scopes.set(key, scope);
+    }
+    for (const scope of scopes.values())
+      this.ctx.storage.sql.exec(
+        'INSERT OR IGNORE INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)',
+        objectKey,
+        scope.app,
+        scope.environment,
+        scope.min,
+        scope.max,
+        now,
+      );
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_scope_segments WHERE rowid IN (SELECT rowid FROM archive_scope_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
   }
 
   override async alarm(): Promise<void> {

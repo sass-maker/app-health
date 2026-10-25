@@ -11,7 +11,7 @@ const FEATURES: CapabilityLedger['features'] = [
     id: 'product_events',
     status: 'partial',
     explanation:
-      'Named events and scoped drill-down are available. Arbitrary properties, identity profiles and whole-session journeys are not implemented.',
+      'Named events support bounded scalar properties and values, property drill-down, goals and saved segments. Identity profiles and whole-session journeys remain incomplete.',
   },
   {
     id: 'endpoint_monitoring',
@@ -75,15 +75,15 @@ const FEATURES: CapabilityLedger['features'] = [
   },
   {
     id: 'funnels_retention',
-    status: 'deferred',
+    status: 'partial',
     explanation:
-      'Funnels and cohorts are deferred by the focused-product decision; sampled aggregates do not prove exact conversion or retention.',
+      'Editable ordered session funnels use verified observed archive facts with explicit scan and coverage limits. Cohorts, complete-source qualification and long-range retention remain incomplete in #219.',
   },
   {
     id: 'profiles_revenue',
-    status: 'deferred',
+    status: 'partial',
     explanation:
-      'Identified profiles and revenue attribution are deferred, not implemented or inferred from anonymous browser recognition.',
+      'Private custom-payment/refund ingestion and currency-separated recorded-cashflow reports are implemented. Provider connections, historical imports and identity-linked profiles/attribution remain incomplete in #219.',
   },
   {
     id: 'replay',
@@ -93,9 +93,9 @@ const FEATURES: CapabilityLedger['features'] = [
   },
   {
     id: 'collaboration_experiments_ai',
-    status: 'deferred',
+    status: 'planned',
     explanation:
-      'Collaboration, experiments and AI analysis are deferred pending demonstrated product need.',
+      'Workspace collaboration and agent/MCP access are planned in #219. Experiments and autonomous AI analysis are not introduced by this expansion.',
   },
 ];
 
