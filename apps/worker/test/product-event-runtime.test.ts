@@ -1,3 +1,5 @@
+import { reserveProductBatch, sealProductBatch } from '../src/product-event-reservation.js';
+import { cleanupProductArchive } from '../src/product-event-cleanup.js';
 import { splitMigrationSql } from './migration-sql.js';
 import { readFile } from 'node:fs/promises';
 import { URL } from 'node:url';
@@ -21,12 +23,10 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
   });
   const db = (await runtime.getD1Database('DB')) as D1DatabaseLike,
     bucket = (await runtime.getR2Bucket('HISTORY')) as unknown as ProductBucket;
-  const sql = (
-    await readFile(new URL('../migrations/0034_product_events.sql', import.meta.url), 'utf8')
-  )
-    .replace(/--[^\n]*/g, '')
-    .trim();
-  for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
+  for (const migration of ['0034_product_events.sql', '0036_product_capacity.sql']) {
+    const sql = await readFile(new URL('../migrations/' + migration, import.meta.url), 'utf8');
+    for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
+  }
   const scope: ProductScope = {
     workspace: 'workspace',
     app_id: 'app',
@@ -79,4 +79,24 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
   ]);
   expect(attempts.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
   expect((await readProductArchive(db, bucket, scope, 0, Date.now() + 1000)).facts).toHaveLength(3);
+  const pendingBatch = crypto.randomUUID(),
+    pendingEvent = { ...event, event_id: crypto.randomUUID() };
+  const pending = await reserveProductBatch(db, scope, pendingBatch, [pendingEvent]);
+  await db
+    .prepare('UPDATE product_batches SET expires_at=0,cleanup_at=0 WHERE reservation=?')
+    .bind(pending.receipt.reservation)
+    .run();
+  expect(await acceptProductArchive(db, bucket, scope, pendingBatch, [pendingEvent])).toMatchObject(
+    { accepted: 1 },
+  );
+  await expect(sealProductBatch(db, pending.receipt, 'a'.repeat(64), 1, 1)).rejects.toThrow(
+    'expired',
+  );
+  expect(await db.prepare('SELECT COUNT(*) AS n FROM product_object_gc').first()).toMatchObject({
+    n: 1,
+  });
+  await cleanupProductArchive(db, bucket);
+  expect(
+    await bucket.put(pending.receipt.object_key, 'late', { onlyIf: { etagDoesNotMatch: '*' } }),
+  ).toBeNull();
 }, 30000);

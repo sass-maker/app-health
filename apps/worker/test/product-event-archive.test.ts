@@ -168,7 +168,7 @@ describe('canonical product archive with real SQLite and local R2', () => {
     try {
       const events = [event()];
       const pending = await reserveProductBatch(db, scope, id(10), events);
-      sqlite.prepare('UPDATE product_batches SET expires_at=0').run();
+      sqlite.prepare('UPDATE product_batches SET expires_at=0,cleanup_at=0').run();
       await expect(sealProductBatch(db, pending.receipt, 'a'.repeat(64), 1, 1)).rejects.toThrow(
         'expired',
       );
@@ -178,7 +178,15 @@ describe('canonical product archive with real SQLite and local R2', () => {
       });
       await acceptProductArchive(db, bucket, scope, id(10), events);
       await cleanupProductArchive(db, bucket, Date.now() + 31 * 86400000 + 1000);
-      expect((await bucket.list!({ prefix: 'product-events/v1/' })).objects).toHaveLength(0);
+      const sealedKey = (
+        sqlite.prepare("SELECT object_key FROM product_batches WHERE state='sealed'").get() as {
+          object_key: string;
+        }
+      ).object_key;
+      expect(await bucket.get(sealedKey)).toBeNull();
+      expect(await (await bucket.get(pending.receipt.object_key))!.text()).toContain(
+        'expired_product_reservation',
+      );
       expect(sqlite.prepare('SELECT COUNT(*) AS n FROM product_event_claims').get()).toMatchObject({
         n: 1,
       });
@@ -228,6 +236,77 @@ it('enforces daily capacity atomically while permitting exact retries and leaves
     await expect(acceptProductArchive(db, bucket, scope, id(13), [event(3)])).rejects.toThrow(
       'CHECK constraint failed',
     );
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('reclaims expired pending identities inline with a fresh nonce and tracks/fences stale R2 uploads', async () => {
+  const { db, sqlite, bucket } = await fixture();
+  try {
+    const events = [event()],
+      first = await reserveProductBatch(db, scope, id(10), events);
+    sqlite.prepare('UPDATE product_batches SET expires_at=0,cleanup_at=0').run();
+    const retry = await reserveProductBatch(db, scope, id(10), events);
+    expect(retry.receipt.reservation).not.toBe(first.receipt.reservation);
+    await bucket.put(first.receipt.object_key, 'stale unaccepted upload', {
+      onlyIf: { etagDoesNotMatch: '*' },
+    });
+    await expect(sealProductBatch(db, first.receipt, 'a'.repeat(64), 1, 1)).rejects.toThrow(
+      'expired',
+    );
+    expect(sqlite.prepare('SELECT object_key FROM product_object_gc').get()).toMatchObject({
+      object_key: first.receipt.object_key,
+    });
+    await cleanupProductArchive(db, bucket);
+    expect(
+      await bucket.put(first.receipt.object_key, 'even later stale upload', {
+        onlyIf: { etagDoesNotMatch: '*' },
+      }),
+    ).toBeNull();
+    expect(await acceptProductArchive(db, bucket, scope, id(10), events)).toMatchObject({
+      accepted: 1,
+    });
+    expect((await readProductArchive(db, bucket, scope, 0, Date.now() + 1000)).facts).toHaveLength(
+      1,
+    );
+  } finally {
+    sqlite.close();
+  }
+});
+it('reserves sustainable35-day tenant-local headroom without global cross-tenant admission coupling', async () => {
+  const { db, sqlite, bucket } = await fixture();
+  try {
+    await acceptProductArchive(db, bucket, scope, id(10), [event()]);
+    sqlite
+      .prepare(
+        "UPDATE product_event_usage SET claims=175000,receipts=175000 WHERE scope='a:ws:app'",
+      )
+      .run();
+    sqlite
+      .prepare("UPDATE product_event_usage SET claims=875000,receipts=875000 WHERE scope='w:ws'")
+      .run();
+    sqlite.prepare("INSERT INTO product_event_usage VALUES('global',999999999,999999999)").run();
+    expect(await acceptProductArchive(db, bucket, scope, id(11), [event(2)])).toMatchObject({
+      accepted: 1,
+    });
+    sqlite.prepare("UPDATE product_event_usage SET claims=180000 WHERE scope='a:ws:app'").run();
+    await expect(acceptProductArchive(db, bucket, scope, id(12), [event(3)])).rejects.toThrow(
+      'retained capacity',
+    );
+    expect(
+      await acceptProductArchive(db, bucket, { ...scope, workspace: 'another-workspace' }, id(12), [
+        event(3),
+      ]),
+    ).toMatchObject({ accepted: 1 });
+    sqlite
+      .prepare('UPDATE product_workspace_days SET events=25000 WHERE workspace_id=?')
+      .run('another-workspace');
+    await expect(
+      acceptProductArchive(db, bucket, { ...scope, workspace: 'another-workspace' }, id(13), [
+        event(4),
+      ]),
+    ).rejects.toThrow('workspace daily capacity');
   } finally {
     sqlite.close();
   }

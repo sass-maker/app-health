@@ -1,3 +1,4 @@
+import type { ProductCleanupWake } from './product-event-maintenance.js';
 import { ProductEventV1 } from '@app-health/contracts';
 import { hashKey } from './crypto.js';
 import { browserSessionScope } from './browser-analytics.js';
@@ -11,6 +12,9 @@ export type ProductScope = {
 export type ProductBucket = Pick<R2Bucket, 'put' | 'get'> &
   Partial<Pick<R2Bucket, 'delete' | 'list'>>;
 export type ProductEnvironment = {
+  BROWSER_EVENTS?: {
+    send(wake: ProductCleanupWake, options?: { delaySeconds: number }): Promise<unknown>;
+  };
   DB?: D1DatabaseLike;
   BROWSER_HISTORY?: Pick<R2Bucket, 'put'> & Partial<Pick<R2Bucket, 'get' | 'delete' | 'list'>>;
   APP_HEALTH_INGEST_HOST?: string;
@@ -25,6 +29,7 @@ export type ProductReceipt = {
   reservation: string;
   state: 'pending' | 'sealed';
   object_key: string;
+  cleanup_at: number;
   object_deleted: number;
   object_hash: string | null;
   object_bytes: number | null;
@@ -109,9 +114,19 @@ export function productFailure(error: unknown) {
       'An identical event is awaiting durable acceptance; retry the original batch',
       503,
     );
-  if (/archive capacity|CHECK constraint failed: events/.test(message))
+  if (/retained or pending capacity|retained capacity/.test(message))
     return new ProductError(
-      'Product event capacity reached (5,000 events and 8 MiB per project/day); narrow or retry after the quota resets',
+      'Product event retained identity or pending-upload capacity reached; retry after maintenance completes or reduce workspace traffic',
+      429,
+    );
+  if (/workspace daily capacity/.test(message))
+    return new ProductError(
+      'Workspace daily capacity reached (25,000 events or 40 MiB); retry after the UTC day resets',
+      429,
+    );
+  if (/CHECK constraint failed: events/.test(message))
+    return new ProductError(
+      'Project daily capacity reached (5,000 events or 8 MiB); retry after the UTC day resets',
       429,
     );
   return error instanceof ProductError

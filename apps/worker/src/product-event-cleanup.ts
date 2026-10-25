@@ -1,64 +1,66 @@
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { ProductBucket, ProductReceipt } from './product-event-model.js';
-const DAY = 86400000;
-const PREFIX = 'product-events/v1/';
-
-async function cleanupOrphans(db: D1DatabaseLike, bucket: ProductBucket, now: number) {
-  if (!bucket.list || !bucket.delete) return;
-  const state = await db
-    .prepare('SELECT cursor FROM product_archive_cleanup WHERE id=1')
-    .first<{ cursor: string | null }>();
-  const page = await bucket.list({
-    prefix: PREFIX,
-    limit: 100,
-    ...(state?.cursor ? { cursor: state.cursor } : {}),
-  });
-  const old = page.objects.filter((object) => object.uploaded.getTime() < now - 31 * DAY);
-  if (old.length) {
-    const existing = await db
-      .prepare(
-        `SELECT object_key FROM product_batches WHERE object_key IN (${old.map(() => '?').join(',')})`,
-      )
-      .bind(...old.map((object) => object.key))
-      .all<{ object_key: string }>();
-    const retained = new Set(existing.results.map((row) => row.object_key));
-    const orphanKeys = old
-      .filter((object) => !retained.has(object.key))
-      .map((object) => object.key);
-    if (orphanKeys.length) await bucket.delete(orphanKeys);
-  }
-  await db
-    .prepare(
-      'INSERT INTO product_archive_cleanup(id,cursor) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor',
-    )
-    .bind(page.truncated ? page.cursor : null)
-    .run();
+const DAY = 86400000,
+  PREFIX = 'product-events/v1/';
+function owned(key: string) {
+  if (!key.startsWith(PREFIX)) throw new Error('Invalid product cleanup prefix');
 }
 
-/** Bounded cleanup owns only its prefix; immutable identity receipts outlive raw facts. */
+async function cleanupObjects(db: D1DatabaseLike, bucket: ProductBucket, now: number) {
+  const rows = await db
+    .prepare(
+      'SELECT * FROM product_object_gc WHERE cleanup_at<=? ORDER BY cleanup_at,object_key LIMIT 100',
+    )
+    .bind(now)
+    .all<{ object_key: string; phase: 'fence' | 'delete' }>();
+  for (const row of rows.results) {
+    owned(row.object_key);
+    if (row.phase === 'fence') {
+      // An overwrite fences any stale conditional create, whichever R2 write wins first.
+      await bucket.put(row.object_key, '{"expired_product_reservation":true}', {
+        httpMetadata: { contentType: 'application/json' },
+      });
+      await db
+        .prepare(
+          "UPDATE product_object_gc SET phase='delete',cleanup_at=? WHERE object_key=? AND phase='fence'",
+        )
+        .bind(now + 35 * DAY, row.object_key)
+        .run();
+    } else {
+      await bucket.delete!(row.object_key);
+      await db
+        .prepare("DELETE FROM product_object_gc WHERE object_key=? AND phase='delete'")
+        .bind(row.object_key)
+        .run();
+    }
+  }
+  return rows.results.length;
+}
+/** Each bounded maintenance slice can be continued by Queue; it never scans an R2 prefix. */
 export async function cleanupProductArchive(
   db: D1DatabaseLike,
   bucket: ProductBucket,
   now = Date.now(),
 ) {
-  if (!bucket.delete) return 0;
+  if (!bucket.delete) return { processed: 0, more: false };
   const rows = await db
     .prepare(
-      `SELECT * FROM product_batches WHERE (state='pending' AND expires_at<=?) OR (state='sealed' AND ((object_deleted=0 AND received_at<?) OR expires_at<=?)) ORDER BY received_at LIMIT 100`,
+      'SELECT * FROM product_batches WHERE cleanup_at<=? ORDER BY cleanup_at,reservation LIMIT 100',
     )
-    .bind(now, now - 31 * DAY, now)
+    .bind(now)
     .all<ProductReceipt>();
-  for (const row of rows.results)
-    if (!row.object_key.startsWith(PREFIX)) throw new Error('Invalid product cleanup prefix');
+  for (const row of rows.results) owned(row.object_key);
   const keys = rows.results
-    .filter((row) => !row.object_deleted && (row.accepted_count > 0 || row.state === 'pending'))
+    .filter((row) => row.state === 'sealed' && !row.object_deleted && row.accepted_count > 0)
     .map((row) => row.object_key);
   if (keys.length) await bucket.delete(keys);
   if (rows.results.length)
     await db.batch(
       rows.results.flatMap((row) => [
         db
-          .prepare('UPDATE product_batches SET object_deleted=1 WHERE reservation=?')
+          .prepare(
+            "UPDATE product_batches SET object_deleted=1,cleanup_at=expires_at WHERE reservation=? AND state='sealed'",
+          )
           .bind(row.reservation),
         db
           .prepare(
@@ -72,10 +74,10 @@ export async function cleanupProductArchive(
           .bind(row.reservation, now, row.reservation),
       ]),
     );
-  await db
-    .prepare('DELETE FROM product_event_days WHERE day<?')
-    .bind(Math.floor(now / DAY) - 35)
-    .run();
-  await cleanupOrphans(db, bucket, now);
-  return rows.results.length;
+  await db.batch([
+    db.prepare('DELETE FROM product_event_days WHERE day<?').bind(Math.floor(now / DAY) - 35),
+    db.prepare('DELETE FROM product_workspace_days WHERE day<?').bind(Math.floor(now / DAY) - 35),
+  ]);
+  const gc = await cleanupObjects(db, bucket, now);
+  return { processed: rows.results.length + gc, more: rows.results.length === 100 || gc === 100 };
 }

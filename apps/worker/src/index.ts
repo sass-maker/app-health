@@ -7,7 +7,7 @@ import { handleWorkspaceAccess } from './workspace-routes.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
 import { handleProductEventIngest } from './product-event-routes.js';
-import { cleanupProductArchive } from './product-event-cleanup.js';
+import { maintainProductArchive } from './product-event-maintenance.js';
 import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
 import { handleProviderOwner } from './payment-provider-routes.js';
 import { handleProviderWebhook } from './payment-provider-webhooks.js';
@@ -1387,6 +1387,15 @@ async function handleMcpRequest(
   );
 }
 
+async function maintainProductArchiveSafely(env: Env) {
+  if (!env.BROWSER_HISTORY?.get) return;
+  try {
+    await maintainProductArchive(env);
+  } catch {
+    console.warn(JSON.stringify({ event: 'product_archive_cleanup_failed' }));
+  }
+}
+
 const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1492,22 +1501,7 @@ const unmonitoredWorker = {
         console.warn(JSON.stringify({ event: 'browser_archive_audit_slice_failed' }));
       }
     }
-    if (env.BROWSER_HISTORY?.get) {
-      try {
-        await cleanupProductArchive(env.DB, {
-          put: env.BROWSER_HISTORY.put.bind(env.BROWSER_HISTORY),
-          get: env.BROWSER_HISTORY.get.bind(env.BROWSER_HISTORY),
-          ...(env.BROWSER_HISTORY.delete
-            ? { delete: env.BROWSER_HISTORY.delete.bind(env.BROWSER_HISTORY) }
-            : {}),
-          ...(env.BROWSER_HISTORY.list
-            ? { list: env.BROWSER_HISTORY.list.bind(env.BROWSER_HISTORY) }
-            : {}),
-        });
-      } catch {
-        console.warn(JSON.stringify({ event: 'product_archive_cleanup_failed' }));
-      }
-    }
+    await maintainProductArchiveSafely(env);
     await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupLogsExpired(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000, 10_000);
     await control.cleanupBrowserQuotaExpired(Date.now() - 60 * 60 * 1000);

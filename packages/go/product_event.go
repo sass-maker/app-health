@@ -63,7 +63,6 @@ type productBatch struct {
 
 var anonymousID = regexp.MustCompile(`(?i)^(?:[a-f0-9]{64}|[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$`)
 var eventUUID = regexp.MustCompile(`(?i)^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
-var currencyCode = regexp.MustCompile(`^[A-Z]{3}$`)
 
 func printable(value string, max int) bool {
 	if value == "" || utf8.RuneCountInString(value) > max {
@@ -135,7 +134,7 @@ func productRevenue(input TrackInput) bool {
 		return input.Revenue == nil
 	}
 	r := input.Revenue
-	return r != nil && r.AmountMinor >= 0 && r.AmountMinor <= 1e12 && currencyCode.MatchString(r.Currency)
+	return r != nil && r.AmountMinor >= 0 && r.AmountMinor <= 1e12 && knownProductCurrency(r.Currency)
 }
 func validTrack(input TrackInput) bool {
 	if !productIdentity(input) || !productProperties(input.Properties) || !productAttribution(input.Attribution) || !productRevenue(input) {
@@ -227,3 +226,5 @@ func (c *Client) deliverProducts(events []ProductEventV1) {
 		events = events[count:]
 	}
 }
+
+func knownProductCurrency(currency string) bool { _, ok := productCurrencyUnits[currency]; return ok }

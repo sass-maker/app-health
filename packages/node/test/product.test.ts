@@ -81,3 +81,36 @@ describe('explicit client.track', () => {
     expect(client.diagnostics().sentEvents).toBe(40);
   });
 });
+
+it('drops invalid ISO money before batching so valid co-batched events still deliver', async () => {
+  const transport = createFetchController();
+  const client = createAppHealthClient({
+    key: 'ahk_fixture',
+    endpoint: 'http://localhost:8787/v1/ingest',
+    fetch: transport.fetch,
+    disableTimer: true,
+  });
+  client.track('Valid', { type: 'revenue', revenue: { currency: 'HUF', amount_minor: 123 } });
+  client.track('Invalid', { type: 'revenue', revenue: { currency: 'XYZ', amount_minor: 123 } });
+  client.track('Ordinary Props', {
+    properties: { revenue: 'ordinary', value: 12 },
+    interactive: false,
+    attribution: { entry_path: '/pricing', campaign: 'Pro Launch' },
+  });
+  await client.close();
+  expect(client.diagnostics()).toMatchObject({ sentEvents: 2, droppedInvalid: 1 });
+  expect(
+    ProductBatchV1.parse(JSON.parse(transport.requests[0].body)).events.map((event) => event.name),
+  ).toEqual(['Valid', 'Ordinary Props']);
+  for (const input of [
+    { attribution: { entry_path: '/x', email: 'private' } },
+    { attribution: { entry_path: '/x', campaign: 'a@example.test' } },
+    { attribution: { entry_path: 'bad' } },
+    { value: Infinity },
+    { interactive: 'bad' },
+    { type: 'unknown' },
+    { path: '/%zz' },
+    { type: 'revenue', revenue: { currency: 'USD', amount_minor: 1.5 } },
+  ])
+    expect(buildProductEvent('Invalid', input as never, Date.now, uuid)).toBeNull();
+});

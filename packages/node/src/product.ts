@@ -1,3 +1,4 @@
+import { currencyMinorUnits } from '../../contracts/src/currency-minor-units.js';
 interface ProductAttribution {
   source?: string;
   medium?: string;
@@ -77,11 +78,14 @@ function validAttribution(attribution: ProductAttribution | undefined) {
       : value.length <= 100 && /^[a-zA-Z0-9 _.,:+/-]*$/.test(value);
   });
 }
+const unsafeProductPath = /[?#@\\\s]/;
 function validPath(path: string | undefined) {
   if (path === undefined) return true;
   try {
     return (
-      path.startsWith('/') && path.length <= 256 && !/[?#@\\\s]/.test(decodeURIComponent(path))
+      path.startsWith('/') &&
+      path.length <= 256 &&
+      !unsafeProductPath.test(decodeURIComponent(path))
     );
   } catch {
     return false;
@@ -95,7 +99,7 @@ function validRevenue(input: ProductTrackInput) {
     Number.isSafeInteger(revenue.amount_minor) &&
     revenue.amount_minor >= 0 &&
     revenue.amount_minor <= 1e12 &&
-    /^[A-Z]{3}$/.test(revenue.currency)
+    Object.hasOwn(currencyMinorUnits, revenue.currency)
   );
 }
 function validProductInput(input: ProductTrackInput) {

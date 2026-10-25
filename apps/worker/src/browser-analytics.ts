@@ -1,3 +1,4 @@
+import type { ProductCleanupWake } from './product-event-maintenance.js';
 import type { ProviderJobWake } from './payment-provider-model.js';
 import {
   PRESENCE_TTL_MS,
@@ -51,7 +52,7 @@ export interface BrowserBindings {
   DB?: D1DatabaseLike;
   BROWSER_EVENTS?: {
     send(
-      batch: CollectedBrowserBatch | ProviderJobWake,
+      batch: CollectedBrowserBatch | ProviderJobWake | ProductCleanupWake,
       options?: { delaySeconds: number },
     ): Promise<unknown>;
   };

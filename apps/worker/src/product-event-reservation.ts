@@ -30,11 +30,20 @@ export async function reserveProductBatch(
     scope.channel,
   ]);
   const key = `product-events/v1/${scopeHash}/${batch}/${reservation}.json`;
+  const expired = `SELECT reservation FROM product_batches WHERE workspace_id=? AND app_id=? AND state='pending' AND expires_at<=?`;
   const statements = [
     db
+      .prepare(`DELETE FROM product_event_claims WHERE reservation IN (${expired})`)
+      .bind(scope.workspace, scope.app_id, now),
+    db
       .prepare(
-        `INSERT OR IGNORE INTO product_batches(workspace_id,app_id,environment_id,channel,batch_id,digest,reservation,state,object_key,input_count,input_bytes,min_time,max_time,received_at,expires_at)
-    VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?)`,
+        `DELETE FROM product_batches WHERE workspace_id=? AND app_id=? AND state='pending' AND expires_at<=?`,
+      )
+      .bind(scope.workspace, scope.app_id, now),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO product_batches(workspace_id,app_id,environment_id,channel,batch_id,digest,reservation,state,object_key,input_count,input_bytes,min_time,max_time,received_at,expires_at,cleanup_at)
+    VALUES(?,?,?,?,?,?,?,'pending',?,?,?,?,?,?,?,?)`,
       )
       .bind(
         ...identity(scope, batch),
@@ -46,6 +55,7 @@ export async function reserveProductBatch(
         Math.min(...events.map((e) => e.occurred_at)),
         Math.max(...events.map((e) => e.occurred_at)),
         now,
+        now + 600000,
         now + 600000,
       ),
   ];
@@ -89,7 +99,7 @@ export async function sealProductBatch(
 ) {
   const result = await db
     .prepare(
-      `UPDATE product_batches SET state='sealed',object_hash=?,object_bytes=?,accepted_count=?,expires_at=?
+      `UPDATE product_batches SET state='sealed',object_hash=?,object_bytes=?,accepted_count=?,expires_at=?,cleanup_at=?
    WHERE reservation=? AND state='pending' AND expires_at>? AND (SELECT COUNT(*) FROM product_event_claims WHERE reservation=?)=?`,
     )
     .bind(
@@ -97,6 +107,7 @@ export async function sealProductBatch(
       bytes,
       count,
       receipt.received_at + 35 * 86400000,
+      receipt.received_at + 31 * 86400000,
       receipt.reservation,
       Date.now(),
       receipt.reservation,
