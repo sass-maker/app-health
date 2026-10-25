@@ -49,12 +49,12 @@ it('rejects unsafe paths, malformed event conditions and unknown fields', () => 
   ])
     expect(AnalysisStep.safeParse({ type: 'page', target }).success).toBe(false);
   for (const step of [
-    { type: 'event', target: 'has space' },
+    { type: 'event', target: 'control\nname' },
     { type: 'event', target: 'signup', property: 'plan' },
     { type: 'event', target: 'signup', equals: true },
     { type: 'event', target: 'signup', property: 'plan', equals: {} },
     { type: 'page', target: '/', property: 'plan', equals: 'pro' },
-    { type: 'event', target: 'signup', property: 'bad.key', equals: 'pro' },
+    { type: 'event', target: 'signup', property: 'constructor', equals: 'pro' },
   ])
     expect(AnalysisStep.safeParse(step).success).toBe(false);
   expect(AnalysisSegment.safeParse({ arbitrary: 'value' }).success).toBe(false);
@@ -102,4 +102,15 @@ it('bounds query scope and validates persisted records and report provenance', (
       funnels: [],
     }).success,
   ).toBe(true);
+});
+
+it('preserves case-sensitive names and ordinary dotted properties in canonical event conditions', () => {
+  expect(
+    AnalysisStep.parse({
+      type: 'event',
+      target: 'Order Paid',
+      property: 'plan.level',
+      equals: 'Pro',
+    }),
+  ).toEqual({ type: 'event', target: 'Order Paid', property: 'plan.level', equals: 'Pro' });
 });
