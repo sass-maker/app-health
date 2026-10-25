@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { ProductEventV1 } from '@app-health/contracts';
 import { analysisDatabase } from './analysis-sqlite.js';
@@ -290,7 +290,7 @@ it('reserves sustainable35-day tenant-local headroom without global cross-tenant
     expect(await acceptProductArchive(db, bucket, scope, id(11), [event(2)])).toMatchObject({
       accepted: 1,
     });
-    sqlite.prepare("UPDATE product_event_usage SET claims=180000 WHERE scope='a:ws:app'").run();
+    sqlite.prepare("UPDATE product_event_usage SET claims=185000 WHERE scope='a:ws:app'").run();
     await expect(acceptProductArchive(db, bucket, scope, id(12), [event(3)])).rejects.toThrow(
       'retained capacity',
     );
@@ -308,6 +308,117 @@ it('reserves sustainable35-day tenant-local headroom without global cross-tenant
       ]),
     ).rejects.toThrow('workspace daily capacity');
   } finally {
+    sqlite.close();
+  }
+});
+
+it('refunds expired pending admission exactly once so a near-quota retry is not charged twice', async () => {
+  const { db, sqlite, bucket } = await fixture();
+  try {
+    const events = Array.from({ length: 100 }, (_, i) => event(i + 1));
+    const reserved = await reserveProductBatch(db, scope, id(1000), events);
+    sqlite.prepare('UPDATE product_event_days SET events=4950').run();
+    sqlite.prepare('UPDATE product_workspace_days SET events=24950').run();
+    sqlite
+      .prepare('UPDATE product_batches SET expires_at=0 WHERE reservation=?')
+      .run(reserved.receipt.reservation);
+    expect(await acceptProductArchive(db, bucket, scope, id(1000), events)).toMatchObject({
+      accepted: 100,
+    });
+    expect(sqlite.prepare('SELECT events FROM product_event_days').get()).toMatchObject({
+      events: 4950,
+    });
+    expect(sqlite.prepare('SELECT events FROM product_workspace_days').get()).toMatchObject({
+      events: 24950,
+    });
+  } finally {
+    sqlite.close();
+  }
+});
+it('excludes sibling expired pending work, allows37-date retained headroom and protects fresh raw objects with stale cleanup indexes', async () => {
+  const { db, sqlite, bucket } = await fixture();
+  try {
+    for (let n = 0; n < 128; n++)
+      sqlite
+        .prepare(
+          `INSERT INTO product_batches(workspace_id,app_id,environment_id,channel,batch_id,digest,reservation,state,object_key,input_count,input_bytes,min_time,max_time,received_at,expires_at)
+   VALUES('ws',?,'env','server',?, ?,?,'pending',?,1,1,0,0,0,0)`,
+        )
+        .run(
+          'sibling-' + Math.floor(n / 32),
+          'old-' + n,
+          'a'.repeat(64),
+          'old-' + n,
+          'product-events/v1/old-' + n,
+        );
+    await acceptProductArchive(db, bucket, scope, id(10), [event()]);
+    sqlite
+      .prepare(
+        "UPDATE product_event_usage SET claims=180000,receipts=180000 WHERE scope='a:ws:app'",
+      )
+      .run();
+    sqlite
+      .prepare("UPDATE product_event_usage SET claims=900000,receipts=900000 WHERE scope='w:ws'")
+      .run();
+    expect(await acceptProductArchive(db, bucket, scope, id(11), [event(2)])).toMatchObject({
+      accepted: 1,
+    });
+    sqlite.prepare("UPDATE product_batches SET cleanup_at=0 WHERE state='sealed'").run();
+    await cleanupProductArchive(db, bucket);
+    const fresh = sqlite
+      .prepare(
+        "SELECT object_key,object_deleted,cleanup_at FROM product_batches WHERE state='sealed'",
+      )
+      .all() as Array<{ object_key: string; object_deleted: number; cleanup_at: number }>;
+    expect(fresh).toHaveLength(2);
+    for (const row of fresh) {
+      expect(await bucket.get(row.object_key)).not.toBeNull();
+      expect(row.object_deleted).toBe(0);
+      expect(row.cleanup_at).toBeGreaterThan(Date.now());
+    }
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM product_event_claims WHERE app_id='app'").get(),
+    ).toMatchObject({ n: 2 });
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('refunds the original UTC admission day across midnight and derives cleanup safely with recursive triggers', async () => {
+  const { db, sqlite, bucket } = await fixture();
+  try {
+    sqlite.exec('PRAGMA recursive_triggers=ON');
+    const current = Date.now(),
+      previous = Math.floor(current / 86400000) * 86400000 - 1;
+    const events = [event()],
+      clock = vi.spyOn(Date, 'now').mockReturnValue(previous);
+    let original;
+    try {
+      original = await reserveProductBatch(db, scope, id(10), events);
+    } finally {
+      clock.mockRestore();
+    }
+    sqlite
+      .prepare('UPDATE product_batches SET expires_at=0 WHERE reservation=?')
+      .run(original.receipt.reservation);
+    await acceptProductArchive(db, bucket, scope, id(10), events);
+    expect(
+      sqlite
+        .prepare('SELECT events FROM product_event_days WHERE day=?')
+        .get(Math.floor(previous / 86400000)),
+    ).toMatchObject({ events: 0 });
+    expect(
+      sqlite
+        .prepare('SELECT events FROM product_event_days WHERE day=?')
+        .get(Math.floor(current / 86400000)),
+    ).toMatchObject({ events: 1 });
+    expect(
+      sqlite
+        .prepare('SELECT events FROM product_workspace_days WHERE day=?')
+        .get(Math.floor(previous / 86400000)),
+    ).toMatchObject({ events: 0 });
+  } finally {
+    vi.restoreAllMocks();
     sqlite.close();
   }
 });

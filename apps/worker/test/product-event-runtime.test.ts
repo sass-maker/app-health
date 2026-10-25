@@ -23,7 +23,11 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
   });
   const db = (await runtime.getD1Database('DB')) as D1DatabaseLike,
     bucket = (await runtime.getR2Bucket('HISTORY')) as unknown as ProductBucket;
-  for (const migration of ['0034_product_events.sql', '0036_product_capacity.sql']) {
+  for (const migration of [
+    '0034_product_events.sql',
+    '0036_product_capacity.sql',
+    '0038_product_maintenance.sql',
+  ]) {
     const sql = await readFile(new URL('../migrations/' + migration, import.meta.url), 'utf8');
     for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
   }
