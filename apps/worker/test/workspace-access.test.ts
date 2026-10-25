@@ -68,6 +68,41 @@ it('binds one-time invitations to a verified email and expiry, preserves roles a
   }
 });
 
+it('upgrades an existing viewer through an editor invitation even at the member cap, without downgrades', async () => {
+  const { db, sqlite } = fixture();
+  try {
+    const guest = { ...owner, id: 'guest', email: 'guest@example.test' };
+    sqlite.exec("INSERT INTO workspace_members VALUES ('ws','guest','viewer',1)");
+    for (let index = 0; index < 98; index++) {
+      sqlite
+        .prepare('INSERT INTO "user" VALUES (?,?,?,1,NULL,1,1)')
+        .run(`member-${index}`, 'Member', `member-${index}@example.test`);
+      sqlite
+        .prepare("INSERT INTO workspace_members VALUES ('ws',?,'viewer',1)")
+        .run(`member-${index}`);
+    }
+    const upgrade = await createInvite(db, owner, { email: guest.email, role: 'editor' });
+    expect(await acceptInvite(db, guest, upgrade.token)).toBe('ws');
+    expect(await selectedMembership(db, guest.id, 'ws')).toMatchObject({ role: 'editor' });
+    const lower = await createInvite(db, owner, { email: guest.email, role: 'viewer' });
+    expect(await acceptInvite(db, guest, lower.token)).toBe('ws');
+    expect(await selectedMembership(db, guest.id, 'ws')).toMatchObject({ role: 'editor' });
+    const blocked = await createInvite(db, owner, {
+      email: 'stranger@example.test',
+      role: 'editor',
+    });
+    expect(
+      await acceptInvite(
+        db,
+        { ...guest, id: 'stranger', email: 'stranger@example.test' },
+        blocked.token,
+      ),
+    ).toBeNull();
+  } finally {
+    sqlite.close();
+  }
+});
+
 it('stores API verifiers only, isolates project/environment scopes and observes revocation/expiry on every request', async () => {
   const { db, sqlite } = fixture();
   try {

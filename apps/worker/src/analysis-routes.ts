@@ -1,3 +1,4 @@
+import { apiScopeAllows } from './api-scope.js';
 import {
   AnalysisDefinition,
   AnalysisQuery,
@@ -28,6 +29,7 @@ async function authorize(
   local: boolean,
 ): Promise<AnalysisStoreScope | null> {
   if (
+    !apiScopeAllows(owner, scope) ||
     (!local && !owner.workspaceId) ||
     (owner.appId && owner.appId !== scope.app_id) ||
     (owner.appIds && !owner.appIds.includes(scope.app_id))

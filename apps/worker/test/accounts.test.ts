@@ -1458,6 +1458,15 @@ describe('Google account boundary with real D1 SQL', () => {
       (await selected('/v1/apps', 'POST', { name: 'Forbidden', environment: 'production' })).status,
     ).toBe(403);
     expect((await selected('/v1/apps', 'GET', undefined, 'ws-forged')).status).toBe(401);
+    await env
+      .DB!.prepare("UPDATE workspace_members SET role='editor' WHERE workspace_id=? AND user_id=?")
+      .bind(account.workspace.id, bob.user.id)
+      .run();
+    const keyPath = `/v1/apps/${aliceApp.app.id}/environments/${aliceApp.environment.id}`;
+    expect((await selected(`${keyPath}/keys`, 'POST', {})).status).toBe(201);
+    expect((await selected(`${keyPath}/revoke`, 'POST', {})).status).toBe(200);
+    expect((await selected('/v1/catalog/import', 'POST', {})).status).toBe(403);
+
     const live = await worker.fetch(
       new Request('https://dashboard.example.com/v1/analytics/live?workspace_id=ws-forged', {
         headers: {
@@ -1562,6 +1571,63 @@ describe('Google account boundary with real D1 SQL', () => {
       env,
     );
     expect(createDefinition.status).toBe(201);
+    const existingDefinition = (await createDefinition.json()) as { id: string };
+    const alternate = crypto.randomUUID();
+    await env
+      .DB!.prepare('INSERT INTO environments(id,app_id,name,created_at) VALUES (?,?,?,?)')
+      .bind(alternate, aliceApp.app.id, 'token-foreign', Date.now())
+      .run();
+    const scopeVariants = [
+      `app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}&environment_id=${alternate}`,
+      `app_id=${aliceApp.app.id}&environment_id=${alternate}&environment_id=${aliceApp.environment.id}`,
+      `app_id=${aliceApp.app.id}&app_id=forged&environment_id=${aliceApp.environment.id}`,
+      `app_id=forged&app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+      `app_id=${aliceApp.app.id}&app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+    ];
+    for (const parameters of scopeVariants) {
+      for (const route of ['report', 'conversions', 'revenue']) {
+        const financial = route === 'revenue' ? '&from=0&to=1000' : '';
+        expect((await api(`/v1/analytics/${route}?${parameters}${financial}`)).status).toBe(403);
+      }
+      for (const method of ['POST', 'PUT', 'DELETE']) {
+        const suffix = method === 'POST' ? '' : `/${existingDefinition.id}`;
+        const denied = await worker.fetch(
+          new Request(
+            `https://dashboard.example.com/v1/analytics/definitions${suffix}?${parameters}`,
+            {
+              method,
+              headers: {
+                authorization: `Bearer ${manager.token}`,
+                'content-type': 'application/json',
+              },
+              ...(method === 'DELETE'
+                ? {}
+                : {
+                    body: JSON.stringify({
+                      kind: 'goal',
+                      name: 'Forbidden mutation',
+                      step: { type: 'event', target: 'secret' },
+                    }),
+                  }),
+            },
+          ),
+          env,
+        );
+        expect(denied.status).toBe(403);
+      }
+    }
+    expect(
+      await env
+        .DB!.prepare('SELECT COUNT(*) AS n FROM analytics_definitions WHERE environment_id=?')
+        .bind(alternate)
+        .first(),
+    ).toMatchObject({ n: 0 });
+    expect(
+      await env
+        .DB!.prepare('SELECT name FROM analytics_definitions WHERE id=?')
+        .bind(existingDefinition.id)
+        .first(),
+    ).toMatchObject({ name: 'Signup' });
     const productKey = await new D1ControlPlane(env.DB!)
       .asRepositories({} as never)
       .keys.createProductKey(aliceApp.app.id, Date.now());

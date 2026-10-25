@@ -1,3 +1,4 @@
+import { useWorkspaceScope } from './lib/workspace-scope.js';
 import {
   CatalogImportRequestV1,
   MAX_PORTFOLIO_CATALOG_PRODUCTS,
@@ -1597,6 +1598,7 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
     }
   }
 
+  const workspace = useWorkspaceScope();
   function cancelUsageExport(): void {
     usageExportController.current?.abort(new DOMException('Export canceled', 'AbortError'));
   }
@@ -1609,16 +1611,22 @@ export function PortfolioBriefing(props: PortfolioBriefingProps): ReactElement {
           qualified yet.
         </p>
         <div className="flex flex-wrap items-center gap-2">
-          <CatalogLinkForm
-            key={ownerToken}
-            ownerToken={ownerToken}
-            projects={projects}
-            catalogCount={data?.products.length ?? null}
-            linked={() => {
-              void retry();
-              onCatalogLinked?.();
-            }}
-          />
+          {workspace.role === 'owner' ? (
+            <CatalogLinkForm
+              key={ownerToken}
+              ownerToken={ownerToken}
+              projects={projects}
+              catalogCount={data?.products.length ?? null}
+              linked={() => {
+                void retry();
+                onCatalogLinked?.();
+              }}
+            />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Catalog links are managed by workspace owners.
+            </p>
+          )}
           <Button
             type="button"
             variant="outline"

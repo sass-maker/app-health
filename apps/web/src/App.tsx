@@ -3265,6 +3265,12 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
         onManage={props.onManage}
       />
     );
+  else if (view === 'backend/logs' && workspaceScope().role === 'viewer')
+    content = (
+      <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+        Application logs require editor or owner access.
+      </p>
+    );
   else if (view === 'backend/logs')
     content = (
       <CapabilityBoundary

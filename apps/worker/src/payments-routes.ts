@@ -1,3 +1,4 @@
+import { apiScopeAllows } from './api-scope.js';
 import { PaymentIngestV1, RevenueQueryV1 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
@@ -86,7 +87,11 @@ async function reportAllowed(
   repos: AppHealthRepositories,
   env: PaymentEnvironment,
 ) {
-  if (owner.appId !== undefined || (owner.appIds && !owner.appIds.includes(query.app_id)))
+  if (
+    !apiScopeAllows(owner, query) ||
+    owner.appId !== undefined ||
+    (owner.appIds && !owner.appIds.includes(query.app_id))
+  )
     return false;
   if ((await repos.environments.getEnvironment(query.environment_id))?.app_id !== query.app_id)
     return false;

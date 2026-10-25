@@ -1,3 +1,4 @@
+import { apiScopeAllows } from './api-scope.js';
 import { isBot } from 'isbot';
 import { browserMetadata } from './browser-metadata.js';
 import {
@@ -678,6 +679,7 @@ async function browserReport(
     Object.fromEntries(new URL(request.url).searchParams),
   );
   if (!filter.success) return json(400, { error: 'Invalid analytics filter.' });
+  if (!apiScopeAllows(owner, filter.data)) return json(403, { error: 'API scope forbidden.' });
   if (!local && filter.data.app_id && !owner.appIds?.includes(filter.data.app_id))
     return json(403, { error: 'Project access denied.' });
   if (local) return json(200, localAnalytics.report(filter.data));

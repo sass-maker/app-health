@@ -52,6 +52,11 @@ function tokenRouteAllowed(request: Request, owner: OwnerIdentity, url: URL) {
     ['POST', 'PUT', 'DELETE'].includes(request.method);
   if (!read && !write) return false;
   if (path === '/v1/apps' || path === '/v1/integration/skill') return true;
+  if (
+    url.searchParams.getAll('app_id').length !== 1 ||
+    url.searchParams.getAll('environment_id').length !== 1
+  )
+    return false;
   return !!owner.apiScopes?.some(
     (scope) =>
       scope.app_id === url.searchParams.get('app_id') &&
@@ -74,6 +79,7 @@ function editorRouteAllowed(request: Request, path: string) {
     );
   return (
     definitionPath.test(path) ||
+    (request.method === 'POST' && /^\/v1\/apps\/[^/]+\/environments\/[^/]+\/keys$/.test(path)) ||
     [
       '/v1/apps',
       '/v1/capabilities',

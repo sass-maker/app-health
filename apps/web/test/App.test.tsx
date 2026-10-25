@@ -1,4 +1,4 @@
-import { workspaceScope } from '../src/lib/workspace-scope.js';
+import { updateWorkspaceRole, workspaceScope } from '../src/lib/workspace-scope.js';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -1317,6 +1317,26 @@ describe('Logs view', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('explains restricted logs to viewers without issuing a forbidden logs request', async () => {
+    const mock = installFetch({ logRows });
+    updateWorkspaceRole('viewer', workspaceScope().epoch);
+    try {
+      render(<App />);
+      await screen.findAllByText('/orders');
+      fireEvent.click(screen.getByRole('tab', { name: 'logs' }));
+      expect(
+        await screen.findByText('Application logs require editor or owner access.'),
+      ).toBeVisible();
+      expect(
+        mock.mock.calls.some(
+          ([input]) => new URL(String(input), location.origin).pathname === '/v1/logs',
+        ),
+      ).toBe(false);
+    } finally {
+      act(() => updateWorkspaceRole('owner', workspaceScope().epoch));
+    }
   });
 
   it('loads logs only after the owner opens Logs and filters by level and event', async () => {

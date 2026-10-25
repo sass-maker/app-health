@@ -73,12 +73,14 @@ export async function acceptInvite(db: D1DatabaseLike, owner: OwnerIdentity, tok
   const results = await db.batch([
     db
       .prepare(
-        `INSERT OR IGNORE INTO workspace_members(workspace_id, user_id, role, created_at)
+        `INSERT INTO workspace_members(workspace_id, user_id, role, created_at)
       SELECT workspace_id, ?, role, ? FROM workspace_invites WHERE ${eligible}
-      AND (SELECT COUNT(*) FROM workspace_members WHERE workspace_id = workspace_invites.workspace_id AND user_id != (SELECT owner_id FROM workspaces WHERE id = workspace_invites.workspace_id)) < 99
-      AND NOT EXISTS(SELECT 1 FROM workspaces WHERE id = workspace_id AND owner_id = ?)`,
+      AND ((SELECT COUNT(*) FROM workspace_members WHERE workspace_id = workspace_invites.workspace_id AND user_id != (SELECT owner_id FROM workspaces WHERE id = workspace_invites.workspace_id)) < 99
+      OR EXISTS(SELECT 1 FROM workspace_members WHERE workspace_id=workspace_invites.workspace_id AND user_id=?))
+      AND NOT EXISTS(SELECT 1 FROM workspaces WHERE id = workspace_id AND owner_id = ?)
+      ON CONFLICT(workspace_id,user_id) DO UPDATE SET role=CASE WHEN workspace_members.role='viewer' AND excluded.role='editor' THEN 'editor' ELSE workspace_members.role END`,
       )
-      .bind(owner.id, now, hash, email, now, owner.id),
+      .bind(owner.id, now, hash, email, now, owner.id, owner.id),
     db
       .prepare(
         `UPDATE workspace_invites SET accepted_at = ?, accepted_by = ? WHERE ${eligible}
