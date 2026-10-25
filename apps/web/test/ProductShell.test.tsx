@@ -1,3 +1,8 @@
+import {
+  updateWorkspaceRole,
+  workspaceScope,
+  selectWorkspace,
+} from '../src/lib/workspace-scope.js';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ProductShell } from '../src/ProductShell.js';
@@ -164,3 +169,15 @@ describe('ProductShell navigation', () => {
     expect(onView).toHaveBeenCalledTimes(3);
   });
 });
+
+it.each(['owner', 'editor', 'viewer', 'unknown'] as const)(
+  'allows project creation only after the %s role is confirmed',
+  (role) => {
+    selectWorkspace('');
+    if (role !== 'unknown') updateWorkspaceRole(role, workspaceScope().epoch);
+    renderShell();
+    expect(screen.queryByRole('button', { name: 'Add another project' }) !== null).toBe(
+      role === 'owner' || role === 'editor',
+    );
+  },
+);

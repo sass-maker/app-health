@@ -4,6 +4,7 @@ import type { D1DatabaseLike } from './d1-adapter.js';
 import { PaymentConflictError, paymentFactId, type PaymentLedgerStore } from './payments-model.js';
 import { paymentReport } from './payments-report.js';
 import { paymentReportQuery } from './payments-query.js';
+import { providerLedgerFence, type ProviderLedgerFence } from './payment-provider-fence.js';
 
 function namespaceValues(input: PaymentIngestV1) {
   return [
@@ -39,30 +40,34 @@ function factValues(input: PaymentIngestV1, hash: string, now: number) {
 export class D1PaymentLedger implements PaymentLedgerStore {
   constructor(private readonly db: D1DatabaseLike) {}
 
-  async record(value: PaymentIngestV1): Promise<boolean> {
+  async record(value: PaymentIngestV1, fence?: ProviderLedgerFence): Promise<boolean> {
     const input = PaymentIngestV1.parse(value);
     const hash = await hashKey(JSON.stringify(input.fact));
     const now = Date.now();
+    const gate = providerLedgerFence(input, fence);
     try {
       const results = await this.db.batch([
+        ...gate.check.map((plan) => this.db.prepare(plan.sql).bind(...plan.values)),
         this.db
           .prepare(
             `INSERT OR IGNORE INTO payment_deliveries
             (app_id, environment_id, provider, account_id, mode, delivery_id, fact_hash, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            SELECT ?, ?, ?, ?, ?, ?, ?, ? ${gate.sql}`,
           )
-          .bind(...namespaceValues(input), input.delivery_id, hash, now),
+          .bind(...namespaceValues(input), input.delivery_id, hash, now, ...gate.values),
         this.db
           .prepare(
             `INSERT OR IGNORE INTO payment_facts
             (app_id, environment_id, provider, account_id, mode, kind, fact_id, transaction_id,
              occurred_at, amount_minor, currency, source, page, country, campaign, fact_hash, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ${gate.sql}`,
           )
-          .bind(...factValues(input, hash, now)),
+          .bind(...factValues(input, hash, now), ...gate.values),
       ]);
+      if (gate.check.length && !results[0].results?.length)
+        throw new Error('Provider generation or assignment fence rejected');
       if (results.some((result) => !result.success)) throw new Error('Financial write failed');
-      return (results[1].meta.changes ?? 0) > 0;
+      return (results[results.length - 1].meta.changes ?? 0) > 0;
     } catch (error) {
       if (
         error instanceof Error &&

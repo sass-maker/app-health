@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import type { RevenueReportV1, RevenueTotalV1 } from '@app-health/contracts';
+import type {
+  RevenueReportV1,
+  RevenueTotalV1,
+  ProviderRevenueReportV1,
+} from '@app-health/contracts';
 import { Button } from '@saas-maker/ui/components/button';
 import { Card, CardContent, CardHeader } from '@saas-maker/ui/components/card';
 import { LabeledSelect } from './LabeledSelect.js';
@@ -11,7 +15,7 @@ const namespace = (row: RevenueTotalV1) =>
 const rowKey = (row: RevenueTotalV1) =>
   JSON.stringify([row.provider, row.account_id, row.mode, row.currency]);
 
-function RevenueTotals({ rows }: { rows: RevenueTotalV1[] }) {
+function RevenueTotals({ rows, provider }: { rows: RevenueTotalV1[]; provider: boolean }) {
   return (
     <div className="grid gap-3 xl:grid-cols-2">
       {rows.map((row) => (
@@ -20,10 +24,14 @@ function RevenueTotals({ rows }: { rows: RevenueTotalV1[] }) {
           <p className="mt-2 break-words text-2xl font-semibold tabular-nums">
             {formatPaymentMinor(row.net_minor, row.currency)}
           </p>
-          <p className="text-xs text-muted-foreground">net recorded cashflow</p>
+          <p className="text-xs text-muted-foreground">
+            {provider ? 'net paid order/payment value' : 'net recorded cashflow'}
+          </p>
           <dl className="mt-4 grid grid-cols-2 gap-3 text-xs">
             <div>
-              <dt className="text-muted-foreground">gross payments</dt>
+              <dt className="text-muted-foreground">
+                {provider ? 'gross paid order/payment values' : 'gross payments'}
+              </dt>
               <dd className="mt-1 tabular-nums">
                 {formatPaymentMinor(row.gross_minor, row.currency)}
               </dd>
@@ -61,7 +69,11 @@ function RevenueTotals({ rows }: { rows: RevenueTotalV1[] }) {
   );
 }
 
-function RevenueDimensions({ report }: { report: RevenueReportV1 }) {
+function RevenueDimensions({
+  report,
+}: {
+  report: Pick<RevenueReportV1, 'breakdown' | 'dimensions'>;
+}) {
   if (!report.dimensions.length) return null;
   return (
     <div className="overflow-x-auto rounded-lg border">
@@ -93,10 +105,14 @@ function RevenueDimensions({ report }: { report: RevenueReportV1 }) {
 
 export function Revenue({ query, ownerToken }: { query: RevenueScope; ownerToken: string }) {
   const [open, setOpen] = useState(false);
+  const [basis, setBasis] = useState<'custom' | 'provider'>('custom');
   const [mode, setMode] = useState('live');
   const [breakdown, setBreakdown] = useState('source');
   const [revision, setRevision] = useState(0);
-  const { report, error, loading } = useRevenue(query, ownerToken, open, mode, breakdown, revision);
+  const { report, error, loading } = useRevenue(query, ownerToken, open, mode, breakdown, {
+    revision,
+    basis,
+  });
   return (
     <Card className="shadow-none">
       <CardHeader className="flex flex-wrap items-center justify-between gap-3 sm:flex-row">
@@ -113,6 +129,15 @@ export function Revenue({ query, ownerToken }: { query: RevenueScope; ownerToken
       {open ? (
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-end gap-3">
+            <LabeledSelect
+              label="Revenue basis"
+              value={basis}
+              onValueChange={(value) => setBasis(value as typeof basis)}
+              options={[
+                { value: 'custom', label: 'custom · recorded cashflows' },
+                { value: 'provider', label: 'providers · resource creation dates' },
+              ]}
+            />
             <LabeledSelect
               label="Payment mode"
               value={mode}
@@ -153,23 +178,44 @@ export function Revenue({ query, ownerToken }: { query: RevenueScope; ownerToken
               {error}
             </p>
           ) : null}
-          {report ? (
-            <>
-              <p className="rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
-                {report.coverage_note}
-              </p>
-              <RevenueTotals rows={report.totals} />
-              {!report.totals.length ? (
-                <p className="text-sm text-muted-foreground">
-                  No recorded payments in this period and mode. Send explicit server payment facts
-                  through the private payments API.
-                </p>
-              ) : null}
-              <RevenueDimensions report={report} />
-            </>
-          ) : null}
+          <RevenueResults report={report} provider={basis === 'provider'} />
         </CardContent>
       ) : null}
     </Card>
   );
+}
+
+function RevenueResults({
+  report,
+  provider,
+}: {
+  report: RevenueReportV1 | ProviderRevenueReportV1 | null;
+  provider: boolean;
+}) {
+  return report ? (
+    <>
+      <p className="rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
+        {report.coverage_note}
+      </p>
+      <RevenueTotals rows={report.totals} provider={provider} />
+      {!report.totals.length ? (
+        <p className="text-sm text-muted-foreground">
+          {provider
+            ? 'No imported provider payments in this period and mode. Connect a provider in project settings and import its history.'
+            : 'No recorded payments in this period and mode. Send explicit server payment facts through the private payments API.'}
+        </p>
+      ) : null}
+      {'unresolved' in report && report.unresolved.length ? (
+        <div role="status" className="rounded-lg border p-3 text-xs leading-5">
+          <p className="font-medium">Unresolved provider resources</p>
+          {report.unresolved.map((row) => (
+            <p key={row.reason}>
+              {row.count} · {row.reason.replaceAll('_', ' ')}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      <RevenueDimensions report={report} />
+    </>
+  ) : null;
 }

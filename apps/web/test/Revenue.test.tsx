@@ -143,3 +143,34 @@ it('discards late financial replies after project, owner, period and visibility 
     3600000,
   );
 });
+
+it('switches to provider creation-date reports without mixing custom cashflow totals or hiding unresolved resources', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const provider = String(input).includes('provider-revenue');
+      return Response.json(
+        provider
+          ? {
+              ...report([total({ provider: 'polar', gross_minor: 1200, net_minor: 1000 })]),
+              basis: 'provider_object_created',
+              coverage_note:
+                'Gross paid order values including tax by resource creation date; multicapture timing unsupported.',
+              unresolved: [{ reason: 'mixed_destination_cart_no_allocation', count: 2 }],
+            }
+          : report(),
+      );
+    }),
+  );
+  render(<Revenue query={query} ownerToken="owner" />);
+  fireEvent.click(screen.getByRole('button', { name: 'explore revenue' }));
+  await screen.findByText('$7.50', { selector: 'p' });
+  fireEvent.keyDown(screen.getByRole('combobox', { name: 'Revenue basis' }), { key: 'ArrowDown' });
+  fireEvent.click(
+    await screen.findByRole('option', { name: 'providers · resource creation dates' }),
+  );
+  expect(await screen.findByText('$10.00', { selector: 'p' })).toBeVisible();
+  expect(screen.queryByText('$7.50', { selector: 'p' })).toBeNull();
+  expect(screen.getByText('net paid order/payment value')).toBeVisible();
+  expect(screen.getByText('2 · mixed destination cart no allocation')).toBeVisible();
+});

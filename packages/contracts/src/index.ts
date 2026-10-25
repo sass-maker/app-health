@@ -31,3 +31,4 @@ export * from './payments.js';
 export * from './workspaces.js';
 
 export * from './currency-minor-units.js';
+export * from './payment-providers.js';

@@ -36,7 +36,8 @@ function validateRefunds(input: PaymentIngestV1, facts: Map<string, LocalFact>) 
     throw new PaymentConflictError();
 }
 
-function matchesQuery(input: PaymentIngestV1, query: RevenueQueryV1) {
+function matchesQuery(input: PaymentIngestV1, query: RevenueQueryV1, providerFacts = false) {
+  if ((input.namespace.provider !== 'custom') !== providerFacts) return false;
   return (
     input.app_id === query.app_id &&
     input.environment_id === query.environment_id &&
@@ -80,10 +81,15 @@ function addFact(total: RevenueTotalV1, input: PaymentIngestV1, original?: Payme
   }
 }
 
-function localRows(facts: Map<string, LocalFact>, query: RevenueQueryV1, dimension: boolean) {
+function localRows(
+  facts: Map<string, LocalFact>,
+  query: RevenueQueryV1,
+  dimension: boolean,
+  providerFacts = false,
+) {
   const groups = new Map<string, RevenueTotalV1 & { value?: string | null }>();
   for (const { input } of facts.values()) {
-    if (!matchesQuery(input, query)) continue;
+    if (!matchesQuery(input, query, providerFacts)) continue;
     const original = facts.get(originalKey(input))?.input;
     const attribution = original?.fact.kind === 'payment' ? original.fact.attribution : {};
     const value = attribution[query.breakdown] ?? null;
@@ -124,12 +130,12 @@ export class LocalPaymentLedger implements PaymentLedgerStore {
     return !previous;
   }
 
-  async report(value: RevenueQueryV1) {
+  async report(value: RevenueQueryV1, providerFacts = false) {
     const query = RevenueQueryV1.parse(value);
     return paymentReport(
       query,
-      localRows(this.facts, query, false),
-      localRows(this.facts, query, true),
+      localRows(this.facts, query, false, providerFacts),
+      localRows(this.facts, query, true, providerFacts),
       'local',
     );
   }

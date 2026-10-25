@@ -5,6 +5,13 @@ import { handleWorkspaceAccess } from './workspace-routes.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
 import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
+import { handleProviderOwner } from './payment-provider-routes.js';
+import { handleProviderWebhook } from './payment-provider-webhooks.js';
+import {
+  drainProviderJob,
+  drainProviderJobs,
+  cleanupProviderJobs,
+} from './payment-provider-jobs.js';
 import { D1EndpointWriter } from './endpoint-durable.js';
 import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
@@ -602,7 +609,12 @@ async function handleAppsRoute(
             })),
         }
       : listed;
-    return json(200, ListAppsResponseV1.parse(projected), true);
+    const response = json(200, ListAppsResponseV1.parse(projected), true);
+    response.headers.set(
+      'x-app-health-workspace-role',
+      owner.authKind === 'api-token' || owner.appId ? 'viewer' : (owner.workspaceRole ?? 'owner'),
+    );
+    return response;
   }
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   if (owner.appId) return productScopeForbidden();
@@ -961,6 +973,16 @@ async function handleIngestHostRoutes(
   url: URL,
   ctx: WorkerContext | undefined,
 ): Promise<Response | null> {
+  const webhookResponse = await handleProviderWebhook(request, env, bundle.local);
+  if (webhookResponse) {
+    if (webhookResponse.status === 202 && ctx && env.DB && env.OWNER_AUTH_TOKEN) {
+      const accepted = (await webhookResponse.clone().json()) as { job_id: string };
+      ctx.waitUntil(
+        drainProviderJob({ db: env.DB, master: env.OWNER_AUTH_TOKEN }, accepted.job_id),
+      );
+    }
+    return webhookResponse;
+  }
   const paymentResponse = await handlePaymentIngest(request, env, bundle.repos, bundle.local);
   if (paymentResponse) return paymentResponse;
   const browserResponse = await handleBrowserIngest(request, env, bundle.repos, bundle.local);
@@ -994,6 +1016,11 @@ async function handleOwnerRoutes(
       headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
     });
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
+  const providerResponse = await handleProviderOwner(request, env, owner, bundle.repos, {
+    local: bundle.local,
+    waitUntil: options?.ctx ? (promise) => options.ctx!.waitUntil(promise) : undefined,
+  });
+  if (providerResponse) return providerResponse;
   const paymentResponse = await handlePaymentOwner(request, env, owner, bundle.repos, bundle.local);
   if (paymentResponse) return paymentResponse;
   const analysisResponse = await handleAnalysisOwner(
@@ -1400,6 +1427,14 @@ const unmonitoredWorker = {
   async scheduled(_controller: unknown, env: Env): Promise<void> {
     writeBotCounterHeartbeat(env.BROWSER_ANALYTICS, Date.now());
     if (!env.DB) return;
+    if (env.OWNER_AUTH_TOKEN) {
+      try {
+        await drainProviderJobs({ db: env.DB, master: env.OWNER_AUTH_TOKEN });
+        await cleanupProviderJobs({ db: env.DB, master: env.OWNER_AUTH_TOKEN });
+      } catch {
+        console.warn(JSON.stringify({ event: 'payment_provider_job_unavailable' }));
+      }
+    }
     await compactEndpointHistoryIfEnabled(env);
     const control = new D1ControlPlane(env.DB);
     await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);

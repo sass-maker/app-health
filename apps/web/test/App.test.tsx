@@ -1,4 +1,8 @@
-import { updateWorkspaceRole, workspaceScope } from '../src/lib/workspace-scope.js';
+import {
+  updateWorkspaceRole,
+  workspaceScope,
+  selectWorkspace,
+} from '../src/lib/workspace-scope.js';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -107,6 +111,7 @@ function installFetch(options?: {
   endpointPending?: boolean;
   endpointFailWindow?: string;
   statusInvalid?: boolean;
+  workspaceRole?: 'owner' | 'editor' | 'viewer';
 }) {
   const publicKeys = [...(options?.publicKeys ?? [])];
   let signedOut = false;
@@ -203,7 +208,11 @@ function installFetch(options?: {
     }
     if (url.pathname === '/v1/apps') {
       if (options?.appsFail || signedOut) return new Response(null, { status: 403 });
-      if (init?.method !== 'POST') return Response.json({ apps: options?.apps ?? [] });
+      if (init?.method !== 'POST')
+        return Response.json(
+          { apps: options?.apps ?? [] },
+          { headers: { 'x-app-health-workspace-role': options?.workspaceRole ?? 'owner' } },
+        );
       return new Response(
         JSON.stringify({
           app: { id: 'app-new', name: 'orders-api', created_at: Date.now() },
@@ -331,6 +340,53 @@ describe('App Health V0 UI', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it.each(['viewer', 'unknown'] as const)(
+    'does not mount key or admin effects for %s deep links',
+    async (role) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+      selectWorkspace('');
+      window.history.replaceState({}, '', '/app#analytics/setup');
+      const mock = installFetch({ workspaceRole: 'viewer' });
+      if (role === 'unknown')
+        vi.stubGlobal(
+          'fetch',
+          vi.fn((input: URL | RequestInfo, init?: RequestInit) =>
+            new URL(String(input), location.origin).pathname === '/v1/apps'
+              ? new Promise<Response>(() => {})
+              : mock(input, init),
+          ),
+        );
+      else updateWorkspaceRole('viewer', workspaceScope().epoch);
+      render(<App />);
+      expect(
+        await screen.findByText('Browser key setup requires confirmed editor or owner access.'),
+      ).toBeVisible();
+      expect(
+        mock.mock.calls.some(
+          ([input]) => new URL(String(input), location.origin).pathname === '/v1/public-keys',
+        ),
+      ).toBe(false);
+      await act(async () => {
+        history.replaceState({}, '', '/app#settings');
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(await screen.findByRole('heading', { name: 'settings' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'connect payment provider' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'create key' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'import fleet catalog' })).toBeNull();
+      expect(
+        mock.mock.calls.some(([input]) =>
+          [
+            '/v1/public-keys',
+            '/v1/payment-connections',
+            '/v1/native-keys',
+            '/v1/analytics/shares',
+          ].includes(new URL(String(input), location.origin).pathname),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it('resolves a valid explicit analytics link without local storage', async () => {
     const apps = [
@@ -1320,7 +1376,7 @@ describe('Logs view', () => {
   });
 
   it('explains restricted logs to viewers without issuing a forbidden logs request', async () => {
-    const mock = installFetch({ logRows });
+    const mock = installFetch({ logRows, workspaceRole: 'viewer' });
     updateWorkspaceRole('viewer', workspaceScope().epoch);
     try {
       render(<App />);

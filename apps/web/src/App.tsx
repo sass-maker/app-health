@@ -1,5 +1,11 @@
+import { PaymentConnections } from './PaymentConnections.js';
 import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
-import { useWorkspaceScope, workspaceScope, selectWorkspace } from './lib/workspace-scope.js';
+import {
+  useWorkspaceScope,
+  workspaceScope,
+  selectWorkspace,
+  workspaceCanManage,
+} from './lib/workspace-scope.js';
 import { DataTable, DataTableSkeleton, type DataColumn } from './components/ResourceTable.js';
 import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { AnalyticsCacheProvider } from './AnalyticsCache.js';
@@ -36,7 +42,15 @@ import {
   ShieldCheck,
   SlidersHorizontal,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode, type ReactElement } from 'react';
+import {
+  createElement,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type ReactElement,
+} from 'react';
 import {
   DEGRADED_ERROR_RATE,
   DEGRADED_P95_MS,
@@ -2038,6 +2052,16 @@ interface PublicKeysPanelProps {
 }
 
 function PublicKeysPanel(props: PublicKeysPanelProps): ReactElement {
+  const { role } = useWorkspaceScope();
+  if (!workspaceCanManage(role))
+    return (
+      <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+        Browser key setup requires confirmed editor or owner access.
+      </p>
+    );
+  return createElement(PublicKeysContent, props);
+}
+function PublicKeysContent(props: PublicKeysPanelProps): ReactElement {
   const {
     project,
     ownerToken,
@@ -2798,7 +2822,7 @@ const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
         </AlertDescription>
       </Alert>
       <WorkspacePanel ownerToken={ownerToken} project={project} />
-      {scope.role !== 'viewer' ? (
+      {workspaceCanManage(scope.role) ? (
         <>
           <CapabilitySettings controller={controller} onOpen={actions.onOpen} />
           <div className="grid gap-5 xl:grid-cols-2">
@@ -2810,6 +2834,13 @@ const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
             />
             <PrivateKeyManager project={project} ownerToken={ownerToken} controller={controller} />
           </div>
+          <PaymentConnections
+            key={`payments/${project.appId}/${project.environmentId}/${ownerToken}`}
+            project={project}
+            projects={projects}
+            ownerToken={ownerToken}
+            ingestOrigin={INGEST_ORIGIN}
+          />
           <AnalyticsSharing
             key={`${project.appId}/${project.environmentId}`}
             project={project}
@@ -2981,7 +3012,17 @@ function ServerCapabilitySetup({
   );
 }
 
-function CapabilitySetup(props: {
+function CapabilitySetup(props: Parameters<typeof CapabilitySetupContent>[0]): ReactElement {
+  const { role } = useWorkspaceScope();
+  if (!workspaceCanManage(role))
+    return (
+      <p className="rounded-lg border p-4 text-sm text-muted-foreground">
+        Project setup requires confirmed editor or owner access.
+      </p>
+    );
+  return createElement(CapabilitySetupContent, props);
+}
+function CapabilitySetupContent(props: {
   id: CapabilityId;
   displayTitle?: string;
   project: SavedProject;
@@ -3265,7 +3306,7 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
         onManage={props.onManage}
       />
     );
-  else if (view === 'backend/logs' && workspaceScope().role === 'viewer')
+  else if (view === 'backend/logs' && !workspaceCanManage(workspaceScope().role))
     content = (
       <p className="rounded-lg border p-4 text-sm text-muted-foreground">
         Application logs require editor or owner access.
@@ -3547,7 +3588,7 @@ function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
       <div className="mx-auto max-w-6xl px-4 py-6">
         <WorkspacePanel ownerToken={props.ownerToken} />
       </div>
-      {workspaceScope().role !== 'viewer' ? (
+      {workspaceCanManage(workspaceScope().role) ? (
         <Setup ownerToken={props.ownerToken} onCreated={props.handleCreated} />
       ) : null}
     </div>

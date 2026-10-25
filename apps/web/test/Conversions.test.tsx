@@ -1,5 +1,10 @@
+import {
+  updateWorkspaceRole,
+  workspaceScope,
+  selectWorkspace,
+} from '../src/lib/workspace-scope.js';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import {
   AnalysisRecord,
   type AnalysisDefinition,
@@ -8,6 +13,7 @@ import {
 } from '@app-health/contracts';
 import { Conversions, SavedSegments } from '../src/Conversions.js';
 
+beforeEach(() => updateWorkspaceRole('owner', workspaceScope().epoch));
 const query: AnalysisQuery = { app_id: 'app-one', environment_id: 'production', range: '24h' };
 const ids = [
   '00000000-0000-4000-8000-000000000001',
@@ -442,3 +448,39 @@ it('keeps a failed segment save available for retry and removes the error after 
   expect(await screen.findByRole('button', { name: 'Reddit' })).toBeVisible();
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it.each(['viewer', 'unknown'] as const)(
+  'keeps %s conversion and segment views read-only while retaining local filter application',
+  async (role) => {
+    selectWorkspace('');
+    if (role === 'viewer') updateWorkspaceRole('viewer', workspaceScope().epoch);
+    const apply = vi.fn(),
+      fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+        Response.json(
+          String(input).includes('/conversions') ? report() : { records: [goal, funnel, segment] },
+        ),
+      );
+    vi.stubGlobal('fetch', fetch);
+    render(
+      <>
+        <Conversions query={query} ownerToken="owner" />
+        <SavedSegments
+          query={{ ...query, filters: { source: 'Google' } }}
+          ownerToken="owner"
+          onApply={apply}
+        />
+      </>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'explore conversions' }));
+    expect(await screen.findByText('Paid signup')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'new goal or funnel' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit Paid signup' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Delete Paid signup' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'saved segments' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Search audience' }));
+    expect(apply).toHaveBeenCalledWith({ source: 'Google', country: 'US' });
+    expect(screen.queryByRole('button', { name: 'Delete segment Search audience' })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Save current filters as a segment' })).toBeNull();
+    expect(fetch.mock.calls.every(([, init]) => !init || init.method === undefined)).toBe(true);
+  },
+);

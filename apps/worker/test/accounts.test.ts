@@ -1407,6 +1407,15 @@ describe('Google account boundary with real D1 SQL', () => {
   });
 
   it('verifies selected workspace memberships and viewer permissions without changing personal scope', async () => {
+    const ownProject = await request('/v1/apps', aliceCookie, {
+      name: 'Isolated scope case',
+      environment: 'production',
+    });
+    expect(ownProject.status).toBe(201);
+    const aliceApp = (await ownProject.json()) as {
+      app: { id: string };
+      environment: { id: string };
+    };
     const account = (await (await request('/v1/account', aliceCookie)).json()) as {
       workspace: { id: string };
     };
@@ -1487,6 +1496,15 @@ describe('Google account boundary with real D1 SQL', () => {
   });
 
   it('routes scoped API tokens and MCP through the production owner boundary', async () => {
+    const ownProject = await request('/v1/apps', aliceCookie, {
+      name: 'Isolated scope case',
+      environment: 'production',
+    });
+    expect(ownProject.status).toBe(201);
+    const aliceApp = (await ownProject.json()) as {
+      app: { id: string };
+      environment: { id: string };
+    };
     const mint = await request('/v1/workspace/api-tokens', aliceCookie, {
       name: 'Scoped assistant',
       permission: 'read',

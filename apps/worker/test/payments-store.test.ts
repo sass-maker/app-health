@@ -153,7 +153,8 @@ describe.each(['d1', 'local'] as const)('%s financial ledger', (kind) => {
         await store.record({ ...original, namespace });
       await store.record(paymentInput('euro', { currency: 'EUR' }));
       await store.record({ ...original, app_id: 'other-app', environment_id: 'other-env' });
-      expect((await store.report(paymentQuery())).totals).toHaveLength(5);
+      expect((await store.report(paymentQuery())).totals).toHaveLength(4);
+      expect((await store.report(paymentQuery({ provider: 'stripe' }))).totals).toEqual([]);
       const filtered = await store.report(
         paymentQuery({ provider: 'custom', account_id: 'merchant', mode: 'live', currency: 'USD' }),
       );

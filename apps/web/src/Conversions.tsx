@@ -1,4 +1,4 @@
-import { useWorkspaceScope } from './lib/workspace-scope.js';
+import { useWorkspaceScope, workspaceCanManage, WorkspaceManage } from './lib/workspace-scope.js';
 import { useEffect, useState } from 'react';
 import {
   AnalysisRecord,
@@ -42,24 +42,28 @@ function GoalRows({
         <div key={goal.id} className="min-w-0 rounded-lg border p-4">
           <div className="flex items-start justify-between gap-2">
             <h3 className="break-words text-sm font-medium">{goal.name}</h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onEdit(goal.id)}
-              aria-label={`Edit ${goal.name}`}
-            >
-              edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onDelete(goal.id)}
-              aria-label={`Delete ${goal.name}`}
-            >
-              delete
-            </Button>
+            <WorkspaceManage>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => onEdit(goal.id)}
+                aria-label={`Edit ${goal.name}`}
+              >
+                edit
+              </Button>
+            </WorkspaceManage>
+            <WorkspaceManage>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => onDelete(goal.id)}
+                aria-label={`Delete ${goal.name}`}
+              >
+                delete
+              </Button>
+            </WorkspaceManage>
           </div>
           <p className="mt-2 text-2xl font-semibold tabular-nums">
             {percent(goal.conversion_rate)}
@@ -95,24 +99,28 @@ function FunnelRows({
         <div key={funnel.id} className="rounded-lg border p-4">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <h3 className="text-sm font-medium">{funnel.name}</h3>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onEdit(funnel.id)}
-              aria-label={`Edit ${funnel.name}`}
-            >
-              edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={() => onDelete(funnel.id)}
-              aria-label={`Delete ${funnel.name}`}
-            >
-              delete
-            </Button>
+            <WorkspaceManage>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => onEdit(funnel.id)}
+                aria-label={`Edit ${funnel.name}`}
+              >
+                edit
+              </Button>
+            </WorkspaceManage>
+            <WorkspaceManage>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                onClick={() => onDelete(funnel.id)}
+                aria-label={`Delete ${funnel.name}`}
+              >
+                delete
+              </Button>
+            </WorkspaceManage>
           </div>
           <p className="my-2 text-xs text-muted-foreground">
             {percent(funnel.conversion_rate)} of starting sessions completed
@@ -159,7 +167,7 @@ export function Conversions(props: ConversionProps) {
 }
 
 function ScopedConversions({ query, ownerToken }: ConversionProps) {
-  const readonly = useWorkspaceScope().role === 'viewer';
+  const readOnly = !workspaceCanManage(useWorkspaceScope().role);
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<{ key: string; data: AnalysisReport } | null>(null);
   const [error, setError] = useState('');
@@ -222,6 +230,9 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     return () => controller.abort();
   }, [open, scope, ownerToken, revision]);
   function edit(id: string) {
+    if (readOnly) {
+      return;
+    }
     const record = definitions.find((row) => row.id === id);
     if (!record || record.definition.kind === 'segment') {
       setError('Original definition unavailable. Refresh before editing.');
@@ -230,6 +241,9 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     setEditing({ kind: 'existing', id, definition: record.definition });
   }
   async function save(definition: AnalysisDefinition) {
+    if (readOnly) {
+      return;
+    }
     setBusy(true);
     try {
       const id = editing?.kind === 'existing' ? `/${encodeURIComponent(editing.id)}` : '';
@@ -258,6 +272,9 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     }
   }
   async function remove(id: string) {
+    if (readOnly) {
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -290,13 +307,15 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
       {open ? (
         <CardContent className="space-y-4">
           <div className="flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              disabled={readonly}
-              onClick={() => setEditing((value) => (value ? null : { kind: 'new' }))}
-            >
-              {editing ? 'cancel' : 'new goal or funnel'}
-            </Button>
+            <WorkspaceManage>
+              <Button
+                variant="outline"
+                disabled={readOnly}
+                onClick={() => setEditing((value) => (value ? null : { kind: 'new' }))}
+              >
+                {editing ? 'cancel' : 'new goal or funnel'}
+              </Button>
+            </WorkspaceManage>
             <Button
               variant="ghost"
               onClick={() => setRevision((value) => value + 1)}
@@ -306,12 +325,14 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
             </Button>
           </div>
           {editing ? (
-            <ConversionEditor
-              key={editing.kind === 'existing' ? editing.id : 'new'}
-              initial={editing.kind === 'existing' ? editing.definition : undefined}
-              onSave={save}
-              busy={busy || readonly}
-            />
+            <WorkspaceManage>
+              <ConversionEditor
+                key={editing.kind === 'existing' ? editing.id : 'new'}
+                initial={editing.kind === 'existing' ? editing.definition : undefined}
+                onSave={save}
+                busy={busy || readOnly}
+              />
+            </WorkspaceManage>
           ) : null}
           {loading ? (
             <p role="status" className="text-xs text-muted-foreground">
@@ -333,13 +354,13 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
                 report={data}
                 onDelete={(id) => void remove(id)}
                 onEdit={edit}
-                busy={busy || readonly}
+                busy={busy || readOnly}
               />
               <FunnelRows
                 report={data}
                 onDelete={(id) => void remove(id)}
                 onEdit={edit}
-                busy={busy || readonly}
+                busy={busy || readOnly}
               />
               {!data.goals.length && !data.funnels.length ? (
                 <p className="text-sm text-muted-foreground">
@@ -419,7 +440,7 @@ function ScopedSavedSegments({
   ownerToken: string;
   onApply: (filters: NonNullable<AnalysisQuery['filters']>) => void;
 }) {
-  const readonly = useWorkspaceScope().role === 'viewer';
+  const readOnly = !workspaceCanManage(useWorkspaceScope().role);
   const [open, setOpen] = useState(false);
   const [records, setRecords] = useState<{ key: string; rows: AnalysisRecord[] } | null>(null);
   const [name, setName] = useState('');
@@ -456,6 +477,9 @@ function ScopedSavedSegments({
     return () => controller.abort();
   }, [open, ownerToken, scope, key, revision]);
   async function mutate(id?: string) {
+    if (readOnly) {
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -505,40 +529,44 @@ function ScopedSavedSegments({
                 >
                   {row.definition.name}
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy || readonly}
-                  onClick={() => void mutate(row.id)}
-                  aria-label={`Delete segment ${row.definition.name}`}
-                >
-                  ×
-                </Button>
+                <WorkspaceManage>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy || readOnly}
+                    onClick={() => void mutate(row.id)}
+                    aria-label={`Delete segment ${row.definition.name}`}
+                  >
+                    ×
+                  </Button>
+                </WorkspaceManage>
               </span>
             ))}
           </div>
           {query.filters && Object.keys(query.filters).length ? (
-            <form
-              aria-label="Save current filters as a segment"
-              onSubmit={(event) => {
-                event.preventDefault();
-                void mutate();
-              }}
-              className="flex flex-wrap gap-2"
-            >
-              <input
-                aria-label="Segment name"
-                value={name}
-                maxLength={80}
-                required
-                placeholder="Name these filters"
-                onChange={(event) => setName(event.target.value)}
-                className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
-              />
-              <Button type="submit" variant="outline" size="sm" disabled={busy || readonly}>
-                save segment
-              </Button>
-            </form>
+            <WorkspaceManage>
+              <form
+                aria-label="Save current filters as a segment"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void mutate();
+                }}
+                className="flex flex-wrap gap-2"
+              >
+                <input
+                  aria-label="Segment name"
+                  value={name}
+                  maxLength={80}
+                  required
+                  placeholder="Name these filters"
+                  onChange={(event) => setName(event.target.value)}
+                  className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
+                />
+                <Button type="submit" variant="outline" size="sm" disabled={busy || readOnly}>
+                  save segment
+                </Button>
+              </form>
+            </WorkspaceManage>
           ) : null}
           {error ? (
             <p role="alert" className="text-xs text-destructive">

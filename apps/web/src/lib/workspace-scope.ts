@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from 'react';
+import { useSyncExternalStore, type ReactNode } from 'react';
 
 const STORAGE = 'app-health-selected-workspace';
-type Scope = { id: string; role: 'owner' | 'editor' | 'viewer'; epoch: number };
+type Scope = { id: string; role: 'owner' | 'editor' | 'viewer' | 'unknown'; epoch: number };
 function storedWorkspace() {
   try {
     return sessionStorage.getItem(STORAGE) ?? '';
@@ -9,7 +9,7 @@ function storedWorkspace() {
     return '';
   }
 }
-let scope: Scope = { id: storedWorkspace(), role: 'owner', epoch: 0 };
+let scope: Scope = { id: storedWorkspace(), role: 'unknown', epoch: 0 };
 const listeners = new Set<() => void>();
 const requests = new Set<AbortController>();
 export const workspaceScope = () => scope;
@@ -22,7 +22,7 @@ function subscribeWorkspace(listener: () => void) {
 export function selectWorkspace(id: string) {
   for (const request of requests) request.abort();
   requests.clear();
-  scope = { id, role: 'owner', epoch: scope.epoch + 1 };
+  scope = { id, role: 'unknown', epoch: scope.epoch + 1 };
   try {
     if (id) sessionStorage.setItem(STORAGE, id);
     else sessionStorage.removeItem(STORAGE);
@@ -51,4 +51,12 @@ export function useWorkspaceScope() {
 export function scopedRequest(controller: AbortController) {
   requests.add(controller);
   return () => requests.delete(controller);
+}
+
+export function workspaceCanManage(role: string) {
+  return role === 'owner' || role === 'editor';
+}
+
+export function WorkspaceManage({ children }: { children: ReactNode }) {
+  return workspaceCanManage(useWorkspaceScope().role) ? children : null;
 }

@@ -7,6 +7,7 @@ const dataReads = new Set([
   '/v1/analytics/report',
   '/v1/analytics/conversions',
   '/v1/analytics/revenue',
+  '/v1/analytics/provider-revenue',
   '/v1/analytics/definitions',
   '/v1/endpoints',
   '/v1/failures',
@@ -23,6 +24,7 @@ const tokenReads = new Set([
   '/v1/analytics/report',
   '/v1/analytics/conversions',
   '/v1/analytics/revenue',
+  '/v1/analytics/provider-revenue',
   '/v1/analytics/definitions',
   '/v1/endpoints',
   '/v1/failures',
@@ -65,21 +67,36 @@ function tokenRouteAllowed(request: Request, owner: OwnerIdentity, url: URL) {
 }
 
 function editorRouteAllowed(request: Request, path: string) {
-  if (request.method === 'GET')
-    return (
-      dataReads.has(path) ||
-      [
-        '/v1/logs',
-        '/v1/logs/cache-summary',
-        '/v1/public-keys',
-        '/v1/native-keys',
-        '/v1/analytics/shares',
-        '/v1/capabilities/ledger',
-      ].includes(path)
-    );
+  if (request.method === 'GET') return editorReadAllowed(path);
+  return editorWriteAllowed(request.method, path);
+}
+function editorReadAllowed(path: string) {
+  return (
+    dataReads.has(path) ||
+    /^\/v1\/(payment-connections|payment-imports)\/[a-f0-9-]{36}(?:\/jobs)?$/.test(path) ||
+    [
+      '/v1/logs',
+      '/v1/logs/cache-summary',
+      '/v1/public-keys',
+      '/v1/native-keys',
+      '/v1/analytics/shares',
+      '/v1/payment-connections',
+      '/v1/capabilities/ledger',
+    ].includes(path)
+  );
+}
+function editorWriteAllowed(method: string, path: string) {
+  const provider =
+    /^\/v1\/payment-connections(?:\/[a-f0-9-]{36}(?:\/(credentials|verify|routing|imports|reconcile|fixture-webhook))?)?$/.test(
+      path,
+    ) || /^\/v1\/payment-imports\/[a-f0-9-]{36}\/(resume|cancel)$/.test(path);
+  const environment =
+    (method === 'POST' && /^\/v1\/apps\/[^/]+\/environments\/[^/]+\/keys$/.test(path)) ||
+    /^\/v1\/apps\/[^/]+\/environments(?:\/[^/]+(?:\/revoke)?)?$/.test(path);
   return (
     definitionPath.test(path) ||
-    (request.method === 'POST' && /^\/v1\/apps\/[^/]+\/environments\/[^/]+\/keys$/.test(path)) ||
+    provider ||
+    environment ||
     [
       '/v1/apps',
       '/v1/capabilities',
@@ -87,7 +104,6 @@ function editorRouteAllowed(request: Request, path: string) {
       '/v1/native-keys',
       '/v1/analytics/shares',
     ].includes(path) ||
-    /^\/v1\/apps\/[^/]+\/environments(?:\/[^/]+(?:\/revoke)?)?$/.test(path) ||
     /^\/v1\/(public-keys|native-keys)\/[^/]+\/revoke$/.test(path)
   );
 }

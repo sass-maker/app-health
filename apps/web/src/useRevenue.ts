@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { RevenueReportV1 } from '@app-health/contracts';
+import { ProviderRevenueReportV1, RevenueReportV1 } from '@app-health/contracts';
 import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
 
 export type RevenueScope = {
@@ -13,9 +13,13 @@ export function useRevenue(
   open: boolean,
   mode: string,
   breakdown: string,
-  revision: number,
+  options: { revision: number; basis: 'custom' | 'provider' },
 ) {
-  const [result, setResult] = useState<{ key: string; report: RevenueReportV1 } | null>(null);
+  const { revision, basis } = options;
+  const [result, setResult] = useState<{
+    key: string;
+    report: RevenueReportV1 | ProviderRevenueReportV1;
+  } | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const key = JSON.stringify([
@@ -25,6 +29,7 @@ export function useRevenue(
     scope.range,
     mode,
     breakdown,
+    basis,
   ]);
   useEffect(() => {
     if (!open) return;
@@ -43,13 +48,19 @@ export function useRevenue(
     });
     setLoading(true);
     setError('');
-    void ownerFetch(apiUrl(`/v1/analytics/revenue?${params}`), ownerToken, {
-      signal: controller.signal,
-    })
+    void ownerFetch(
+      apiUrl(`/v1/analytics/${basis === 'provider' ? 'provider-revenue' : 'revenue'}?${params}`),
+      ownerToken,
+      {
+        signal: controller.signal,
+      },
+    )
       .then(async (response) => {
         if (!response.ok)
           throw new Error('Recorded revenue could not load. Retry or choose a shorter period.');
-        const report = RevenueReportV1.parse(await response.json());
+        const report = (basis === 'provider' ? ProviderRevenueReportV1 : RevenueReportV1).parse(
+          await response.json(),
+        );
         if (!controller.signal.aborted) setResult({ key, report });
       })
       .catch(() => {
@@ -70,6 +81,7 @@ export function useRevenue(
     scope.range,
     mode,
     breakdown,
+    basis,
     revision,
     key,
   ]);
