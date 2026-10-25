@@ -53,12 +53,29 @@ it('serves real production worker connection/import controls with encrypted secr
     expect(
       (await request(`/v1/payment-connections/${c.id}/verify?${query}`, 'POST', {})).status,
     ).toBe(200);
+    env.BROWSER_EVENTS = {
+      send: async () => {
+        throw new Error('queue offline');
+      },
+    };
     const job = await request(`/v1/payment-connections/${c.id}/imports?${query}`, 'POST', {
       from: f.time - 1,
       to: Date.now(),
     });
     expect(job.status).toBe(202);
     const state = (await job.json()) as { id: string };
+    expect(
+      f.sqlite.prepare('SELECT reason FROM payment_provider_jobs WHERE id=?').get(state.id),
+    ).toMatchObject({ reason: 'queue_dispatch_pending' });
+    f.sqlite.prepare("UPDATE payment_provider_jobs SET status='paused' WHERE id=?").run(state.id);
+    expect(
+      (await request(`/v1/payment-imports/${state.id}/resume?${query}`, 'POST', {})).status,
+    ).toBe(200);
+    f.controls.failure = 401;
+    expect(
+      (await request(`/v1/payment-connections/${c.id}/verify?${query}`, 'POST', {})).status,
+    ).toBe(424);
+    f.controls.failure = 0;
     expect(
       (await request(`/v1/payment-imports/${state.id}/cancel?${query}`, 'POST', {})).status,
     ).toBe(200);
@@ -70,6 +87,18 @@ it('serves real production worker connection/import controls with encrypted secr
         )
       ).status,
     ).toBe(403);
+    f.sqlite
+      .prepare("UPDATE payment_provider_jobs SET kind='webhook',status='paused' WHERE id=?")
+      .run(state.id);
+    expect(
+      (await request(`/v1/payment-connections/${c.id}/credentials?${query}`, 'POST', f.credentials))
+        .status,
+    ).toBe(200);
+    expect(
+      f.sqlite
+        .prepare('SELECT generation,status,reason FROM payment_provider_jobs WHERE id=?')
+        .get(state.id),
+    ).toMatchObject({ generation: 2, status: 'queued', reason: 'queue_dispatch_pending' });
     expect((await request(`/v1/payment-connections/${c.id}?${query}`, 'DELETE')).status).toBe(200);
     expect(
       (await request(`/v1/payment-connections/${c.id}/verify?${query}`, 'POST', {})).status,

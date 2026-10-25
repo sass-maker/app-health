@@ -197,6 +197,12 @@ function RevenueResults({
       <p className="rounded-lg bg-muted p-3 text-xs leading-5 text-muted-foreground">
         {report.coverage_note}
       </p>
+      {'diagnostics_truncated' in report && report.diagnostics_truncated ? (
+        <p role="status" className="text-xs text-muted-foreground">
+          Provider diagnostics are bounded and incomplete. Observed counts exclude omitted
+          resources.
+        </p>
+      ) : null}
       <RevenueTotals rows={report.totals} provider={provider} />
       {!report.totals.length ? (
         <p className="text-sm text-muted-foreground">

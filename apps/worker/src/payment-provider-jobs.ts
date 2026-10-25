@@ -204,7 +204,7 @@ export async function drainProviderJob(runtime: ProviderRuntime, id: string) {
 export async function cancelProviderJob(runtime: ProviderRuntime, job: JobRow) {
   await runtime.db
     .prepare(
-      `UPDATE payment_provider_jobs SET status='cancelled',reason='cancelled_by_owner',lease_token=NULL,lease_until=0,updated_at=? WHERE id=? AND status!='finished'`,
+      `UPDATE payment_provider_jobs SET status='cancelled',reason='cancelled_by_owner',lease_token=NULL,lease_until=0,wake_token=NULL,wake_until=0,updated_at=? WHERE id=? AND status!='finished'`,
     )
     .bind(Date.now(), job.id)
     .run();
@@ -212,6 +212,12 @@ export async function cancelProviderJob(runtime: ProviderRuntime, job: JobRow) {
 }
 
 export async function cleanupProviderJobs(runtime: ProviderRuntime) {
+  await runtime.db
+    .prepare(
+      `DELETE FROM payment_provider_issues WHERE rowid IN (SELECT rowid FROM payment_provider_issues WHERE observed_at<? ORDER BY observed_at LIMIT 1000)`,
+    )
+    .bind(Date.now() - 31 * 86400000)
+    .run();
   await runtime.db
     .prepare(
       `DELETE FROM payment_provider_jobs WHERE rowid IN (SELECT rowid FROM payment_provider_jobs WHERE status IN ('finished','cancelled') AND updated_at<? ORDER BY updated_at LIMIT 1000)`,

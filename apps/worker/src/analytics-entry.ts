@@ -34,8 +34,8 @@ export default {
         message.ack();
       else browser.push(message as Message<CollectedBrowserBatch>);
     }
-    if (maintenance.length) await consumeProductMaintenance(maintenance, env);
-    if (providers.length) await consumeProviderJobs(providers, env);
     if (browser.length) await consumeBrowserBatches(browser, env);
+    if (providers.length) await consumeProviderJobs(providers, env);
+    if (maintenance.length) await consumeProductMaintenance(maintenance, env);
   },
 } satisfies ExportedHandler<Env, CollectedBrowserBatch | ProviderJobWake | ProductCleanupWake>;

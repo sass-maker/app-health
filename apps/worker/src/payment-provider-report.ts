@@ -30,6 +30,7 @@ export async function providerRevenueReport(db: D1DatabaseLike, query: RevenueQu
     totals: totals.map((row) => RevenueTotalV1.parse(row)),
     dimensions,
     unresolved,
+    diagnostics_truncated: await truncatedDiagnostics(db, query),
   });
 }
 
@@ -89,4 +90,24 @@ async function unresolvedResources(db: D1DatabaseLike, query: RevenueQueryV1) {
   const rows = [...unresolved.results, ...issues.results];
   if (rows.length > 50) throw new ProviderError('provider_diagnostic_capacity_narrow_period', 413);
   return rows;
+}
+
+async function truncatedDiagnostics(db: D1DatabaseLike, query: RevenueQueryV1) {
+  return !!(await db
+    .prepare(
+      `SELECT 1 FROM payment_provider_issue_state s JOIN payment_connections c ON c.id=s.connection_id
+    WHERE c.app_id=? AND c.environment_id=? AND (? IS NULL OR c.mode=?)
+    AND (? IS NULL OR c.provider=?) AND (? IS NULL OR c.account_id=?) LIMIT 1`,
+    )
+    .bind(
+      query.app_id,
+      query.environment_id,
+      query.mode ?? null,
+      query.mode ?? null,
+      query.provider ?? null,
+      query.provider ?? null,
+      query.account_id ?? null,
+      query.account_id ?? null,
+    )
+    .first());
 }

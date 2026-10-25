@@ -22,6 +22,8 @@ export type JobRow = Omit<PaymentImportJob, 'from' | 'to' | 'coverage_note'> & {
   body_digest: string | null;
   lease_token: string | null;
   lease_until: number;
+  wake_token: string | null;
+  wake_until: number;
 };
 export type ProviderEnvironment = {
   DB?: D1DatabaseLike;
@@ -87,7 +89,8 @@ export type RoutingTarget = Pick<PaymentRoutingRule, 'app_id' | 'environment_id'
 
 export type ProviderJobWake = {
   type: 'payment-provider-job';
-  schema_version: 1;
+  schema_version: 1 | 2;
+  wake_token?: string;
   job_id: string;
   generation: number;
 };

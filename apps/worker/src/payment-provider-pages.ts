@@ -10,7 +10,6 @@ import {
 export type ImportCursor = {
   page?: number;
   scannedPages?: number;
-  lastCreated?: number;
   after?: string;
   ids?: string[];
   offset?: number;
@@ -106,7 +105,7 @@ function polarRefundPage(cursor: ImportCursor, rows: unknown[], job: JobRow): Im
   const scannedPages = (cursor.scannedPages ?? 0) + 1;
   if (scannedPages > 4000) throw new ProviderError('polar_refund_history_scan_limit', 413);
   const ids: string[] = [];
-  let lastCreated = cursor.lastCreated ?? Number.POSITIVE_INFINITY,
+  let lastCreated = Number.POSITIVE_INFINITY,
     pastWindow = false;
   for (const value of rows) {
     const row = object(value),
@@ -127,7 +126,6 @@ function polarRefundPage(cursor: ImportCursor, rows: unknown[], job: JobRow): Im
   return {
     ...cursor,
     scannedPages,
-    lastCreated: Number.isFinite(lastCreated) ? lastCreated : undefined,
     ids,
     offset: 0,
     more: rows.length === 25 && !pastWindow,
@@ -147,7 +145,6 @@ export function nextImportPage(
       page: (cursor.page ?? 0) + 1,
       after: cursor.last,
       scannedPages: cursor.scannedPages,
-      lastCreated: cursor.lastCreated,
       windowFrom: cursor.windowFrom,
       windowTo: cursor.windowTo,
       pendingWindows: cursor.pendingWindows,

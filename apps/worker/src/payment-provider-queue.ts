@@ -17,17 +17,21 @@ async function wakeSibling(runtime: ProviderRuntime, connection: string, exclude
     .first<JobRow>();
   if (job) await wakeProviderJob(runtime, job);
 }
-async function wakeBlockedJob(runtime: ProviderRuntime, job: JobRow) {
+async function wakeBlockedJob(runtime: ProviderRuntime, job: JobRow, token: string) {
   const busy = await runtime.db
     .prepare(
       `SELECT MIN(j.lease_until) AS until FROM payment_provider_jobs j JOIN payment_connections c ON c.id=j.connection_id WHERE j.status='running' AND j.lease_until>? AND c.workspace_id=(SELECT workspace_id FROM payment_connections WHERE id=?)`,
     )
     .bind(Date.now(), job.connection_id)
     .first<{ until: number | null }>();
-  await wakeProviderJob(runtime, {
-    ...job,
-    lease_until: Math.max(job.lease_until, busy?.until ?? 0),
-  });
+  await wakeProviderJob(
+    runtime,
+    {
+      ...job,
+      lease_until: Math.max(job.lease_until, busy?.until ?? 0),
+    },
+    token,
+  );
 }
 async function consumeOne(runtime: ProviderRuntime, wake: ProviderJobWake, run: boolean) {
   let job = await runtime.db
@@ -35,6 +39,20 @@ async function consumeOne(runtime: ProviderRuntime, wake: ProviderJobWake, run: 
     .bind(wake.job_id)
     .first<JobRow>();
   if (!job || job.generation !== wake.generation) return;
+  if (wake.schema_version === 1) {
+    await wakeProviderJob(runtime, job);
+    return;
+  }
+  const token = 'processing:' + wake.wake_token;
+  const claimed = await runtime.db
+    .prepare(
+      `UPDATE payment_provider_jobs SET wake_token=?,wake_until=?
+    WHERE id=? AND generation=? AND wake_token=? AND status IN ('queued','running')
+    AND EXISTS(SELECT 1 FROM payment_connections c WHERE c.id=connection_id AND c.status='active' AND c.generation=payment_provider_jobs.generation)`,
+    )
+    .bind(token, Date.now() + 60000, job.id, job.generation, wake.wake_token)
+    .run();
+  if (!claimed.meta.changes) return;
   const c = await connectionRow(runtime.db, job.connection_id);
   if (
     c.status !== 'active' ||
@@ -45,8 +63,16 @@ async function consumeOne(runtime: ProviderRuntime, wake: ProviderJobWake, run: 
   if (run && job.retry_at <= Date.now() && job.lease_until <= Date.now())
     await drainProviderJob(runtime, job.id);
   job = await jobRow(runtime.db, job.id);
-  if (['queued', 'running'].includes(job.status)) await wakeBlockedJob(runtime, job);
-  else await wakeSibling(runtime, job.connection_id, job.id);
+  if (['queued', 'running'].includes(job.status)) await wakeBlockedJob(runtime, job, token);
+  else {
+    await runtime.db
+      .prepare(
+        'UPDATE payment_provider_jobs SET wake_token=NULL,wake_until=0 WHERE id=? AND wake_token=?',
+      )
+      .bind(job.id, token)
+      .run();
+    await wakeSibling(runtime, job.connection_id, job.id);
+  }
 }
 export async function consumeProviderJobs(
   messages: ReadonlyArray<Pick<Message<ProviderJobWake>, 'body' | 'ack' | 'retry'>>,
@@ -67,6 +93,18 @@ export async function consumeProviderJobs(
       await consumeOne(runtime, message.body, index < 4);
       message.ack();
     } catch {
+      if (message.body.wake_token)
+        await runtime.db
+          .prepare(
+            `UPDATE payment_provider_jobs SET wake_token=?,wake_until=0 WHERE id=? AND generation=? AND wake_token=?`,
+          )
+          .bind(
+            message.body.wake_token,
+            message.body.job_id,
+            message.body.generation,
+            'processing:' + message.body.wake_token,
+          )
+          .run();
       message.retry({ delaySeconds: 30 });
     }
   }

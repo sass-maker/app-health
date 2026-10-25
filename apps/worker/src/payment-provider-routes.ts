@@ -1,4 +1,4 @@
-import { wakeProviderJob } from './payment-provider-wake.js';
+import { dispatchProviderJob } from './payment-provider-wake.js';
 import {
   PaymentConnectionInput,
   PaymentCredentials,
@@ -109,7 +109,7 @@ async function importAction(context: Context, c: ConnectionRow, action: string) 
       input.data,
       action === 'reconcile' ? 'reconcile' : 'import',
     );
-  await wakeProviderJob(r, await jobRow(r.db, job.id));
+  await dispatchProviderJob(r, await jobRow(r.db, job.id));
   return json(202, job);
 }
 async function jobsAction(context: Context, c: ConnectionRow) {
@@ -229,7 +229,7 @@ async function jobRequest(context: Context, id: string, action: string | undefin
   if (action === 'resume' && context.request.method === 'POST') await resumeProviderJob(r, job);
   else if (action || context.request.method !== 'GET')
     throw new ProviderError('method_not_allowed', 405);
-  if (action === 'resume') await wakeProviderJob(r, await jobRow(r.db, id));
+  if (action === 'resume') await dispatchProviderJob(r, await jobRow(r.db, id));
   return json(200, publicJob(await jobRow(r.db, id)));
 }
 export async function handleProviderOwner(
@@ -250,7 +250,13 @@ export async function handleProviderOwner(
     return await ownerRequest({ request, url, env, owner, repos, ...options });
   } catch (error) {
     const status =
-      error instanceof ProviderError ? error.status : error instanceof SyntaxError ? 400 : 503;
+      error instanceof ProviderError
+        ? error.code === 'provider_credentials_or_permissions_rejected'
+          ? 424
+          : error.status
+        : error instanceof SyntaxError
+          ? 400
+          : 503;
     return json(status, {
       error: error instanceof ProviderError ? error.code : 'provider_operation_unavailable',
     });

@@ -307,8 +307,18 @@ it('does not consume hydration429as a permanent resource issue or advance a prod
 it('strictly partitions mixed browser and malformed provider wakes before browser sharding', async () => {
   const f = providerFixture();
   try {
-    const q = queueFixture(f),
-      stage = vi.fn(async () => ({ accepted: 1, duplicates: 0 }));
+    const c = await f.connect(),
+      q = queueFixture(f),
+      order: string[] = [];
+    const stage = vi.fn(async () => {
+      order.push('browser');
+      return { accepted: 1, duplicates: 0 };
+    });
+    const job = await startProviderImport(q.runtime, c, { from: 0, to: Date.now() });
+    await wakeProviderJob(q.runtime, await jobRow(f.db, job.id));
+    f.controls.before = () => {
+      order.push('provider');
+    };
     const browser = {
       workspace: 'ws',
       app_id: 'app',
@@ -323,6 +333,7 @@ it('strictly partitions mixed browser and malformed provider wakes before browse
     await entry.queue(
       {
         messages: [
+          { body: q.pending.shift()!, ack: vi.fn(), retry },
           { body: browser, ack: ackBrowser, retry },
           {
             body: { type: 'payment-provider-job', schema_version: 1, job_id: 'bad', generation: 1 },
@@ -333,6 +344,8 @@ it('strictly partitions mixed browser and malformed provider wakes before browse
       } as unknown as MessageBatch<ProviderJobWake>,
       { ...q.env, BROWSER_ARCHIVE: { getByName: () => ({ stage }) } } as unknown as Env,
     );
+    expect(order[0]).toBe('browser');
+    expect(order).toContain('provider');
     expect(stage).toHaveBeenCalledWith([browser]);
     expect(ackBrowser).toHaveBeenCalledOnce();
     expect(ackInvalid).toHaveBeenCalledOnce();

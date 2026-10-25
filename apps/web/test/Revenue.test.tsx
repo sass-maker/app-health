@@ -157,6 +157,7 @@ it('switches to provider creation-date reports without mixing custom cashflow to
               coverage_note:
                 'Gross paid order values including tax by resource creation date; multicapture timing unsupported.',
               unresolved: [{ reason: 'mixed_destination_cart_no_allocation', count: 2 }],
+              diagnostics_truncated: true,
             }
           : report(),
       );
@@ -173,4 +174,5 @@ it('switches to provider creation-date reports without mixing custom cashflow to
   expect(screen.queryByText('$7.50', { selector: 'p' })).toBeNull();
   expect(screen.getByText('net paid order/payment value')).toBeVisible();
   expect(screen.getByText('2 · mixed destination cart no allocation')).toBeVisible();
+  expect(screen.getByText(/Provider diagnostics are bounded and incomplete/)).toBeVisible();
 });

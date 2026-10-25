@@ -1,4 +1,4 @@
-import { wakeProviderJob } from './payment-provider-wake.js';
+import { dispatchProviderJob } from './payment-provider-wake.js';
 import { type PaymentConnectionInput, type PaymentCredentials } from '@app-health/contracts';
 import { verifyProviderAccount } from './payment-provider-api.js';
 import {
@@ -109,14 +109,14 @@ export async function replaceProviderCredentials(
       .bind(cipher, updated.generation, updated.verified_at, c.id, c.generation),
     runtime.db
       .prepare(
-        `UPDATE payment_provider_jobs SET generation=?,status='queued',reason=NULL,retry_at=0,lease_token=NULL,lease_until=0,updated_at=?
+        `UPDATE payment_provider_jobs SET generation=?,status='queued',reason=NULL,retry_at=0,lease_token=NULL,lease_until=0,wake_token=NULL,wake_until=0,updated_at=?
       WHERE connection_id=? AND kind='webhook' AND (status IN ('queued','running','paused') OR (status='cancelled' AND reason IN ('connection_generation_changed','connection_disconnected')))
       AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND cipher=? AND status='active')`,
       )
       .bind(updated.generation, Date.now(), c.id, c.id, updated.generation, cipher),
     runtime.db
       .prepare(
-        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_generation_changed',lease_token=NULL,lease_until=0,updated_at=?
+        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_generation_changed',lease_token=NULL,lease_until=0,wake_token=NULL,wake_until=0,updated_at=?
       WHERE connection_id=? AND kind!='webhook' AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND cipher=? AND status='active')`,
       )
       .bind(Date.now(), c.id, c.id, updated.generation, cipher),
@@ -128,7 +128,7 @@ export async function replaceProviderCredentials(
     )
     .bind(c.id, updated.generation)
     .first<import('./payment-provider-model.js').JobRow>();
-  if (recovered) await wakeProviderJob(runtime, recovered);
+  if (recovered) await dispatchProviderJob(runtime, recovered);
   return publicConnection(updated, await connectionRules(runtime.db, c.id));
 }
 export async function verifyConnection(runtime: ProviderRuntime, c: ConnectionRow) {
@@ -155,7 +155,7 @@ export async function disconnectProvider(runtime: ProviderRuntime, c: Connection
       .bind(c.id, c.generation),
     runtime.db
       .prepare(
-        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_disconnected',lease_token=NULL,lease_until=0 WHERE connection_id=? AND generation=? AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND status='disconnected')`,
+        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_disconnected',lease_token=NULL,lease_until=0,wake_token=NULL,wake_until=0 WHERE connection_id=? AND generation=? AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND status='disconnected')`,
       )
       .bind(c.id, c.generation, c.id, c.generation + 1),
   ]);

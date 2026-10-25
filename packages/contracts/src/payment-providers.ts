@@ -88,6 +88,7 @@ export type PaymentImportJob = z.infer<typeof PaymentImportJob>;
 export const ProviderRevenueReportV1 = RevenueReportV1.omit({ basis: true })
   .extend({
     basis: z.literal('provider_object_created'),
+    diagnostics_truncated: z.boolean().default(false),
     unresolved: z
       .array(
         z.object({ reason: z.string().max(100), count: z.number().int().nonnegative() }).strict(),
