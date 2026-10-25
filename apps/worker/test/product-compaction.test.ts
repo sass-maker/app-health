@@ -68,7 +68,7 @@ it('compacts 500 single-event SDK flushes with exact immutable facts and bounded
       'segment limit',
     );
     const old = sqlite
-      .prepare('SELECT * FROM product_report_segments ORDER BY object_bytes,id LIMIT 1')
+      .prepare('SELECT * FROM product_report_segments ORDER BY received_at,object_bytes,id LIMIT 1')
       .get() as ProductSegment;
     for (let i = 0; i < 20; i++) if (!(await compactProductArchive(db, bucket)).more) break;
     const report = await readProductArchive(db, bucket, scope, 0, Date.now() + 1000);
