@@ -113,7 +113,9 @@ it.each(['stripe', 'polar', 'dodo'] as const)(
       const forbidden = (await call({ provider, app_id: 'other-app', environment_id: 'other-env' }))
         .result;
       expect(forbidden.isError).toBe(true);
-      expect(JSON.parse(forbidden.content[0].text)).toMatchObject({ error: expect.any(String) });
+      expect(JSON.parse(forbidden.content[0].text)).toEqual({
+        error: 'Credential or workspace role does not permit this route',
+      });
       for (const args of [
         { basis: 'unknown' },
         { basis: 'custom', provider },
