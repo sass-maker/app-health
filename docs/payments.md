@@ -1,8 +1,9 @@
 # Explicit payments and recorded revenue
 
-This is the custom-provider foundation of [#219](https://github.com/sass-maker/app-health/issues/219).
-It is implemented locally; production migration/release, provider connections,
-webhook delivery and historical imports are not established by these examples.
+This is the payment/revenue integration in [#219](https://github.com/sass-maker/app-health/issues/219).
+Custom facts and Stripe/Polar/Dodo connection, webhook and bounded import flows
+are implemented. These examples and local provider fixtures do not establish
+production account activation, webhook delivery or historical completeness.
 
 Send explicit financial facts from a trusted server to `POST /v1/payments` on
 the ingest host, using an active private project/environment key as Bearer auth.
@@ -69,7 +70,16 @@ uses a bounded in-memory ledger and clears on restart. Production never falls
 back to local storage. Financial growth and query-scan cost still scale with
 traffic; this slice is not a production load/cost qualification.
 
-Raw-body validators for Stripe and Standard Webhooks (Dodo/Polar, including
-explicit Polar legacy-secret encoding) are tested primitives. They do not create
-provider connections, expose webhook routes or import history. Those workflows
-remain open in #219.
+Connected providers use `GET /v1/analytics/provider-revenue` with the same scoped
+query fields. Its `provider_object_created` basis and coverage note describe
+provider creation dates and supported resources; do not interpret this as a
+per-capture cashflow history. The custom endpoint above excludes provider facts.
+Provider connections, product routing, resumable imports and reconciliation are
+available in Settings. Credentials use a dedicated versioned encryption keyring;
+account-specific configuration and production Queue delivery require activation.
+
+The scoped MCP `revenue_report` tool defaults to custom recorded cashflows.
+Use `basis: "provider"` for connected-provider revenue, optionally filtering
+`provider: "stripe"`, `"polar"` or `"dodo"`. Specifying one of those providers
+also selects the provider basis. Conflicting basis/provider arguments reject;
+currencies, accounts and live/test modes remain separate.

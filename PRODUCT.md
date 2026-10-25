@@ -36,9 +36,10 @@ Google accounts and workspace-owned project onboarding are implemented locally
 in the current account slice. Production activation and real Google callback
 verification are separate. Do not advertise them as live before that verification.
 General browser analytics and portfolio live viewers came through issue #58.
-The owner's 2026-10-25 request adds DataBull, Traks and Minilytics coverage in
-[#219](https://github.com/sass-maker/app-health/issues/219); account onboarding
-does not establish parity.
+The owner's 2026-10-25 request uses DataBull, Traks and Minilytics as references
+for the core analytics and revenue delivery in
+[#219](https://github.com/sass-maker/app-health/issues/219). The owner subsequently
+narrowed that request to required features; full reference parity is not the goal.
 
 The dashboard leads with web analytics and a dedicated Events view. Application
 health, logs, and collection details support investigation. The public landing
@@ -90,10 +91,15 @@ and Diagnostics. Setup is part of the relevant product; it is not another produc
 Dashboard routes use those names directly, without old route aliases. Persisted data
 and ingestion contracts are independent of dashboard navigation.
 
-The 2026-10-25 request supersedes the earlier deferral of funnels, revenue and
-team management. Implement those within this navigation and privacy boundary.
-Rich explicit events, editable goals/funnels/segments and the custom-payment ledger
-are implemented on the feature branch; production activation and full reference
-coverage are unverified. Provider connections, historical import, identity-linked
-attribution, teams, MCP and longer history remain tracked in #219. Experiments
-remain outside this expansion; Clarity covers replay and heat maps.
+The required delivery includes rich explicit browser/server events, consent and
+own-visit exclusion, editable goals/funnels/saved segments, recorded payments and
+refunds, Stripe/Polar/Dodo connections and bounded import/reconciliation, workspace
+roles/invitations, and scoped revocable API/MCP access. Keep those within the
+existing navigation and privacy boundary. Production account activation remains
+separate from local implementation and verification.
+
+Advanced identity-linked attribution and LTV, compatibility layers, expanded
+period/timezone/history infrastructure, richer geography/live journeys, Telegram,
+bot/WebMCP analytics, expanded agent tooling and self-host lifecycle automation
+are outside this delivery. Do not keep the core delivery open for these extras.
+Experiments remain outside scope; Clarity covers replay and heat maps.
