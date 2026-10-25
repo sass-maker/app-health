@@ -29,21 +29,25 @@ CREATE TABLE product_archive_maintenance (
 );
 INSERT INTO product_archive_maintenance(id) VALUES(1);
 CREATE TRIGGER product_cleanup_insert AFTER INSERT ON product_batches
-WHEN NEW.cleanup_at!=CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
+WHEN (NEW.state='pending' AND NEW.cleanup_at!=NEW.expires_at)
+ OR (NEW.state='sealed' AND NEW.object_deleted=0 AND NEW.cleanup_at!=NEW.received_at+2678400000)
+ OR (NEW.state='sealed' AND NEW.object_deleted!=0 AND NEW.cleanup_at!=MAX(NEW.expires_at,NEW.received_at+3024000000))
  OR (NEW.state='sealed' AND NEW.expires_at<NEW.received_at+3024000000)
 BEGIN
  UPDATE product_batches SET
-  expires_at=CASE WHEN NEW.state='sealed' THEN MAX(NEW.expires_at,NEW.received_at+3024000000) ELSE NEW.expires_at END,
-  cleanup_at=CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
+  expires_at= CASE WHEN NEW.state='sealed' THEN MAX(NEW.expires_at,NEW.received_at+3024000000) ELSE NEW.expires_at END,
+  cleanup_at= CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
  WHERE reservation=NEW.reservation;
 END;
 CREATE TRIGGER product_cleanup_update AFTER UPDATE OF state,received_at,expires_at,object_deleted ON product_batches
-WHEN NEW.cleanup_at!=CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
+WHEN (NEW.state='pending' AND NEW.cleanup_at!=NEW.expires_at)
+ OR (NEW.state='sealed' AND NEW.object_deleted=0 AND NEW.cleanup_at!=NEW.received_at+2678400000)
+ OR (NEW.state='sealed' AND NEW.object_deleted!=0 AND NEW.cleanup_at!=MAX(NEW.expires_at,NEW.received_at+3024000000))
  OR (NEW.state='sealed' AND NEW.expires_at<NEW.received_at+3024000000)
 BEGIN
  UPDATE product_batches SET
-  expires_at=CASE WHEN NEW.state='sealed' THEN MAX(NEW.expires_at,NEW.received_at+3024000000) ELSE NEW.expires_at END,
-  cleanup_at=CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
+  expires_at= CASE WHEN NEW.state='sealed' THEN MAX(NEW.expires_at,NEW.received_at+3024000000) ELSE NEW.expires_at END,
+  cleanup_at= CASE WHEN NEW.state='pending' THEN NEW.expires_at WHEN NEW.object_deleted=0 THEN NEW.received_at+2678400000 ELSE MAX(NEW.expires_at,NEW.received_at+3024000000) END
  WHERE reservation=NEW.reservation;
 END;
-UPDATE product_batches SET expires_at=CASE WHEN state='sealed' THEN MAX(expires_at,received_at+3024000000) ELSE expires_at END;
+UPDATE product_batches SET expires_at= CASE WHEN state='sealed' THEN MAX(expires_at,received_at+3024000000) ELSE expires_at END;

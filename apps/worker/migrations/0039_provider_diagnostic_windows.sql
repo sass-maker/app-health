@@ -9,6 +9,6 @@ WHEN NOT EXISTS(SELECT 1 FROM payment_provider_issues WHERE connection_id=NEW.co
  AND (SELECT COUNT(*) FROM payment_provider_issues WHERE connection_id=NEW.connection_id)>=1000
 BEGIN
  INSERT INTO payment_provider_issue_state(connection_id,truncated,first_omitted_at,last_omitted_at) VALUES(NEW.connection_id,1,NEW.observed_at,NEW.observed_at)
- ON CONFLICT(connection_id) DO UPDATE SET first_omitted_at=CASE WHEN last_omitted_at<NEW.observed_at-2678400000 THEN NEW.observed_at ELSE MIN(first_omitted_at,NEW.observed_at) END,last_omitted_at=MAX(last_omitted_at,NEW.observed_at);
+ ON CONFLICT(connection_id) DO UPDATE SET first_omitted_at= CASE WHEN last_omitted_at<NEW.observed_at-2678400000 THEN NEW.observed_at ELSE MIN(first_omitted_at,NEW.observed_at) END,last_omitted_at=MAX(last_omitted_at,NEW.observed_at);
  SELECT RAISE(IGNORE);
 END;
