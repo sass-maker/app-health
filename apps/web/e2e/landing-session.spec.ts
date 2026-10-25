@@ -12,7 +12,9 @@ test('a returning session survives refresh and does not trap Back on the landing
     }),
   );
   await page.route('**/v1/account/config', (route) => route.fulfill({ json: { google: true } }));
-  await page.route('**/v1/apps', (route) => route.fulfill({ json: { apps: [] } }));
+  await page.route('**/v1/apps', (route) =>
+    route.fulfill({ headers: { 'x-app-health-workspace-role': 'owner' }, json: { apps: [] } }),
+  );
   await page.goto('/privacy');
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /see what people do/ })).toBeVisible();
@@ -55,7 +57,10 @@ test('restoring an existing project preserves the selection without adding refre
   );
   await page.route('**/v1/account/config', (route) => route.fulfill({ json: { google: true } }));
   await page.route('**/v1/apps', (route) =>
-    route.fulfill({ json: { apps: [{ app: created.app, environments: [created.environment] }] } }),
+    route.fulfill({
+      headers: { 'x-app-health-workspace-role': 'owner' },
+      json: { apps: [{ app: created.app, environments: [created.environment] }] },
+    }),
   );
   await page.goto('/privacy');
   await page.goto('/');
