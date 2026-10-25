@@ -288,19 +288,6 @@
       }
     },
     {
-      "project": "ios-landings",
-      "journey": "home",
-      "url": "https://apps.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "App landings</title>"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
       "project": "rolepatch",
       "journey": "home",
       "url": "https://rolepatch.com/",
