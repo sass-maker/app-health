@@ -144,6 +144,10 @@ function validScopePage(key: string, cursor: ArchiveScopeCursor | null, limit: n
   );
 }
 
+function expandedFactsDigest(batch: CollectedBrowserBatch, version: number, digest: string) {
+  return version === 2 ? Promise.resolve(digest) : digestBrowserEventFacts(batch, 2);
+}
+
 async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch> {
   const names = [batch.workspace, batch.app_id, batch.environment_id, batch.batch_id];
   if (names.some((name) => typeof name !== 'string' || !name.length || name.length > 200))
@@ -176,7 +180,7 @@ async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch
   ]);
   const expanded = JSON.stringify([
     ...names,
-    version === 2 ? factsDigest : await digestBrowserEventFacts(batch, 2),
+    await expandedFactsDigest(batch, version, factsDigest),
   ]);
   const [legacyFingerprint, expandedFingerprint] = await Promise.all(
     [legacy, expanded].map(archiveFingerprint),
