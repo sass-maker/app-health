@@ -1598,6 +1598,8 @@ describe('Logs view', () => {
     expect(await screen.findByText('install product events')).toBeTruthy();
     expect(screen.getByText(/waiting for the first valid product events event/)).toBeTruthy();
     expect(screen.queryByText('install web analytics')).toBeNull();
+    expect(screen.getByRole('button', { name: 'explore revenue', exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'explore conversions', exact: true })).toBeVisible();
   });
 });
 

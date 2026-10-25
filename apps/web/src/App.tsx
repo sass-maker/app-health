@@ -2871,6 +2871,7 @@ const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
 interface CapabilityBoundaryProps {
   id: CapabilityId;
   displayTitle?: string;
+  allowBeforeFirstReceipt?: boolean;
   project: SavedProject;
   ownerToken: string;
   controller: CapabilityController;
@@ -2947,6 +2948,7 @@ function CapabilityBoundary(props: CapabilityBoundaryProps): ReactElement {
           privateKey={controller.data.private_key}
           onManage={onManage}
         />
+        {props.allowBeforeFirstReceipt ? children : null}
       </div>
     );
   return (
@@ -3391,6 +3393,7 @@ function DashboardAnalytics(props: DashboardContentProps): ReactElement {
     <CapabilityBoundary
       id="analytics"
       displayTitle={view === 'events' ? 'product events' : undefined}
+      allowBeforeFirstReceipt={view === 'events'}
       project={project}
       ownerToken={ownerToken}
       controller={capabilities}
