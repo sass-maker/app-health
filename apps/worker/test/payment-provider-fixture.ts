@@ -8,7 +8,11 @@ import { createProviderConnection } from '../src/payment-provider-connections.js
 import { connectionRow } from '../src/payment-provider-store.js';
 import { providerSession } from '../src/payment-provider-api.js';
 
-export const MASTER = 'synthetic-provider-master-at-least-32-characters';
+export const MASTER = JSON.stringify({
+  v: 1,
+  active: 'test-key',
+  keys: [{ id: 'test-key', key: btoa('a'.repeat(32)) }],
+});
 export function providerFixture(provider: PaymentProvider = 'stripe') {
   const database = analysisDatabase();
   database.sqlite.prepare('INSERT INTO workspace_apps VALUES (?,?)').run('other-app', 'ws');
@@ -127,7 +131,9 @@ export function providerFixture(provider: PaymentProvider = 'stripe') {
     const resource = parts.at(-2),
       id = parts.at(-1);
     const isDetail = ['charges', 'payments', 'orders', 'refunds'].includes(resource ?? '');
-    const rows = clean.endsWith('/refunds') ? refunds : payments;
+    const rows = [...(clean.endsWith('/refunds') ? refunds : payments)];
+    if (url.searchParams.get('sorting') === '-created_at')
+      rows.sort((a, b) => Date.parse(String(b.created_at)) - Date.parse(String(a.created_at)));
     if (provider === 'polar' && clean.endsWith('/refunds') && url.searchParams.has('id'))
       return Response.json({
         items: refunds.filter((row) => row.id === url.searchParams.get('id')),
@@ -162,7 +168,8 @@ export function providerFixture(provider: PaymentProvider = 'stripe') {
     credentials,
     fixture: false,
   };
-  const runtime = { db: database.db, master: MASTER, fetcher };
+  const queue = { send: async () => {} };
+  const runtime = { db: database.db, keyring: MASTER, fetcher, queue };
   async function connect() {
     const created = await createProviderConnection(runtime, 'ws', input);
     return connectionRow(database.db, created.id);

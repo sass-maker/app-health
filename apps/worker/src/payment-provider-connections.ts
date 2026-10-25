@@ -1,6 +1,11 @@
+import { wakeProviderJob } from './payment-provider-wake.js';
 import { type PaymentConnectionInput, type PaymentCredentials } from '@app-health/contracts';
 import { verifyProviderAccount } from './payment-provider-api.js';
-import { openProviderCredentials, sealProviderCredentials } from './payment-provider-crypto.js';
+import {
+  openProviderCredentials,
+  sealProviderCredentials,
+  validateProviderKeyring,
+} from './payment-provider-crypto.js';
 import { activeConnection, connectionRules, publicConnection } from './payment-provider-store.js';
 import {
   ProviderError,
@@ -15,6 +20,7 @@ export async function createProviderConnection(
 ) {
   if (input.fixture || !input.credentials)
     throw new ProviderError('real_connection_requires_credentials');
+  validateProviderKeyring(runtime.keyring);
   const account = await verifyProviderAccount(input, runtime.fetcher);
   const row: ConnectionRow = {
     id: crypto.randomUUID(),
@@ -33,7 +39,7 @@ export async function createProviderConnection(
     verified_at: Date.now(),
     webhook_at: null,
   };
-  row.cipher = await sealProviderCredentials(runtime.master, row, input.credentials);
+  row.cipher = await sealProviderCredentials(runtime.keyring, row, input.credentials);
   try {
     const result = await runtime.db
       .prepare(
@@ -85,6 +91,7 @@ export async function replaceProviderCredentials(
   c: ConnectionRow,
   credentials: PaymentCredentials,
 ) {
+  validateProviderKeyring(runtime.keyring);
   const account = await verifyProviderAccount(verificationInput(c, credentials), runtime.fetcher);
   if (account !== c.account_id) throw new ProviderError('replacement_account_mismatch', 409);
   const updated = {
@@ -93,7 +100,7 @@ export async function replaceProviderCredentials(
     status: 'active' as const,
     verified_at: Date.now(),
   };
-  const cipher = await sealProviderCredentials(runtime.master, updated, credentials);
+  const cipher = await sealProviderCredentials(runtime.keyring, updated, credentials);
   const results = await runtime.db.batch([
     runtime.db
       .prepare(
@@ -102,16 +109,32 @@ export async function replaceProviderCredentials(
       .bind(cipher, updated.generation, updated.verified_at, c.id, c.generation),
     runtime.db
       .prepare(
-        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_generation_changed',lease_token=NULL,lease_until=0 WHERE connection_id=? AND generation=? AND status!='finished'`,
+        `UPDATE payment_provider_jobs SET generation=?,status='queued',reason=NULL,retry_at=0,lease_token=NULL,lease_until=0,updated_at=?
+      WHERE connection_id=? AND kind='webhook' AND (status IN ('queued','running','paused') OR (status='cancelled' AND reason IN ('connection_generation_changed','connection_disconnected')))
+      AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND cipher=? AND status='active')`,
       )
-      .bind(c.id, c.generation),
+      .bind(updated.generation, Date.now(), c.id, c.id, updated.generation, cipher),
+    runtime.db
+      .prepare(
+        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_generation_changed',lease_token=NULL,lease_until=0,updated_at=?
+      WHERE connection_id=? AND kind!='webhook' AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND cipher=? AND status='active')`,
+      )
+      .bind(Date.now(), c.id, c.id, updated.generation, cipher),
   ]);
   if (!results[0].meta.changes) throw new ProviderError('connection_generation_changed', 409);
+  const recovered = await runtime.db
+    .prepare(
+      "SELECT * FROM payment_provider_jobs WHERE connection_id=? AND generation=? AND status='queued' ORDER BY created_at,id LIMIT 1",
+    )
+    .bind(c.id, updated.generation)
+    .first<import('./payment-provider-model.js').JobRow>();
+  if (recovered) await wakeProviderJob(runtime, recovered);
   return publicConnection(updated, await connectionRules(runtime.db, c.id));
 }
 export async function verifyConnection(runtime: ProviderRuntime, c: ConnectionRow) {
   await activeConnection(runtime.db, c.id, c.generation);
-  const credentials = await openProviderCredentials(runtime.master, c, c.cipher);
+  const credentials = await openProviderCredentials(runtime.keyring, c, c.cipher);
+  validateProviderKeyring(runtime.keyring);
   const account = await verifyProviderAccount(verificationInput(c, credentials), runtime.fetcher);
   if (account !== c.account_id) throw new ProviderError('provider_account_mismatch', 409);
   const verified = await runtime.db
@@ -132,7 +155,7 @@ export async function disconnectProvider(runtime: ProviderRuntime, c: Connection
       .bind(c.id, c.generation),
     runtime.db
       .prepare(
-        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_disconnected',lease_token=NULL,lease_until=0 WHERE connection_id=? AND generation=? AND status!='finished' AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND status='disconnected')`,
+        `UPDATE payment_provider_jobs SET status='cancelled',reason='connection_disconnected',lease_token=NULL,lease_until=0 WHERE connection_id=? AND generation=? AND status IN ('queued','running','paused') AND EXISTS(SELECT 1 FROM payment_connections WHERE id=? AND generation=? AND status='disconnected')`,
       )
       .bind(c.id, c.generation, c.id, c.generation + 1),
   ]);

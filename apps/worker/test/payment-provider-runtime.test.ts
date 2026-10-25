@@ -36,7 +36,7 @@ afterEach(async () => mf.dispose());
 it('serializes concurrent partial refunds through real workerd D1 triggers without double counting', async () => {
   const f = providerFixture();
   try {
-    const runtime = { db, master: MASTER, fetcher: f.runtime.fetcher };
+    const runtime = { db, keyring: MASTER, fetcher: f.runtime.fetcher };
     const created = await createProviderConnection(runtime, 'legacy', f.input),
       c = await connectionRow(db, created.id);
     await processProviderResource(
@@ -73,7 +73,7 @@ it('serializes concurrent partial refunds through real workerd D1 triggers witho
 it('guards the same financial transaction with the winning routing assignment, live generation and current job lease', async () => {
   const f = providerFixture();
   const created = await createProviderConnection(
-    { db, master: MASTER, fetcher: f.runtime.fetcher },
+    { db, keyring: MASTER, fetcher: f.runtime.fetcher },
     'legacy',
     f.input,
   );

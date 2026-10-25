@@ -1,3 +1,5 @@
+import { providerRuntime } from './payment-provider-model.js';
+import { pumpProviderJobs } from './payment-provider-wake.js';
 import { readEndpointBuckets } from './endpoint-read.js';
 import { ownerRouteAllowed } from './access-policy.js';
 import { apiTokenIdentity } from './workspace-access.js';
@@ -9,11 +11,7 @@ import { cleanupProductArchive } from './product-event-cleanup.js';
 import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
 import { handleProviderOwner } from './payment-provider-routes.js';
 import { handleProviderWebhook } from './payment-provider-webhooks.js';
-import {
-  drainProviderJob,
-  drainProviderJobs,
-  cleanupProviderJobs,
-} from './payment-provider-jobs.js';
+import { cleanupProviderJobs } from './payment-provider-jobs.js';
 import { D1EndpointWriter } from './endpoint-durable.js';
 import { monitorSelfRequest, type SelfBackendBindings } from './self-backend.js';
 import { cleanupExpiredAccountRecords } from './account-retention.js';
@@ -115,6 +113,7 @@ export interface Env
   APP_HEALTH_INGEST_HOST?: string;
   APP_HEALTH_INGEST_ORIGIN?: string;
   OWNER_AUTH_TOKEN?: string;
+  PAYMENT_ENCRYPTION_KEYRING?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   ANALYTICS_ENGINE_QUERY_TOKEN?: string;
   /** Optional Slack incoming-webhook URL for application log alerts. */
@@ -977,12 +976,6 @@ async function handleIngestHostRoutes(
 ): Promise<Response | null> {
   const webhookResponse = await handleProviderWebhook(request, env, bundle.local);
   if (webhookResponse) {
-    if (webhookResponse.status === 202 && ctx && env.DB && env.OWNER_AUTH_TOKEN) {
-      const accepted = (await webhookResponse.clone().json()) as { job_id: string };
-      ctx.waitUntil(
-        drainProviderJob({ db: env.DB, master: env.OWNER_AUTH_TOKEN }, accepted.job_id),
-      );
-    }
     return webhookResponse;
   }
   const productResponse = await handleProductEventIngest(request, env, bundle.repos, bundle.local);
@@ -1431,10 +1424,11 @@ const unmonitoredWorker = {
   async scheduled(_controller: unknown, env: Env): Promise<void> {
     writeBotCounterHeartbeat(env.BROWSER_ANALYTICS, Date.now());
     if (!env.DB) return;
-    if (env.OWNER_AUTH_TOKEN) {
+    if (env.BROWSER_EVENTS) {
       try {
-        await drainProviderJobs({ db: env.DB, master: env.OWNER_AUTH_TOKEN });
-        await cleanupProviderJobs({ db: env.DB, master: env.OWNER_AUTH_TOKEN });
+        const runtime = providerRuntime(env);
+        await pumpProviderJobs(runtime);
+        await cleanupProviderJobs(runtime);
       } catch {
         console.warn(JSON.stringify({ event: 'payment_provider_job_unavailable' }));
       }

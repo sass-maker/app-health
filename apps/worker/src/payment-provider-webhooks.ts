@@ -1,12 +1,14 @@
+import { wakeProviderJob } from './payment-provider-wake.js';
 import {
   verifyStripePaymentSignature,
   verifyStandardPaymentSignature,
 } from './payments-signatures.js';
 import { openProviderCredentials } from './payment-provider-crypto.js';
-import { connectionRow } from './payment-provider-store.js';
+import { connectionRow, jobRow } from './payment-provider-store.js';
 import {
   object,
   ProviderError,
+  providerRuntime,
   resourceId,
   type ConnectionRow,
   type ProviderEnvironment,
@@ -91,7 +93,7 @@ async function acceptWebhook(request: Request, runtime: ProviderRuntime, c: Conn
   if (c.status !== 'active' || !c.cipher)
     throw new ProviderError('payment_connection_disconnected', 410);
   const bytes = await rawBody(request);
-  const credentials = await openProviderCredentials(runtime.master, c, c.cipher);
+  const credentials = await openProviderCredentials(runtime.keyring, c, c.cipher);
   const now = Date.now();
   const valid = await validSignature(request, c, bytes, credentials, now);
   if (!valid) throw new ProviderError('invalid_webhook_signature', 401);
@@ -154,6 +156,8 @@ async function persistWebhook(
   ]);
   if (!results[2].results?.length)
     throw new ProviderError('webhook_capacity_or_connection_changed', 429);
+  const job = await jobRow(runtime.db, String(results[2].results[0].id));
+  await wakeProviderJob(runtime, job);
   return {
     accepted: true,
     duplicate: !results[0].meta.changes,
@@ -171,11 +175,10 @@ export async function handleProviderWebhook(
   const denied = webhookRequestDenial(request, env, local, url);
   if (denied) return denied;
   try {
-    if (!env.DB || !env.OWNER_AUTH_TOKEN)
-      throw new ProviderError('provider_storage_or_encryption_unavailable', 503);
+    if (!env.DB) throw new ProviderError('provider_storage_or_encryption_unavailable', 503);
     const c = await connectionRow(env.DB, match[2]);
     if (c.provider !== match[1]) throw new ProviderError('payment_connection_not_found', 404);
-    const result = await acceptWebhook(request, { db: env.DB, master: env.OWNER_AUTH_TOKEN }, c);
+    const result = await acceptWebhook(request, providerRuntime(env), c);
     return Response.json(result, { status: 202, headers: { 'cache-control': 'no-store' } });
   } catch (error) {
     const conflict =

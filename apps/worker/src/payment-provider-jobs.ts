@@ -61,7 +61,7 @@ async function persist(
   lease: string,
   patch: Partial<JobRow>,
 ) {
-  const next = { ...job, ...patch, updated_at: Date.now() };
+  const next = { ...job, reason: null, retry_at: 0, ...patch, updated_at: Date.now() };
   const result = await runtime.db
     .prepare(
       `UPDATE payment_provider_jobs SET status=?,phase=?,cursor=?,processed=?,recorded=?,unresolved=?,filtered=?,reason=?,retry_at=?,updated_at=?
@@ -135,7 +135,7 @@ async function importStep(
 }
 async function runSlice(runtime: ProviderRuntime, job: JobRow, lease: string) {
   const c = await activeConnection(runtime.db, job.connection_id, job.generation);
-  const credentials = await openProviderCredentials(runtime.master, c, c.cipher);
+  const credentials = await openProviderCredentials(runtime.keyring, c, c.cipher);
   const session = providerSession(c, credentials, runtime.fetcher);
   session.fence = { jobId: job.id, leaseToken: lease };
   const deadline = performance.now() + 18000;
@@ -201,16 +201,6 @@ export async function drainProviderJob(runtime: ProviderRuntime, id: string) {
       .run();
   }
 }
-export async function drainProviderJobs(runtime: ProviderRuntime) {
-  const rows = await runtime.db
-    .prepare(
-      `SELECT id FROM payment_provider_jobs WHERE (status='queued' OR (status='running' AND lease_until<=?)) AND retry_at<=? AND NOT EXISTS(SELECT 1 FROM payment_provider_jobs busy WHERE busy.connection_id=payment_provider_jobs.connection_id AND busy.status='running' AND busy.lease_until>?) ORDER BY updated_at,id LIMIT 1`,
-    )
-    .bind(Date.now(), Date.now(), Date.now())
-    .all<{ id: string }>();
-  for (const row of rows.results) await drainProviderJob(runtime, row.id);
-}
-
 export async function cancelProviderJob(runtime: ProviderRuntime, job: JobRow) {
   await runtime.db
     .prepare(

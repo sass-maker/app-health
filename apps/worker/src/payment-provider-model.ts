@@ -25,14 +25,16 @@ export type JobRow = Omit<PaymentImportJob, 'from' | 'to' | 'coverage_note'> & {
 };
 export type ProviderEnvironment = {
   DB?: D1DatabaseLike;
-  OWNER_AUTH_TOKEN?: string;
+  PAYMENT_ENCRYPTION_KEYRING?: string;
+  BROWSER_EVENTS?: ProviderQueue;
   APP_HEALTH_INGEST_HOST?: string;
 };
 export type ProviderRuntime = {
   db: D1DatabaseLike;
-  master: string;
+  keyring: string;
   fetcher?: typeof fetch;
   now?: () => number;
+  queue?: ProviderQueue;
 };
 export type ProviderSession = {
   connection: ConnectionRow;
@@ -82,3 +84,18 @@ export function providerRoot(provider: PaymentProvider, mode: 'live' | 'test') {
   return mode === 'live' ? 'https://live.dodopayments.com' : 'https://test.dodopayments.com';
 }
 export type RoutingTarget = Pick<PaymentRoutingRule, 'app_id' | 'environment_id'>;
+
+export type ProviderJobWake = {
+  type: 'payment-provider-job';
+  schema_version: 1;
+  job_id: string;
+  generation: number;
+};
+type ProviderQueue = {
+  send(wake: ProviderJobWake, options?: { delaySeconds: number }): Promise<unknown>;
+};
+
+export function providerRuntime(env: ProviderEnvironment): ProviderRuntime {
+  if (!env.DB) throw new ProviderError('provider_storage_unavailable', 503);
+  return { db: env.DB, keyring: env.PAYMENT_ENCRYPTION_KEYRING ?? '', queue: env.BROWSER_EVENTS };
+}

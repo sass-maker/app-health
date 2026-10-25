@@ -23,11 +23,13 @@ export async function providerRevenueReport(db: D1DatabaseLike, query: RevenueQu
     to: query.to,
     source: 'd1',
     basis: 'provider_object_created',
-    coverage_note: PROVIDER_COVERAGE,
+    coverage_note:
+      PROVIDER_COVERAGE +
+      ' Unknown-resource-time diagnostics use observation time, not a financial creation date.',
     breakdown: query.breakdown,
     totals: totals.map((row) => RevenueTotalV1.parse(row)),
     dimensions,
-    unresolved: unresolved.results,
+    unresolved,
   });
 }
 
@@ -64,5 +66,27 @@ async function unresolvedResources(db: D1DatabaseLike, query: RevenueQueryV1) {
       currency,
     )
     .all<{ reason: string; count: number }>();
-  return unresolved;
+  const issues = await db
+    .prepare(
+      `SELECT 'unknown_resource_time_observed_'||substr(i.reason,1,65) AS reason,COUNT(*) AS count
+   FROM payment_provider_issues i JOIN payment_connections c ON c.id=i.connection_id
+   WHERE c.app_id=? AND c.environment_id=? AND i.observed_at>=? AND i.observed_at<?
+    AND (? IS NULL OR c.mode=?) AND (? IS NULL OR c.provider=?) AND (? IS NULL OR c.account_id=?) GROUP BY 1 LIMIT 51`,
+    )
+    .bind(
+      query.app_id,
+      query.environment_id,
+      query.from,
+      query.to,
+      mode,
+      mode,
+      provider,
+      provider,
+      account,
+      account,
+    )
+    .all<{ reason: string; count: number }>();
+  const rows = [...unresolved.results, ...issues.results];
+  if (rows.length > 50) throw new ProviderError('provider_diagnostic_capacity_narrow_period', 413);
+  return rows;
 }

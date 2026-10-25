@@ -1,3 +1,4 @@
+import { wakeProviderJob } from './payment-provider-wake.js';
 import {
   PaymentConnectionInput,
   PaymentCredentials,
@@ -29,12 +30,12 @@ import {
   startProviderImport,
   resumeProviderJob,
   cancelProviderJob,
-  drainProviderJob,
 } from './payment-provider-jobs.js';
 import { providerRevenueReport } from './payment-provider-report.js';
 import { localProviderRequest } from './payment-provider-local.js';
 import {
   ProviderError,
+  providerRuntime,
   type ConnectionRow,
   type ProviderEnvironment,
   type ProviderRuntime,
@@ -78,10 +79,9 @@ async function allowed(context: Context, scope: Scope) {
     .first());
 }
 function runtime(context: Context): ProviderRuntime {
-  if (!context.env.DB || !context.env.OWNER_AUTH_TOKEN)
-    throw new ProviderError('provider_storage_or_encryption_unavailable', 503);
-  return { db: context.env.DB, master: context.env.OWNER_AUTH_TOKEN };
+  return providerRuntime(context.env);
 }
+
 function requireMethod(context: Context, expected: string) {
   if (context.request.method !== expected) throw new ProviderError('method_not_allowed', 405);
 }
@@ -109,7 +109,7 @@ async function importAction(context: Context, c: ConnectionRow, action: string) 
       input.data,
       action === 'reconcile' ? 'reconcile' : 'import',
     );
-  context.waitUntil?.(drainProviderJob(r, job.id));
+  await wakeProviderJob(r, await jobRow(r.db, job.id));
   return json(202, job);
 }
 async function jobsAction(context: Context, c: ConnectionRow) {
@@ -229,7 +229,7 @@ async function jobRequest(context: Context, id: string, action: string | undefin
   if (action === 'resume' && context.request.method === 'POST') await resumeProviderJob(r, job);
   else if (action || context.request.method !== 'GET')
     throw new ProviderError('method_not_allowed', 405);
-  context.waitUntil?.(drainProviderJob(r, id));
+  if (action === 'resume') await wakeProviderJob(r, await jobRow(r.db, id));
   return json(200, publicJob(await jobRow(r.db, id)));
 }
 export async function handleProviderOwner(

@@ -64,9 +64,17 @@ export function useConnectionActions(c: PaymentConnection, token: string, refres
   async function openDetails() {
     setOpen(!open);
     if (open) return;
-    const result = await action(`${base}/jobs`, 'GET');
-    const list = (result as { jobs?: unknown[] } | null)?.jobs;
-    if (list?.length) setJob(PaymentImportJob.parse(list[0]));
+    setBusy(true);
+    setError('');
+    try {
+      const result = await paymentProviderRequest(`${base}/jobs?${query}`, token, 'GET');
+      const list = (result as { jobs?: unknown[] })?.jobs;
+      if (list?.length) setJob(PaymentImportJob.parse(list[0]));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Payment progress unavailable.');
+    } finally {
+      setBusy(false);
+    }
   }
   const interval = { from: Date.parse(from + 'Z'), to: Date.parse(to + 'Z') };
   return {

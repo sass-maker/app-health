@@ -11,6 +11,8 @@ function environment(db: Env['DB']): Env {
     APP_HEALTH_INGEST_HOST: 'ingest.test',
     APP_HEALTH_INGEST_ORIGIN: 'https://ingest.test',
     OWNER_AUTH_TOKEN: MASTER,
+    PAYMENT_ENCRYPTION_KEYRING: MASTER,
+    BROWSER_EVENTS: { send: async () => {} },
     CLOUDFLARE_ACCOUNT_ID: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     ANALYTICS_ENGINE_QUERY_TOKEN: 'synthetic',
     TELEMETRY: { writeDataPoint() {} },
@@ -87,7 +89,11 @@ it('permits scoped API tokens to read provider reports but never connection conf
       { id: 'user', label: 'Owner', workspaceId: 'ws', workspaceRole: 'owner' },
       { name: 'Report', permission: 'manage', scopes: [{ app_id: 'app', environment_id: 'env' }] },
     );
-    const env = environment(f.db),
+    const env = {
+        ...environment(f.db),
+        PAYMENT_ENCRYPTION_KEYRING: undefined,
+        OWNER_AUTH_TOKEN: 'rotated-independent-owner-token',
+      },
       query = `app_id=app&environment_id=env`;
     const call = (path: string, method = 'GET') =>
       worker.fetch(

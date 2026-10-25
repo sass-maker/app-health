@@ -241,9 +241,9 @@ it('authenticates every immutable encryption scope field, limits encoded secrets
       openProviderCredentials('another-master-with-at-least-32-characters', scope, cipher),
     ).rejects.toThrow('unavailable');
     await expect(
-      openProviderCredentials(MASTER, scope, cipher.replace('"v":1', '"v":2')),
+      openProviderCredentials(MASTER, scope, cipher.replace('"v":2', '"v":1')),
     ).rejects.toThrow('unavailable');
-    await expect(sealProviderCredentials('', scope, f.credentials)).rejects.toThrow('master');
+    await expect(sealProviderCredentials('', scope, f.credentials)).rejects.toThrow('keyring');
     const large = {
       api_key: '"'.repeat(4096),
       webhook_secrets: Array(4).fill('"'.repeat(4096)),

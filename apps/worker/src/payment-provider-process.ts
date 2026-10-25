@@ -1,3 +1,4 @@
+import { permanentResourceError, rememberProviderIssue } from './payment-provider-issues.js';
 import { providerOperationFence } from './payment-provider-fence.js';
 import { PaymentIngestV1 } from '@app-health/contracts';
 import { hashKey } from './crypto.js';
@@ -51,6 +52,12 @@ async function remember(
     )
     .run();
   if (!result.meta.changes) throw new ProviderError('job_lease_or_generation_changed', 409);
+  await db
+    .prepare(
+      `DELETE FROM payment_provider_issues WHERE connection_id=? AND kind=? AND resource_id=? AND EXISTS(SELECT 1 ${gate.sql})`,
+    )
+    .bind(c.id, resource.kind, resource.id, ...gate.values)
+    .run();
 }
 async function originalFact(
   db: D1DatabaseLike,
@@ -120,7 +127,7 @@ async function processNormalized(
     try {
       recorded = await recordNormalized(db, session, resource, row);
     } catch (error) {
-      if (error instanceof ProviderError && error.status < 500) resource.reason = error.code;
+      if (permanentResourceError(error)) resource.reason = error.code;
       else if (error instanceof PaymentConflictError)
         resource.reason = 'financial_identity_or_refund_conflict';
       else throw error;
@@ -129,7 +136,7 @@ async function processNormalized(
   await remember(db, session, resource);
   return { recorded: Number(recorded), unresolved: Number(resource.reason !== null), filtered: 0 };
 }
-export async function processProviderResource(
+async function processResource(
   db: D1DatabaseLike,
   session: ProviderSession,
   kind: 'payment' | 'refund',
@@ -148,4 +155,20 @@ export async function processProviderResource(
     return { recorded: 0, unresolved: 0, filtered: 1 };
   if (normalized.id !== id) throw new ProviderError('provider_resource_identity_mismatch', 409);
   return processNormalized(db, session, normalized, row);
+}
+
+export async function processProviderResource(
+  db: D1DatabaseLike,
+  session: ProviderSession,
+  kind: 'payment' | 'refund',
+  id: string,
+  window?: { from: number; to: number },
+) {
+  try {
+    return await processResource(db, session, kind, id, window);
+  } catch (error) {
+    if (!permanentResourceError(error)) throw error;
+    await rememberProviderIssue(db, session, kind, id, error);
+    return { recorded: 0, unresolved: 1, filtered: 0 };
+  }
 }

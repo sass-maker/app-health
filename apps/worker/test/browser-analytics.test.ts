@@ -172,7 +172,9 @@ describe('browser analytical data', () => {
       'raw-session-secret',
       {
         DB: acceptedReceiptDb(),
-        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        BROWSER_EVENTS: {
+          send: async (value) => void ('events' in value ? sent.push(value) : undefined),
+        },
         BROWSER_HISTORY: {
           put: async () => ({}) as R2Object,
           list: async () => ({ objects: [], delimitedPrefixes: [], truncated: false }),
@@ -459,7 +461,9 @@ describe('browser collector boundary', () => {
       {
         APP_HEALTH_INGEST_HOST: 'localhost',
         DB: acceptedReceiptDb('local'),
-        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        BROWSER_EVENTS: {
+          send: async (value) => void ('events' in value ? sent.push(value) : undefined),
+        },
         WORKSPACE_PRESENCE: {
           getByName: () => ({
             heartbeat: async () => {},

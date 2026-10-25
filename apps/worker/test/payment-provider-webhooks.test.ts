@@ -40,6 +40,8 @@ describe.each(['stripe', 'polar', 'dodo'] as const)('%s signed webhook durabilit
         env = {
           DB: f.db,
           OWNER_AUTH_TOKEN: MASTER,
+          PAYMENT_ENCRYPTION_KEYRING: MASTER,
+          BROWSER_EVENTS: { send: async () => {} },
           APP_HEALTH_INGEST_HOST: 'ingest.test',
           APP_HEALTH_DASHBOARD_HOST: 'dashboard.test',
           APP_HEALTH_INGEST_ORIGIN: 'https://ingest.test',
@@ -131,7 +133,13 @@ it('supports explicit Polar legacy signing, rejects oversized/invalid signed JSO
   try {
     f.credentials.signature_scheme = 'polar_legacy';
     const c = await f.connect(),
-      env = { DB: f.db, OWNER_AUTH_TOKEN: MASTER, APP_HEALTH_INGEST_HOST: 'ingest.test' };
+      env = {
+        DB: f.db,
+        OWNER_AUTH_TOKEN: MASTER,
+        PAYMENT_ENCRYPTION_KEYRING: MASTER,
+        BROWSER_EVENTS: { send: async () => {} },
+        APP_HEALTH_INGEST_HOST: 'ingest.test',
+      };
     const call = (bytes: Uint8Array, id = 'legacy') =>
       handleProviderWebhook(
         new Request(`https://ingest.test/v1/payment-webhooks/polar/${c.id}`, {

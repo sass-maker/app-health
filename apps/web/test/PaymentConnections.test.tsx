@@ -183,3 +183,25 @@ it('never renders a late connection list from another project', async () => {
   await act(async () => old(Response.json({ connections: [connection], fixture_mode: false })));
   expect(screen.queryByText('acct_test')).toBeNull();
 });
+
+it('opens management with one read-only jobs request and no mutation notice or connection-list refresh', async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input), location.origin).pathname;
+      requests.push((init?.method ?? 'GET') + ' ' + path);
+      return Response.json(
+        path.endsWith('/jobs') ? { jobs: [] } : { connections: [connection], fixture_mode: false },
+      );
+    }),
+  );
+  renderPanel();
+  fireEvent.click(await screen.findByRole('button', { name: 'manage stripe' }));
+  await screen.findByLabelText('stripe webhook endpoint');
+  expect(requests).toEqual([
+    'GET /v1/payment-connections',
+    `GET /v1/payment-connections/${connection.id}/jobs`,
+  ]);
+  expect(screen.queryByText('Payment connection updated.')).toBeNull();
+});

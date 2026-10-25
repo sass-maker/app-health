@@ -9,6 +9,8 @@ import {
 
 export type ImportCursor = {
   page?: number;
+  scannedPages?: number;
+  lastCreated?: number;
   after?: string;
   ids?: string[];
   offset?: number;
@@ -39,7 +41,7 @@ function polarRequest(session: ProviderSession, job: JobRow, cursor: ImportCurso
     params: {
       limit: '25',
       page: String(cursor.page ?? 1),
-      sorting: 'created_at',
+      sorting: refunds ? '-created_at' : 'created_at',
       organization_id: session.connection.account_id,
       ...(!refunds
         ? {
@@ -94,9 +96,42 @@ export async function providerPage(
   const rows = c.provider === 'stripe' ? result.data : result.items;
   if (!Array.isArray(rows) || rows.length > 25)
     throw new ProviderError('invalid_provider_page', 503);
+  if (c.provider === 'polar' && job.phase === 'refunds')
+    return polarRefundPage(request.cursor, rows, job);
   const ids = rows.map((row) => pageResourceId(c.provider, job.phase, object(row)));
   const more = c.provider === 'stripe' ? result.has_more === true : rows.length === 25;
   return { ...request.cursor, ids, offset: 0, more, last: ids.at(-1) };
+}
+function polarRefundPage(cursor: ImportCursor, rows: unknown[], job: JobRow): ImportCursor {
+  const scannedPages = (cursor.scannedPages ?? 0) + 1;
+  if (scannedPages > 4000) throw new ProviderError('polar_refund_history_scan_limit', 413);
+  const ids: string[] = [];
+  let lastCreated = cursor.lastCreated ?? Number.POSITIVE_INFINITY,
+    pastWindow = false;
+  for (const value of rows) {
+    const row = object(value),
+      id = resourceId(row.id),
+      time = typeof row.created_at === 'string' ? Date.parse(row.created_at) : NaN;
+    if (!Number.isFinite(time)) {
+      ids.push(id);
+      continue;
+    }
+    if (time > lastCreated) throw new ProviderError('polar_refund_ordering_unverified', 413);
+    lastCreated = time;
+    if (time < job.from_time) {
+      pastWindow = true;
+      continue;
+    }
+    if (time < job.to_time) ids.push(id);
+  }
+  return {
+    ...cursor,
+    scannedPages,
+    lastCreated: Number.isFinite(lastCreated) ? lastCreated : undefined,
+    ids,
+    offset: 0,
+    more: rows.length === 25 && !pastWindow,
+  };
 }
 function pageResourceId(provider: string, phase: string, row: Record<string, unknown>) {
   if (provider !== 'dodo') return resourceId(row.id);
@@ -111,6 +146,8 @@ export function nextImportPage(
     return {
       page: (cursor.page ?? 0) + 1,
       after: cursor.last,
+      scannedPages: cursor.scannedPages,
+      lastCreated: cursor.lastCreated,
       windowFrom: cursor.windowFrom,
       windowTo: cursor.windowTo,
       pendingWindows: cursor.pendingWindows,

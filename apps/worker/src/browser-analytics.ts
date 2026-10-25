@@ -1,3 +1,4 @@
+import type { ProviderJobWake } from './payment-provider-model.js';
 import {
   PRESENCE_TTL_MS,
   type BrowserEventV1,
@@ -48,7 +49,12 @@ export interface CollectedBrowserBatch {
 }
 export interface BrowserBindings {
   DB?: D1DatabaseLike;
-  BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
+  BROWSER_EVENTS?: {
+    send(
+      batch: CollectedBrowserBatch | ProviderJobWake,
+      options?: { delaySeconds: number },
+    ): Promise<unknown>;
+  };
   BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'> & Partial<Pick<R2Bucket, 'get'>>;
   BROWSER_ARCHIVE?: {
     getByName(name: string): {

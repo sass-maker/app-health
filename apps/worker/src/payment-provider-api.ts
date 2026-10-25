@@ -45,13 +45,10 @@ export async function providerGet(
         429,
         retryTime(response.headers.get('retry-after')),
       );
-    throw new ProviderError(
-      response.status === 401 || response.status === 403
-        ? 'provider_credentials_or_permissions_rejected'
-        : 'provider_resource_unavailable',
-      503,
-      Date.now() + 60000,
-    );
+    if (response.status === 401 || response.status === 403)
+      throw new ProviderError('provider_credentials_or_permissions_rejected', response.status);
+    if (response.status === 404) throw new ProviderError('provider_resource_not_found', 404);
+    throw new ProviderError('provider_resource_unavailable', 503, Date.now() + 60000);
   }
   try {
     return object(await readPublicJson(response, 524288));
@@ -121,7 +118,7 @@ export async function providerResource(
     });
     const rows = Array.isArray(page.items) ? page.items : [];
     const row = object(rows[0]);
-    if (row.id !== id) throw new ProviderError('provider_refund_not_found', 503);
+    if (row.id !== id) throw new ProviderError('provider_refund_not_found', 404);
     return row;
   }
   const paths = {
