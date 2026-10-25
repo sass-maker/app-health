@@ -130,6 +130,7 @@ it('keeps closed-day tails compact and does not extend retention', async () => {
 }, 30000);
 it('lost uploads, expired publishers and concurrent acceptance preserve the previous complete snapshot', async () => {
   const { db, sqlite, bucket } = await fixture();
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     await seed(db, bucket, 32);
     let first = true;
@@ -145,9 +146,10 @@ it('lost uploads, expired publishers and concurrent acceptance preserve the prev
       },
     };
     expect(await compactProductArchive(db, lost)).toMatchObject({ failed: true, published: false });
+    expect(warn).toHaveBeenCalledExactlyOnceWith('{"event":"product_compaction_failed"}');
     expect(
       sqlite.prepare('SELECT retry_at,error_code FROM product_compaction_jobs').get(),
-    ).toMatchObject({ error_code: 'history_source_unavailable' });
+    ).toMatchObject({ error_code: 'compaction_failed' });
     expect((await compactProductArchive(db, bucket)).published).toBe(false);
     sqlite.exec('UPDATE product_compaction_jobs SET retry_at=0');
     expect((await readProductArchive(db, bucket, scope, 0, Date.now() + 1000)).facts).toHaveLength(
@@ -261,7 +263,7 @@ it('backs off a poisoned oldest job while queued cleanup and another scope conti
     const issue = sqlite
       .prepare("SELECT retry_at,error_code FROM product_compaction_jobs WHERE app_id='app'")
       .get() as { retry_at: number; error_code: string };
-    expect(issue.error_code).toBe('history_source_unavailable');
+    expect(issue.error_code).toBe('compaction_failed');
     expect(issue.retry_at).toBeGreaterThan(Date.now());
     expect(issue.retry_at).toBeLessThanOrEqual(Date.now() + 15 * 60000);
     expect(

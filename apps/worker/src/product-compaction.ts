@@ -157,9 +157,10 @@ export async function compactProductArchive(
     return { published: false, more: await moreReady(db) };
   } catch {
     // A poisoned scope must not monopolize the global maintenance chain. Never retain parser text.
+    console.warn(JSON.stringify({ event: 'product_compaction_failed' }));
     await db
       .prepare(
-        `UPDATE product_compaction_jobs SET dirty=1,retry_at=?,error_code='history_source_unavailable' WHERE ${JOB_WHERE} AND lease_token=?`,
+        `UPDATE product_compaction_jobs SET dirty=1,retry_at=?,error_code='compaction_failed' WHERE ${JOB_WHERE} AND lease_token=?`,
       )
       .bind(Date.now() + 15 * 60000, ...jobIdentity(job), job.lease_token)
       .run();
