@@ -6,6 +6,7 @@ import { processProviderResource } from './payment-provider-process.js';
 import { activeConnection, jobRow, publicJob } from './payment-provider-store.js';
 import {
   ProviderError,
+  requireProviderQueue,
   type ConnectionRow,
   type JobRow,
   type ProviderRuntime,
@@ -18,6 +19,7 @@ export async function startProviderImport(
   input: PaymentImportInput,
   kind: 'import' | 'reconcile' = 'import',
 ) {
+  requireProviderQueue(runtime);
   const id = crypto.randomUUID(),
     now = Date.now();
   const result = await runtime.db
@@ -46,6 +48,7 @@ export async function startProviderImport(
   return publicJob(await jobRow(runtime.db, id));
 }
 export async function resumeProviderJob(runtime: ProviderRuntime, job: JobRow) {
+  requireProviderQueue(runtime);
   await activeConnection(runtime.db, job.connection_id, job.generation);
   await runtime.db
     .prepare(
@@ -212,6 +215,12 @@ export async function cancelProviderJob(runtime: ProviderRuntime, job: JobRow) {
 }
 
 export async function cleanupProviderJobs(runtime: ProviderRuntime) {
+  await runtime.db
+    .prepare(
+      `DELETE FROM payment_provider_issue_state WHERE connection_id IN (SELECT connection_id FROM payment_provider_issue_state WHERE last_omitted_at<? ORDER BY last_omitted_at LIMIT 1000)`,
+    )
+    .bind(Date.now() - 31 * 86400000)
+    .run();
   await runtime.db
     .prepare(
       `DELETE FROM payment_provider_issues WHERE rowid IN (SELECT rowid FROM payment_provider_issues WHERE observed_at<? ORDER BY observed_at LIMIT 1000)`,

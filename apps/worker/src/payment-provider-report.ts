@@ -25,7 +25,7 @@ export async function providerRevenueReport(db: D1DatabaseLike, query: RevenueQu
     basis: 'provider_object_created',
     coverage_note:
       PROVIDER_COVERAGE +
-      ' Unknown-resource-time diagnostics use observation time, not a financial creation date.',
+      ' Unknown-resource-time diagnostics use observation time, not a financial creation date. They retain 31 days; bounded and older windows may be incomplete. Omission bounds are conservative intervals.',
     breakdown: query.breakdown,
     totals: totals.map((row) => RevenueTotalV1.parse(row)),
     dimensions,
@@ -93,11 +93,12 @@ async function unresolvedResources(db: D1DatabaseLike, query: RevenueQueryV1) {
 }
 
 async function truncatedDiagnostics(db: D1DatabaseLike, query: RevenueQueryV1) {
+  const cutoff = Date.now() - 31 * 86400000;
   return !!(await db
     .prepare(
-      `SELECT 1 FROM payment_provider_issue_state s JOIN payment_connections c ON c.id=s.connection_id
-    WHERE c.app_id=? AND c.environment_id=? AND (? IS NULL OR c.mode=?)
-    AND (? IS NULL OR c.provider=?) AND (? IS NULL OR c.account_id=?) LIMIT 1`,
+      `SELECT 1 FROM payment_connections c LEFT JOIN payment_provider_issue_state s ON c.id=s.connection_id
+ WHERE c.app_id=? AND c.environment_id=? AND (? IS NULL OR c.mode=?) AND (? IS NULL OR c.provider=?) AND (? IS NULL OR c.account_id=?)
+ AND ((s.last_omitted_at>=? AND s.first_omitted_at<? AND s.last_omitted_at>=?) OR (?<? AND c.created_at<? AND c.created_at<?)) LIMIT 1`,
     )
     .bind(
       query.app_id,
@@ -108,6 +109,13 @@ async function truncatedDiagnostics(db: D1DatabaseLike, query: RevenueQueryV1) {
       query.provider ?? null,
       query.account_id ?? null,
       query.account_id ?? null,
+      cutoff,
+      query.to,
+      query.from,
+      query.from,
+      cutoff,
+      cutoff,
+      query.to,
     )
     .first());
 }

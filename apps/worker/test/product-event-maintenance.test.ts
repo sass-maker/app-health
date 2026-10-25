@@ -132,3 +132,32 @@ it('upgrades legacy wakes without running a slice and acknowledges browser stagi
     f.sqlite.close();
   }
 });
+
+it('defers a live processing-token duplicate without resetting ownership and resumes its crashed lease after expiry', async () => {
+  const f = fixture();
+  try {
+    f.seed(1);
+    await maintainProductArchive(f.env);
+    const wake = f.pending.shift()!;
+    f.sqlite
+      .prepare('UPDATE product_archive_maintenance SET wake_token=?,wake_until=?')
+      .run('processing:' + wake.wake_token, Date.now() + 60000);
+    const live = f.message(wake);
+    await f.deliver([live]);
+    expect(live.ack).not.toHaveBeenCalled();
+    expect(live.retry).toHaveBeenCalledOnce();
+    expect(
+      f.sqlite.prepare('SELECT wake_token FROM product_archive_maintenance').get(),
+    ).toMatchObject({ wake_token: 'processing:' + wake.wake_token });
+    f.sqlite.prepare('UPDATE product_archive_maintenance SET wake_until=0').run();
+    const expired = f.message(wake);
+    await f.deliver([expired]);
+    expect(expired.ack).toHaveBeenCalledOnce();
+    expect(expired.retry).not.toHaveBeenCalled();
+    expect(f.sqlite.prepare('SELECT COUNT(*) n FROM product_batches').get()).toMatchObject({
+      n: 0,
+    });
+  } finally {
+    f.sqlite.close();
+  }
+});

@@ -49,18 +49,25 @@ export async function maintainProductArchive(
 async function consumeOne(wake: ProductCleanupWake, env: ProductEnvironment) {
   if (wake.schema_version === 1) {
     await maintainProductArchive(env);
-    return false;
+    return 'stale' as const;
   }
   const bucket = env.BROWSER_HISTORY;
   if (!env.DB || !bucket?.get || !bucket.delete)
     throw new Error('Product maintenance bindings unavailable');
   const processing = 'processing:' + wake.wake_token;
   const claimed = await env.DB.prepare(
-    'UPDATE product_archive_maintenance SET wake_token=?,wake_until=? WHERE id=1 AND wake_token=?',
+    'UPDATE product_archive_maintenance SET wake_token=?,wake_until=? WHERE id=1 AND (wake_token=? OR (wake_token=? AND wake_until<=?))',
   )
-    .bind(processing, Date.now() + 60000, wake.wake_token)
+    .bind(processing, Date.now() + 60000, wake.wake_token, processing, Date.now())
     .run();
-  if (!claimed.meta.changes) return false;
+  if (!claimed.meta.changes) {
+    const current = await env.DB.prepare(
+      'SELECT wake_token,wake_until FROM product_archive_maintenance WHERE id=1',
+    ).first<{ wake_token: string | null; wake_until: number }>();
+    return current?.wake_token === processing && current.wake_until > Date.now()
+      ? ('busy' as const)
+      : ('stale' as const);
+  }
   const result = await cleanupProductArchive(env.DB, {
     put: bucket.put.bind(bucket),
     get: bucket.get.bind(bucket),
@@ -73,7 +80,7 @@ async function consumeOne(wake: ProductCleanupWake, env: ProductEnvironment) {
     )
       .bind(processing)
       .run();
-  return true;
+  return 'ran' as const;
 }
 export async function consumeProductMaintenance(
   messages: ReadonlyArray<Pick<Message<ProductCleanupWake>, 'body' | 'ack' | 'retry'>>,
@@ -94,7 +101,12 @@ export async function consumeProductMaintenance(
           continue;
         }
       }
-      ran = (await consumeOne(message.body, env)) || ran;
+      const outcome = await consumeOne(message.body, env);
+      if (outcome === 'busy') {
+        message.retry({ delaySeconds: 30 });
+        continue;
+      }
+      ran = outcome === 'ran' || ran;
       message.ack();
     } catch {
       if (env.DB && message.body.wake_token)

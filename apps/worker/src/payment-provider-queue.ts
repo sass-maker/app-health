@@ -47,12 +47,21 @@ async function consumeOne(runtime: ProviderRuntime, wake: ProviderJobWake, run: 
   const claimed = await runtime.db
     .prepare(
       `UPDATE payment_provider_jobs SET wake_token=?,wake_until=?
-    WHERE id=? AND generation=? AND wake_token=? AND status IN ('queued','running')
+    WHERE id=? AND generation=? AND (wake_token=? OR (wake_token=? AND wake_until<=?)) AND status IN ('queued','running')
     AND EXISTS(SELECT 1 FROM payment_connections c WHERE c.id=connection_id AND c.status='active' AND c.generation=payment_provider_jobs.generation)`,
     )
-    .bind(token, Date.now() + 60000, job.id, job.generation, wake.wake_token)
+    .bind(token, Date.now() + 60000, job.id, job.generation, wake.wake_token, token, Date.now())
     .run();
-  if (!claimed.meta.changes) return;
+  if (!claimed.meta.changes) {
+    const current = await jobRow(runtime.db, job.id);
+    if (
+      current.generation === wake.generation &&
+      current.wake_token === token &&
+      current.wake_until > Date.now()
+    )
+      return { retry: Math.max(1, Math.ceil((current.wake_until - Date.now()) / 1000)) };
+    return;
+  }
   const c = await connectionRow(runtime.db, job.connection_id);
   if (
     c.status !== 'active' ||
@@ -90,7 +99,11 @@ export async function consumeProviderJobs(
   for (let index = 0; index < messages.length; index++) {
     const message = messages[index];
     try {
-      await consumeOne(runtime, message.body, index < 4);
+      const outcome = await consumeOne(runtime, message.body, index < 4);
+      if (outcome) {
+        message.retry({ delaySeconds: outcome.retry });
+        continue;
+      }
       message.ack();
     } catch {
       if (message.body.wake_token)

@@ -102,3 +102,7 @@ export function providerRuntime(env: ProviderEnvironment): ProviderRuntime {
   if (!env.DB) throw new ProviderError('provider_storage_unavailable', 503);
   return { db: env.DB, keyring: env.PAYMENT_ENCRYPTION_KEYRING ?? '', queue: env.BROWSER_EVENTS };
 }
+
+export function requireProviderQueue(runtime: ProviderRuntime) {
+  if (!runtime.queue) throw new ProviderError('provider_job_queue_unavailable', 503);
+}

@@ -1,5 +1,6 @@
 import {
   ProviderError,
+  requireProviderQueue,
   type ProviderRuntime,
   type ProviderJobWake,
   type JobRow,
@@ -70,6 +71,7 @@ export async function wakeProviderJob(
 }
 /** Successful durable owner mutations stay successful if outbox publication is unavailable. */
 export async function dispatchProviderJob(runtime: ProviderRuntime, job: JobRow) {
+  requireProviderQueue(runtime);
   try {
     await wakeProviderJob(runtime, job);
   } catch {

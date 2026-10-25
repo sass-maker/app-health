@@ -9,6 +9,7 @@ import {
 import { activeConnection, connectionRules, publicConnection } from './payment-provider-store.js';
 import {
   ProviderError,
+  requireProviderQueue,
   type ConnectionRow,
   type ProviderRuntime,
 } from './payment-provider-model.js';
@@ -91,6 +92,7 @@ export async function replaceProviderCredentials(
   c: ConnectionRow,
   credentials: PaymentCredentials,
 ) {
+  requireProviderQueue(runtime);
   validateProviderKeyring(runtime.keyring);
   const account = await verifyProviderAccount(verificationInput(c, credentials), runtime.fetcher);
   if (account !== c.account_id) throw new ProviderError('replacement_account_mismatch', 409);
