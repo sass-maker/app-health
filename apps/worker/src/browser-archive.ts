@@ -40,6 +40,7 @@ interface PreparedBatch {
   workspace: string;
   payload: string;
   fingerprint: string;
+  compatible_fingerprints: string[];
   bytes: number;
 }
 type PendingRow = {
@@ -165,29 +166,43 @@ async function prepareBatch(batch: CollectedBrowserBatch): Promise<PreparedBatch
   const bytes = new TextEncoder().encode(`${payload}\n`).byteLength;
   if (bytes > MAX_BATCH_BYTES) throw new Error('Archive batch exceeds 64 KiB');
   // Collector retries may update received_at without changing the accepted events.
-  const content =
-    version === 2
-      ? JSON.stringify([...names, factsDigest])
-      : JSON.stringify([
-          ...names,
-          batch.events,
-          batch.session_hash,
-          batch.visitor_hash,
-          batch.visit_type,
-          batch.attribution,
-        ]);
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
-  const fingerprint = Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join(
-    '',
+  const legacy = JSON.stringify([
+    ...names,
+    batch.events,
+    batch.session_hash,
+    batch.visitor_hash,
+    batch.visit_type,
+    batch.attribution,
+  ]);
+  const expanded = JSON.stringify([
+    ...names,
+    version === 2 ? factsDigest : await digestBrowserEventFacts(batch, 2),
+  ]);
+  const [legacyFingerprint, expandedFingerprint] = await Promise.all(
+    [legacy, expanded].map(archiveFingerprint),
   );
+  // A rolling upgrade may deliver the same plain batch through both versions.
+  // The legacy archive hash binds full session/attribution context even though
+  // the legacy event-facts digest does not. Rich facts cannot match a v1 copy.
+  const fingerprint = version === 2 ? expandedFingerprint : legacyFingerprint;
+  const compatible =
+    browserFactsDigestVersion(batch) === 1
+      ? [legacyFingerprint, expandedFingerprint]
+      : [fingerprint];
   return {
     identity: JSON.stringify(names.slice(1)),
     scope: { app_id: batch.app_id, environment_id: batch.environment_id, batch_id: batch.batch_id },
     workspace: batch.workspace,
     payload,
     fingerprint,
+    compatible_fingerprints: compatible,
     bytes,
   };
+}
+
+async function archiveFingerprint(content: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content));
+  return Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, '0')).join('');
 }
 
 /** Queue consumers route consistently by workspace + shard, including every retry. */
@@ -384,7 +399,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
             batch.identity,
           )
           .toArray()[0];
-      if (existing && existing.fingerprint !== batch.fingerprint)
+      if (existing && !batch.compatible_fingerprints.includes(existing.fingerprint))
         throw new Error('Archive batch identity reused with different events');
       if (!existing) fresh.set(batch.identity, batch);
     }

@@ -453,6 +453,39 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
     ).toBe(503);
   });
 
+  it.each([1, 2] as const)(
+    'deduplicates equivalent mixed-version queue deliveries when v%s arrives first',
+    async (version) => {
+      app = await harness();
+      const original = { ...batch('mixed-version'), session_hash: 'original-session' };
+      const v2 = { ...original, facts_digest_version: 2 as const };
+      const first = version === 1 ? original : v2;
+      const second = version === 1 ? v2 : original;
+      expect((await app.call('stage', [first, second])).body).toMatchObject({ duplicates: 1 });
+      expect((await app.call('stage', [second])).body).toMatchObject({ duplicates: 1 });
+      expect((await app.call('inspect')).body.pending_batches).toBe(1);
+      expect(
+        (await app.call('stage', [{ ...second, session_hash: 'changed-session' }])).status,
+      ).toBe(503);
+      expect(
+        (
+          await app.call('stage', [
+            {
+              ...v2,
+              events: [{ ...original.events[0], properties: { plan: 'augmented' } }],
+            },
+          ])
+        ).status,
+      ).toBe(503);
+      expect((await app.call('flush')).status).toBe(200);
+      const bucket = await app.bucket();
+      const object = await bucket.get((await bucket.list()).objects[0].key);
+      const archived = JSON.parse(gunzipSync(Buffer.from(await object!.arrayBuffer())).toString());
+      expect(archived.session_hash).toBe('original-session');
+      expect(archived.facts_digest_version).toBe(version);
+    },
+  );
+
   it('archives v2 properties and treats reordered property keys as an identical retry', async () => {
     app = await harness();
     const first = batch('rich-v2');

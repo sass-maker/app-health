@@ -398,6 +398,38 @@ describe('exact browser visitor daily ledger', () => {
     ).toMatchObject({ results: [{ india_day: '2026-09-29' }, { india_day: '2026-09-30' }] });
   });
 
+  it('accepts a raced plain v2 retry without upgrading an already accepted v1 receipt', async () => {
+    const original = batch({ session_hash: 'original-session' });
+    await acceptBrowserVisitorBatch(db, original, original.received_at);
+    const retry = { ...original, facts_digest_version: 2 as const };
+    await expect(
+      acceptBrowserVisitorBatch(db, retry, original.received_at + 1),
+    ).resolves.toBeUndefined();
+    expect(
+      await db
+        .prepare(
+          `SELECT facts_digest_version, expanded_facts_digest FROM
+      browser_visitor_batch_receipts WHERE batch_id = ?`,
+        )
+        .bind(original.batch_id)
+        .first(),
+    ).toEqual({ facts_digest_version: 1, expanded_facts_digest: null });
+    const augmented = {
+      ...retry,
+      events: [{ ...original.events[0], properties: { plan: 'pro' } }],
+    };
+    await expect(
+      acceptBrowserVisitorBatch(db, augmented, original.received_at + 2),
+    ).rejects.toThrow();
+    expect(
+      (
+        await db
+          .prepare('SELECT COUNT(*) AS total FROM browser_visitor_batch_receipts')
+          .first<{ total: number }>()
+      )?.total,
+    ).toBe(1);
+  });
+
   it('leaves legacy 0019 receipts unindexed when retried with the same fingerprint', async () => {
     const item = batch({ batch_id: 'legacy-0019-batch' });
     await acceptBrowserVisitorBatch(db, item, item.received_at);

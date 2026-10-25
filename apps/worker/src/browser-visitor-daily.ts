@@ -689,12 +689,18 @@ export async function acceptBrowserVisitorBatch(
     (receipt?.open_fence_count === days.length || receipt?.open_fence_count === 0);
   if (!receipt)
     throw new Error('Browser batch acceptance was blocked by a sealed or incomplete event day');
+  // An old in-flight request can commit its v1 receipt after the new collector
+  // reserved and queued an equivalent plain retry. Keep the receipt at v1;
+  // matching its old digest must never authenticate or upgrade session context.
+  const matchingVersionedReceipt =
+    (receipt.facts_digest_version === version && receipt.facts_digest === factsDigest) ||
+    (version === 2 &&
+      browserFactsDigestVersion(normalizedBatch) === 1 &&
+      receipt.facts_digest_version === 1 &&
+      receipt.facts_digest === legacyDigest);
   if (
     receipt?.fingerprint !== fingerprint ||
-    (!matchingLegacyReceipt &&
-      (!indexedReceipt ||
-        receipt.facts_digest_version !== version ||
-        receipt.facts_digest !== factsDigest))
+    (!matchingLegacyReceipt && (!indexedReceipt || !matchingVersionedReceipt))
   )
     throw new Error('Browser batch identity reused with different facts');
 }
