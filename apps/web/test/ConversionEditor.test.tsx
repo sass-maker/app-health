@@ -37,7 +37,7 @@ describe('conversion definition editor', () => {
           step: { type: 'event', target: 'signup.completed', property: 'plan', equals: expected },
         }),
       );
-      expect(screen.getByLabelText('Conversion name')).toHaveValue('');
+      await waitFor(() => expect(screen.getByLabelText('Conversion name')).toHaveValue(''));
     },
   );
   it('creates an ordered funnel with a deliberate window and bounds added steps', async () => {

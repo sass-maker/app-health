@@ -6,6 +6,11 @@ import type { KeyRepository } from './repository.js';
 
 /** A resolved local owner. The id is opaque and never persisted as user data. */
 export interface OwnerIdentity {
+  authKind?: 'account' | 'api-token';
+  workspaceRole?: 'owner' | 'editor' | 'viewer';
+  email?: string;
+  apiPermission?: 'read' | 'manage';
+  apiScopes?: readonly { app_id: string; environment_id: string }[];
   /** Stable opaque identifier for the local operator. */
   id: string;
   /** Human-readable label for diagnostics only. */

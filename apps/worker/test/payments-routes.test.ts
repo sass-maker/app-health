@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { OwnerIdentity } from '../src/identity.js';
 import { RevenueReportV1, SEED_APP_ID, SEED_ENV_ID, SEED_KEY } from '@app-health/contracts';
 import { handlePaymentIngest, handlePaymentOwner } from '../src/payments-routes.js';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
@@ -45,7 +46,7 @@ async function fixture() {
       repos,
       local,
     );
-  const report = (patch = '', identity = owner, local = false) =>
+  const report = (patch = '', identity: OwnerIdentity = owner, local = false) =>
     handlePaymentOwner(
       new Request(`https://dashboard.test/v1/analytics/revenue?${query}${patch}`),
       env,
@@ -80,6 +81,7 @@ describe('private financial ingestion and owner reports', () => {
         totals: [{ gross_minor: 1000, payments: 1 }],
       });
       expect((await f.report('', { ...f.owner, appIds: [] }))!.status).toBe(403);
+      expect((await f.report('', { ...f.owner, appId: f.created.app.id }))!.status).toBe(403);
       expect((await f.report('&environment_id=other-env'))!.status).toBe(403);
       expect(
         (await f.report(

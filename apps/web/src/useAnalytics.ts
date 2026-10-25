@@ -1,3 +1,5 @@
+import { workspaceScope } from './lib/workspace-scope.js';
+import { ownerFetch } from './lib/owner-fetch.js';
 import { useReportCache } from './AnalyticsCache.js';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -82,6 +84,7 @@ function createWorkspaceSocket(
   function connect() {
     if (isPaused() || socket) return;
     const url = new URL('/v1/analytics/live', location.href);
+    if (workspaceScope().id) url.searchParams.set('workspace_id', workspaceScope().id);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     const current = new WebSocket(url);
     socket = current;
@@ -147,7 +150,7 @@ export function useWorkspaceAnalytics(ownerToken: string) {
       const { controller } = timeout;
       request = controller;
       try {
-        const response = await fetch('/v1/analytics', {
+        const response = await ownerFetch('/v1/analytics', ownerToken, {
           signal: controller.signal,
           headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
         });
@@ -220,7 +223,7 @@ export function useWorkspaceHealth(ownerToken: string) {
       const timeout = timedRequest();
       request = timeout.controller;
       try {
-        const response = await fetch('/v1/workspace/health', {
+        const response = await ownerFetch('/v1/workspace/health', ownerToken, {
           signal: timeout.controller.signal,
           headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
           cache: 'no-store',
@@ -348,7 +351,7 @@ export function useBrowserReport(
   options: ReportOptions = 'audience',
 ) {
   const params = reportConfiguration(range, appId, environmentId, event, options);
-  const scope = JSON.stringify([ownerToken, params.toString()]);
+  const scope = reportCacheScope(ownerToken, params);
   const state = useReportState(scope);
   useEffect(() => {
     let cancelled = false;
@@ -372,7 +375,7 @@ export function useBrowserReport(
       const { controller } = timeout;
       request = controller;
       try {
-        const response = await fetch(`/v1/analytics/report?${params}`, {
+        const response = await ownerFetch(`/v1/analytics/report?${params}`, ownerToken, {
           signal: controller.signal,
           headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
           cache: 'no-store',
@@ -426,4 +429,13 @@ export function useBrowserReport(
     loading: state.loading,
     reload: () => state.setRetry((value) => value + 1),
   };
+}
+
+function reportCacheScope(ownerToken: string, params: URLSearchParams) {
+  return JSON.stringify([
+    ownerToken,
+    workspaceScope().id,
+    workspaceScope().epoch,
+    params.toString(),
+  ]);
 }

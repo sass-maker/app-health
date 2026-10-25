@@ -8,7 +8,7 @@ import { Button } from '@saas-maker/ui/components/button';
 import { Input } from '@saas-maker/ui/components/input';
 import { LabeledSelect } from './LabeledSelect.js';
 import { SpeedTable, SpeedTableSkeleton } from './SpeedTable.js';
-import { ownerFetch } from './lib/owner-fetch.js';
+import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
 import { pollWhileVisible } from './lib/visible-poll.js';
 import { isBreaching, sortSpeedProducts, type SpeedSort } from './lib/speed-display.js';
 
@@ -57,7 +57,7 @@ function useSpeedReport(
       controller = new AbortController();
       try {
         const response = await ownerFetch(
-          `/v1/reports/speed?range=${range}&class=${performanceClass}`,
+          apiUrl(`/v1/reports/speed?range=${range}&class=${performanceClass}`),
           ownerToken,
           { signal: controller.signal },
         );

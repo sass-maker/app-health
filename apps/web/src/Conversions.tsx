@@ -1,3 +1,4 @@
+import { useWorkspaceScope } from './lib/workspace-scope.js';
 import { useEffect, useState } from 'react';
 import {
   AnalysisRecord,
@@ -9,7 +10,7 @@ import {
 import { Button } from '@saas-maker/ui/components/button';
 import { Card, CardContent, CardHeader } from '@saas-maker/ui/components/card';
 import { ConversionEditor } from './ConversionEditor.js';
-import { ownerFetch } from './lib/owner-fetch.js';
+import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
 
 const percent = (value: number | null) => (value === null ? '—' : `${(value * 100).toFixed(1)}%`);
 function queryString(query: AnalysisQuery) {
@@ -158,6 +159,7 @@ export function Conversions(props: ConversionProps) {
 }
 
 function ScopedConversions({ query, ownerToken }: ConversionProps) {
+  const readonly = useWorkspaceScope().role === 'viewer';
   const [open, setOpen] = useState(false);
   const [report, setReport] = useState<{ key: string; data: AnalysisReport } | null>(null);
   const [error, setError] = useState('');
@@ -178,7 +180,7 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    void ownerFetch(`/v1/analytics/conversions?${params}`, ownerToken, {
+    void ownerFetch(apiUrl(`/v1/analytics/conversions?${params}`), ownerToken, {
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -203,7 +205,9 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    void ownerFetch(`/v1/analytics/definitions?${scope}`, ownerToken, { signal: controller.signal })
+    void ownerFetch(apiUrl(`/v1/analytics/definitions?${scope}`), ownerToken, {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error('Conversion definitions could not load.');
         const result = AnalysisRecords.parse(await response.json());
@@ -229,12 +233,23 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     setBusy(true);
     try {
       const id = editing?.kind === 'existing' ? `/${encodeURIComponent(editing.id)}` : '';
-      const response = await ownerFetch(`/v1/analytics/definitions${id}?${scope}`, ownerToken, {
-        method: id ? 'PUT' : 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(definition),
-      });
-      if (!response.ok) throw new Error('Definition was not saved');
+      const response = await ownerFetch(
+        apiUrl(`/v1/analytics/definitions${id}?${scope}`),
+        ownerToken,
+        {
+          method: id ? 'PUT' : 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(definition),
+        },
+      );
+      if (!response.ok) {
+        const failure = (await response.json()) as { error?: string };
+        throw new Error(
+          response.status === 409
+            ? (failure.error ?? 'The workspace has reached its definition limit.')
+            : 'Definition was not saved',
+        );
+      }
       AnalysisRecord.parse(await response.json());
       setEditing(null);
       setRevision((value) => value + 1);
@@ -247,7 +262,7 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
     setError('');
     try {
       const response = await ownerFetch(
-        `/v1/analytics/definitions/${encodeURIComponent(id)}?${scope}`,
+        apiUrl(`/v1/analytics/definitions/${encodeURIComponent(id)}?${scope}`),
         ownerToken,
         { method: 'DELETE' },
       );
@@ -277,6 +292,7 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
+              disabled={readonly}
               onClick={() => setEditing((value) => (value ? null : { kind: 'new' }))}
             >
               {editing ? 'cancel' : 'new goal or funnel'}
@@ -294,7 +310,7 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
               key={editing.kind === 'existing' ? editing.id : 'new'}
               initial={editing.kind === 'existing' ? editing.definition : undefined}
               onSave={save}
-              busy={busy}
+              busy={busy || readonly}
             />
           ) : null}
           {loading ? (
@@ -317,13 +333,13 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
                 report={data}
                 onDelete={(id) => void remove(id)}
                 onEdit={edit}
-                busy={busy}
+                busy={busy || readonly}
               />
               <FunnelRows
                 report={data}
                 onDelete={(id) => void remove(id)}
                 onEdit={edit}
-                busy={busy}
+                busy={busy || readonly}
               />
               {!data.goals.length && !data.funnels.length ? (
                 <p className="text-sm text-muted-foreground">
@@ -343,6 +359,13 @@ function EventProperties({ report }: { report: AnalysisReport }) {
   return (
     <div className="space-y-3 border-t pt-4">
       <h3 className="text-sm font-medium">event properties & values</h3>
+      {report.property_detail?.truncated ? (
+        <p className="text-xs text-muted-foreground">
+          Property detail is bounded. {report.property_detail.omitted_occurrences.toLocaleString()}{' '}
+          property observations were omitted. These are retained buckets, not the top values. Goals
+          and funnels still use all nonconflicting observed events.
+        </p>
+      ) : null}
       {report.values.map((row) => (
         <p key={row.name} className="break-all text-xs">
           {row.name}: {row.occurrences.toLocaleString()} occurrences · value{' '}
@@ -396,6 +419,7 @@ function ScopedSavedSegments({
   ownerToken: string;
   onApply: (filters: NonNullable<AnalysisQuery['filters']>) => void;
 }) {
+  const readonly = useWorkspaceScope().role === 'viewer';
   const [open, setOpen] = useState(false);
   const [records, setRecords] = useState<{ key: string; rows: AnalysisRecord[] } | null>(null);
   const [name, setName] = useState('');
@@ -411,7 +435,9 @@ function ScopedSavedSegments({
     if (!open) return;
     const controller = new AbortController();
     setError('');
-    void ownerFetch(`/v1/analytics/definitions?${scope}`, ownerToken, { signal: controller.signal })
+    void ownerFetch(apiUrl(`/v1/analytics/definitions?${scope}`), ownerToken, {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         if (!response.ok) throw new Error('Saved segments could not load.');
         const result = AnalysisRecords.parse(await response.json());
@@ -434,7 +460,7 @@ function ScopedSavedSegments({
     setError('');
     try {
       const response = await ownerFetch(
-        `/v1/analytics/definitions${id ? `/${encodeURIComponent(id)}` : ''}?${scope}`,
+        apiUrl(`/v1/analytics/definitions${id ? `/${encodeURIComponent(id)}` : ''}?${scope}`),
         ownerToken,
         {
           method: id ? 'DELETE' : 'POST',
@@ -482,7 +508,7 @@ function ScopedSavedSegments({
                 <Button
                   variant="ghost"
                   size="sm"
-                  disabled={busy}
+                  disabled={busy || readonly}
                   onClick={() => void mutate(row.id)}
                   aria-label={`Delete segment ${row.definition.name}`}
                 >
@@ -509,7 +535,7 @@ function ScopedSavedSegments({
                 onChange={(event) => setName(event.target.value)}
                 className="h-9 min-w-0 rounded-md border bg-background px-3 text-sm"
               />
-              <Button type="submit" variant="outline" size="sm" disabled={busy}>
+              <Button type="submit" variant="outline" size="sm" disabled={busy || readonly}>
                 save segment
               </Button>
             </form>

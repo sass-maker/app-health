@@ -86,10 +86,7 @@ async function reportAllowed(
   repos: AppHealthRepositories,
   env: PaymentEnvironment,
 ) {
-  if (
-    (owner.appId && owner.appId !== query.app_id) ||
-    (owner.appIds && !owner.appIds.includes(query.app_id))
-  )
+  if (owner.appId !== undefined || (owner.appIds && !owner.appIds.includes(query.app_id)))
     return false;
   if ((await repos.environments.getEnvironment(query.environment_id))?.app_id !== query.app_id)
     return false;

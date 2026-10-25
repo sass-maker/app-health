@@ -204,8 +204,12 @@ export function ConversionEditor({
     try {
       await onSave(parsed.data);
       if (!initial) setName('');
-    } catch {
-      setError('Could not save this definition. Retry without changing the form.');
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? `${cause.message} Retry without changing the form.`
+          : 'Could not save this definition. Retry without changing the form.',
+      );
     }
   }
   return (

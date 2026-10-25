@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { RevenueReportV1 } from '@app-health/contracts';
-import { ownerFetch } from './lib/owner-fetch.js';
+import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
 
 export type RevenueScope = {
   app_id: string;
@@ -43,7 +43,9 @@ export function useRevenue(
     });
     setLoading(true);
     setError('');
-    void ownerFetch(`/v1/analytics/revenue?${params}`, ownerToken, { signal: controller.signal })
+    void ownerFetch(apiUrl(`/v1/analytics/revenue?${params}`), ownerToken, {
+      signal: controller.signal,
+    })
       .then(async (response) => {
         if (!response.ok)
           throw new Error('Recorded revenue could not load. Retry or choose a shorter period.');

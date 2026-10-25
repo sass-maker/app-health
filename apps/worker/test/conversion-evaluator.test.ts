@@ -84,7 +84,11 @@ it('deduplicates event UUIDs, rejects conflicting facts and excludes other envir
     batch([event('pageview', '/', 999), event('pageview', '/', 10000)]),
   ]);
   expect(result).toMatchObject({ events: 1, sessions: 1, visitors: 1, complete: false });
-  expect(() => report([source, batch([{ ...first, path: '/changed' }])])).toThrow('Conflicting');
+  expect(report([source, batch([{ ...first, path: '/changed' }]), batch([first])])).toMatchObject({
+    events: 1,
+    conflicting_events: 1,
+    complete: false,
+  });
 });
 it('computes unique visitor goals with strict property predicates, values and missing identity separately', () => {
   const goal = definition({
@@ -261,4 +265,25 @@ it('reports typed property breakdowns and event values without merging scalar ty
     { value: '1', count: 1 },
   ]);
   expect(report(input.batches).properties).toEqual([]);
+});
+
+it('bounds property detail without withholding goals or funnels and discloses omitted observations', () => {
+  const goal = definition({ kind: 'goal', name: 'All purchases', step: action('purchase') });
+  const records = Array.from({ length: 101 }, (_, index) =>
+    event('event', 'purchase', 2000 + index, { properties: { item: String(index) } }),
+  );
+  const result = evaluateConversions({
+    batches: [batch(records)],
+    definitions: [goal],
+    query: { ...query, event: 'purchase' },
+    from: 1000,
+    to: 10000,
+    source: 'archive',
+    complete: false,
+    coverage_note: 'Observed',
+  });
+  expect(result.goals[0].occurrences).toBe(101);
+  expect(result.events).toBe(101);
+  expect(result.properties[0].values).toHaveLength(100);
+  expect(result.property_detail).toEqual({ truncated: true, omitted_occurrences: 1 });
 });

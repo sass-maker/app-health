@@ -1,4 +1,8 @@
 import { readEndpointBuckets } from './endpoint-read.js';
+import { ownerRouteAllowed } from './access-policy.js';
+import { apiTokenIdentity } from './workspace-access.js';
+import { handleWorkspaceAccess } from './workspace-routes.js';
+import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
 import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
 import { D1EndpointWriter } from './endpoint-durable.js';
@@ -584,7 +588,21 @@ async function handleAppsRoute(
       ? { apps: options.preloadedApps }
       : await service.listApps(owner.appId);
     if (options?.timings) options.timings.routeReadMs = performance.now() - routeReadStarted;
-    return json(200, ListAppsResponseV1.parse(listed), true);
+    const projected = owner.apiScopes
+      ? {
+          apps: listed.apps
+            .filter((row) => owner.apiScopes!.some((scope) => scope.app_id === row.app.id))
+            .map((row) => ({
+              ...row,
+              environments: row.environments.filter((environment) =>
+                owner.apiScopes!.some(
+                  (scope) => scope.app_id === row.app.id && scope.environment_id === environment.id,
+                ),
+              ),
+            })),
+        }
+      : listed;
+    return json(200, ListAppsResponseV1.parse(projected), true);
   }
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   if (owner.appId) return productScopeForbidden();
@@ -969,6 +987,12 @@ async function handleOwnerRoutes(
     preloadedCapabilitySetup?: import('./repository.js').CapabilitySetup | null;
   },
 ): Promise<Response> {
+  if (!ownerRouteAllowed(request, owner))
+    return json(403, { error: 'Credential or workspace role does not permit this route' }, true);
+  if (url.pathname === '/v1/integration/skill' && owner.authKind === 'api-token')
+    return new Response(integrationSkill(owner, url.origin), {
+      headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
+    });
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const paymentResponse = await handlePaymentOwner(request, env, owner, bundle.repos, bundle.local);
   if (paymentResponse) return paymentResponse;
@@ -1003,7 +1027,17 @@ async function handleOwnerRoutes(
     options?.timings,
     options?.preloadedCapabilitySetup,
   );
-  if (projectResponse) return projectResponse;
+  if (projectResponse) {
+    if (
+      owner.workspaceRole === 'viewer' &&
+      url.pathname === '/v1/capabilities' &&
+      projectResponse.ok
+    ) {
+      const body = (await projectResponse.json()) as Record<string, unknown>;
+      return json(200, { ...body, private_key: null }, true);
+    }
+    return projectResponse;
+  }
   const browserResponse = await handleBrowserOwner(
     request,
     env,
@@ -1094,27 +1128,10 @@ async function handleAccountOwner(
   if (!accountMutationAllowed(request))
     return json(403, { error: 'same-origin request required' }, true);
   const path = new URL(request.url).pathname;
-  const measureOwnerRead =
-    request.method === 'GET' &&
-    [
-      '/v1/apps',
-      '/v1/capabilities',
-      '/v1/endpoints',
-      '/v1/installation/status',
-      '/v1/analytics/report',
-      '/v1/reports/daily-engagement',
-      '/v1/reports/portfolio-briefing',
-      '/v1/reports/speed',
-      '/v1/workspace/alerts',
-    ].includes(path);
-  const timings: OwnerRequestTimings | undefined = measureOwnerRead ? {} : undefined;
+  const timings = accountReadTimings(request, path);
   const ownerHandlerStarted = timings ? performance.now() : undefined;
   const includeApps = request.method === 'GET' && path === '/v1/apps';
   const capabilityScope = requestedCapabilityScope(request, path, url);
-  const requestedEndpointAppId =
-    request.method === 'GET' && path === '/v1/endpoints'
-      ? url.searchParams.get('app_id') || undefined
-      : undefined;
   const account = await accountIdentity(
     request,
     env,
@@ -1126,11 +1143,20 @@ async function handleAccountOwner(
     timings,
     includeApps,
     capabilityScope,
-    requestedEndpointAppId,
+    endpointAppScope(request, path, url),
   );
   if (!account || !env.DB) return json(401, { error: 'sign in required' }, true);
   if (url.pathname === '/v1/account' && request.method === 'GET')
-    return json(200, { user: { name: account.owner.label }, workspace: account.workspace }, true);
+    return json(
+      200,
+      {
+        user: { name: account.owner.label },
+        workspace: { ...account.workspace, role: account.owner.workspaceRole },
+      },
+      true,
+    );
+  const access = await handleWorkspaceAccess(request, env.DB, account.owner);
+  if (access) return completeWorkspaceAccess(access, request, env, account.workspace.id, path);
   const response = await handleOwnerRoutes(
     request,
     workspaceBundle(bundle, env.DB, account.workspace.id),
@@ -1141,12 +1167,61 @@ async function handleAccountOwner(
       ctx,
       timings,
       ...(includeApps ? { preloadedApps: account.apps ?? [] } : {}),
-      ...(capabilityScope ? { preloadedCapabilitySetup: account.capabilitySetup ?? null } : {}),
+      ...preloadedAccountCapability(account, capabilityScope),
     },
   );
   if (timings && ownerHandlerStarted !== undefined)
     timings.ownerHandlerTotalMs = performance.now() - ownerHandlerStarted;
+  if (path === '/v1/apps')
+    response.headers.set('x-app-health-workspace-role', account.owner.workspaceRole ?? 'owner');
   return withOwnerServerTiming(response, timings);
+}
+
+function accountReadTimings(request: Request, path: string): OwnerRequestTimings | undefined {
+  return request.method === 'GET' &&
+    [
+      '/v1/apps',
+      '/v1/capabilities',
+      '/v1/endpoints',
+      '/v1/installation/status',
+      '/v1/analytics/report',
+      '/v1/reports/daily-engagement',
+      '/v1/reports/portfolio-briefing',
+      '/v1/reports/speed',
+      '/v1/workspace/alerts',
+    ].includes(path)
+    ? {}
+    : undefined;
+}
+function endpointAppScope(request: Request, path: string, url: URL) {
+  return request.method === 'GET' && path === '/v1/endpoints'
+    ? url.searchParams.get('app_id') || undefined
+    : undefined;
+}
+function preloadedAccountCapability(
+  account: NonNullable<Awaited<ReturnType<typeof accountIdentity>>>,
+  scope: ReturnType<typeof requestedCapabilityScope>,
+) {
+  return scope && 'capabilitySetup' in account
+    ? { preloadedCapabilitySetup: account.capabilitySetup ?? null }
+    : {};
+}
+
+async function completeWorkspaceAccess(
+  access: Response,
+  request: Request,
+  env: Env,
+  workspaceId: string,
+  path: string,
+) {
+  if (access.ok && request.method === 'DELETE' && path.startsWith('/v1/workspace/members/')) {
+    try {
+      await env.WORKSPACE_PRESENCE?.getByName(workspaceId).revokeViewer?.(path.split('/').at(-1)!);
+    } catch {
+      /* The existing authentication lease closes remaining sockets within sixty seconds. */
+    }
+  }
+  return access;
 }
 
 function requestedCapabilityScope(request: Request, path: string, url: URL) {
@@ -1175,6 +1250,20 @@ async function handleBearerOwner(
   bundle: AdapterBundle,
   ctx?: WorkerContext,
 ): Promise<Response> {
+  const raw = extractBearerKey(request);
+  if (raw.startsWith('aha_')) {
+    const tokenOwner = env.DB ? await apiTokenIdentity(env.DB, raw) : null;
+    if (!tokenOwner)
+      return json(401, { error: 'Invalid, expired or revoked workspace API token' }, true);
+    return handleOwnerRoutes(
+      request,
+      workspaceBundle(bundle, env.DB!, tokenOwner.workspaceId!),
+      tokenOwner,
+      url,
+      env,
+      { ctx },
+    );
+  }
   const owner = await bundle.identity.resolve(request);
   if (!owner) return json(403, { error: 'owner secret required' }, true);
   if (owner.appId || !env.DB) return handleOwnerRoutes(request, bundle, owner, url, env, { ctx });
@@ -1251,6 +1340,29 @@ async function compactEndpointHistoryIfEnabled(env: Env): Promise<void> {
   }
 }
 
+async function handleMcpRequest(
+  request: Request,
+  env: Env,
+  bundle: AdapterBundle,
+  ctx?: WorkerContext,
+) {
+  const url = new URL(request.url);
+  if (request.headers.has('origin') && request.headers.get('origin') !== url.origin)
+    return json(403, { error: 'Origin forbidden' }, true);
+  const owner = env.DB ? await apiTokenIdentity(env.DB, extractBearerKey(request)) : null;
+  if (!owner) return json(401, { error: 'Workspace API token required' }, true);
+  return handleAnalyticsMcp(request, owner, (toolRequest, identity) =>
+    handleOwnerRoutes(
+      toolRequest,
+      workspaceBundle(bundle, env.DB!, identity.workspaceId!),
+      identity,
+      new URL(toolRequest.url),
+      env,
+      { ctx },
+    ),
+  );
+}
+
 const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1268,6 +1380,7 @@ const unmonitoredWorker = {
     if (ingestHostResponse) return ingestHostResponse;
 
     if (!hostAllowed(url, bundle, env, 'owner')) return json(404, { error: 'not found' });
+    if (url.pathname === '/mcp') return handleMcpRequest(request, env, bundle, ctx);
     const sharedResponse = await handlePublicAnalytics(request, env, bundle.repos, bundle.local);
     if (sharedResponse) return sharedResponse;
     if (!url.pathname.startsWith('/v1/')) {

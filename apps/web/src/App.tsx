@@ -1,3 +1,5 @@
+import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
+import { useWorkspaceScope, workspaceScope, selectWorkspace } from './lib/workspace-scope.js';
 import { DataTable, DataTableSkeleton, type DataColumn } from './components/ResourceTable.js';
 import { FilterBar } from '@saas-maker/ui/blocks/filter-bar';
 import { AnalyticsCacheProvider } from './AnalyticsCache.js';
@@ -114,7 +116,8 @@ import { ProjectsView } from './ProjectsView.js';
 
 const INGEST_ORIGIN =
   (import.meta.env.VITE_APP_HEALTH_INGEST_ORIGIN as string | undefined) ?? window.location.origin;
-const STORAGE_KEY = 'app-health-v0-project';
+const projectStorageKey = () =>
+  `app-health-v0-project${workspaceScope().id ? ':' + workspaceScope().id : ''}`;
 
 type SortKey = 'health' | 'requests' | 'error_rate' | 'p95' | 'size' | 'last_seen';
 type SortDirection = 'asc' | 'desc';
@@ -237,7 +240,7 @@ function useEnvironmentCapabilities(project: SavedProject, ownerToken: string) {
 
 function readProject(): SavedProject | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(projectStorageKey());
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<SavedProject>;
     if (!value.appId || !value.environmentId || !value.name || !value.environment) return null;
@@ -2782,6 +2785,7 @@ interface ProjectSettingsProps {
 
 const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
   const { project, projects, ownerToken, controller, actions } = props;
+  const scope = useWorkspaceScope();
   return (
     <div className="space-y-5">
       <Alert>
@@ -2793,35 +2797,42 @@ const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
           settings on this page apply only to the selected environment.
         </AlertDescription>
       </Alert>
-      <CapabilitySettings controller={controller} onOpen={actions.onOpen} />
-      <div className="grid gap-5 xl:grid-cols-2">
-        <EnvironmentManager
-          project={project}
-          projects={projects}
-          ownerToken={ownerToken}
-          onCreated={actions.onEnvironmentCreated}
-        />
-        <PrivateKeyManager project={project} ownerToken={ownerToken} controller={controller} />
-      </div>
-      <AnalyticsSharing
-        key={`${project.appId}/${project.environmentId}`}
-        project={project}
-        ownerToken={ownerToken}
-      />
-      <NativeKeys
-        key={`native/${project.appId}/${project.environmentId}/${ownerToken}`}
-        project={project}
-        ownerToken={ownerToken}
-        ingestOrigin={INGEST_ORIGIN}
-      />
-      <PublicKeysPanel
-        project={project}
-        ownerToken={ownerToken}
-        installMode={true}
-        eyebrow="public environment keys"
-        title="browser analytics and logs"
-        purpose="combined"
-      />
+      <WorkspacePanel ownerToken={ownerToken} project={project} />
+      {scope.role !== 'viewer' ? (
+        <>
+          <CapabilitySettings controller={controller} onOpen={actions.onOpen} />
+          <div className="grid gap-5 xl:grid-cols-2">
+            <EnvironmentManager
+              project={project}
+              projects={projects}
+              ownerToken={ownerToken}
+              onCreated={actions.onEnvironmentCreated}
+            />
+            <PrivateKeyManager project={project} ownerToken={ownerToken} controller={controller} />
+          </div>
+          <AnalyticsSharing
+            key={`${project.appId}/${project.environmentId}`}
+            project={project}
+            ownerToken={ownerToken}
+          />
+          <NativeKeys
+            key={`native/${project.appId}/${project.environmentId}/${ownerToken}`}
+            project={project}
+            ownerToken={ownerToken}
+            ingestOrigin={INGEST_ORIGIN}
+          />
+          <PublicKeysPanel
+            project={project}
+            ownerToken={ownerToken}
+            installMode={true}
+            eyebrow="public environment keys"
+            title="browser analytics and logs"
+            purpose="combined"
+          />
+        </>
+      ) : (
+        <p className="text-sm text-muted-foreground">You have read-only workspace access.</p>
+      )}
     </div>
   );
 };
@@ -3527,7 +3538,12 @@ function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
           <AlertDescription>{props.selectionError}</AlertDescription>
         </Alert>
       ) : null}
-      <Setup ownerToken={props.ownerToken} onCreated={props.handleCreated} />
+      <div className="mx-auto max-w-6xl px-4 py-6">
+        <WorkspacePanel ownerToken={props.ownerToken} />
+      </div>
+      {workspaceScope().role !== 'viewer' ? (
+        <Setup ownerToken={props.ownerToken} onCreated={props.handleCreated} />
+      ) : null}
     </div>
   );
 }
@@ -3590,7 +3606,7 @@ function workspaceEntry(
   return <OwnerUnlock onUnlock={onUnlock} googleEnabled={bootstrap.result?.google ?? false} />;
 }
 
-export function App(): ReactElement {
+function AppSession(): ReactElement {
   const bootstrap = useAccountBootstrap();
   const bootstrapApplied = useRef(false);
   const [accountSession, setAccountSession] = useState(false);
@@ -3657,7 +3673,7 @@ export function App(): ReactElement {
             selected.appId !== project.appId ||
             selected.environmentId !== project.environmentId)
         ) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(selected));
+          localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
           setProject(selected);
           setCreated(null);
         }
@@ -3720,7 +3736,7 @@ export function App(): ReactElement {
   }, [bootstrap.result]);
 
   function selectProject(value: SavedProject, replaceHistory = false): void {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(projectStorageKey(), JSON.stringify(value));
     setProject(value);
     setRequestedProject({ appId: value.appId, environmentId: value.environmentId });
     setStrictRequestedProject(false);
@@ -3782,7 +3798,7 @@ export function App(): ReactElement {
   }
 
   function reset(replaceHistory = false): void {
-    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(projectStorageKey());
     setCreated(null);
     setProject(null);
     setRequestedProject(null);
@@ -3801,11 +3817,13 @@ export function App(): ReactElement {
         await requestSignOut();
         setAccountSession(false);
         reset();
+        selectWorkspace('');
       } catch {
         setSessionError('could not sign out. please try again.');
         return;
       }
     }
+    if (!accountSession) selectWorkspace('');
     if (accountSession || !import.meta.env.DEV) setOwnerToken(null);
     setProjects([]);
     setCreated(null);
@@ -3879,6 +3897,23 @@ export function App(): ReactElement {
           onEnvironmentCreated: handleEnvironmentCreated,
         }}
       />
+    </>
+  );
+}
+
+export function App(): ReactElement {
+  const scope = useWorkspaceScope();
+  return (
+    <>
+      <PendingInvitation />
+      {scope.id ? (
+        <div className="border-b bg-muted/30 px-4 py-2 text-xs">
+          <button type="button" className="underline" onClick={() => selectWorkspace('')}>
+            return to personal workspace
+          </button>
+        </div>
+      ) : null}
+      <AppSession key={scope.epoch} />
     </>
   );
 }

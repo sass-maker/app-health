@@ -113,6 +113,8 @@ export const AnalysisReport = z
     sessions: count,
     visitors: count,
     unidentified_sessions: count,
+    conflicting_events: count.optional(),
+    property_detail: z.object({ truncated: z.boolean(), omitted_occurrences: count }).optional(),
     values: z.array(z.object({ name: z.string(), occurrences: count, value: z.number().finite() })),
     properties: z.array(
       z.object({ key: z.string(), values: z.array(z.object({ value: scalar, count })) }),

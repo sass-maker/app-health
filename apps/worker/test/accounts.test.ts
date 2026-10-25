@@ -41,12 +41,19 @@ describe('Google account boundary with real D1 SQL', () => {
       '0013_archive_projects.sql',
       '0014_endpoint_rollups.sql',
       '0015_response_payload_bytes.sql',
+      '0016_workspace_membership.sql',
+      '0030_analytics_definitions.sql',
+      '0031_payment_ledger.sql',
+      '0032_workspace_access.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
-      for (const statement of sql
-        .replace(/--[^\n]*/g, '')
-        .split(';')
-        .filter((s) => s.trim()))
+      const cleaned = sql.replace(/--[^\n]*/g, '').trim();
+      const statements = ['0030_analytics_definitions.sql', '0031_payment_ledger.sql'].includes(
+        file,
+      )
+        ? cleaned.split(/\n(?=CREATE )/)
+        : cleaned.split(';');
+      for (const statement of statements.filter((value) => value.trim()))
         await db.prepare(statement).run();
     }
     const catalogMigration = await readFile(
@@ -1397,6 +1404,184 @@ describe('Google account boundary with real D1 SQL', () => {
         })
       ).status,
     ).toBe(403);
+  });
+
+  it('verifies selected workspace memberships and viewer permissions without changing personal scope', async () => {
+    const account = (await (await request('/v1/account', aliceCookie)).json()) as {
+      workspace: { id: string };
+    };
+    const bob = (await createAccountAuth(env)!.api.getSession({
+      headers: new Headers({ cookie: bobCookie }),
+    }))!;
+    await env
+      .DB!.prepare(
+        "INSERT INTO workspace_members(workspace_id, user_id, role, created_at) VALUES (?, ?, 'viewer', ?)",
+      )
+      .bind(account.workspace.id, bob.user.id, Date.now())
+      .run();
+    const selected = (
+      path: string,
+      method = 'GET',
+      body?: unknown,
+      workspace = account.workspace.id,
+    ) =>
+      worker.fetch(
+        new Request('https://dashboard.example.com' + path, {
+          method,
+          headers: {
+            cookie: bobCookie,
+            'x-app-health-workspace': workspace,
+            ...(method === 'GET'
+              ? {}
+              : { origin: 'https://dashboard.example.com', 'content-type': 'application/json' }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+        env,
+      );
+    const scoped = await selected('/v1/apps');
+    expect(scoped.status).toBe(200);
+    expect(scoped.headers.get('x-app-health-workspace-role')).toBe('viewer');
+    expect((await scoped.json()) as unknown).toMatchObject({
+      apps: expect.arrayContaining([
+        expect.objectContaining({ app: expect.objectContaining({ id: aliceApp.app.id }) }),
+      ]),
+    });
+    for (const path of [
+      '/v1/workspace/members',
+      '/v1/workspace/api-tokens',
+      '/v1/public-keys?app_id=' + aliceApp.app.id,
+      '/v1/native-keys?app_id=' + aliceApp.app.id,
+    ])
+      expect((await selected(path)).status).toBe(403);
+    expect(
+      (await selected('/v1/apps', 'POST', { name: 'Forbidden', environment: 'production' })).status,
+    ).toBe(403);
+    expect((await selected('/v1/apps', 'GET', undefined, 'ws-forged')).status).toBe(401);
+    const live = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/analytics/live?workspace_id=ws-forged', {
+        headers: {
+          cookie: bobCookie,
+          origin: 'https://dashboard.example.com',
+          upgrade: 'websocket',
+        },
+      }),
+      env,
+    );
+    expect(live.status).toBe(401);
+    await env
+      .DB!.prepare('DELETE FROM workspace_members WHERE workspace_id = ? AND user_id = ?')
+      .bind(account.workspace.id, bob.user.id)
+      .run();
+    expect((await selected('/v1/apps')).status).toBe(401);
+    expect((await request('/v1/apps', bobCookie)).status).toBe(200);
+  });
+
+  it('routes scoped API tokens and MCP through the production owner boundary', async () => {
+    const mint = await request('/v1/workspace/api-tokens', aliceCookie, {
+      name: 'Scoped assistant',
+      permission: 'read',
+      scopes: [{ app_id: aliceApp.app.id, environment_id: aliceApp.environment.id }],
+    });
+    expect(mint.status).toBe(201);
+    const token = (await mint.json()) as { id: string; token: string };
+    const api = (path: string, method = 'GET', body?: unknown) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${path}`, {
+          method,
+          headers: {
+            authorization: `Bearer ${token.token}`,
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+        env,
+      );
+    const inventory = await api('/v1/apps');
+    expect(inventory.status).toBe(200);
+    const text = await inventory.text();
+    expect(text).toContain(aliceApp.app.id);
+    for (const secret of [
+      '/v1/public-keys',
+      '/v1/workspace/members',
+      '/v1/workspace/api-tokens',
+      '/v1/logs',
+    ])
+      expect((await api(secret)).status).toBe(403);
+    expect(
+      (await api(`/v1/analytics/definitions?app_id=${aliceApp.app.id}&environment_id=forged`))
+        .status,
+    ).toBe(403);
+    expect(
+      (
+        await api(
+          `/v1/analytics/definitions?app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`,
+          'POST',
+          {},
+        )
+      ).status,
+    ).toBe(403);
+    const mcp = await api('/mcp', 'POST', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'sites', arguments: {} },
+    });
+    expect(mcp.status).toBe(200);
+    expect(JSON.stringify(await mcp.json())).toContain(aliceApp.app.id);
+    expect(
+      (
+        await api('/mcp', 'POST', {
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: { name: 'save_definition', arguments: {} },
+        })
+      ).status,
+    ).toBe(200);
+    const scoped = `app_id=${aliceApp.app.id}&environment_id=${aliceApp.environment.id}`;
+    expect((await api(`/v1/analytics/revenue?${scoped}&from=0&to=1000`)).status).toBe(200);
+    expect((await api(`/v1/analytics/definitions?${scoped}`)).status).toBe(200);
+    const manageResponse = await request('/v1/workspace/api-tokens', aliceCookie, {
+      name: 'Definition editor',
+      permission: 'manage',
+      scopes: [{ app_id: aliceApp.app.id, environment_id: aliceApp.environment.id }],
+    });
+    const manager = (await manageResponse.json()) as { token: string };
+    const createDefinition = await worker.fetch(
+      new Request(`https://dashboard.example.com/v1/analytics/definitions?${scoped}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${manager.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'goal',
+          name: 'Signup',
+          step: { type: 'event', target: 'signup' },
+        }),
+      }),
+      env,
+    );
+    expect(createDefinition.status).toBe(201);
+    const productKey = await new D1ControlPlane(env.DB!)
+      .asRepositories({} as never)
+      .keys.createProductKey(aliceApp.app.id, Date.now());
+    const financialRead = await worker.fetch(
+      new Request(`https://dashboard.example.com/v1/analytics/revenue?${scoped}&from=0&to=1000`, {
+        headers: { authorization: `Bearer ${productKey.rawKey}` },
+      }),
+      env,
+    );
+    expect(financialRead.status).toBe(403);
+    const revoke = await worker.fetch(
+      new Request(`https://dashboard.example.com/v1/workspace/api-tokens/${token.id}`, {
+        method: 'DELETE',
+        headers: { cookie: aliceCookie, origin: 'https://dashboard.example.com' },
+      }),
+      env,
+    );
+    expect(revoke.status).toBe(200);
+    expect((await api('/v1/apps')).status).toBe(401);
+    expect((await api('/mcp', 'POST', { jsonrpc: '2.0', id: 3, method: 'ping' })).status).toBe(401);
   });
 
   it('revokes the actual session on sign-out', async () => {

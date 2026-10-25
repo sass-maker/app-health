@@ -595,12 +595,12 @@ async function browserVisitorCoverageOwnerRoute(
   return handleBrowserVisitorCoverageOperator(request, env, owner.workspaceId!);
 }
 
-async function browserLiveRoute(request: Request, presence: BrowserPresence) {
+async function browserLiveRoute(request: Request, presence: BrowserPresence, owner: OwnerIdentity) {
   if (request.headers.get('origin') !== new URL(request.url).origin)
     return json(403, { error: 'same-origin stream required' });
   return presence.fetch(
     new Request('https://presence/live', {
-      headers: { upgrade: request.headers.get('upgrade') ?? '' },
+      headers: { upgrade: request.headers.get('upgrade') ?? '', 'x-auth-user': owner.id },
     }),
   );
 }
@@ -627,7 +627,7 @@ export async function handleBrowserOwner(
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
   const presence = env.WORKSPACE_PRESENCE.getByName(workspace);
-  if (path.endsWith('/live')) return browserLiveRoute(request, presence);
+  if (path.endsWith('/live')) return browserLiveRoute(request, presence, owner);
   return workspaceSummary(workspace, env, presence, owner.appIds ?? []);
 }
 

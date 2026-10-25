@@ -78,3 +78,26 @@ it('rejects invalid JSON/definitions, oversized bodies, unsupported methods and 
   expect((await f.call(`/v1/analytics/conversions?${f.scope}&range=all`))!.status).toBe(400);
   expect((await f.call(path, 'GET', undefined, f.owner, false))!.status).toBe(503);
 });
+
+it('reports the saved-definition limit explicitly without losing existing definitions', async () => {
+  const f = await fixture();
+  const path = `/v1/analytics/definitions?${f.scope}`;
+  for (let index = 0; index < 100; index++)
+    expect(
+      (await f.call(path, 'POST', {
+        kind: 'goal',
+        name: `Goal ${index}`,
+        step: { type: 'page', target: '/' },
+      }))!.status,
+    ).toBe(201);
+  const rejected = (await f.call(path, 'POST', {
+    kind: 'goal',
+    name: 'Overflow',
+    step: { type: 'page', target: '/' },
+  }))!;
+  expect(rejected.status).toBe(409);
+  expect(await rejected.json()).toMatchObject({ error: expect.stringContaining('100') });
+  expect(((await (await f.call(path))!.json()) as { records: unknown[] }).records).toHaveLength(
+    100,
+  );
+});

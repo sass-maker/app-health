@@ -1,10 +1,16 @@
+import { currencyMinorUnits } from '@app-health/contracts';
 /** Format integer minor units without losing cents at the safe-integer boundary. */
 export function formatPaymentMinor(amount: number, currency: string): string {
   if (!Number.isSafeInteger(amount)) return '—';
-  if (!Intl.supportedValuesOf('currency').includes(currency))
+  if (!Object.hasOwn(currencyMinorUnits, currency))
     return `${amount.toLocaleString('en-US')} minor ${currency}`;
-  const formatter = new Intl.NumberFormat('en-US', { style: 'currency', currency });
-  const digits = formatter.resolvedOptions().maximumFractionDigits ?? 2;
+  const digits = currencyMinorUnits[currency];
+  const formatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
   const scale = 10n ** BigInt(digits);
   const absolute = BigInt(amount < 0 ? -amount : amount);
   const whole = absolute / scale;

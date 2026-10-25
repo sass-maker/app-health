@@ -123,6 +123,11 @@ async function analysisRequest(
 }
 
 function analysisError(error: unknown) {
+  if (error instanceof Error && /[Aa]nalysis definition limit/.test(error.message))
+    return json(409, {
+      error:
+        'This environment has reached its limit of 100 saved goals, funnels and segments. Delete an unused definition before creating another.',
+    });
   if (error instanceof SyntaxError) return json(400, { error: 'Invalid JSON' });
   if (error instanceof Error && error.message === 'payload too large')
     return json(413, { error: 'Analysis definition exceeds 16 KiB' });

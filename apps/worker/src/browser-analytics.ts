@@ -85,6 +85,7 @@ export interface BrowserBindings {
   WORKSPACE_PRESENCE?: {
     getByName(name: string): {
       heartbeat(appId: string, environmentId: string, session: string): Promise<void>;
+      revokeViewer?(user: string): Promise<void>;
       snapshot(): Promise<PresenceSnapshot>;
       publicSnapshot?(
         appId: string,

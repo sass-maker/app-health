@@ -1,3 +1,4 @@
+import { ownerFetch } from './lib/owner-fetch.js';
 import { useEffect, useState, type ReactElement } from 'react';
 import type { LogLevel, LogSource } from '@app-health/contracts';
 import {
@@ -239,7 +240,7 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
         setLoading(false);
       }
     }, ALERT_FEED_TIMEOUT_MS);
-    void fetch('/v1/workspace/alerts', {
+    void ownerFetch('/v1/workspace/alerts', ownerToken, {
       signal: controller.signal,
       headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
     })

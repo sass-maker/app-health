@@ -20,26 +20,34 @@ function factsInWindow(
   query: AnalysisQuery,
   from: number,
   to: number,
-): Fact[] {
+): { facts: Fact[]; conflicts: number } {
   const facts = new Map<string, Fact>();
+  const conflicts = new Set<string>();
   for (const batch of batches) {
     if (batch.app_id !== query.app_id || batch.environment_id !== query.environment_id) continue;
     for (const event of batch.events) {
       if (event.timestamp < from || event.timestamp >= to) continue;
       const fact = { event, batch };
       const key = keyOf(fact);
+      if (conflicts.has(key)) continue;
       const saved = facts.get(key);
-      if (saved && factSignature(saved) !== factSignature(fact))
-        throw new Error('Conflicting archived event identity');
+      if (saved && factSignature(saved) !== factSignature(fact)) {
+        facts.delete(key);
+        conflicts.add(key);
+        continue;
+      }
       if (!saved) facts.set(key, fact);
-      if (facts.size > 50000)
+      if (facts.size + conflicts.size > 50000)
         throw new Error('Conversion event limit exceeded; choose a shorter period.');
     }
   }
-  return [...facts.values()].sort(
-    (a, b) =>
-      a.event.timestamp - b.event.timestamp || a.event.event_id.localeCompare(b.event.event_id),
-  );
+  return {
+    conflicts: conflicts.size,
+    facts: [...facts.values()].sort(
+      (a, b) =>
+        a.event.timestamp - b.event.timestamp || a.event.event_id.localeCompare(b.event.event_id),
+    ),
+  };
 }
 
 function factDimensions(fact: Fact) {
@@ -209,24 +217,35 @@ function funnelResult(
 }
 
 type PropertyCounts = Map<string, Map<string, { value: string | number | boolean; count: number }>>;
-function addEventProperties(properties: PropertyCounts, event: Fact['event']) {
+function addEventProperties(
+  detail: { counts: PropertyCounts; totalBuckets: number; omitted: number },
+  event: Fact['event'],
+) {
+  const properties = detail.counts;
   for (const [key, value] of Object.entries(event.properties ?? {})) {
     const counts = properties.get(key) ?? new Map();
-    if (!properties.has(key) && properties.size >= 100)
-      throw new Error('Property key limit exceeded; choose a shorter period.');
+    if (!properties.has(key) && properties.size >= 100) {
+      detail.omitted++;
+      continue;
+    }
     const encoded = JSON.stringify(value);
     const existing = counts.get(encoded);
-    if (!existing && counts.size >= 100)
-      throw new Error('Property cardinality limit exceeded; choose a shorter period.');
-    if (!existing && [...properties.values()].reduce((total, rows) => total + rows.size, 0) >= 1000)
-      throw new Error('Property result limit exceeded; choose a shorter period.');
+    if (!existing && counts.size >= 100) {
+      detail.omitted++;
+      continue;
+    }
+    if (!existing && detail.totalBuckets >= 1000) {
+      detail.omitted++;
+      continue;
+    }
+    if (!existing) detail.totalBuckets++;
     counts.set(encoded, { value, count: (existing?.count ?? 0) + 1 });
     properties.set(key, counts);
   }
 }
 function eventDetails(facts: Fact[], eventName: string | undefined) {
   const values = new Map<string, { name: string; occurrences: number; value: number }>();
-  const properties: PropertyCounts = new Map();
+  const detail = { counts: new Map() as PropertyCounts, totalBuckets: 0, omitted: 0 };
   for (const { event } of facts) {
     if (!event.name || (eventName && event.name !== eventName)) continue;
     const row = values.get(event.name) ?? { name: event.name, occurrences: 0, value: 0 };
@@ -234,11 +253,12 @@ function eventDetails(facts: Fact[], eventName: string | undefined) {
     row.value += event.value ?? 0;
     values.set(event.name, row);
     if (!eventName) continue;
-    addEventProperties(properties, event);
+    addEventProperties(detail, event);
   }
   return {
+    property_detail: { truncated: detail.omitted > 0, omitted_occurrences: detail.omitted },
     values: [...values.values()].sort((a, b) => b.occurrences - a.occurrences).slice(0, 100),
-    properties: [...properties]
+    properties: [...detail.counts]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, rows]) => ({
         key,
@@ -258,7 +278,8 @@ export function evaluateConversions(input: {
   complete: boolean;
   coverage_note: string;
 }): AnalysisReport {
-  const all = factsInWindow(input.batches, input.query, input.from, input.to);
+  const observed = factsInWindow(input.batches, input.query, input.from, input.to);
+  const all = observed.facts;
   const facts = all.filter((fact) => segmentMatches(fact, input.query.filters));
   const visitors = new Set(
     facts.flatMap(({ batch }) => (batch.visitor_hash ? [batch.visitor_hash] : [])),
@@ -272,8 +293,11 @@ export function evaluateConversions(input: {
     from: input.from,
     to: input.to,
     source: input.source,
-    complete: input.complete,
-    coverage_note: input.coverage_note,
+    complete: input.complete && observed.conflicts === 0,
+    conflicting_events: observed.conflicts,
+    coverage_note: observed.conflicts
+      ? `${input.coverage_note.slice(0, 390)} ${observed.conflicts} conflicting event identities were excluded entirely. Unaffected observations remain available.`
+      : input.coverage_note,
     events: facts.filter(({ event }) => event.type === 'event').length,
     sessions: groups.size,
     visitors: visitors.size,

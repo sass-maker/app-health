@@ -1,3 +1,4 @@
+import { workspaceScope } from '../src/lib/workspace-scope.js';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -108,6 +109,7 @@ function installFetch(options?: {
   statusInvalid?: boolean;
 }) {
   const publicKeys = [...(options?.publicKeys ?? [])];
+  let signedOut = false;
   let failedWindow = options?.endpointFailWindow ?? null;
   let capabilityRows =
     options?.capabilityRows ??
@@ -195,10 +197,12 @@ function installFetch(options?: {
       );
     }
     if (options?.fail) throw new Error('connection refused');
-    if (url.pathname === '/v1/auth/sign-out')
+    if (url.pathname === '/v1/auth/sign-out') {
+      if (!options?.signOutFail) signedOut = true;
       return new Response('{}', { status: options?.signOutFail ? 503 : 200 });
+    }
     if (url.pathname === '/v1/apps') {
-      if (options?.appsFail) return new Response(null, { status: 403 });
+      if (options?.appsFail || signedOut) return new Response(null, { status: 403 });
       if (init?.method !== 'POST') return Response.json({ apps: options?.apps ?? [] });
       return new Response(
         JSON.stringify({
@@ -502,7 +506,10 @@ describe('App Health V0 UI', () => {
     expect(await screen.findByRole('button', { name: 'back to projects' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'create project' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'back to projects' }));
+    const beforeSignOutEpoch = workspaceScope().epoch;
     fireEvent.click(await screen.findByRole('button', { name: 'sign out' }));
+    await waitFor(() => expect(workspaceScope().epoch).toBeGreaterThan(beforeSignOutEpoch));
+    expect(workspaceScope().id).toBe('');
     expect(await screen.findByRole('button', { name: 'continue with Google' })).toBeTruthy();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(

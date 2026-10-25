@@ -506,8 +506,9 @@ async function fetchPortfolioBriefing(
   try {
     return await Promise.race([
       (async () => {
-        const response = await fetch(
+        const response = await ownerFetch(
           `/v1/reports/portfolio-briefing?date=${encodeURIComponent(date)}&traffic=${traffic}`,
+          ownerToken,
           {
             signal: controller.signal,
             headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
