@@ -53,6 +53,105 @@ const selfBackendKey = 'ahk_local_self_backend_runtime_only';
 const selfBatches = [];
 const selfReceipts = [];
 
+async function verifyPaymentsRuntime(runtime, project, ownerRequest) {
+  const timestamp = Date.now() - 1000;
+  const scope = `app_id=${project.app.id}&environment_id=${project.environment.id}&from=${timestamp - 1000}&to=${timestamp + 10000}`;
+  const input = {
+    schema_version: 1,
+    app_id: project.app.id,
+    environment_id: project.environment.id,
+    namespace: { provider: 'custom', account_id: 'merchant', mode: 'live' },
+    delivery_id: 'original',
+    fact: {
+      kind: 'payment',
+      transaction_id: 'payment',
+      occurred_at: timestamp,
+      amount_minor: 1000,
+      currency: 'USD',
+      attribution: { source: 'Newsletter' },
+    },
+  };
+  const send = (body, headers = {}) =>
+    runtime.dispatchFetch('https://ingest.example.com/v1/payments', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${project.key.key}`, ...headers },
+      body: JSON.stringify(body),
+    });
+  const refund = (id, amount) => ({
+    ...input,
+    delivery_id: id,
+    fact: {
+      kind: 'refund',
+      transaction_id: 'payment',
+      refund_id: id,
+      occurred_at: timestamp,
+      amount_minor: amount,
+      currency: 'USD',
+    },
+  });
+  assert.equal((await send(input, { origin: 'https://dashboard.example.com' })).status, 403);
+  assert.equal((await send(refund('first-refund', 300))).status, 202);
+  const pending = await (await ownerRequest(`/v1/analytics/revenue?${scope}`)).json();
+  assert.equal(pending.totals[0].pending_refunds_minor, 300);
+  assert.equal(pending.totals[0].net_minor, 0);
+  assert.equal((await send(input)).status, 202);
+  assert.equal((await (await send(input)).json()).duplicate, true);
+  assert.equal((await send({ ...input, fact: { ...input.fact, amount_minor: 999 } })).status, 409);
+  const concurrent = await Promise.all([
+    send(refund('concurrent-one', 600)),
+    send(refund('concurrent-two', 600)),
+  ]);
+  assert.deepEqual(concurrent.map((response) => response.status).sort(), [202, 409]);
+  assert.equal(
+    (await send({ ...input, namespace: { ...input.namespace, mode: 'test' } })).status,
+    202,
+  );
+  assert.equal(
+    (
+      await send({
+        ...input,
+        delivery_id: 'yen',
+        fact: { ...input.fact, transaction_id: 'yen', currency: 'JPY', amount_minor: 1200 },
+      })
+    ).status,
+    202,
+  );
+  const response = await ownerRequest(`/v1/analytics/revenue?${scope}&mode=live`);
+  assert.equal(response.status, 200);
+  const report = await response.json();
+  assert.equal(report.source, 'd1');
+  assert.equal(report.totals.length, 2);
+  assert.deepEqual(
+    report.totals.find((row) => row.currency === 'USD'),
+    {
+      provider: 'custom',
+      account_id: 'merchant',
+      mode: 'live',
+      currency: 'USD',
+      gross_minor: 1000,
+      refunds_minor: 900,
+      net_minor: 100,
+      payments: 1,
+      refunds: 2,
+      attributed_payments: 1,
+      pending_refunds: 0,
+      pending_refunds_minor: 0,
+    },
+  );
+  assert.equal(report.totals.find((row) => row.currency === 'JPY').net_minor, 1200);
+  assert.equal(
+    (
+      await ownerRequest(
+        `/v1/analytics/revenue?${scope.replace(project.environment.id, 'foreign')}`,
+      )
+    ).status,
+    403,
+  );
+  log(
+    'Financial runtime: private-key scope, refund-first reconciliation, concurrent refund guards, duplicate retries and separate currency/mode totals verified.',
+  );
+}
+
 function splitMigrationSql(sql) {
   const source = sql.replace(/--[^\n]*/g, '');
   const statements = [];
@@ -72,7 +171,16 @@ function splitMigrationSql(sql) {
 
     const statement = source.slice(start, index).trim();
     if (!trigger && /\bCREATE\s+TRIGGER\b/i.test(statement)) trigger = true;
-    if (trigger && !/\bEND\s*$/i.test(statement)) continue;
+    if (trigger) {
+      const unquoted = statement.replace(/'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`/g, '');
+      const blocks = unquoted.match(/\b(?:BEGIN|CASE|END)\b/gi) ?? [];
+      const depth = blocks.reduce(
+        (value, block) => value + (block.toUpperCase() === 'END' ? -1 : 1),
+        0,
+      );
+      // CASE ... END can end a statement without ending the surrounding trigger.
+      if (depth !== 0 || !/\bEND\s*$/i.test(unquoted)) continue;
+    }
     if (statement) statements.push(statement);
     start = index + 1;
     trigger = false;
@@ -316,6 +424,7 @@ try {
   });
   assert.equal(created.status, 201);
   const project = await created.json();
+  await verifyPaymentsRuntime(mf, project, request);
   const failedCreate = await request('/v1/apps', { name: '', environment: 'production' });
   assert.equal(failedCreate.status, 400);
   const selfLogs = await (await ownerRequest(`/v1/logs?${selfLogScope}`)).json();

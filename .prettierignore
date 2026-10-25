@@ -18,3 +18,4 @@ packages/swift/.swiftpm
 apps/probe/journeys.json
 apps/web/public/footer.css
 apps/web/public/footer.js
+apps/web/public/tracker.js

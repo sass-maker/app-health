@@ -28,9 +28,22 @@ while the document is visible. After it loads, `window.appHealth.track('signup.c
 sends an explicit named analytics event. `page('/pricing')` supports manual
 page views; `diagnostics()` reports acknowledged, dropped, retried, and queued
 events; `stop()` removes the tracker and its history hooks. A TypeScript global
-API declaration is available beside the script. Use the existing
-`createWebLogger` for structured log properties; the lightweight analytics
-contract deliberately accepts names only.
+API declaration is available beside the script. `track(name, properties?, value?)`
+accepts up to 20 flat scalar properties and an optional numeric value. Keys are
+lowercase snake case (40 characters); strings are at most 200 characters and
+numbers are finite within ±1e12. These are explicit owner-authored facts: never
+pass private values. `createWebLogger` remains the separate structured log API.
+
+Optional `data-autotrack`, `data-404`, `data-scroll` and `data-hash` enable outbound
+hosts/known download types, a declared 404, coarse scroll milestones and sanitized
+hash routes respectively. Automatic extras load separately and stop with the tracker.
+Use `data-identity="cookieless"` for memory-only visits, or
+`data-consent="required"` to wait for `appHealth.consent(true)`. Revocation pauses
+collection, clears pending work and removes collection hooks. Only the local
+exclusion preference is read before consent. `ignore()` persists that project’s
+local exclusion; `ignore(false)` undoes it. `checkoutMetadata()` returns only
+explicit sanitized source, entry page and campaign tags; it does not connect a
+payment provider or establish identity attribution.
 
 **Web analytics** is the default dashboard, with active browser sessions, page
 views, trends, top pages, and referral sources. **Events** shows explicitly named
@@ -45,10 +58,12 @@ To publish aggregate live counts on a product website, use
 ### Web vitals
 
 Add `data-vitals` (empty, `"1"`, or `"true"`) to the tracker tag to opt in.
-When its script URL ends in `/tracker.js`, the tracker lazily loads `/vitals.js`
-from the same host (beside `/tracker.js`);
+When its script pathname ends in `/tracker.js`, the tracker lazily loads shared
+`/tracker-extras.js`, which loads `/vitals.js` from the same host;
 `vitals.js` is a separate opt-in static file with no runtime dependencies.
-The tracker gzip budget rises from 3250 to **3400 bytes** for the small loader (about 180 bytes); the vitals code itself stays out of the tracker. Vitals emit one `web.vitals`
+The core tracker keeps its **3400-byte gzip** budget; optional vitals code stays
+separate. A bounded `?v=` release token propagates to optional assets for cache
+separation; it does not provide immutable historical version hosting. Vitals emit one `web.vitals`
 log per document, sent on the first hidden transition or pagehide. Optional
 `data-vitals-sample="0.1"` samples once per document; values must be in (0, 1],
 with missing or invalid values defaulting to 1. Webdriver and documents with
@@ -356,8 +371,14 @@ WebSocket upgrade, same-origin enforcement, and authenticated ownership.
 Browser evidence is in `.fleet/evidence/analytics/`; the populated screenshots
 use actual local collector events from two projects, not fixture metric counts.
 
-Remaining product work in #58 includes richer filtering, a dedicated bot report, funnels,
-revenue/payment attribution, exports/replay, alerting, and full DataFast parity.
+The expansion in #219 adds goals, ordered funnels, saved segments and property
+breakdowns through `/v1/analytics/definitions` and `/v1/analytics/conversions`.
+Conversions are computed over verified observed archive events, not sampled AE
+aggregates. Production reads remain `complete: false`; missing objects, byte/event
+limits, unindexed historical volume and scan deadlines fail closed. The scope/time
+index prunes new unrelated segments; old unindexed segments remain candidates.
+The Events dashboard offers create/edit/delete and explicitly labels coverage.
+Payment ingestion and recorded revenue are described in [payments](payments.md).
 
 ## Source, country, and session reporting
 

@@ -1,8 +1,10 @@
+import { updateWorkspaceRole, workspaceScope } from '../src/lib/workspace-scope.js';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, expect, it, vi } from 'vitest';
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { PortfolioBriefingV1 } from '@app-health/contracts';
 import { DailyEngagement } from '../src/DailyEngagement.js';
 
+beforeEach(() => updateWorkspaceRole('owner', workspaceScope().epoch));
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

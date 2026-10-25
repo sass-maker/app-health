@@ -1,3 +1,8 @@
+import {
+  updateWorkspaceRole,
+  workspaceScope,
+  selectWorkspace,
+} from '../src/lib/workspace-scope.js';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -106,8 +111,10 @@ function installFetch(options?: {
   endpointPending?: boolean;
   endpointFailWindow?: string;
   statusInvalid?: boolean;
+  workspaceRole?: 'owner' | 'editor' | 'viewer';
 }) {
   const publicKeys = [...(options?.publicKeys ?? [])];
+  let signedOut = false;
   let failedWindow = options?.endpointFailWindow ?? null;
   let capabilityRows =
     options?.capabilityRows ??
@@ -195,11 +202,17 @@ function installFetch(options?: {
       );
     }
     if (options?.fail) throw new Error('connection refused');
-    if (url.pathname === '/v1/auth/sign-out')
+    if (url.pathname === '/v1/auth/sign-out') {
+      if (!options?.signOutFail) signedOut = true;
       return new Response('{}', { status: options?.signOutFail ? 503 : 200 });
+    }
     if (url.pathname === '/v1/apps') {
-      if (options?.appsFail) return new Response(null, { status: 403 });
-      if (init?.method !== 'POST') return Response.json({ apps: options?.apps ?? [] });
+      if (options?.appsFail || signedOut) return new Response(null, { status: 403 });
+      if (init?.method !== 'POST')
+        return Response.json(
+          { apps: options?.apps ?? [] },
+          { headers: { 'x-app-health-workspace-role': options?.workspaceRole ?? 'owner' } },
+        );
       return new Response(
         JSON.stringify({
           app: { id: 'app-new', name: 'orders-api', created_at: Date.now() },
@@ -327,6 +340,53 @@ describe('App Health V0 UI', () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
   });
+
+  it.each(['viewer', 'unknown'] as const)(
+    'does not mount key or admin effects for %s deep links',
+    async (role) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+      selectWorkspace('');
+      window.history.replaceState({}, '', '/app#analytics/setup');
+      const mock = installFetch({ workspaceRole: 'viewer' });
+      if (role === 'unknown')
+        vi.stubGlobal(
+          'fetch',
+          vi.fn((input: URL | RequestInfo, init?: RequestInit) =>
+            new URL(String(input), location.origin).pathname === '/v1/apps'
+              ? new Promise<Response>(() => {})
+              : mock(input, init),
+          ),
+        );
+      else updateWorkspaceRole('viewer', workspaceScope().epoch);
+      render(<App />);
+      expect(
+        await screen.findByText('Browser key setup requires confirmed editor or owner access.'),
+      ).toBeVisible();
+      expect(
+        mock.mock.calls.some(
+          ([input]) => new URL(String(input), location.origin).pathname === '/v1/public-keys',
+        ),
+      ).toBe(false);
+      await act(async () => {
+        history.replaceState({}, '', '/app#settings');
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      });
+      expect(await screen.findByRole('heading', { name: 'settings' })).toBeVisible();
+      expect(screen.queryByRole('button', { name: 'connect payment provider' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'create key' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'import fleet catalog' })).toBeNull();
+      expect(
+        mock.mock.calls.some(([input]) =>
+          [
+            '/v1/public-keys',
+            '/v1/payment-connections',
+            '/v1/native-keys',
+            '/v1/analytics/shares',
+          ].includes(new URL(String(input), location.origin).pathname),
+        ),
+      ).toBe(false);
+    },
+  );
 
   it('resolves a valid explicit analytics link without local storage', async () => {
     const apps = [
@@ -502,7 +562,10 @@ describe('App Health V0 UI', () => {
     expect(await screen.findByRole('button', { name: 'back to projects' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'create project' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'back to projects' }));
+    const beforeSignOutEpoch = workspaceScope().epoch;
     fireEvent.click(await screen.findByRole('button', { name: 'sign out' }));
+    await waitFor(() => expect(workspaceScope().epoch).toBeGreaterThan(beforeSignOutEpoch));
+    expect(workspaceScope().id).toBe('');
     expect(await screen.findByRole('button', { name: 'continue with Google' })).toBeTruthy();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
     expect(
@@ -1312,6 +1375,26 @@ describe('Logs view', () => {
     vi.unstubAllGlobals();
   });
 
+  it('explains restricted logs to viewers without issuing a forbidden logs request', async () => {
+    const mock = installFetch({ logRows, workspaceRole: 'viewer' });
+    updateWorkspaceRole('viewer', workspaceScope().epoch);
+    try {
+      render(<App />);
+      await screen.findAllByText('/orders');
+      fireEvent.click(screen.getByRole('tab', { name: 'logs' }));
+      expect(
+        await screen.findByText('Application logs require editor or owner access.'),
+      ).toBeVisible();
+      expect(
+        mock.mock.calls.some(
+          ([input]) => new URL(String(input), location.origin).pathname === '/v1/logs',
+        ),
+      ).toBe(false);
+    } finally {
+      act(() => updateWorkspaceRole('owner', workspaceScope().epoch));
+    }
+  });
+
   it('loads logs only after the owner opens Logs and filters by level and event', async () => {
     const fetchMock = installFetch({ logRows });
     render(<App />);
@@ -1515,6 +1598,8 @@ describe('Logs view', () => {
     expect(await screen.findByText('install product events')).toBeTruthy();
     expect(screen.getByText(/waiting for the first valid product events event/)).toBeTruthy();
     expect(screen.queryByText('install web analytics')).toBeNull();
+    expect(screen.getByRole('button', { name: /^explore revenue$/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /^explore conversions$/ })).toBeVisible();
   });
 });
 

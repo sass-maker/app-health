@@ -21,6 +21,7 @@ function clientSpy() {
   const client: AppHealthClient = {
     record: (event) => events.push(event),
     log: () => {},
+    track: () => {},
     flush,
     close: async () => {},
     diagnostics: () => ({

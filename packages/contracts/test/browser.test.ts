@@ -68,3 +68,30 @@ describe('opt-in browser contract', () => {
     );
   });
 });
+
+it('accepts only bounded flat explicit event properties and finite values', () => {
+  const custom = { ...event, type: 'event', name: 'purchase' };
+  expect(
+    BrowserEventV1.safeParse({
+      ...custom,
+      properties: { plan: 'pro', seats: 4, trial: false },
+      value: -10,
+    }).success,
+  ).toBe(true);
+  for (const extra of [
+    { properties: { nested: {} } },
+    { properties: { missing: null } },
+    { properties: { too_long: 'x'.repeat(201) } },
+    { properties: { 'invalid-key': true } },
+    { properties: { constructor: 'private' } },
+    { properties: { amount: Infinity } },
+    {
+      properties: Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`key_${index}`, 1])),
+    },
+    { value: NaN },
+    { value: 1e12 + 1 },
+  ])
+    expect(BrowserEventV1.safeParse({ ...custom, ...extra }).success).toBe(false);
+  expect(BrowserEventV1.safeParse({ ...event, properties: {} }).success).toBe(false);
+  expect(BrowserEventV1.safeParse({ ...event, value: 1 }).success).toBe(false);
+});

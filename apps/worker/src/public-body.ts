@@ -1,4 +1,7 @@
-export async function readPublicJson(request: Request, limit: number): Promise<unknown> {
+export async function readPublicJson(
+  request: Pick<Request, 'headers' | 'body'>,
+  limit: number,
+): Promise<unknown> {
   if (Number(request.headers.get('content-length')) > limit) throw new Error('payload too large');
   const reader = request.body?.getReader();
   if (!reader) return null;

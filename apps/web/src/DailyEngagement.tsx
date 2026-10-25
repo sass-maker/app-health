@@ -1,3 +1,4 @@
+import { ownerFetch } from './lib/owner-fetch.js';
 import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import {
   DailyEngagementReportV1,
@@ -209,7 +210,7 @@ export function DailyEngagement(props: DailyEngagementProps): ReactElement {
     `daily-engagement:${date}`,
     async (signal) => {
       const url = `/v1/reports/daily-engagement?date=${encodeURIComponent(date)}&capture_applicability=1&browser_visitor_unknown_reason=1&feedback_applicability=1`;
-      const response = await fetch(url, {
+      const response = await ownerFetch(url, ownerToken, {
         signal,
         headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
       });

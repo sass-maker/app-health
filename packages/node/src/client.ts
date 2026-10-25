@@ -16,6 +16,12 @@ import {
   type LogEventV1,
   type RuntimeField,
 } from './contracts.js';
+import {
+  buildProductEvent,
+  type ProductEvent,
+  type ProductBatch,
+  type ProductTrackInput,
+} from './product.js';
 import { buildLogEventV1, deriveLogsEndpoint, type LogInput } from './log.js';
 import { createDiagnostics, type AppHealthDiagnostics } from './diagnostics.js';
 import {
@@ -95,6 +101,8 @@ export interface AppHealthClient {
    * bound and flush cycle with endpoint events but travel to `/v1/logs`.
    */
   log(event: string, input?: LogInput): void;
+  /** Explicit owner-authored product conversion; never derived from middleware traffic. */
+  track(name: string, input?: ProductTrackInput): void;
   /** Flush all queued events with retries. Resolves when the drain completes. */
   flush(): Promise<void>;
   /** Stop the timer, flush remaining events, and resolve. */
@@ -174,12 +182,23 @@ interface ClientState {
   cfg: ResolvedClientConfig;
   queue: EventV1[];
   logQueue: LogEventV1[];
+  productQueue: ProductEvent[];
   diag: ReturnType<typeof createDiagnostics>;
 }
 
-async function drainQueues({ cfg, queue, logQueue, diag }: ClientState): Promise<void> {
-  const send = async (batch: EventBatchV1 | LogBatchV1, endpoint: string, items: unknown[]) => {
-    diag.setQueued(queue.length + logQueue.length);
+async function drainQueues({
+  cfg,
+  queue,
+  logQueue,
+  productQueue,
+  diag,
+}: ClientState): Promise<void> {
+  const send = async (
+    batch: EventBatchV1 | LogBatchV1 | ProductBatch,
+    endpoint: string,
+    items: unknown[],
+  ) => {
+    diag.setQueued(queue.length + logQueue.length + productQueue.length);
     const result: TransportResult = await sendBatch(batch, { ...cfg.transport, endpoint });
     recordDeliveryResult(result, items, diag);
   };
@@ -192,13 +211,36 @@ async function drainQueues({ cfg, queue, logQueue, diag }: ClientState): Promise
     const logs = takeSizedBatch(logQueue, cfg.logBatchSize);
     await send(buildLogBatch(logs, cfg.uuid, cfg.environment), cfg.logsEndpointUrl, logs);
   }
+  while (productQueue.length > 0) {
+    const events = takeSizedBatch(productQueue, Math.min(cfg.maxBatchSize, 100), 64 * 1024);
+    if (!events.length) {
+      productQueue.shift();
+      diag.increment('droppedInvalid');
+      continue;
+    }
+    const target = new URL(cfg.endpointUrl);
+    target.pathname = '/v1/product-events';
+    target.search = '';
+    target.hash = '';
+    await send(
+      { schema_version: 1, batch_id: cfg.uuid(), environment: cfg.environment, events },
+      target.href,
+      events,
+    );
+  }
 }
 
 export function createAppHealthClient(options: AppHealthClientOptions): AppHealthClient {
   const cfg = resolveClientConfig(options);
-  const state: ClientState = { cfg, queue: [], logQueue: [], diag: createDiagnostics() };
-  const { queue, logQueue, diag } = state;
-  const queued = () => queue.length + logQueue.length;
+  const state: ClientState = {
+    cfg,
+    queue: [],
+    logQueue: [],
+    productQueue: [],
+    diag: createDiagnostics(),
+  };
+  const { queue, logQueue, productQueue, diag } = state;
+  const queued = () => queue.length + logQueue.length + productQueue.length;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
   let flushing: Promise<void> | null = null;
@@ -269,6 +311,12 @@ export function createAppHealthClient(options: AppHealthClientOptions): AppHealt
         logQueue,
         observe(() => buildLogEventV1(event, input, { now, uuid })) ?? null,
         cfg.logBatchSize,
+      ),
+    track: (name, input = {}) =>
+      enqueue(
+        productQueue,
+        observe(() => buildProductEvent(name, input, now, uuid)) ?? null,
+        Math.min(cfg.maxBatchSize, 100),
       ),
     flush,
     close,

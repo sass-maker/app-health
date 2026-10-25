@@ -1,3 +1,5 @@
+import type { ProductCleanupWake } from './product-event-maintenance.js';
+import type { ProviderJobWake } from './payment-provider-model.js';
 import {
   PRESENCE_TTL_MS,
   type BrowserEventV1,
@@ -8,8 +10,13 @@ import {
 } from '@app-health/contracts';
 import { localBrowserReport } from './browser-reports.js';
 import type { AnalyticsEngineDatasetLike } from './analytics-engine.js';
-import type { BrowserArchiveStageResult, BrowserArchiveStagingLookup } from './browser-archive.js';
-import type { BROWSER_EVENT_FACTS_DIGEST_VERSION } from './browser-facts-digest.js';
+import type {
+  BrowserArchiveStageResult,
+  BrowserArchiveStagingLookup,
+  ArchiveScopeWindow,
+  ArchiveScopeCursor,
+  ArchiveScopePage,
+} from './browser-archive.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 
 export async function browserSessionScope(
@@ -32,7 +39,7 @@ export interface CollectedBrowserBatch {
   received_at: number;
   events: BrowserEventV1[];
   /** Queue/archive copy of the D1 receipt's versioned event-facts digest. */
-  facts_digest_version?: typeof BROWSER_EVENT_FACTS_DIGEST_VERSION;
+  facts_digest_version?: 1 | 2;
   facts_digest?: string;
   /** Scoped one-way session identifier; raw browser session IDs never persist. */
   session_hash?: string;
@@ -43,7 +50,12 @@ export interface CollectedBrowserBatch {
 }
 export interface BrowserBindings {
   DB?: D1DatabaseLike;
-  BROWSER_EVENTS?: { send(batch: CollectedBrowserBatch): Promise<unknown> };
+  BROWSER_EVENTS?: {
+    send(
+      batch: CollectedBrowserBatch | ProviderJobWake | ProductCleanupWake,
+      options?: { delaySeconds: number },
+    ): Promise<unknown>;
+  };
   BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'> & Partial<Pick<R2Bucket, 'get'>>;
   BROWSER_ARCHIVE?: {
     getByName(name: string): {
@@ -51,6 +63,11 @@ export interface BrowserBindings {
       lookupStaged(
         batches: Array<Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>>,
       ): Promise<BrowserArchiveStagingLookup>;
+      archiveSegmentsForScope?(
+        scope: ArchiveScopeWindow,
+        cursor?: ArchiveScopeCursor | null,
+        limit?: number,
+      ): Promise<ArchiveScopePage>;
       archiveSegmentsForEventDay?(
         day: string,
         cursor?: { event_day: string; object_key: string; snapshot_sequence: number } | null,
@@ -75,6 +92,7 @@ export interface BrowserBindings {
   WORKSPACE_PRESENCE?: {
     getByName(name: string): {
       heartbeat(appId: string, environmentId: string, session: string): Promise<void>;
+      revokeViewer?(user: string): Promise<void>;
       snapshot(): Promise<PresenceSnapshot>;
       publicSnapshot?(
         appId: string,
@@ -139,6 +157,9 @@ export class LocalBrowserAnalytics {
   }
   report(filter: BrowserReportFilter) {
     return localBrowserReport(this.batches.values(), filter);
+  }
+  conversionBatches(): Iterable<CollectedBrowserBatch> {
+    return this.batches.values();
   }
   summary(): BrowserSummary {
     const now = Date.now();

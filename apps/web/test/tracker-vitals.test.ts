@@ -3,6 +3,7 @@ import { gzipSync } from 'node:zlib';
 import { validateBrowserLogBatch, WebVitalsProps } from '@app-health/contracts';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import vitalsSource from '../public/vitals.js?raw';
+import { start, assetURL } from '../public/tracker-extras.js';
 
 type Entry = {
   startTime?: number;
@@ -75,7 +76,10 @@ async function installTracker(
   Object.assign(script.dataset, { key: 'ahk_pub_vitals', ...data });
   if (src) script.src = src;
   vi.spyOn(document, 'currentScript', 'get').mockReturnValue(script);
+  const extras = assetURL(script, 'tracker-extras.js');
+  if (extras) vi.doMock(extras, () => ({ start }));
   await import('../public/tracker.js');
+  await vi.dynamicImportSettled();
 }
 const loadedScripts = () => document.head.querySelectorAll<HTMLScriptElement>('script');
 beforeEach(() => {
@@ -127,6 +131,7 @@ it.each(['', '1', 'true'])(
       key: 'ahk_pub_vitals',
       vitals,
       vitalsPath: '/',
+      vitalsGeneration: expect.any(String),
       endpoint: data.endpoint,
       vitalsEndpoint: data.vitalsEndpoint,
       vitalsSample: data.vitalsSample,
@@ -143,6 +148,7 @@ it('leaves missing optional attributes unset in the loader', async () => {
     key: 'ahk_pub_vitals',
     vitals: '',
     vitalsPath: '/',
+    vitalsGeneration: expect.any(String),
   });
 });
 
@@ -157,7 +163,7 @@ it.each([undefined, 'false', '0', 'TRUE', 'yes'])(
   },
 );
 
-it.each(['', 'https://health.example/other.js', 'https://health.example/tracker.js?v=1'])(
+it.each(['', 'https://health.example/other.js'])(
   'does not load vitals from a non-tracker source %j',
   async (src) => {
     await installTracker({ vitals: '' }, src);
@@ -185,7 +191,7 @@ it('does not initialize standalone vitals without a current script', async () =>
 
 it('sends one valid debug log at send time without requiring data-vitals', async () => {
   await install();
-  expect(Object.keys(vitalsWindow.appHealthVitals!)).toEqual(['stop']);
+  expect(Object.keys(vitalsWindow.appHealthVitals!)).toEqual(['generation', 'stop']);
   expect(window.appHealth).toBeUndefined();
   vi.setSystemTime(Date.now() + 10000);
   hidden();
@@ -592,4 +598,32 @@ it('waits for prerender activation before initializing', async () => {
   } finally {
     delete (document as unknown as { prerendering?: boolean }).prerendering;
   }
+});
+
+it('loads versioned optional vitals without copying unrelated script query values', async () => {
+  await installTracker(
+    { vitals: 'true' },
+    'https://health.example/tracker.js?v=2026.10&secret=private#token',
+  );
+  expect(loadedScripts()[0].src).toBe('https://health.example/vitals.js?v=2026.10');
+});
+it('rejects an older vitals download after consent is granted again', async () => {
+  await installTracker({ vitals: 'true' });
+  const stale = loadedScripts()[0];
+  window.appHealth!.consent(false);
+  window.appHealth!.consent(true);
+  await vi.dynamicImportSettled();
+  const current = loadedScripts()[0];
+  expect(current).not.toBe(stale);
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(stale);
+  runVitals();
+  expect(observers.size).toBe(0);
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(current);
+  vi.stubGlobal('performance', { getEntriesByType: () => [{ responseStart: 125.6 }] });
+  runVitals();
+  expect(observers.size).toBeGreaterThan(0);
+  const owner = vitalsWindow.appHealthVitals;
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(stale);
+  runVitals();
+  expect(vitalsWindow.appHealthVitals).toBe(owner);
 });

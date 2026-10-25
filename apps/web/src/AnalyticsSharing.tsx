@@ -1,3 +1,4 @@
+import { ownerFetch } from './lib/owner-fetch.js';
 import { SkeletonText } from '@saas-maker/ui/components/skeleton';
 import { ErrorState } from '@saas-maker/ui/components/error-state';
 import { EmptyState } from '@saas-maker/ui/components/empty-state';
@@ -34,7 +35,7 @@ async function shareRequest(
     ? { authorization: `Bearer ${ownerToken}` }
     : {};
   if (payload) headers['content-type'] = 'application/json';
-  const response = await fetch(url, {
+  const response = await ownerFetch(url, ownerToken, {
     method,
     headers,
     ...(payload ? { body: JSON.stringify(payload) } : {}),

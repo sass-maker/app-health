@@ -118,13 +118,23 @@ export class WorkspacePresence extends DurableObject<unknown> {
     if (this.ctx.getWebSockets().length >= 20)
       return new Response('Too many viewers', { status: 429 });
     const pair = new WebSocketPair();
-    pair[1].serializeAttachment({ expires: Date.now() + 60_000 });
+    pair[1].serializeAttachment({
+      expires: Date.now() + 60_000,
+      user: request.headers.get('x-auth-user'),
+    });
     this.ctx.acceptWebSocket(pair[1]);
     pair[1].send(JSON.stringify(this.snapshot()));
     const next = Date.now() + 10_000;
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm === null || alarm > next) await this.ctx.storage.setAlarm(next);
     return new Response(null, { status: 101, webSocket: pair[0] });
+  }
+
+  revokeViewer(user: string): void {
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = socket.deserializeAttachment() as { user?: string };
+      if (attachment.user === user) socket.close(4001, 'Workspace access revoked');
+    }
   }
 
   private broadcast(): number | null {

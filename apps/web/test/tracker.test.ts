@@ -55,6 +55,23 @@ it('retries the same batch ID, bounds retry attempts and reports dropped events'
   expect(new Set(ids).size).toBe(1);
   expect(api().diagnostics()).toMatchObject({ retries: 3, dropped: 1, queued: 0 });
 });
+it('packs rich unicode events by UTF-8 bytes and retains stable retry payloads', async () => {
+  const properties = Object.fromEntries(
+    Array.from({ length: 20 }, (_, index) => [`field_${index}`, '🌍'.repeat(100)]),
+  );
+  for (let index = 0; index < 12; index++) api().track('purchase', properties, index);
+  vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 503 } as Response);
+  await api().flush();
+  await api().flush();
+  while (api().diagnostics().queued) await api().flush();
+  const bodies = vi.mocked(fetch).mock.calls.map(([, init]) => String(init?.body));
+  expect(bodies[0]).toBe(bodies[1]);
+  for (const body of bodies) {
+    expect(new Blob([body]).size).toBeLessThanOrEqual(32768);
+    expect(BrowserBatchV1.safeParse(JSON.parse(body)).success).toBe(true);
+  }
+  expect(api().diagnostics()).toMatchObject({ accepted: 13, dropped: 0, queued: 0 });
+});
 it('tracks SPA navigation once and restores hooks and timers on stop', async () => {
   history.pushState({}, '', '/pricing');
   history.replaceState({}, '', '/pricing?utm_source=test');
@@ -254,4 +271,63 @@ it('does not count internal navigation as an external traffic source', async () 
   await api().flush();
   const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
   expect(body.events[1].referrer).toBe('');
+});
+
+it('accepts bounded explicit properties and values, snapshots caller objects, and drops invalid data', async () => {
+  const properties = { plan: 'pro', seats: 2, trial: false };
+  api().track('plan.selected', properties, 29.5);
+  properties.plan = 'changed';
+  for (const [data, value] of [
+    [{ nested: {} }, undefined],
+    [{ too_long: 'x'.repeat(201) }, undefined],
+    [{ bad: null }, undefined],
+    [{ valid: Infinity }, undefined],
+    [{ 'bad-key': true }, undefined],
+    [{ constructor: 'private' }, undefined],
+    [
+      Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`key_${index}`, true])),
+      undefined,
+    ],
+    [undefined, Infinity],
+    [undefined, 1e12 + 1],
+  ])
+    api().track('invalid', data as Record<string, string>, value as number);
+  await api().flush();
+  const batch = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(BrowserBatchV1.safeParse(batch).success).toBe(true);
+  expect(batch.events).toHaveLength(2);
+  expect(batch.events[1]).toMatchObject({
+    name: 'plan.selected',
+    properties: { plan: 'pro', seats: 2, trial: false },
+    value: 29.5,
+  });
+  expect(api().diagnostics().dropped).toBe(9);
+});
+
+it('tracks hash routes only when enabled and redacts route identifiers and secrets', async () => {
+  api().stop();
+  window.localStorage?.clear();
+  history.replaceState({}, '', '/shell#/orders/123?token=private#secret');
+  vi.resetModules();
+  const script = document.createElement('script');
+  script.dataset.key = 'ahk_pub_test';
+  script.dataset.hash = 'true';
+  vi.spyOn(document, 'currentScript', 'get').mockReturnValue(script);
+  await import('../public/tracker.js');
+  api().track('checkout');
+  history.pushState({}, '', '/shell#/pricing?private=true');
+  window.dispatchEvent(new Event('hashchange'));
+  await api().flush();
+  const batch = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
+  expect(batch.events.map((event: { path: string }) => event.path)).toEqual([
+    '/orders/:id',
+    '/orders/:id',
+    '/pricing',
+  ]);
+  expect(batch.attribution.entry_path).toBe('/orders/:id');
+  expect(JSON.stringify(batch)).not.toContain('private');
+  expect(JSON.stringify(batch)).not.toContain('secret');
+  api().stop();
+  window.dispatchEvent(new Event('hashchange'));
+  expect(window.appHealth).toBeUndefined();
 });

@@ -3,6 +3,7 @@ import type { AppEnvironmentV1 } from '@app-health/contracts';
 import { getAccountCapabilitySetup, type D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 import type { CapabilitySetup } from './repository.js';
+import { selectedMembership, WORKSPACE_HEADER } from './workspace-access.js';
 
 export interface AccountBindings {
   APP_HEALTH_ACCOUNTS?: string;
@@ -126,9 +127,10 @@ export async function measureOwnerRouteRead<T>(
  */
 function withAuthReadTiming(db: D1Database, timings: OwnerRequestTimings): D1Database {
   const readTimingFor = (query: string): 'session' | 'user' | undefined => {
-    if (/\bfrom\s+["`]?session["`]?(?=\s|\)|$)/i.test(query)) return 'session';
-    if (/\bfrom\s+["`]?user["`]?(?=\s|\)|$)/i.test(query)) return 'user';
-    return undefined;
+    const table = query
+      .match(new RegExp('\\bfrom\\s+["`]?([a-z]+)["`]?(?=\\s|\\)|$)', 'i'))?.[1]
+      ?.toLowerCase();
+    return table === 'session' || table === 'user' ? table : undefined;
   };
 
   const wrapStatement = (statement: D1PreparedStatement, read: 'session' | 'user' | undefined) =>
@@ -226,7 +228,12 @@ export async function personalWorkspace(
   return workspace;
 }
 
-async function workspaceAndApps(db: D1DatabaseLike, userId: string, includeEnvironments = false) {
+async function workspaceAndApps(
+  db: D1DatabaseLike,
+  userId: string,
+  includeEnvironments = false,
+  workspaceId?: string,
+) {
   const { results } = await db
     .prepare(
       `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id,
@@ -236,10 +243,10 @@ async function workspaceAndApps(db: D1DatabaseLike, userId: string, includeEnvir
        LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id
        LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
        ${includeEnvironments ? 'LEFT JOIN environments e ON e.app_id = a.id' : ''}
-       WHERE w.owner_id = ?
+       WHERE ${workspaceId ? 'w.id = ?' : 'w.owner_id = ?'}
        ORDER BY ${includeEnvironments ? 'a.created_at DESC, e.created_at' : 'a.id'}`,
     )
-    .bind(userId)
+    .bind(workspaceId ?? userId)
     .all<{
       workspace_id: string;
       workspace_name: string;
@@ -296,6 +303,56 @@ export async function accountIdentity(
   if (timings) timings.sessionLookupMs = performance.now() - sessionLookupStarted;
   if (!session || !session.user.emailVerified) return null;
 
+  const path = new URL(request.url).pathname;
+  if (
+    path === '/v1/analytics/live' &&
+    request.headers.has(WORKSPACE_HEADER) &&
+    new URL(request.url).searchParams.has('workspace_id') &&
+    request.headers.get(WORKSPACE_HEADER) !== new URL(request.url).searchParams.get('workspace_id')
+  )
+    return null;
+  const requestedWorkspace = ['/v1/workspaces', '/v1/invites/accept'].includes(path)
+    ? null
+    : request.headers.get(WORKSPACE_HEADER) ||
+      (new URL(request.url).pathname === '/v1/analytics/live'
+        ? new URL(request.url).searchParams.get('workspace_id')
+        : null);
+  if (requestedWorkspace) {
+    if (!validWorkspaceId(requestedWorkspace)) return null;
+    const membership = await selectedMembership(env.DB, session.user.id, requestedWorkspace);
+    if (!membership) return null;
+    const rows = await workspaceAndApps(env.DB, session.user.id, true, membership.id);
+    const projected = new Map<string, AppEnvironmentV1>();
+    for (const row of rows) {
+      if (!row.app_id || !row.app_name) continue;
+      const entry = projected.get(row.app_id) ?? {
+        app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at ?? 0 },
+        environments: [],
+      };
+      if (row.env_id)
+        entry.environments.push({
+          id: row.env_id,
+          app_id: row.app_id,
+          name: row.env_name ?? '',
+          created_at: row.env_created_at ?? 0,
+        });
+      projected.set(row.app_id, entry);
+    }
+    return {
+      workspace: { id: membership.id, name: membership.name },
+      owner: {
+        id: session.user.id,
+        label: session.user.name,
+        email: session.user.email,
+        authKind: 'account',
+        workspaceRole: membership.role,
+        workspaceId: membership.id,
+        appIds: [...projected.keys()],
+      },
+      ...(includeApps ? { apps: [...projected.values()] } : {}),
+    };
+  }
+
   if (capabilityScope) {
     const capabilityScopeStarted = performance.now();
     let scoped = await getAccountCapabilitySetup(
@@ -318,12 +375,7 @@ export async function accountIdentity(
     if (!scoped) throw new Error('Workspace could not be read');
     return {
       workspace: scoped.workspace,
-      owner: {
-        id: session.user.id,
-        label: session.user.name,
-        workspaceId: scoped.workspace.id,
-        appIds: scoped.appIds,
-      },
+      owner: personalOwner(session.user, scoped.workspace.id, scoped.appIds),
       capabilitySetup: scoped.setup,
     };
   }
@@ -339,12 +391,11 @@ export async function accountIdentity(
     if (!workspaceRow) throw new Error('Workspace could not be read');
     return {
       workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
-      owner: {
-        id: session.user.id,
-        label: session.user.name,
-        workspaceId: workspaceRow.workspace_id,
-        appIds: workspaceRow.has_app ? [requestedAppId] : [],
-      },
+      owner: personalOwner(
+        session.user,
+        workspaceRow.workspace_id,
+        workspaceRow.has_app ? [requestedAppId] : [],
+      ),
     };
   }
 
@@ -385,12 +436,7 @@ export async function accountIdentity(
     timings.appsProjectionMs = performance.now() - appsProjectionStarted;
   return {
     workspace: { id: workspaceRow.workspace_id, name: workspaceRow.workspace_name },
-    owner: {
-      id: session.user.id,
-      label: session.user.name,
-      workspaceId: workspaceRow.workspace_id,
-      appIds,
-    },
+    owner: personalOwner(session.user, workspaceRow.workspace_id, appIds),
     ...(includeApps ? { apps: projectedApps ?? [] } : {}),
   };
 }
@@ -399,4 +445,28 @@ export async function accountIdentity(
 export function accountMutationAllowed(request: Request): boolean {
   if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return true;
   return request.headers.get('origin') === new URL(request.url).origin;
+}
+
+function validWorkspaceId(value: string) {
+  return (
+    value.length <= 100 &&
+    value.length > 0 &&
+    value.split('').every((character) => /[a-zA-Z0-9_-]/.test(character))
+  );
+}
+
+function personalOwner(
+  user: { id: string; name: string; email: string },
+  workspaceId: string,
+  appIds: string[],
+): OwnerIdentity {
+  return {
+    authKind: 'account',
+    workspaceRole: 'owner',
+    email: user.email,
+    id: user.id,
+    label: user.name,
+    workspaceId,
+    appIds,
+  };
 }

@@ -37,6 +37,7 @@ const batch = (): CollectedBrowserBatch => ({
 });
 function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
   type Prepared = D1PreparedStatement & { sql: string; values: unknown[] };
+  const claims = new Map<string, unknown>();
   return {
     prepare(sql) {
       const statement = {
@@ -59,6 +60,15 @@ function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
       return statement;
     },
     async batch(statements) {
+      const claim = statements[0] as Prepared;
+      if (claim.sql.includes('INSERT INTO browser_expanded_batch_claims')) {
+        const key = JSON.stringify(claim.values.slice(0, 4));
+        if (!claims.has(key)) claims.set(key, claim.values[4]);
+        return [
+          { success: true, meta: {} },
+          { success: true, meta: {}, results: [{ digest: claims.get(key) }] },
+        ];
+      }
       const indexedDays = statements.filter((statement) =>
         (statement as Prepared).sql.includes('INSERT INTO browser_visitor_acceptance_day_fences'),
       ).length;
@@ -74,8 +84,8 @@ function acceptedReceiptDb(workspaceId?: string): D1DatabaseLike {
                 {
                   fingerprint: receipt?.values[4],
                   event_count: receipt?.values[7],
-                  facts_digest_version: receipt?.values[8],
-                  facts_digest: receipt?.values[9],
+                  facts_digest_version: receipt?.values[10] ? 2 : receipt?.values[8],
+                  facts_digest: receipt?.values[10] ?? receipt?.values[9],
                   indexed_days: indexedDays,
                   open_fence_count: indexedDays,
                 },
@@ -162,7 +172,9 @@ describe('browser analytical data', () => {
       'raw-session-secret',
       {
         DB: acceptedReceiptDb(),
-        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        BROWSER_EVENTS: {
+          send: async (value) => void ('events' in value ? sent.push(value) : undefined),
+        },
         BROWSER_HISTORY: {
           put: async () => ({}) as R2Object,
           list: async () => ({ objects: [], delimitedPrefixes: [], truncated: false }),
@@ -191,7 +203,7 @@ describe('browser analytical data', () => {
     );
     expect(response.status).toBe(202);
     expect(sent[0].session_hash).toMatch(/^[a-f0-9]{64}$/);
-    expect(sent[0].facts_digest_version).toBe(1);
+    expect(sent[0].facts_digest_version).toBe(2);
     expect(sent[0].facts_digest).toMatch(/^[a-f0-9]{64}$/);
     expect(JSON.stringify(sent[0])).not.toContain('raw-session-secret');
   });
@@ -228,7 +240,10 @@ describe('browser analytical data', () => {
     );
     expect(send).toHaveBeenCalledOnce();
     expect(response.status).toBe(503);
-    expect(commit).not.toHaveBeenCalled();
+    expect(commit).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(commit.mock.calls)).not.toContain(
+      'INSERT INTO browser_visitor_batch_receipts',
+    );
     expect(recordCapability).not.toHaveBeenCalled();
   });
   it('stores delayed events without reviving presence and preserves explicit missing sources', async () => {
@@ -270,7 +285,7 @@ describe('browser analytical data', () => {
     ]);
     for (const events of [[], batch().events]) {
       const fresh = await acceptBrowser(
-        { ...old, events },
+        { ...old, events, batch_id: crypto.randomUUID() },
         'session',
         env,
         {} as AppHealthRepositories,
@@ -446,7 +461,9 @@ describe('browser collector boundary', () => {
       {
         APP_HEALTH_INGEST_HOST: 'localhost',
         DB: acceptedReceiptDb('local'),
-        BROWSER_EVENTS: { send: async (value) => void sent.push(value) },
+        BROWSER_EVENTS: {
+          send: async (value) => void ('events' in value ? sent.push(value) : undefined),
+        },
         WORKSPACE_PRESENCE: {
           getByName: () => ({
             heartbeat: async () => {},

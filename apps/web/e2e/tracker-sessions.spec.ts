@@ -9,7 +9,7 @@ test.afterEach(async () => {
   server?.closeAllConnections();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
 });
-async function fixture(request: APIRequestContext, baseURL: string) {
+async function fixture(request: APIRequestContext, baseURL: string, attributes = '') {
   let key = '';
   server = createServer((req, res) => {
     if (req.url === '/fixture/redirect') {
@@ -18,7 +18,7 @@ async function fixture(request: APIRequestContext, baseURL: string) {
     }
     res.setHeader('content-type', 'text/html');
     res.end(
-      `<!doctype html><title>Tracker fixture</title><a href="/fixture/next">Next</a>${req.url?.startsWith('/fixture/') ? `<script src="${baseURL}/tracker.js" data-key="${key}" data-endpoint="${baseURL}/v1/browser"></script>` : ''}`,
+      `<!doctype html><title>Tracker fixture</title><a href="/fixture/next">Next</a>${req.url?.startsWith('/fixture/') ? `<script src="${baseURL}/tracker.js" data-key="${key}" data-endpoint="${baseURL}/v1/browser" ${attributes}></script>` : ''}`,
     );
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -155,4 +155,99 @@ test('simultaneous tabs serialize identity creation and report one visitor and s
   await expect
     .poll(async () => (await report(request, project)).audience)
     .toMatchObject({ visitors: 1, new_sessions: 1, returning_sessions: 1 });
+});
+
+test('consent and persistent own-visit exclusion gate actual collector traffic across tabs', async ({
+  page,
+  context,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(
+    request,
+    baseURL!,
+    'data-consent="required" data-autotrack="true" data-vitals="true"',
+  );
+  const first = receipts(page);
+  const optional: string[] = [];
+  page.on('request', (request) => {
+    if (/\/(tracker-extras|vitals)\.js/.test(request.url())) optional.push(request.url());
+  });
+  await page.goto(`${project.origin}/fixture/landing?ref=launch&secret=private`);
+  await page.waitForFunction(() => !!window.appHealth);
+  await page.evaluate(() => {
+    window.appHealth!.track('pre_consent');
+    history.pushState({}, '', '/fixture/current?secret=private');
+  });
+  await flush(page);
+  expect(first).toEqual([]);
+  expect(optional).toEqual([]);
+  expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+  await page.evaluate(() => window.appHealth!.consent(true));
+  await flush(page);
+  expect(first[0].events.map((event) => [event.type, event.name, event.path])).toEqual([
+    ['pageview', undefined, '/fixture/current'],
+  ]);
+  const secondPage = await context.newPage();
+  const second = receipts(secondPage);
+  await secondPage.goto(`${project.origin}/fixture/landing`);
+  await secondPage.waitForFunction(() => !!window.appHealth);
+  await page.evaluate(() => {
+    window.appHealth!.track('queued_before_exclusion');
+    window.appHealth!.ignore();
+  });
+  await secondPage.waitForFunction(() => window.appHealth?.isIgnored());
+  await secondPage.evaluate(() => window.appHealth!.consent(true));
+  await Promise.all([flush(page), flush(secondPage)]);
+  expect(first).toHaveLength(1);
+  expect(second).toEqual([]);
+  expect(
+    await secondPage.evaluate(() =>
+      Object.keys(localStorage).filter((name) => name.endsWith(':ignore')),
+    ),
+  ).toEqual([`h:${project.key}:ignore`]);
+  await secondPage.reload();
+  await secondPage.waitForFunction(() => window.appHealth?.isIgnored());
+  await secondPage.evaluate(() => window.appHealth!.ignore(false));
+  await flush(secondPage);
+  expect(second).toEqual([]);
+  await secondPage.evaluate(() => window.appHealth!.consent(true));
+  await flush(secondPage);
+  expect(second[0].events).toHaveLength(1);
+  expect(second[0].events[0].name).toBeUndefined();
+  await page.waitForFunction(() => !window.appHealth?.isIgnored());
+  await flush(page);
+  expect(first).toHaveLength(2);
+  expect(first[1].events.map((event) => event.name)).toEqual([undefined]);
+  await secondPage.close();
+});
+
+test('cookieless identity stays in memory and checkout metadata contains only sanitized attribution', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(request, baseURL!, 'data-identity="cookieless"');
+  const batches = receipts(page);
+  await page.goto(
+    `${project.origin}/fixture/landing?via=partner&utm_campaign=summer&secret=private`,
+  );
+  await flush(page);
+  const first = batches[0];
+  expect(first.visitor_id).toBeUndefined();
+  expect(first.visit_type).toBeUndefined();
+  expect(await page.evaluate(() => Object.keys(localStorage))).toEqual([]);
+  expect(await page.evaluate(() => Object.keys(sessionStorage))).toEqual([]);
+  expect(await page.evaluate(() => window.appHealth!.checkoutMetadata())).toEqual({
+    app_health_source: 'partner',
+    app_health_page: '/fixture/landing',
+    app_health_campaign: 'summer',
+  });
+  await page.evaluate(() => window.appHealth!.track('action'));
+  await flush(page);
+  expect(batches[1].session_id).toBe(first.session_id);
+  await page.reload();
+  await flush(page);
+  expect(batches[2].session_id).not.toBe(first.session_id);
+  expect(JSON.stringify(batches)).not.toContain('private');
 });

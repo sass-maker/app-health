@@ -1,6 +1,5 @@
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 import {
-  BROWSER_EVENT_FACTS_DIGEST_VERSION,
   digestSerializedBrowserEventFacts,
   serializeBrowserEventFacts,
 } from './browser-facts-digest.js';
@@ -14,7 +13,16 @@ const MAX_BROWSER_ARCHIVE_BATCH_EVENTS = 25;
 /** A parsed immutable R2 row. The caller must verify its segment manifest and bytes first. */
 type BrowserArchiveFact = Pick<
   CollectedBrowserBatch,
-  'workspace' | 'app_id' | 'environment_id' | 'batch_id' | 'events' | 'visitor_hash'
+  | 'workspace'
+  | 'app_id'
+  | 'environment_id'
+  | 'batch_id'
+  | 'events'
+  | 'visitor_hash'
+  | 'session_hash'
+  | 'attribution'
+  | 'metadata'
+  | 'visit_type'
 > & { facts_digest_version?: number; facts_digest?: string };
 
 type BrowserArchiveReconciliationState =
@@ -179,8 +187,8 @@ function receiptState(
   const candidate = candidates[0];
   if (candidate?.version === undefined || candidate.digest === undefined)
     return 'archive_digest_missing';
-  return candidate.version === BROWSER_EVENT_FACTS_DIGEST_VERSION &&
-    receipt.facts_digest_version === BROWSER_EVENT_FACTS_DIGEST_VERSION &&
+  return (candidate.version === 1 || candidate.version === 2) &&
+    receipt.facts_digest_version === candidate.version &&
     candidate.digest === receipt.facts_digest
     ? 'matched'
     : 'digest_mismatch';

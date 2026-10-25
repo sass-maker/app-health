@@ -1,3 +1,4 @@
+import { ownerFetch } from './lib/owner-fetch.js';
 import { useEffect, useState } from 'react';
 import { NativeKey } from '@app-health/contracts';
 import { Button } from '@saas-maker/ui/components/button';
@@ -17,7 +18,7 @@ interface Props {
   ingestOrigin: string;
 }
 async function nativeRequest(url: string, token: string, method: string, signal?: AbortSignal) {
-  const response = await fetch(url, {
+  const response = await ownerFetch(url, token, {
     method,
     signal: signal ?? AbortSignal.timeout(8000),
     headers: token ? { authorization: `Bearer ${token}` } : {},

@@ -48,19 +48,22 @@ function install() {
     const url = new URL(String(input), location.origin);
     if (url.pathname === '/v1/account/config') return Response.json({ google: false });
     if (url.pathname === '/v1/apps')
-      return Response.json({
-        apps: projects.map((project) => ({
-          app: { id: project.appId, name: project.name, created_at: 1 },
-          environments: [
-            {
-              id: project.environmentId,
-              app_id: project.appId,
-              name: project.environment,
-              created_at: 1,
-            },
-          ],
-        })),
-      });
+      return Response.json(
+        {
+          apps: projects.map((project) => ({
+            app: { id: project.appId, name: project.name, created_at: 1 },
+            environments: [
+              {
+                id: project.environmentId,
+                app_id: project.appId,
+                name: project.environment,
+                created_at: 1,
+              },
+            ],
+          })),
+        },
+        { headers: { 'x-app-health-workspace-role': 'owner' } },
+      );
     if (url.pathname === '/v1/capabilities')
       return Response.json({
         app_id: url.searchParams.get('app_id'),

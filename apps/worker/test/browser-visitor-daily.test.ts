@@ -221,6 +221,12 @@ beforeAll(async () => {
       'utf8',
     ),
   );
+  await apply(
+    await readFile(
+      new URL('../migrations/0029_expanded_browser_facts.sql', import.meta.url),
+      'utf8',
+    ),
+  );
 });
 
 beforeEach(async () => {
@@ -390,6 +396,38 @@ describe('exact browser visitor daily ledger', () => {
         .bind(item.batch_id)
         .all(),
     ).toMatchObject({ results: [{ india_day: '2026-09-29' }, { india_day: '2026-09-30' }] });
+  });
+
+  it('accepts a raced plain v2 retry without upgrading an already accepted v1 receipt', async () => {
+    const original = batch({ session_hash: 'original-session' });
+    await acceptBrowserVisitorBatch(db, original, original.received_at);
+    const retry = { ...original, facts_digest_version: 2 as const };
+    await expect(
+      acceptBrowserVisitorBatch(db, retry, original.received_at + 1),
+    ).resolves.toBeUndefined();
+    expect(
+      await db
+        .prepare(
+          `SELECT facts_digest_version, expanded_facts_digest FROM
+      browser_visitor_batch_receipts WHERE batch_id = ?`,
+        )
+        .bind(original.batch_id)
+        .first(),
+    ).toEqual({ facts_digest_version: 1, expanded_facts_digest: null });
+    const augmented = {
+      ...retry,
+      events: [{ ...original.events[0], properties: { plan: 'pro' } }],
+    };
+    await expect(
+      acceptBrowserVisitorBatch(db, augmented, original.received_at + 2),
+    ).rejects.toThrow();
+    expect(
+      (
+        await db
+          .prepare('SELECT COUNT(*) AS total FROM browser_visitor_batch_receipts')
+          .first<{ total: number }>()
+      )?.total,
+    ).toBe(1);
   });
 
   it('leaves legacy 0019 receipts unindexed when retried with the same fingerprint', async () => {
@@ -1392,8 +1430,11 @@ describe('exact browser visitor daily ledger', () => {
 
   it('does not return 202 when D1 receipt acceptance fails for a hashless batch after Queue.send', async () => {
     const failedDb = {
-      prepare: vi.fn(),
-      batch: vi.fn().mockRejectedValue(new Error('D1 unavailable')),
+      prepare: db.prepare.bind(db),
+      batch: vi
+        .fn()
+        .mockImplementationOnce(db.batch.bind(db))
+        .mockRejectedValue(new Error('D1 unavailable')),
     };
     const send = vi.fn().mockResolvedValue(undefined);
     const env = {

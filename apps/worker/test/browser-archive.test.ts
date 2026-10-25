@@ -21,7 +21,9 @@ vi.mock('cloudflare:workers', () => ({
     ) {}
   },
 }));
-import { BrowserArchive } from '../src/browser-archive.js';
+import { BrowserArchive, type ArchiveScopePage } from '../src/browser-archive.js';
+import { readConversionArchive } from '../src/conversion-archive.js';
+import type { BrowserEnvironment } from '../src/browser-routes.js';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
 
 // Only this wrapper injects failures. Production code runs unchanged in workerd,
@@ -54,6 +56,14 @@ export class TestArchive extends BrowserArchive {
       lastPutCreated: await this.testCtx.storage.get('lastPutCreated') };
   }
   listDay(value) { return this.archiveSegmentsForEventDay(value.day, value.cursor ?? null, value.limit); }
+  listScope(value) { return this.archiveSegmentsForScope(value.scope, value.cursor ?? null, value.limit); }
+  seedScopeIndex(value) {
+    for (let index = 0; index < 450; index++) {
+      const key = 'synthetic-' + String(index).padStart(4, '0');
+      this.testCtx.storage.sql.exec('INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)', value.day, key, key, Date.now());
+      this.testCtx.storage.sql.exec('INSERT INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)', key, index % 2 ? 'other' : 'app-one', 'production', value.old, value.old, Date.now());
+    }
+  }
   lookupBatch(value) { return this.archiveSegmentForBatch(value.app_id, value.environment_id, value.batch_id); }
   expireDayIndex() { this.testCtx.storage.sql.exec('UPDATE archive_day_segments SET indexed_at = 1'); }
   expireBatchIndex() { this.testCtx.storage.sql.exec('UPDATE archive_batch_segments SET indexed_at = 1'); }
@@ -108,10 +118,7 @@ async function harness() {
   const archiveSource = source
     .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
     .replace("import { persistArchiveSegment } from './archive-segment.js';", '')
-    .replace(
-      /import \{\s*BROWSER_EVENT_FACTS_DIGEST_VERSION,\s*digestBrowserEventFacts,?\s*\} from '.\/browser-facts-digest.js';/,
-      '',
-    );
+    .replace(/import \{[^}]+\} from '.\/browser-facts-digest.js';/, '');
   const script =
     ts.transpileModule(segment, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
@@ -162,10 +169,144 @@ async function harness() {
   };
 }
 
+async function conversionEnvironment(app: Awaited<ReturnType<typeof harness>>) {
+  const bucket = await app.bucket();
+  const get = vi.fn((key: string) => bucket.get(key));
+  const env: BrowserEnvironment = {
+    BROWSER_HISTORY: { get } as unknown as R2Bucket,
+    BROWSER_ARCHIVE: {
+      getByName: () => ({
+        stage: async () => {
+          throw new Error('Unexpected stage during read');
+        },
+        lookupStaged: async () => {
+          throw new Error('Unexpected staging lookup during read');
+        },
+        archiveSegmentsForScope: async (scope, cursor, limit) => {
+          const result = await app.call('listScope', { scope, cursor, limit });
+          if (result.status !== 200) throw new Error(String(result.body.error));
+          return result.body as unknown as ArchiveScopePage;
+        },
+      }),
+    },
+  };
+  return { env, bucket, get };
+}
+
 describe('BrowserArchive real SQLite and R2 durability', () => {
   let app: Awaited<ReturnType<typeof harness>>;
   afterEach(async () => {
     if (app) await app.dispose();
+  });
+
+  it('reads conversion facts through real scope SQL and verified R2 bytes with half-open scope/time bounds', async () => {
+    app = await harness();
+    const day = new Date(Date.now() + 19800000).toISOString().slice(0, 10);
+    const midnight = Date.parse(`${day}T00:00:00+05:30`);
+    const from = midnight - 1000,
+      to = midnight + 1000;
+    const original = batch(crypto.randomUUID());
+    original.events = [from - 1, from, midnight, to].map((timestamp) => ({
+      ...original.events[0],
+      timestamp,
+      event_id: crypto.randomUUID(),
+    }));
+    await app.call('stage', [
+      original,
+      { ...original, batch_id: crypto.randomUUID(), app_id: 'foreign' },
+    ]);
+    await app.call('flush');
+    const { env, get } = await conversionEnvironment(app);
+    const query = { app_id: 'app-one', environment_id: 'production', range: '1h' as const };
+    const result = await readConversionArchive(env, 'workspace-one', query, from, to);
+    expect(result).toHaveLength(1);
+    expect(result[0].events.map((event) => event.timestamp)).toEqual([from, midnight]);
+    expect(get).toHaveBeenCalledTimes(1);
+    await expect(readConversionArchive(env, 'foreign-workspace', query, from, to)).rejects.toThrow(
+      'manifest mismatch',
+    );
+    await expect(readConversionArchive({}, 'workspace-one', query, from, to)).rejects.toThrow(
+      'unavailable',
+    );
+    await expect(readConversionArchive(env, 'workspace-one', query, from, from)).rejects.toThrow(
+      'Invalid',
+    );
+  });
+
+  it('rejects an entire conversion read on corrupt or absent R2 objects instead of returning partial zeros', async () => {
+    app = await harness();
+    const now = Date.now();
+    const original = batch(crypto.randomUUID());
+    original.events[0].timestamp = now - 1000;
+    await app.call('stage', [original]);
+    await app.call('flush');
+    const { env, bucket } = await conversionEnvironment(app);
+    const object = (await bucket.list()).objects[0];
+    const stored = (await bucket.get(object.key))!;
+    const bytes = new Uint8Array(await stored.arrayBuffer());
+    bytes[0] ^= 1;
+    await bucket.put(object.key, bytes, { customMetadata: stored.customMetadata });
+    const query = { app_id: 'app-one', environment_id: 'production', range: '1h' as const };
+    await expect(
+      readConversionArchive(env, 'workspace-one', query, now - 3600000, now),
+    ).rejects.toThrow('checksum mismatch');
+    await bucket.delete(object.key);
+    await expect(
+      readConversionArchive(env, 'workspace-one', query, now - 3600000, now),
+    ).rejects.toThrow('missing segment');
+  });
+
+  it('rejects excessive matching archive references before reading R2', async () => {
+    app = await harness();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await app.call('seedScopeIndex', { day, old: now - 1000 });
+    const { env, get } = await conversionEnvironment(app);
+    await expect(
+      readConversionArchive(
+        env,
+        'workspace-one',
+        { app_id: 'app-one', environment_id: 'production', range: '1h' },
+        now - 3600000,
+        now,
+      ),
+    ).rejects.toThrow('limit exceeded');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('prunes hundreds of unrelated or old segments before the scope page limit and preserves unindexed legacy history', async () => {
+    app = await harness();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await app.call('seedScopeIndex', { day, old: now - 7200000 });
+    const recent = batch(crypto.randomUUID());
+    recent.events[0].timestamp = now - 1000;
+    await app.call('stage', [recent]);
+    await app.call('flush');
+    const scope = { app_id: 'app-one', environment_id: 'production', from: now - 3600000, to: now };
+    const result = await app.call('listScope', { scope, limit: 1 });
+    expect(result.status).toBe(200);
+    expect(result.body.segments).toHaveLength(1);
+    expect(result.body.next_cursor).toBeNull();
+    await app.call('insertConcurrentDaySegment', day);
+    const legacy = await app.call('listScope', { scope, limit: 1 });
+    expect(legacy.body.segments).toEqual([
+      { segment_id: 'concurrent-segment', object_key: '!concurrent-after-first-page' },
+    ]);
+    expect(legacy.body.next_cursor).toBeTruthy();
+    const page = await app.call('listScope', { scope, cursor: legacy.body.next_cursor, limit: 1 });
+    expect(page.body.segments).toHaveLength(1);
+    expect(page.body.next_cursor).toBeNull();
+    expect(
+      (
+        await app.call('listScope', {
+          scope: { ...scope, app_id: 'other' },
+          cursor: legacy.body.next_cursor,
+        })
+      ).status,
+    ).toBe(503);
+    expect((await app.call('listScope', { scope: { ...scope, to: scope.from } })).status).toBe(503);
+    expect((await app.call('listScope', { scope, limit: 101 })).status).toBe(503);
   });
 
   it('bounds pending bytes and segment bytes and schedules threshold flush promptly', async () => {
@@ -310,6 +451,78 @@ describe('BrowserArchive real SQLite and R2 durability', () => {
         ])
       ).status,
     ).toBe(503);
+  });
+
+  it.each([1, 2] as const)(
+    'deduplicates equivalent mixed-version queue deliveries when v%s arrives first',
+    async (version) => {
+      app = await harness();
+      const original = { ...batch('mixed-version'), session_hash: 'original-session' };
+      const v2 = { ...original, facts_digest_version: 2 as const };
+      const first = version === 1 ? original : v2;
+      const second = version === 1 ? v2 : original;
+      expect((await app.call('stage', [first, second])).body).toMatchObject({ duplicates: 1 });
+      expect((await app.call('stage', [second])).body).toMatchObject({ duplicates: 1 });
+      expect((await app.call('inspect')).body.pending_batches).toBe(1);
+      expect(
+        (await app.call('stage', [{ ...second, session_hash: 'changed-session' }])).status,
+      ).toBe(503);
+      expect(
+        (
+          await app.call('stage', [
+            {
+              ...v2,
+              events: [{ ...original.events[0], properties: { plan: 'augmented' } }],
+            },
+          ])
+        ).status,
+      ).toBe(503);
+      expect((await app.call('flush')).status).toBe(200);
+      const bucket = await app.bucket();
+      const object = await bucket.get((await bucket.list()).objects[0].key);
+      const archived = JSON.parse(gunzipSync(Buffer.from(await object!.arrayBuffer())).toString());
+      expect(archived.session_hash).toBe('original-session');
+      expect(archived.facts_digest_version).toBe(version);
+    },
+  );
+
+  it('archives v2 properties and treats reordered property keys as an identical retry', async () => {
+    app = await harness();
+    const first = batch('rich-v2');
+    const events = [
+      {
+        ...first.events[0],
+        type: 'event' as const,
+        name: 'purchase',
+        properties: { plan: 'pro', seats: 2 },
+        value: 29,
+      },
+    ];
+    const accepted = {
+      ...first,
+      events,
+      session_hash: 's',
+      facts_digest_version: 2 as const,
+      facts_digest: await digestBrowserEventFacts({ ...first, events, session_hash: 's' }, 2),
+    };
+    expect((await app.call('stage', [accepted])).body.accepted).toHaveLength(1);
+    const retry = {
+      ...accepted,
+      events: [{ ...events[0], properties: { seats: 2, plan: 'pro' } }],
+    };
+    expect((await app.call('stage', [retry])).body.duplicates).toBe(1);
+    expect(
+      (await app.call('stage', [{ ...accepted, events: [{ ...events[0], value: 30 }] }])).status,
+    ).toBe(503);
+    expect((await app.call('flush')).status).toBe(200);
+    const bucket = await app.bucket();
+    const object = await bucket.get((await bucket.list()).objects[0].key);
+    const archived = JSON.parse(gunzipSync(Buffer.from(await object!.arrayBuffer())).toString());
+    expect(archived).toMatchObject({
+      facts_digest_version: 2,
+      facts_digest: accepted.facts_digest,
+      events: [{ properties: { plan: 'pro', seats: 2 }, value: 29 }],
+    });
   });
 
   it('indexes event India days only after verified upload, including late and multi-day facts', async () => {

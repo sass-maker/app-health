@@ -1,5 +1,11 @@
+import { apiScopeAllows } from './api-scope.js';
 import { isBot } from 'isbot';
 import { browserMetadata } from './browser-metadata.js';
+import {
+  claimBrowserBatch,
+  prepareBrowserBatch,
+  compatibleBrowserBatch,
+} from './browser-batch-claim.js';
 import { writeBotCounter } from './browser-bot-counters.js';
 import { measureOwnerRouteRead, type OwnerRequestTimings } from './accounts.js';
 import { readPublicJson } from './public-body.js';
@@ -30,10 +36,6 @@ import {
   recordBrowserVisitorScopeActivation,
   sealExactBrowserVisitorDay,
 } from './browser-visitor-daily.js';
-import {
-  BROWSER_EVENT_FACTS_DIGEST_VERSION,
-  digestBrowserEventFacts,
-} from './browser-facts-digest.js';
 import { cachedAnalytics } from './analytics-cache.js';
 import type { SharedAnalytics } from '@app-health/contracts';
 import {
@@ -52,6 +54,9 @@ export interface BrowserEnvironment extends BrowserBindings {
   ANALYTICS_ENGINE_QUERY_TOKEN?: string;
 }
 const localAnalytics = new LocalBrowserAnalytics();
+export function localConversionBatches(): Iterable<CollectedBrowserBatch> {
+  return localAnalytics.conversionBatches();
+}
 const UNSAFE_BROWSER_PATH = /[@?#\\\s]/;
 const json = (status: number, body: unknown) =>
   Response.json(body, { status, headers: { 'cache-control': 'no-store' } });
@@ -171,21 +176,11 @@ export async function acceptBrowser(
   repos: AppHealthRepositories,
   local: boolean,
 ) {
-  const scopedBatch = session
-    ? {
-        ...batch,
-        session_hash: await browserSessionScope(batch.app_id, batch.environment_id, session),
-      }
-    : batch;
-  const durableBatch =
-    !local && scopedBatch.events.length
-      ? {
-          ...scopedBatch,
-          facts_digest_version:
-            BROWSER_EVENT_FACTS_DIGEST_VERSION as typeof BROWSER_EVENT_FACTS_DIGEST_VERSION,
-          facts_digest: await digestBrowserEventFacts(scopedBatch),
-        }
-      : scopedBatch;
+  const prepared = await prepareBrowserBatch(batch, session, local);
+  const reserved =
+    !local && prepared.events.length ? await reserveBrowserBatch(env, prepared) : prepared;
+  if (reserved instanceof Response) return reserved;
+  const durableBatch = reserved;
   const activeSession =
     !batch.events.length ||
     batch.events.some((event) => event.timestamp > batch.received_at - PRESENCE_TTL_MS)
@@ -227,6 +222,23 @@ export async function acceptBrowser(
     }
   }
   return response;
+}
+
+async function reserveBrowserBatch(
+  env: BrowserEnvironment,
+  batch: CollectedBrowserBatch,
+): Promise<Response | CollectedBrowserBatch> {
+  if (!env.DB) return json(503, { error: 'Event receipt storage unavailable' });
+  try {
+    const compatible = await compatibleBrowserBatch(env.DB, batch);
+    if (compatible === 'accepted')
+      return json(202, { accepted: batch.events.length, presence: false, duplicate: true });
+    if (!compatible || !(await claimBrowserBatch(env.DB, compatible)))
+      return json(409, { error: 'Batch identity reused with different event facts' });
+    return compatible;
+  } catch {
+    return json(503, { error: 'browser analytics persistence unavailable' });
+  }
 }
 
 async function enqueueBrowser(
@@ -584,12 +596,12 @@ async function browserVisitorCoverageOwnerRoute(
   return handleBrowserVisitorCoverageOperator(request, env, owner.workspaceId!);
 }
 
-async function browserLiveRoute(request: Request, presence: BrowserPresence) {
+async function browserLiveRoute(request: Request, presence: BrowserPresence, owner: OwnerIdentity) {
   if (request.headers.get('origin') !== new URL(request.url).origin)
     return json(403, { error: 'same-origin stream required' });
   return presence.fetch(
     new Request('https://presence/live', {
-      headers: { upgrade: request.headers.get('upgrade') ?? '' },
+      headers: { upgrade: request.headers.get('upgrade') ?? '', 'x-auth-user': owner.id },
     }),
   );
 }
@@ -616,7 +628,7 @@ export async function handleBrowserOwner(
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
   const presence = env.WORKSPACE_PRESENCE.getByName(workspace);
-  if (path.endsWith('/live')) return browserLiveRoute(request, presence);
+  if (path.endsWith('/live')) return browserLiveRoute(request, presence, owner);
   return workspaceSummary(workspace, env, presence, owner.appIds ?? []);
 }
 
@@ -667,6 +679,7 @@ async function browserReport(
     Object.fromEntries(new URL(request.url).searchParams),
   );
   if (!filter.success) return json(400, { error: 'Invalid analytics filter.' });
+  if (!apiScopeAllows(owner, filter.data)) return json(403, { error: 'API scope forbidden.' });
   if (!local && filter.data.app_id && !owner.appIds?.includes(filter.data.app_id))
     return json(403, { error: 'Project access denied.' });
   if (local) return json(200, localAnalytics.report(filter.data));

@@ -1,3 +1,4 @@
+import { WorkspaceManage } from './lib/workspace-scope.js';
 import { type DashboardView } from './dashboard-navigation.js';
 import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import {
@@ -191,19 +192,21 @@ function WorkspaceSidebar(props: WorkspaceSidebarProps): ReactElement {
 function WorkspaceSidebarFooter({ onAdd }: Pick<Props, 'onAdd'>): ReactElement {
   return (
     <div className="mt-auto px-3 pb-3">
-      <Button
-        variant="ghost"
-        className="w-full justify-start"
-        aria-label="Add another project"
-        onClick={() => {
-          window.appHealth?.track('project_add_started');
-          void window.appHealth?.flush?.();
-          onAdd();
-        }}
-      >
-        <Plus />
-        add project
-      </Button>
+      <WorkspaceManage>
+        <Button
+          variant="ghost"
+          className="w-full justify-start"
+          aria-label="Add another project"
+          onClick={() => {
+            window.appHealth?.track('project_add_started');
+            void window.appHealth?.flush?.();
+            onAdd();
+          }}
+        >
+          <Plus />
+          add project
+        </Button>
+      </WorkspaceManage>
       <a
         href="/#integration"
         className="flex min-h-11 items-center gap-2 px-3 text-xs text-muted-foreground hover:text-foreground"

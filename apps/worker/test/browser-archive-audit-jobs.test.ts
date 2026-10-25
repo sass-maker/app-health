@@ -144,6 +144,7 @@ beforeAll(async () => {
   await applyMigration('0024_browser_archive_queue_evidence.sql');
   await applyMigration('0025_browser_visitor_acceptance_coverage.sql');
   await applyMigration('0026_browser_visitor_day_seals.sql');
+  await applyMigration('0029_expanded_browser_facts.sql');
   body = await archiveBody();
 });
 

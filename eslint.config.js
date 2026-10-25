@@ -14,6 +14,7 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/coverage/**',
       'apps/web/public/footer.js',
+      'apps/web/public/tracker.js',
       'packages/go/**',
       'openspec/**',
       '.codex/**',
@@ -38,7 +39,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ['examples/dropin-log-client/**/*.js', 'apps/web/public/tracker.js'],
+    files: [
+      'examples/dropin-log-client/**/*.js',
+      'apps/web/scripts/tracker-source.js',
+      'apps/web/public/tracker-extras.js',
+    ],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',
@@ -61,4 +66,5 @@ export default tseslint.config(
       },
     },
   },
+  { files: ['apps/web/public/tracker-extras.js'], languageOptions: { sourceType: 'module' } },
 );
