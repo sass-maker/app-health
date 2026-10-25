@@ -1,3 +1,4 @@
+import { splitMigrationSql } from './migration-sql.js';
 import { URL } from 'node:url';
 import { readFile, readdir } from 'node:fs/promises';
 import { beforeEach, afterEach, expect, it } from 'vitest';
@@ -21,11 +22,8 @@ beforeEach(async () => {
   db = await mf.getD1Database('DB');
   const directory = new URL('../migrations/', import.meta.url);
   for (const file of (await readdir(directory)).filter((name) => name.endsWith('.sql')).sort()) {
-    const sql = (await readFile(new URL(file, directory), 'utf8')).replace(/--[^\n]*/g, '').trim();
-    for (const statement of sql
-      .split(/;\s*(?=(?:CREATE|ALTER|DROP|INSERT|UPDATE|DELETE|PRAGMA)\b)/i)
-      .filter((value) => value.trim()))
-      await db.prepare(statement).run();
+    const sql = await readFile(new URL(file, directory), 'utf8');
+    for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
   }
   await db.prepare("INSERT INTO apps(id,name,created_at) VALUES ('app','Product',1)").run();
   await db

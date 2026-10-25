@@ -1,10 +1,10 @@
 /** Leave room for the envelope beneath the collector's 256 KiB body limit. */
-export function takeSizedBatch<T>(queue: T[], limit: number): T[] {
+export function takeSizedBatch<T>(queue: T[], limit: number, byteLimit = 256 * 1024): T[] {
   let bytes = 1024;
   let count = 0;
   for (const item of queue) {
     const size = new TextEncoder().encode(JSON.stringify(item)).byteLength + 1;
-    if (count >= limit || bytes + size > 256 * 1024) break;
+    if (count >= limit || bytes + size > byteLimit) break;
     bytes += size;
     count++;
   }

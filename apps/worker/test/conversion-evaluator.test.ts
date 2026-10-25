@@ -287,3 +287,66 @@ it('bounds property detail without withholding goals or funnels and discloses om
   expect(result.properties[0].values).toHaveLength(100);
   expect(result.property_detail).toEqual({ truncated: true, omitted_occurrences: 1 });
 });
+
+it('uses only observed browser cohort for cross-channel rates and keeps event identities and tracked currencies separate', () => {
+  const goal = definition({ kind: 'goal', name: 'Paid', step: action('Order Paid') });
+  const productFacts = [
+    ['v1', 's1', 'USD', 100],
+    ['server-only', 's2', 'JPY', 500],
+  ].map(([visitor, session, currency, amount], index) => ({
+    scope: { workspace: 'ws', app_id: 'app', environment_id: 'env', channel: 'server' as const },
+    event: {
+      schemaVersion: 'app-health.product-event.v1' as const,
+      event_id: 'same-browser-id',
+      occurred_at: 3000 + index,
+      channel: 'server' as const,
+      type: 'revenue' as const,
+      name: 'Order Paid',
+      visitor_id: String(visitor),
+      session_id: String(session),
+      value: 2,
+      revenue: { currency: String(currency), amount_minor: Number(amount) },
+    },
+  }));
+  productFacts[1].event.event_id = 'unlinked-server-id';
+  const input = {
+    batches: [batch([event('pageview', '/pricing', 2000, { event_id: 'same-browser-id' })])],
+    productFacts,
+    definitions: [goal],
+    query,
+    from: 1000,
+    to: 10000,
+    source: 'archive' as const,
+    complete: false,
+    coverage_note: 'Observed',
+  };
+  const result = AnalysisReport.parse(evaluateConversions(input));
+  expect(result.conflicting_events).toBe(0);
+  expect(result.goals[0]).toMatchObject({
+    occurrences: 2,
+    visitors: 2,
+    denominator_visitors: 1,
+    rate_visitors: 1,
+    unlinked_visitors: 1,
+    conversion_rate: 1,
+    value: 4,
+    tracked_revenue: [
+      { currency: 'JPY', amount_minor: 500 },
+      { currency: 'USD', amount_minor: 100 },
+    ],
+  });
+  expect(evaluateConversions({ ...input, batches: [] }).goals[0]).toMatchObject({
+    conversion_rate: null,
+    denominator_visitors: 0,
+    unlinked_visitors: 2,
+  });
+  expect(
+    evaluateConversions({
+      ...input,
+      productFacts: productFacts.map((row) => ({
+        ...row,
+        event: { ...row.event, name: 'order paid' },
+      })),
+    }).goals[0].occurrences,
+  ).toBe(0);
+});

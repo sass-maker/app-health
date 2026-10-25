@@ -60,6 +60,7 @@ export async function readConversionArchive(
   query: AnalysisQuery,
   from: number,
   to: number,
+  budget?: { objects: number; bytes: number },
 ): Promise<CollectedBrowserBatch[]> {
   const { BROWSER_ARCHIVE: archive, BROWSER_HISTORY: history } = env;
   if (!archive || !history?.get) throw new Error('Conversion archive unavailable');
@@ -72,6 +73,10 @@ export async function readConversionArchive(
     { app_id: query.app_id, environment_id: query.environment_id, from, to },
     deadline,
   );
+  if (budget) {
+    budget.objects += references.size;
+    if (budget.objects > 200) throw new Error('Combined conversion segment limit exceeded');
+  }
   const batches: CollectedBrowserBatch[] = [];
   const bytes = { compressed: 0, decompressed: 0 };
   let events = 0;
@@ -95,5 +100,6 @@ export async function readConversionArchive(
       if (scoped.length) batches.push({ ...batch, events: scoped });
     }
   }
+  if (budget) budget.bytes += bytes.decompressed;
   return batches;
 }

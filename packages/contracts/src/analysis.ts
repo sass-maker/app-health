@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { BrowserReportFilter } from './browser.js';
+import { ProductEventName, ProductPropertyKey } from './product-event.js';
 
 const scalar = z.union([
-  z.string().max(200),
+  z.string().max(255),
   z.number().finite().min(-1e12).max(1e12),
   z.boolean(),
 ]);
-const property = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/);
+const property = ProductPropertyKey;
 export const AnalysisStep = z
   .object({
     type: z.enum(['page', 'event']),
@@ -19,7 +20,7 @@ export const AnalysisStep = z
     const valid =
       step.type === 'page'
         ? /^\/[^?#@\\\s]*$/.test(step.target) && !step.target.replace(/\/\*$/, '').includes('*')
-        : /^[a-z][a-z0-9_.:-]{0,63}$/.test(step.target);
+        : ProductEventName.safeParse(step.target).success;
     if (!valid)
       context.addIssue({
         code: 'custom',
@@ -92,16 +93,23 @@ export const AnalysisScope = z
 export type AnalysisScope = z.infer<typeof AnalysisScope>;
 export const AnalysisQuery = AnalysisScope.extend({
   range: z.enum(['1h', '24h', '7d', '30d']).default('24h'),
-  event: z
-    .string()
-    .regex(/^[a-z][a-z0-9_.:-]{0,63}$/)
-    .optional(),
+  event: ProductEventName.optional(),
   filters: AnalysisSegment.optional(),
 }).strict();
 export type AnalysisQuery = z.infer<typeof AnalysisQuery>;
 
 const count = z.number().int().nonnegative();
 const rate = z.number().min(0).max(1).nullable();
+const trackedMoney = z
+  .array(
+    z
+      .object({
+        currency: z.string().regex(/^[A-Z]{3}$/),
+        amount_minor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+      })
+      .strict(),
+  )
+  .max(200);
 export const AnalysisReport = z
   .object({
     from: count,
@@ -113,6 +121,9 @@ export const AnalysisReport = z
     sessions: count,
     visitors: count,
     unidentified_sessions: count,
+    browser_cohort_visitors: count.optional(),
+    unlinked_events: count.optional(),
+    tracked_revenue: trackedMoney.optional(),
     conflicting_events: count.optional(),
     property_detail: z.object({ truncated: z.boolean(), omitted_occurrences: count }).optional(),
     values: z.array(z.object({ name: z.string(), occurrences: count, value: z.number().finite() })),
@@ -124,6 +135,10 @@ export const AnalysisReport = z
         id: z.string(),
         name: z.string(),
         occurrences: count,
+        denominator_visitors: count.optional(),
+        rate_visitors: count.optional(),
+        unlinked_visitors: count.optional(),
+        tracked_revenue: trackedMoney.optional(),
         visitors: count,
         sessions: count,
         conversion_rate: rate,

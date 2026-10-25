@@ -4,6 +4,8 @@ import { apiTokenIdentity } from './workspace-access.js';
 import { handleWorkspaceAccess } from './workspace-routes.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
+import { handleProductEventIngest } from './product-event-routes.js';
+import { cleanupProductArchive } from './product-event-cleanup.js';
 import { handlePaymentIngest, handlePaymentOwner } from './payments-routes.js';
 import { handleProviderOwner } from './payment-provider-routes.js';
 import { handleProviderWebhook } from './payment-provider-webhooks.js';
@@ -983,6 +985,8 @@ async function handleIngestHostRoutes(
     }
     return webhookResponse;
   }
+  const productResponse = await handleProductEventIngest(request, env, bundle.repos, bundle.local);
+  if (productResponse) return productResponse;
   const paymentResponse = await handlePaymentIngest(request, env, bundle.repos, bundle.local);
   if (paymentResponse) return paymentResponse;
   const browserResponse = await handleBrowserIngest(request, env, bundle.repos, bundle.local);
@@ -1492,6 +1496,22 @@ const unmonitoredWorker = {
         );
       } catch {
         console.warn(JSON.stringify({ event: 'browser_archive_audit_slice_failed' }));
+      }
+    }
+    if (env.BROWSER_HISTORY?.get) {
+      try {
+        await cleanupProductArchive(env.DB, {
+          put: env.BROWSER_HISTORY.put.bind(env.BROWSER_HISTORY),
+          get: env.BROWSER_HISTORY.get.bind(env.BROWSER_HISTORY),
+          ...(env.BROWSER_HISTORY.delete
+            ? { delete: env.BROWSER_HISTORY.delete.bind(env.BROWSER_HISTORY) }
+            : {}),
+          ...(env.BROWSER_HISTORY.list
+            ? { list: env.BROWSER_HISTORY.list.bind(env.BROWSER_HISTORY) }
+            : {}),
+        });
+      } catch {
+        console.warn(JSON.stringify({ event: 'product_archive_cleanup_failed' }));
       }
     }
     await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);

@@ -49,3 +49,5 @@ export {
   MAX_LOG_BATCH,
   MAX_LOG_PROPS,
 } from './contracts.js';
+
+export type { ProductTrackInput, ProductMoney } from './product.js';

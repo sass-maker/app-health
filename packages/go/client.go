@@ -68,7 +68,7 @@ type Config struct {
 type Client struct {
 	cfg Config
 
-	queue chan EventV1
+	queue chan queuedEvent
 	flush chan chan struct{}
 	stop  chan struct{}
 	done  chan struct{}
@@ -150,7 +150,7 @@ func New(cfg Config) *Client {
 
 	c := &Client{
 		cfg:        cfg,
-		queue:      make(chan EventV1, cfg.QueueSize),
+		queue:      make(chan queuedEvent, cfg.QueueSize),
 		flush:      make(chan chan struct{}),
 		stop:       make(chan struct{}),
 		done:       make(chan struct{}),
@@ -170,7 +170,7 @@ func (c *Client) enqueue(ev EventV1) {
 		return
 	}
 	select {
-	case c.queue <- ev:
+	case c.queue <- queuedEvent{endpoint: &ev}:
 	default:
 		c.dropped.Add(1)
 	}
@@ -224,15 +224,27 @@ func (c *Client) loop() {
 	defer close(c.done)
 
 	batch := make([]EventV1, 0, c.cfg.BatchSize)
+	products := make([]ProductEventV1, 0, c.cfg.BatchSize)
 	flushTimer := time.NewTimer(c.cfg.FlushInterval)
 	defer flushTimer.Stop()
 
 	flush := func() {
-		if len(batch) == 0 {
-			return
+		if len(batch) > 0 {
+			c.deliverBatch(batch)
+			batch = batch[:0]
 		}
-		c.deliverBatch(batch)
-		batch = batch[:0]
+		if len(products) > 0 {
+			c.deliverProducts(products)
+			products = products[:0]
+		}
+	}
+	appendEvent := func(ev queuedEvent) {
+		if ev.endpoint != nil {
+			batch = append(batch, *ev.endpoint)
+		}
+		if ev.product != nil {
+			products = append(products, *ev.product)
+		}
 	}
 
 	for {
@@ -242,8 +254,8 @@ func (c *Client) loop() {
 			for {
 				select {
 				case ev := <-c.queue:
-					batch = append(batch, ev)
-					if len(batch) >= c.cfg.BatchSize {
+					appendEvent(ev)
+					if len(batch)+len(products) >= c.cfg.BatchSize {
 						flush()
 					}
 				default:
@@ -252,8 +264,8 @@ func (c *Client) loop() {
 				}
 			}
 		case ev := <-c.queue:
-			batch = append(batch, ev)
-			if len(batch) >= c.cfg.BatchSize {
+			appendEvent(ev)
+			if len(batch)+len(products) >= c.cfg.BatchSize {
 				flush()
 				if !flushTimer.Stop() {
 					select {
@@ -273,8 +285,8 @@ func (c *Client) loop() {
 			for draining {
 				select {
 				case ev := <-c.queue:
-					batch = append(batch, ev)
-					if len(batch) >= c.cfg.BatchSize {
+					appendEvent(ev)
+					if len(batch)+len(products) >= c.cfg.BatchSize {
 						flush()
 					}
 				default:
@@ -298,6 +310,10 @@ func (c *Client) deliverBatch(events []EventV1) {
 		return
 	}
 
+	c.deliverBody(body, len(events), c.cfg.IngestURL)
+}
+
+func (c *Client) deliverBody(body []byte, count int, endpoint string) {
 	deadline := c.cfg.Timeout
 	for attempt := 0; attempt <= c.cfg.MaxRetries; attempt++ {
 		if attempt > 0 {
@@ -313,13 +329,13 @@ func (c *Client) deliverBatch(events []EventV1) {
 			case <-time.After(backoff):
 			}
 		}
-		if c.sendOnce(body, deadline) {
-			c.sent.Add(int64(len(events)))
+		if c.sendOnce(body, deadline, endpoint) {
+			c.sent.Add(int64(count))
 			c.batchesSent.Add(1)
 			return
 		}
 	}
-	c.failed.Add(int64(len(events)))
+	c.failed.Add(int64(count))
 }
 
 func (c *Client) buildBatch(events []EventV1) EventBatchV1 {
@@ -339,11 +355,15 @@ func (c *Client) buildBatch(events []EventV1) EventBatchV1 {
 }
 
 // sendOnce performs a single POST. It returns true on a 2xx response.
-func (c *Client) sendOnce(body []byte, timeout time.Duration) bool {
+func (c *Client) sendOnce(body []byte, timeout time.Duration, endpoints ...string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.IngestURL, bytes.NewReader(body))
+	endpoint := c.cfg.IngestURL
+	if len(endpoints) > 0 {
+		endpoint = endpoints[0]
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return false
 	}

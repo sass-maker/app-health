@@ -15,6 +15,8 @@ import {
   type AnalysisStore,
 } from './analysis-store.js';
 import { evaluateConversions } from './conversion-evaluator.js';
+import { localProductEvents } from './product-event-local.js';
+import { readProductArchive } from './product-event-archive.js';
 import { readConversionArchive } from './conversion-archive.js';
 import { readPublicJson } from './public-body.js';
 
@@ -64,11 +66,31 @@ async function conversionReport(
   const to = Date.now();
   const durations = { '1h': 3600000, '24h': 86400000, '7d': 7 * 86400000, '30d': 30 * 86400000 };
   const from = to - durations[query.range];
+  const budget = { objects: 0, bytes: 0 };
   const batches = local
     ? localConversionBatches()
-    : await readConversionArchive(env, scope.workspace, query, from, to);
+    : await readConversionArchive(env, scope.workspace, query, from, to, budget);
+  const products = local
+    ? {
+        facts: localProductEvents.read({ ...scope, workspace: scope.workspace }, from, to),
+        pending: 0,
+      }
+    : env.DB && env.BROWSER_HISTORY?.get
+      ? await readProductArchive(
+          env.DB,
+          {
+            put: env.BROWSER_HISTORY.put.bind(env.BROWSER_HISTORY),
+            get: env.BROWSER_HISTORY.get.bind(env.BROWSER_HISTORY),
+          },
+          scope,
+          from,
+          to,
+          { objects: 200 - budget.objects, bytes: 8 * 1024 * 1024 - budget.bytes },
+        )
+      : { facts: [], pending: 0 };
   return evaluateConversions({
     batches,
+    productFacts: products.facts,
     query,
     definitions,
     from,
@@ -77,7 +99,7 @@ async function conversionReport(
     complete: local,
     coverage_note: local
       ? 'Local development events only. Restarting the server clears data.'
-      : 'Observed archived events only. Recent queued/staged events may not be sealed; queue closure and full-period retention are unverified. Counts and rates are not a complete traffic census.',
+      : `Observed archived browser and explicit product events only. ${products.pending} product batches are pending. Browser cohort rates exclude unlinked conversions. Queue closure and full-period retention are unverified; counts are not a complete traffic census.`,
   });
 }
 

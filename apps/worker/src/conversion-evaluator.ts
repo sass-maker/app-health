@@ -7,59 +7,70 @@ import {
   type BrowserSegmentFilter,
 } from '@app-health/contracts';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
-import { serializeBrowserEventFacts } from './browser-facts-digest.js';
+import { canonicalProductJson, type ProductFact } from './product-event-model.js';
+import {
+  browserConversionFacts,
+  productConversionFacts,
+  type ConversionFact,
+} from './conversion-facts.js';
 
-type Fact = { event: CollectedBrowserBatch['events'][number]; batch: CollectedBrowserBatch };
+type Fact = ConversionFact;
 const keyOf = (fact: Fact) =>
-  JSON.stringify([fact.batch.app_id, fact.batch.environment_id, fact.event.event_id]);
-const factSignature = (fact: Fact) =>
-  serializeBrowserEventFacts({ ...fact.batch, batch_id: 'event', events: [fact.event] }, 2);
+  JSON.stringify([
+    fact.context.app_id,
+    fact.context.environment_id,
+    fact.context.channel,
+    fact.event.event_id,
+  ]);
+const factSignature = (fact: Fact) => canonicalProductJson(fact);
 
 function factsInWindow(
-  batches: Iterable<CollectedBrowserBatch>,
+  source: Fact[],
   query: AnalysisQuery,
   from: number,
   to: number,
 ): { facts: Fact[]; conflicts: number } {
   const facts = new Map<string, Fact>();
   const conflicts = new Set<string>();
-  for (const batch of batches) {
-    if (batch.app_id !== query.app_id || batch.environment_id !== query.environment_id) continue;
-    for (const event of batch.events) {
-      if (event.timestamp < from || event.timestamp >= to) continue;
-      const fact = { event, batch };
-      const key = keyOf(fact);
-      if (conflicts.has(key)) continue;
-      const saved = facts.get(key);
-      if (saved && factSignature(saved) !== factSignature(fact)) {
-        facts.delete(key);
-        conflicts.add(key);
-        continue;
-      }
-      if (!saved) facts.set(key, fact);
-      if (facts.size + conflicts.size > 50000)
-        throw new Error('Conversion event limit exceeded; choose a shorter period.');
+  for (const fact of source) {
+    if (
+      fact.context.app_id !== query.app_id ||
+      fact.context.environment_id !== query.environment_id
+    )
+      continue;
+    if (fact.event.occurred_at < from || fact.event.occurred_at >= to) continue;
+    const key = keyOf(fact);
+    if (conflicts.has(key)) continue;
+    const saved = facts.get(key);
+    if (saved && factSignature(saved) !== factSignature(fact)) {
+      facts.delete(key);
+      conflicts.add(key);
+      continue;
     }
+    if (!saved) facts.set(key, fact);
+    if (facts.size + conflicts.size > 50000)
+      throw new Error('Conversion event limit exceeded; choose a shorter period.');
   }
   return {
     conflicts: conflicts.size,
     facts: [...facts.values()].sort(
       (a, b) =>
-        a.event.timestamp - b.event.timestamp || a.event.event_id.localeCompare(b.event.event_id),
+        a.event.occurred_at - b.event.occurred_at ||
+        a.event.event_id.localeCompare(b.event.event_id),
     ),
   };
 }
 
 function factDimensions(fact: Fact) {
-  const { batch, event } = fact;
+  const { context: batch, event } = fact;
   return {
-    path: event.path,
-    source: normalizeAnalyticsSource(batch.attribution?.source ?? event.referrer),
+    path: event.path ?? '',
+    source: normalizeAnalyticsSource(batch.attribution?.source ?? batch.referrer ?? ''),
     ...technologyDimensions(batch),
     ...acquisitionDimensions(batch),
   };
 }
-function technologyDimensions(batch: CollectedBrowserBatch) {
+function technologyDimensions(batch: Fact['context']) {
   return {
     country: batch.metadata?.country || 'Unknown',
     device: batch.metadata?.device || 'Unknown',
@@ -67,7 +78,7 @@ function technologyDimensions(batch: CollectedBrowserBatch) {
     channel: batch.metadata?.channel || 'Unknown',
   };
 }
-function acquisitionDimensions(batch: CollectedBrowserBatch) {
+function acquisitionDimensions(batch: Fact['context']) {
   return {
     entry_path: batch.attribution?.entry_path ?? '',
     campaign: batch.attribution?.campaign ?? '',
@@ -88,14 +99,14 @@ function segmentMatches(fact: Fact, filters: BrowserSegmentFilter = {}): boolean
 function stepMatches(fact: Fact, step: AnalysisStep): boolean {
   const { event } = fact;
   if (step.type === 'page') {
-    if (event.type !== 'pageview') return false;
+    if (event.type !== 'page_view' || !event.path) return false;
     const prefix = step.target.endsWith('/*') ? step.target.slice(0, -2) : null;
     return prefix !== null
       ? event.path === prefix || event.path.startsWith(`${prefix}/`)
       : event.path === step.target;
   }
   return (
-    event.type === 'event' &&
+    (event.type === 'event' || event.type === 'revenue') &&
     event.name === step.target &&
     (step.property === undefined || event.properties?.[step.property] === step.equals)
   );
@@ -104,8 +115,8 @@ function stepMatches(fact: Fact, step: AnalysisStep): boolean {
 function sessionGroups(facts: Fact[]): Map<string, Fact[]> {
   const groups = new Map<string, Fact[]>();
   for (const fact of facts) {
-    if (!fact.batch.session_hash) continue;
-    const key = fact.batch.session_hash;
+    if (!fact.context.session_hash) continue;
+    const key = fact.context.session_hash;
     const events = groups.get(key) ?? [];
     events.push(fact);
     groups.set(key, events);
@@ -116,21 +127,26 @@ function sessionGroups(facts: Fact[]): Map<string, Fact[]> {
 function goalResult(
   record: AnalysisRecord,
   facts: Fact[],
-  denominator: number,
+  cohort: Set<string>,
 ): AnalysisReport['goals'][number] {
   if (record.definition.kind !== 'goal') throw new Error('Expected goal');
   const step = record.definition.step;
   const matched = facts.filter((fact) => stepMatches(fact, step));
   const visitors = new Set(
-    matched.flatMap(({ batch }) => (batch.visitor_hash ? [batch.visitor_hash] : [])),
+    matched.flatMap(({ context }) => (context.visitor_hash ? [context.visitor_hash] : [])),
   );
+  const rateVisitors = [...visitors].filter((visitor) => cohort.has(visitor)).length;
   return {
     id: record.id,
     name: record.definition.name,
     occurrences: matched.length,
     visitors: visitors.size,
     sessions: sessionGroups(matched).size,
-    conversion_rate: denominator ? visitors.size / denominator : null,
+    conversion_rate: cohort.size ? rateVisitors / cohort.size : null,
+    denominator_visitors: cohort.size,
+    rate_visitors: rateVisitors,
+    unlinked_visitors: visitors.size - rateVisitors,
+    tracked_revenue: trackedRevenue(matched),
     value: matched.reduce((sum, fact) => sum + (fact.event.value ?? 0), 0),
   };
 }
@@ -144,7 +160,7 @@ function eligibleProgress(
   filters: BrowserSegmentFilter,
 ) {
   if (step === 0) return segmentMatches(fact, filters) && segmentMatches(fact, definition.segment);
-  return prior !== undefined && fact.event.timestamp - prior.start <= definition.window_ms;
+  return prior !== undefined && fact.event.occurred_at - prior.start <= definition.window_ms;
 }
 function sessionProgress(
   events: Fact[],
@@ -157,9 +173,9 @@ function sessionProgress(
   let timestamp = -1;
   let previous = [...states];
   for (const fact of events) {
-    if (fact.event.timestamp !== timestamp) {
+    if (fact.event.occurred_at !== timestamp) {
       previous = [...states];
-      timestamp = fact.event.timestamp;
+      timestamp = fact.event.occurred_at;
     }
     for (let step = definition.steps.length - 1; step >= 0; step--) {
       if (!stepMatches(fact, definition.steps[step])) continue;
@@ -270,6 +286,7 @@ function eventDetails(facts: Fact[], eventName: string | undefined) {
 /** Exact computation over supplied archive facts; source completeness is supplied separately. */
 export function evaluateConversions(input: {
   batches: Iterable<CollectedBrowserBatch>;
+  productFacts?: ProductFact[];
   query: AnalysisQuery;
   definitions: AnalysisRecord[];
   from: number;
@@ -278,15 +295,25 @@ export function evaluateConversions(input: {
   complete: boolean;
   coverage_note: string;
 }): AnalysisReport {
-  const observed = factsInWindow(input.batches, input.query, input.from, input.to);
+  const observed = factsInWindow(
+    [...browserConversionFacts(input.batches), ...productConversionFacts(input.productFacts ?? [])],
+    input.query,
+    input.from,
+    input.to,
+  );
   const all = observed.facts;
   const facts = all.filter((fact) => segmentMatches(fact, input.query.filters));
   const visitors = new Set(
-    facts.flatMap(({ batch }) => (batch.visitor_hash ? [batch.visitor_hash] : [])),
+    facts.flatMap(({ context }) => (context.visitor_hash ? [context.visitor_hash] : [])),
+  );
+  const cohort = new Set(
+    facts.flatMap(({ context }) =>
+      context.channel === 'browser' && context.visitor_hash ? [context.visitor_hash] : [],
+    ),
   );
   const groups = sessionGroups(facts);
   const unidentified = [...groups.values()].filter(
-    (rows) => !rows.some(({ batch }) => batch.visitor_hash),
+    (rows) => !rows.some(({ context }) => context.visitor_hash),
   ).length;
   const allGroups = sessionGroups(all);
   return {
@@ -301,13 +328,32 @@ export function evaluateConversions(input: {
     events: facts.filter(({ event }) => event.type === 'event').length,
     sessions: groups.size,
     visitors: visitors.size,
+    browser_cohort_visitors: cohort.size,
+    unlinked_events: facts.filter((fact) => !fact.context.session_hash).length,
+    tracked_revenue: trackedRevenue(facts),
     unidentified_sessions: unidentified,
     ...eventDetails(facts, input.query.event),
     goals: input.definitions
       .filter((row) => row.definition.kind === 'goal')
-      .map((row) => goalResult(row, facts, visitors.size)),
+      .map((row) => goalResult(row, facts, cohort)),
     funnels: input.definitions
       .filter((row) => row.definition.kind === 'funnel')
       .map((row) => funnelResult(row, allGroups, input.query.filters ?? {})),
   };
+}
+
+function trackedRevenue(facts: Fact[]) {
+  const totals = new Map<string, bigint>();
+  for (const { event } of facts)
+    if (event.revenue)
+      totals.set(
+        event.revenue.currency,
+        (totals.get(event.revenue.currency) ?? 0n) + BigInt(event.revenue.amount_minor),
+      );
+  for (const amount of totals.values())
+    if (amount > BigInt(Number.MAX_SAFE_INTEGER))
+      throw new Error('Tracked revenue exceeds exact report capacity');
+  return [...totals]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, amount_minor]) => ({ currency, amount_minor: Number(amount_minor) }));
 }

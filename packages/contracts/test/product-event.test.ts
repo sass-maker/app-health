@@ -64,9 +64,10 @@ describe('ProductEventV1 envelope', () => {
         ),
       }).success,
     ).toBe(false);
-    expect(ProductEventV1.safeParse({ ...named, properties: { 'Not-A-Key': 1 } }).success).toBe(
-      false,
-    );
+    expect(
+      ProductEventV1.safeParse({ ...named, properties: Object.fromEntries([['__proto__', 1]]) })
+        .success,
+    ).toBe(false);
   });
 
   it('rejects unknown fields and a foreign schema version', () => {
@@ -78,7 +79,8 @@ describe('ProductEventV1 envelope', () => {
 
   it('bounds identity to opaque anonymous strings', () => {
     expect(
-      ProductEventV1.safeParse({ ...named, visitor_id: 'anon_abc-123', session_id: 's_1' }).success,
+      ProductEventV1.safeParse({ ...named, visitor_id: base.event_id, session_id: base.event_id })
+        .success,
     ).toBe(true);
     expect(ProductEventV1.safeParse({ ...named, visitor_id: 'sarthak@example.com' }).success).toBe(
       false,
