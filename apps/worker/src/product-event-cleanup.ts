@@ -1,3 +1,4 @@
+import { cleanupProductSegments } from './product-segment-cleanup.js';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { ProductBucket, ProductReceipt } from './product-event-model.js';
 const DAY = 86400000,
@@ -110,6 +111,10 @@ export async function cleanupProductArchive(
     db.prepare('DELETE FROM product_event_days WHERE day<?').bind(Math.floor(now / DAY) - 35),
     db.prepare('DELETE FROM product_workspace_days WHERE day<?').bind(Math.floor(now / DAY) - 35),
   ]);
+  const segments = await cleanupProductSegments(db, now);
   const gc = await cleanupObjects(db, bucket, now);
-  return { processed: due.length + gc.processed, more: rows.results.length === 100 || gc.more };
+  return {
+    processed: due.length + gc.processed,
+    more: rows.results.length === 100 || gc.more || segments.more,
+  };
 }

@@ -1,3 +1,4 @@
+import { compactProductArchive } from '../src/product-compaction.js';
 import { reserveProductBatch, sealProductBatch } from '../src/product-event-reservation.js';
 import { cleanupProductArchive } from '../src/product-event-cleanup.js';
 import { splitMigrationSql } from './migration-sql.js';
@@ -27,6 +28,7 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
     '0034_product_events.sql',
     '0036_product_capacity.sql',
     '0038_product_maintenance.sql',
+    '0040_product_segments.sql',
   ]) {
     const sql = await readFile(new URL('../migrations/' + migration, import.meta.url), 'utf8');
     for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
@@ -103,4 +105,16 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
   expect(
     await bucket.put(pending.receipt.object_key, 'late', { onlyIf: { etagDoesNotMatch: '*' } }),
   ).toBeNull();
+  for (let i = 0; i < 32; i++)
+    await acceptProductArchive(db, bucket, scope, crypto.randomUUID(), [
+      { ...event, event_id: crypto.randomUUID() },
+    ]);
+  const compacted = await Promise.all([
+    compactProductArchive(db, bucket),
+    compactProductArchive(db, bucket),
+  ]);
+  expect(compacted.filter((value) => value.published)).toHaveLength(1);
+  const report = await readProductArchive(db, bucket, scope, 0, Date.now() + 1000);
+  expect(report.facts).toHaveLength(36);
+  expect(report.objects).toBeLessThan(10);
 }, 30000);

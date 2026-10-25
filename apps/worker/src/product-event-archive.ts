@@ -1,3 +1,4 @@
+import type { ProductSegment } from './product-segment-model.js';
 import { ProductEventV1 } from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import {
@@ -6,7 +7,6 @@ import {
   ProductError,
   type ProductScope,
   type ProductBucket,
-  type ProductReceipt,
   type ProductFact,
 } from './product-event-model.js';
 
@@ -70,13 +70,13 @@ export async function acceptProductArchive(
     duplicates: events.length - (newlySealed ? reserved.events.length : 0),
   };
 }
-async function readProductObject(
+export async function readProductObject(
   bucket: ProductBucket,
-  receipt: ProductReceipt,
+  receipt: ProductSegment,
   bytes: { total: number; limit: number },
 ): Promise<ProductFact[]> {
   const object = await bucket.get(receipt.object_key);
-  if (!object || object.size !== receipt.object_bytes || object.size > 98304) {
+  if (!object || object.size !== receipt.object_bytes || object.size > 1024 * 1024) {
     await object?.body.cancel();
     throw new ProductError('Product history object missing or changed');
   }
@@ -94,6 +94,7 @@ async function readProductObject(
     scope: ProductScope;
     batch_id: string;
     reservation: string;
+    segment_id?: string;
     events: unknown[];
   };
 
@@ -104,11 +105,12 @@ async function readProductObject(
     channel: receipt.channel,
   };
   if (
-    envelope.schema_version !== 1 ||
+    envelope.schema_version !== receipt.format ||
     canonicalProductJson(envelope.scope) !== canonicalProductJson(scope) ||
-    envelope.batch_id !== receipt.batch_id ||
-    envelope.reservation !== receipt.reservation ||
-    envelope.events.length !== receipt.accepted_count
+    (receipt.format === 1 &&
+      (envelope.batch_id !== receipt.batch_id || envelope.reservation !== receipt.reservation)) ||
+    (receipt.format === 2 && envelope.segment_id !== receipt.id) ||
+    envelope.events.length !== receipt.event_count
   )
     throw new ProductError('Product history manifest mismatch');
   return envelope.events.map((value) => ({ scope, event: ProductEventV1.parse(value) }));
@@ -125,10 +127,10 @@ export async function readProductArchive(
 ) {
   const rows = await db
     .prepare(
-      `SELECT * FROM product_batches WHERE workspace_id=? AND app_id=? AND environment_id=? AND state='sealed' AND accepted_count>0 AND min_time<? AND max_time>=? ORDER BY received_at,reservation LIMIT 201`,
+      `SELECT * FROM product_report_segments WHERE workspace_id=? AND app_id=? AND environment_id=? AND active=1 AND min_time<? AND max_time>=? ORDER BY received_at,id LIMIT 201`,
     )
     .bind(scope.workspace, scope.app_id, scope.environment_id, to, from)
-    .all<ProductReceipt>();
+    .all<ProductSegment>();
   if (rows.results.length > budget.objects)
     throw new ProductError('Combined conversion segment limit exceeded; choose a shorter period');
   const pending = await db

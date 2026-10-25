@@ -1,3 +1,5 @@
+import { compactProductArchive } from './product-compaction.js';
+import { maintainProductArchive } from './product-event-maintenance.js';
 import { ProductBatchV1, type ProductEventV1 } from '@app-health/contracts';
 import type { AppHealthRepositories } from './repository.js';
 import { readPublicJson } from './public-body.js';
@@ -54,6 +56,7 @@ async function accept(
   env: ProductEnvironment,
   repos: AppHealthRepositories,
   local: boolean,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ) {
   const parsed = ProductBatchV1.safeParse(await readPublicJson(request, 65536));
   if (!parsed.success)
@@ -76,25 +79,42 @@ async function accept(
   if (local) return json(202, localProductEvents.record(scope, parsed.data.batch_id, events));
   if (!env.DB || !env.BROWSER_HISTORY?.get)
     throw new ProductError('Product archive bindings unavailable');
-  return json(
-    202,
-    await acceptProductArchive(
+  if (!env.BROWSER_EVENTS) throw new ProductError('Product maintenance queue unavailable');
+  const accepted = await acceptProductArchive(
+    env.DB,
+    {
+      put: env.BROWSER_HISTORY.put.bind(env.BROWSER_HISTORY),
+      get: env.BROWSER_HISTORY.get.bind(env.BROWSER_HISTORY),
+    },
+    scope,
+    parsed.data.batch_id,
+    events,
+  );
+  if (waitUntil) waitUntil(compactAfterAcceptance(env, scope));
+  return json(202, accepted);
+}
+async function compactAfterAcceptance(env: ProductEnvironment, scope: ProductScope) {
+  try {
+    if (!env.DB || !env.BROWSER_HISTORY?.get) return;
+    const result = await compactProductArchive(
       env.DB,
       {
         put: env.BROWSER_HISTORY.put.bind(env.BROWSER_HISTORY),
         get: env.BROWSER_HISTORY.get.bind(env.BROWSER_HISTORY),
       },
       scope,
-      parsed.data.batch_id,
-      events,
-    ),
-  );
+    );
+    if (result.more) await maintainProductArchive(env);
+  } catch {
+    // Accepted bytes remain durable; the dirty D1 job and cron recover background work.
+  }
 }
 export async function handleProductEventIngest(
   request: Request,
   env: ProductEnvironment,
   repos: AppHealthRepositories,
   local: boolean,
+  waitUntil?: (promise: Promise<unknown>) => void,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (url.pathname !== '/v1/product-events') return null;
@@ -106,7 +126,7 @@ export async function handleProductEventIngest(
   if (request.method !== 'POST') return json(405, { error: 'Method not allowed' });
   if (request.headers.has('origin')) return json(403, { error: 'Private server ingestion only' });
   try {
-    return await accept(request, env, repos, local);
+    return await accept(request, env, repos, local, waitUntil);
   } catch (error) {
     if (error instanceof Error && error.message === 'payload too large')
       return json(413, { error: 'Product batch exceeds 64 KiB' });

@@ -1,3 +1,4 @@
+import { compactProductArchive } from './product-compaction.js';
 import { cleanupProductArchive } from './product-event-cleanup.js';
 import type { ProductEnvironment } from './product-event-model.js';
 export type ProductCleanupWake = {
@@ -73,7 +74,11 @@ async function consumeOne(wake: ProductCleanupWake, env: ProductEnvironment) {
     get: bucket.get.bind(bucket),
     delete: bucket.delete.bind(bucket),
   });
-  if (result.more) await maintainProductArchive(env, processing);
+  const compacted = await compactProductArchive(env.DB, {
+    put: bucket.put.bind(bucket),
+    get: bucket.get.bind(bucket),
+  });
+  if (result.more || compacted.more) await maintainProductArchive(env, processing);
   else
     await env.DB.prepare(
       'UPDATE product_archive_maintenance SET wake_token=NULL,wake_until=0 WHERE id=1 AND wake_token=?',

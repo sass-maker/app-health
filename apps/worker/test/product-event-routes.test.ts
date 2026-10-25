@@ -1,7 +1,8 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
 import { AppHealthService } from '../src/service.js';
 import { handleProductEventIngest } from '../src/product-event-routes.js';
+import type { ProductEnvironment } from '../src/product-event-model.js';
 import { analysisDatabase } from './analysis-sqlite.js';
 
 it('authenticates private event product/environment independently of browser and owner credentials', async () => {
@@ -36,6 +37,7 @@ it('authenticates private event product/environment independently of browser and
     body: unknown = input,
     headers: Record<string, string> = {},
     host = 'ingest.test',
+    extra: Partial<ProductEnvironment> = {},
   ) =>
     handleProductEventIngest(
       new Request(`https://${host}/v1/product-events`, {
@@ -43,7 +45,7 @@ it('authenticates private event product/environment independently of browser and
         headers: { authorization: `Bearer ${created.key.key}`, ...headers },
         body: JSON.stringify(body),
       }),
-      { DB: db, APP_HEALTH_INGEST_HOST: 'ingest.test' },
+      { DB: db, APP_HEALTH_INGEST_HOST: 'ingest.test', ...extra },
       repos,
       false,
     );
@@ -55,6 +57,15 @@ it('authenticates private event product/environment independently of browser and
     expect((await ingest({ ...input, environment_id: 'other-env' }))?.status).toBe(403);
     // Valid private input reaches durability checking; absent R2 cannot be acknowledged.
     expect((await ingest())?.status).toBe(503);
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM product_batches').get()).toMatchObject({
+      n: 0,
+    });
+    const put = vi.fn(async () => ({}) as R2Object),
+      get = vi.fn(async () => null);
+    const noQueue = await ingest(input, {}, 'ingest.test', { BROWSER_HISTORY: { put, get } });
+    expect(noQueue?.status).toBe(503);
+    expect(await noQueue?.json()).toEqual({ error: 'Product maintenance queue unavailable' });
+    expect(put).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM product_batches').get()).toMatchObject({
       n: 0,
     });

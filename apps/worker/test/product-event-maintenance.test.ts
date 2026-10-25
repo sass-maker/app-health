@@ -101,10 +101,13 @@ it('upgrades legacy wakes without running a slice and acknowledges browser stagi
     f.sqlite
       .prepare("INSERT INTO product_object_gc VALUES('product-events/v1/fence',0,'fence')")
       .run();
-    const browserAck = vi.fn(),
+    const order: string[] = [];
+    const browserAck = vi.fn(() => {
+        order.push('browser');
+      }),
       retry = vi.fn();
     f.put.mockImplementation(async () => {
-      expect(browserAck).toHaveBeenCalledOnce();
+      order.push('maintenance');
       return {};
     });
     const browser = {
@@ -115,9 +118,10 @@ it('upgrades legacy wakes without running a slice and acknowledges browser stagi
       received_at: Date.now(),
       events: [],
     };
+    const maintenance = f.message(f.pending.shift()!);
     await entry.queue(
       {
-        messages: [f.message(f.pending.shift()!), { body: browser, ack: browserAck, retry }],
+        messages: [maintenance, { body: browser, ack: browserAck, retry }],
       } as unknown as MessageBatch<ProductCleanupWake>,
       {
         ...f.env,
@@ -127,6 +131,9 @@ it('upgrades legacy wakes without running a slice and acknowledges browser stagi
       } as unknown as Env,
     );
     expect(f.put).toHaveBeenCalledOnce();
+    expect(order).toEqual(['browser', 'maintenance']);
+    expect(maintenance.ack).toHaveBeenCalledOnce();
+    expect(maintenance.retry).not.toHaveBeenCalled();
     expect(retry).not.toHaveBeenCalled();
   } finally {
     f.sqlite.close();

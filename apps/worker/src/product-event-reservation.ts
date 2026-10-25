@@ -97,23 +97,32 @@ export async function sealProductBatch(
   bytes: number,
   count: number,
 ) {
-  const result = await db
-    .prepare(
-      `UPDATE product_batches SET state='sealed',object_hash=?,object_bytes=?,accepted_count=?,expires_at=?,cleanup_at=?
+  const results = await db.batch([
+    db
+      .prepare(
+        `UPDATE product_batches SET state='sealed',object_hash=?,object_bytes=?,accepted_count=?,expires_at=?,cleanup_at=?
    WHERE reservation=? AND state='pending' AND expires_at>? AND (SELECT COUNT(*) FROM product_event_claims WHERE reservation=?)=?`,
-    )
-    .bind(
-      hash,
-      bytes,
-      count,
-      receipt.received_at + 35 * 86400000,
-      receipt.received_at + 31 * 86400000,
-      receipt.reservation,
-      Date.now(),
-      receipt.reservation,
-      count,
-    )
-    .run();
+      )
+      .bind(
+        hash,
+        bytes,
+        count,
+        receipt.received_at + 35 * 86400000,
+        receipt.received_at + 31 * 86400000,
+        receipt.reservation,
+        Date.now(),
+        receipt.reservation,
+        count,
+      ),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO product_report_segments(id,workspace_id,app_id,environment_id,channel,event_day,level,format,reservation,batch_id,object_key,object_hash,object_bytes,event_count,min_time,max_time,received_at,active,cleanup_at)
+     SELECT reservation,workspace_id,app_id,environment_id,channel,CAST(received_at/86400000 AS INTEGER),0,1,reservation,batch_id,object_key,object_hash,object_bytes,accepted_count,min_time,max_time,received_at,1,received_at+2678400000
+     FROM product_batches WHERE reservation=? AND state='sealed' AND object_hash=? AND accepted_count>0 AND object_deleted=0`,
+      )
+      .bind(receipt.reservation, hash),
+  ]);
+  const result = results[0];
   if (result.meta.changes) return true;
   const existing = await db
     .prepare('SELECT state,object_hash FROM product_batches WHERE reservation=?')

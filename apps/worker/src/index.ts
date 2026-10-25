@@ -978,7 +978,13 @@ async function handleIngestHostRoutes(
   if (webhookResponse) {
     return webhookResponse;
   }
-  const productResponse = await handleProductEventIngest(request, env, bundle.repos, bundle.local);
+  const productResponse = await handleProductEventIngest(
+    request,
+    env,
+    bundle.repos,
+    bundle.local,
+    ctx?.waitUntil.bind(ctx),
+  );
   if (productResponse) return productResponse;
   const paymentResponse = await handlePaymentIngest(request, env, bundle.repos, bundle.local);
   if (paymentResponse) return paymentResponse;
