@@ -7,8 +7,13 @@ import { URL } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import { Miniflare } from 'miniflare';
 import { ProductEventV1 } from '@app-health/contracts';
-import { acceptProductArchive, readProductArchive } from '../src/product-event-archive.js';
+import {
+  acceptProductArchive,
+  readProductArchive,
+  readProductObject,
+} from '../src/product-event-archive.js';
 import type { D1DatabaseLike } from '../src/d1-adapter.js';
+import type { ProductSegment } from '../src/product-segment-model.js';
 import type { ProductBucket, ProductScope } from '../src/product-event-model.js';
 
 let runtime: Miniflare;
@@ -29,6 +34,7 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
     '0036_product_capacity.sql',
     '0038_product_maintenance.sql',
     '0040_product_segments.sql',
+    '0041_product_compaction_retries.sql',
   ]) {
     const sql = await readFile(new URL('../migrations/' + migration, import.meta.url), 'utf8');
     for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
@@ -117,4 +123,18 @@ it('atomically reserves concurrent identities in actual workerd D1 and seals rea
   const report = await readProductArchive(db, bucket, scope, 0, Date.now() + 1000);
   expect(report.facts).toHaveLength(36);
   expect(report.objects).toBeLessThan(10);
+  const held = await db
+    .prepare('SELECT * FROM product_report_segments WHERE active=1 AND format=1 LIMIT 1')
+    .first<ProductSegment>();
+  expect(held).not.toBeNull();
+  const expiry = Date.now() + 31 * 86400000 + 1000;
+  await cleanupProductArchive(db, bucket, expiry);
+  expect(
+    await db.prepare('SELECT COUNT(*) AS n FROM product_report_segments WHERE active=1').first(),
+  ).toMatchObject({ n: 0 });
+  expect(await readProductObject(bucket, held!, { total: 0, limit: 1048576 })).toHaveLength(1);
+  await cleanupProductArchive(db, bucket, expiry + 3600001);
+  await expect(readProductObject(bucket, held!, { total: 0, limit: 1048576 })).rejects.toThrow(
+    'changed',
+  );
 }, 30000);

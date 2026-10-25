@@ -183,7 +183,12 @@ describe('canonical product archive with real SQLite and local R2', () => {
           object_key: string;
         }
       ).object_key;
-      expect(await bucket.get(sealedKey)).toBeNull();
+      expect(await bucket.get(sealedKey)).not.toBeNull();
+      expect(
+        sqlite.prepare('SELECT COUNT(*) AS n FROM product_report_segments WHERE active=1').get(),
+      ).toMatchObject({ n: 0 });
+      await cleanupProductArchive(db, bucket, Date.now() + 31 * 86400000 + 3601001);
+      expect(await (await bucket.get(sealedKey))!.text()).toContain('expired_product_reservation');
       expect(await (await bucket.get(pending.receipt.object_key))!.text()).toContain(
         'expired_product_reservation',
       );

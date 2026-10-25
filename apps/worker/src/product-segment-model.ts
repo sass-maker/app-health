@@ -31,6 +31,8 @@ export type CompactionJob = {
   closed: number;
   lease_token: string | null;
   lease_until: number;
+  retry_at: number;
+  error_code: string | null;
 };
 export const jobIdentity = (
   scope: Pick<

@@ -1,5 +1,5 @@
 import { cleanupProductSegments } from './product-segment-cleanup.js';
-import type { D1DatabaseLike } from './d1-adapter.js';
+import type { D1PreparedStatement, D1DatabaseLike } from './d1-adapter.js';
 import type { ProductBucket, ProductReceipt } from './product-event-model.js';
 const DAY = 86400000,
   PREFIX = 'product-events/v1/';
@@ -48,10 +48,38 @@ function effectiveCleanup(row: ProductReceipt) {
     ? Math.max(row.expires_at, row.received_at + 35 * DAY)
     : row.received_at + 31 * DAY;
 }
+function retireRawReferences(
+  db: D1DatabaseLike,
+  row: ProductReceipt,
+  now: number,
+): D1PreparedStatement[] {
+  if (
+    row.state !== 'sealed' ||
+    row.object_deleted ||
+    row.accepted_count === 0 ||
+    row.received_at > now - 31 * DAY
+  )
+    return [];
+  const eligible =
+    "SELECT 1 FROM product_batches WHERE reservation=? AND state='sealed' AND object_deleted=0 AND received_at<=?";
+  return [
+    db
+      .prepare(
+        `UPDATE product_report_segments SET active=0,cleanup_at=? WHERE object_key=? AND EXISTS(${eligible})`,
+      )
+      .bind(now + 3600000, row.object_key, row.reservation, now - 31 * DAY),
+    db
+      .prepare(
+        `INSERT INTO product_object_gc(object_key,cleanup_at,phase) SELECT object_key,?,'fence' FROM product_batches WHERE reservation=? AND state='sealed' AND object_deleted=0 AND accepted_count>0 AND received_at<=? ON CONFLICT(object_key) DO UPDATE SET cleanup_at=MAX(product_object_gc.cleanup_at,excluded.cleanup_at) WHERE product_object_gc.phase='fence'`,
+      )
+      .bind(now + 3600000, row.reservation, now - 31 * DAY),
+  ];
+}
 async function retireReceipts(db: D1DatabaseLike, rows: ProductReceipt[], now: number) {
   if (rows.length)
     await db.batch(
       rows.flatMap((row) => [
+        ...retireRawReferences(db, row, now),
         db
           .prepare(
             "UPDATE product_batches SET object_deleted=1,cleanup_at=MAX(expires_at,received_at+?) WHERE reservation=? AND state='sealed' AND received_at<=?",
@@ -96,16 +124,6 @@ export async function cleanupProductArchive(
           .bind(effectiveCleanup(row), row.reservation),
       ),
     );
-  const keys = due
-    .filter(
-      (row) =>
-        row.state === 'sealed' &&
-        !row.object_deleted &&
-        row.accepted_count > 0 &&
-        row.received_at <= now - 31 * DAY,
-    )
-    .map((row) => row.object_key);
-  if (keys.length) await bucket.delete(keys);
   await retireReceipts(db, due, now);
   await db.batch([
     db.prepare('DELETE FROM product_event_days WHERE day<?').bind(Math.floor(now / DAY) - 35),

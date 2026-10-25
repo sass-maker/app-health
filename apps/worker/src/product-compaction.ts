@@ -16,6 +16,14 @@ import {
 import { publishProductSegment } from './product-segment-publish.js';
 const DAY = 86400000,
   MAX_BYTES = 1024 * 1024;
+const READY = '(dirty=1 OR (closed=0 AND event_day<?)) AND retry_at<=? AND lease_until<=?';
+async function moreReady(db: D1DatabaseLike) {
+  const now = Date.now();
+  return !!(await db
+    .prepare(`SELECT 1 FROM product_compaction_jobs WHERE ${READY} LIMIT 1`)
+    .bind(Math.floor(now / DAY), now, now)
+    .first());
+}
 
 async function claim(db: D1DatabaseLike, scope?: ProductScope) {
   const now = Date.now(),
@@ -24,9 +32,9 @@ async function claim(db: D1DatabaseLike, scope?: ProductScope) {
   const params = scope ? [scope.workspace, scope.app_id, scope.environment_id, scope.channel] : [];
   return db
     .prepare(
-      `UPDATE product_compaction_jobs SET lease_token=?,lease_until=? WHERE rowid IN (SELECT rowid FROM product_compaction_jobs WHERE (dirty=1 OR (closed=0 AND event_day<?)) AND lease_until<=? ${filter} ORDER BY event_day LIMIT 1) RETURNING *`,
+      `UPDATE product_compaction_jobs SET lease_token=?,lease_until=? WHERE rowid IN (SELECT rowid FROM product_compaction_jobs WHERE ${READY} ${filter} ORDER BY event_day LIMIT 1) RETURNING *`,
     )
-    .bind(token, now + 60000, Math.floor(now / DAY), now, ...params)
+    .bind(token, now + 60000, Math.floor(now / DAY), now, now, ...params)
     .first<CompactionJob>();
 }
 async function candidates(db: D1DatabaseLike, job: CompactionJob) {
@@ -35,24 +43,32 @@ async function candidates(db: D1DatabaseLike, job: CompactionJob) {
   if (!old) {
     const row = await db
       .prepare(
-        `SELECT level FROM product_report_segments WHERE ${JOB_WHERE} AND active=1 GROUP BY level HAVING COUNT(*)>=32 ORDER BY level LIMIT 1`,
+        `SELECT level FROM product_report_segments WHERE ${JOB_WHERE} AND active=1 AND received_at>? GROUP BY level HAVING COUNT(*)>=32 ORDER BY level LIMIT 1`,
       )
-      .bind(...jobIdentity(job))
+      .bind(...jobIdentity(job), Date.now() - 31 * DAY)
       .first<{ level: number }>();
     if (!row) return [];
     level = row.level;
   }
   const rows = await db
     .prepare(
-      `SELECT * FROM product_report_segments WHERE ${JOB_WHERE} AND active=1 ${level === undefined ? '' : ' AND level=?'} ORDER BY object_bytes,id LIMIT 32`,
+      `SELECT * FROM product_report_segments WHERE ${JOB_WHERE} AND active=1 AND received_at>? ${level === undefined ? '' : ' AND level=?'} ORDER BY received_at,object_bytes,id LIMIT 32`,
     )
-    .bind(...jobIdentity(job), ...(level === undefined ? [] : [level]))
+    .bind(...jobIdentity(job), Date.now() - 31 * DAY, ...(level === undefined ? [] : [level]))
     .all<ProductSegment>();
   let bytes = 8192,
-    count = 0;
+    count = 0,
+    firstReceived = Infinity,
+    lastTime = -Infinity;
   const selected: ProductSegment[] = [];
   for (const row of rows.results) {
-    if (bytes + row.object_bytes > MAX_BYTES || count + row.event_count > 5000) break;
+    const first = Math.min(row.received_at, firstReceived);
+    const last = Math.max(row.max_time, lastTime);
+    // The earliest receipt anchors 31-day expiry; every event still needs 30-day coverage.
+    if (last > first + DAY) continue;
+    if (bytes + row.object_bytes > MAX_BYTES || count + row.event_count > 5000) continue;
+    firstReceived = first;
+    lastTime = last;
     bytes += row.object_bytes;
     count += row.event_count;
     selected.push(row);
@@ -129,7 +145,7 @@ export async function compactProductArchive(
     if (rows.length) return { published: await merge(db, bucket, job, rows), more: true };
     await db
       .prepare(
-        `UPDATE product_compaction_jobs SET dirty=0,closed=? WHERE ${JOB_WHERE} AND lease_token=? AND epoch=?`,
+        `UPDATE product_compaction_jobs SET dirty=0,closed=?,retry_at=0,error_code=NULL WHERE ${JOB_WHERE} AND lease_token=? AND epoch=?`,
       )
       .bind(
         job.event_day < Math.floor(Date.now() / DAY) ? 1 : 0,
@@ -138,13 +154,16 @@ export async function compactProductArchive(
         job.epoch,
       )
       .run();
-    const remaining = await db
+    return { published: false, more: await moreReady(db) };
+  } catch {
+    // A poisoned scope must not monopolize the global maintenance chain. Never retain parser text.
+    await db
       .prepare(
-        'SELECT 1 FROM product_compaction_jobs WHERE dirty=1 OR (closed=0 AND event_day<?) LIMIT 1',
+        `UPDATE product_compaction_jobs SET dirty=1,retry_at=?,error_code='history_source_unavailable' WHERE ${JOB_WHERE} AND lease_token=?`,
       )
-      .bind(Math.floor(Date.now() / DAY))
-      .first();
-    return { published: false, more: !!remaining };
+      .bind(Date.now() + 15 * 60000, ...jobIdentity(job), job.lease_token)
+      .run();
+    return { published: false, more: await moreReady(db), failed: true };
   } finally {
     await db
       .prepare(

@@ -25,12 +25,12 @@ export async function publishProductSegment(
     ids = rows.map((row) => row.id),
     slots = ids.map(() => '?').join(',');
   const exists = 'EXISTS(SELECT 1 FROM product_report_segments WHERE id=?)';
-  const received = Math.max(...rows.map((row) => row.received_at));
+  const received = Math.min(...rows.map((row) => row.received_at));
   const statements = [
     db
       .prepare(
         `INSERT INTO product_report_segments(id,workspace_id,app_id,environment_id,channel,event_day,level,format,object_key,object_hash,object_bytes,event_count,min_time,max_time,received_at,cleanup_at)
- SELECT ?,?,?,?,?,?,?,2,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM product_compaction_jobs WHERE ${JOB_WHERE} AND lease_token=? AND lease_until>?) AND (SELECT COUNT(*) FROM product_report_segments WHERE id IN (${slots}) AND active=1)=?`,
+ SELECT ?,?,?,?,?,?,?,2,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM product_compaction_jobs WHERE ${JOB_WHERE} AND lease_token=? AND lease_until>?) AND (SELECT COUNT(*) FROM product_report_segments WHERE id IN (${slots}) AND active=1 AND received_at>?)=?`,
       )
       .bind(
         output.id,
@@ -48,6 +48,7 @@ export async function publishProductSegment(
         job.lease_token,
         now,
         ...ids,
+        now - 31 * 86400000,
         rows.length,
       ),
     db
@@ -67,6 +68,11 @@ export async function publishProductSegment(
         )
         .bind(row.object_key, now + 3600000, output.id),
     ),
+    db
+      .prepare(
+        `UPDATE product_compaction_jobs SET retry_at=0,error_code=NULL WHERE ${JOB_WHERE} AND lease_token=? AND ${exists}`,
+      )
+      .bind(...jobIdentity(job), job.lease_token, output.id),
     db
       .prepare(`DELETE FROM product_object_gc WHERE object_key=? AND ${exists}`)
       .bind(output.key, output.id),
