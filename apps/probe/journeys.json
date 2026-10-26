@@ -122,19 +122,6 @@
       }
     },
     {
-      "project": "significanthobbies",
-      "journey": "home",
-      "url": "https://significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Significant Hobbies"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
       "project": "anime-list",
       "journey": "home",
       "url": "https://anime.significanthobbies.com/",
