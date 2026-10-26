@@ -425,8 +425,12 @@ function signedNumber(value: number | null): string {
 function responseCount(product: DailyProduct): number | null {
   const values: Array<number | null> = [
     product.feedback_submitted,
-    product.newsletter_applicability === 'applicable' ? product.newsletter_joins : null,
-    product.waitlist_applicability === 'applicable' ? product.waitlist_joins : null,
+    product.newsletter_applicability === 'applicable' || (product.newsletter_joins ?? 0) > 0
+      ? product.newsletter_joins
+      : null,
+    product.waitlist_applicability === 'applicable' || (product.waitlist_joins ?? 0) > 0
+      ? product.waitlist_joins
+      : null,
   ];
   return values.some((value) => value !== null)
     ? values.reduce<number>((total, value) => total + (value ?? 0), 0)

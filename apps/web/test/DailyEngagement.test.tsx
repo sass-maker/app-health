@@ -391,6 +391,79 @@ it('blocks catalog linking when the imported catalog is at capacity', async () =
   expect(requestsFor(fetch, '/v1/catalog/import')).toHaveLength(0);
 });
 
+it.each(['unknown', 'not_applicable'])(
+  'counts positive capture receipts with %s applicability across the summary and both ledgers',
+  async (applicability) => {
+    const daily = {
+      ...report,
+      products: [
+        {
+          ...report.products[0],
+          feedback_submitted: 1,
+          newsletter_joins: 2,
+          newsletter_applicability: applicability,
+          waitlist_joins: 4,
+          waitlist_applicability: applicability,
+        },
+      ],
+      product_count: 1,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        Response.json(String(input).includes('/portfolio-briefing') ? briefing : daily),
+      ),
+    );
+    render(<DailyEngagement ownerToken="owner" />);
+    const table = await screen.findByRole('table');
+    const summary = screen.getByText('confirmed responses').parentElement!;
+    expect(within(summary).getByText('7')).toBeTruthy();
+    const atlas = within(table).getByText('atlas').closest('tr')!;
+    expect(within(atlas).getByText('7')).toBeTruthy();
+    const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
+    expect(within(mobile).getByText('replies + joins').parentElement?.textContent).toContain('7');
+  },
+);
+
+it.each([
+  ['unknown', 'unknown'],
+  ['not_applicable', 'not applicable'],
+  ['applicable', '0'],
+])(
+  'preserves %s capture zero semantics without inventing positive receipts',
+  async (applicability, label) => {
+    const daily = {
+      ...report,
+      products: [
+        {
+          ...report.products[0],
+          feedback_submitted: null,
+          feedback_applicability: applicability,
+          newsletter_joins: 0,
+          newsletter_applicability: applicability,
+          waitlist_joins: 0,
+          waitlist_applicability: applicability,
+        },
+      ],
+      product_count: 1,
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) =>
+        Response.json(String(input).includes('/portfolio-briefing') ? briefing : daily),
+      ),
+    );
+    render(<DailyEngagement ownerToken="owner" />);
+    await screen.findByRole('table');
+    const summary = screen.getByText('confirmed responses').parentElement!;
+    expect(
+      within(summary).getByText(applicability === 'applicable' ? '0' : 'unknown'),
+    ).toBeTruthy();
+    const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
+    expect(within(mobile).getByText('replies + joins').parentElement?.textContent).toContain(label);
+  },
+);
+
 it('shows unsupported response metrics as not applicable without hiding real feedback', async () => {
   const daily = {
     ...report,
