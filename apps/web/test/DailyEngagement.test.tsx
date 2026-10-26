@@ -421,7 +421,9 @@ it.each(['unknown', 'not_applicable'])(
     const atlas = within(table).getByText('atlas').closest('tr')!;
     expect(within(atlas).getByText('7')).toBeTruthy();
     const mobile = screen.getByRole('list', { name: 'Portfolio project ledger' });
-    expect(within(mobile).getByText('replies + joins').parentElement?.textContent).toContain('7');
+    expect(
+      within(within(mobile).getByText('replies + joins').parentElement!).getByText('7'),
+    ).toBeTruthy();
   },
 );
 
