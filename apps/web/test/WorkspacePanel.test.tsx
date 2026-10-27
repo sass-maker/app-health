@@ -107,13 +107,11 @@ it('caps selection at 50 scopes and keeps the selected project as the default', 
   const current = { appId: 'app-0', environmentId: 'prod-0' };
   render(<WorkspacePanel ownerToken="" project={current} projects={manyProjects} />);
   await openTokenForm();
-  expect(screen.getByRole('checkbox', { name: /Project 0 · production/ })).toBeChecked();
-  for (let index = 1; index < 50; index++)
-    fireEvent.click(
-      screen.getByRole('checkbox', { name: new RegExp(`Project ${index} · production`) }),
-    );
+  const checkboxes = screen.getAllByRole('checkbox');
+  expect(checkboxes[0]).toBeChecked();
+  for (let index = 1; index < 50; index++) fireEvent.click(checkboxes[index]!);
   expect(screen.getByText('50 of 50 scopes selected')).toBeVisible();
-  expect(screen.getByRole('checkbox', { name: /Project 50 · production/ })).toBeDisabled();
+  expect(checkboxes[50]).toBeDisabled();
 });
 
 it('drops selected pairs that disappear when the project inventory refreshes', async () => {
