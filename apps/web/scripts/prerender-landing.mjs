@@ -33,6 +33,7 @@ try {
   for (const [name, componentName, file] of [
     ['landing', 'LandingPage', 'index.html'],
     ['changelog', 'Changelog', 'changelog.html'],
+    ['privacy', 'PrivacyPage', 'privacy.html'],
   ]) {
     const module = await server.ssrLoadModule(`/src/${componentName}.tsx`);
     const markup = renderToString(createElement(module[componentName]));

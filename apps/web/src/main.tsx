@@ -83,7 +83,13 @@ void view.then(({ component: RootView, title }) => {
       <RootView />
     </StrictMode>
   );
-  const prerenderedPage = isLanding ? 'landing' : path === '/changelog' ? 'changelog' : null;
+  const prerenderedPage = isLanding
+    ? 'landing'
+    : path === '/changelog'
+      ? 'changelog'
+      : path === '/privacy'
+        ? 'privacy'
+        : null;
   if (prerenderedPage && root.dataset.prerendered === prerenderedPage) hydrateRoot(root, content);
   else createRoot(root).render(content);
 });

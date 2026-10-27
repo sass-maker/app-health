@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/.turbo/**',
       '**/coverage/**',
+      'apps/worker/src/agent-surfaces/**',
       'apps/web/public/footer.js',
       'apps/web/public/tracker.js',
       'packages/go/**',

@@ -1,53 +1,11 @@
+import publicCopy from './public-copy.json';
 import type { ReactElement } from 'react';
 import { ProductBrand } from './ProductShell.js';
 import { ThemeToggle } from './ThemeToggle.js';
 import { Button } from '@saas-maker/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 
-const entries = [
-  {
-    date: '2026-09-12',
-    title: 'analytics, logs, and endpoint health share one workspace',
-    outcomes: [
-      'Sign in with Google, create projects and environments, and connect each capability when you need it.',
-      'Web analytics shows live sessions, historical sessions, page views, referral sources, and named events. Sessions are not unique people; sampled counts are labeled.',
-      'Share an aggregate live page with a revocable link. Private logs, event names, and credentials stay in your dashboard.',
-      'The JavaScript SDK ships endpoint adapters, explicit logs, and a public analytics viewer as separate imports.',
-    ],
-  },
-  {
-    date: '2026-07-27',
-    title: 'one product key can now cover multiple environments',
-    outcomes: [
-      'SDK and OpenTelemetry traffic can select a bounded environment while sharing one product-scoped ingest key.',
-      'The dashboard switches endpoint health, installation status, and retained failures together.',
-    ],
-  },
-  {
-    date: '2026-07-25',
-    title: 'Cloudflare applications gained first-party adapters',
-    outcomes: [
-      'Hono middleware and a Pages Functions wrapper report trusted route templates without changing application responses.',
-      'Delivery stays fail-open and can continue through the platform execution context after a response is returned.',
-    ],
-  },
-  {
-    date: '2026-07-22',
-    title: 'the dashboard made collection boundaries visible',
-    outcomes: [
-      'Operators can inspect recent retained failures and the exact fields App Health accepts for an environment.',
-      'The product explains aggregate storage, retention, and the request data it never collects.',
-    ],
-  },
-  {
-    date: '2026-07-21',
-    title: 'endpoint health reached production',
-    outcomes: [
-      'Node, Go, and OpenTelemetry traffic can feed the same focused view of requests, latency, errors, and last-seen time.',
-      'Every accepted route remains discoverable even when sampled metrics are temporarily unavailable.',
-    ],
-  },
-];
+const entries = publicCopy.entries;
 
 export function Changelog(): ReactElement {
   return (
@@ -58,22 +16,21 @@ export function Changelog(): ReactElement {
           <nav aria-label="Product links" className="flex items-center gap-2">
             <ThemeToggle />
             <Button asChild variant="ghost">
-              <a href="https://github.com/sass-maker/app-health/issues">roadmap</a>
+              <a href="https://github.com/sass-maker/app-health/issues">
+                {publicCopy.changelog.roadmapLabel}
+              </a>
             </Button>
             <Button asChild variant="outline">
-              <a href="/app">dashboard</a>
+              <a href="/app">{publicCopy.changelog.dashboardLabel}</a>
             </Button>
           </nav>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
-        <p className="text-sm font-medium text-muted-foreground">product history</p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight">
-          what changed, and what it means.
-        </h1>
+        <p className="text-sm font-medium text-muted-foreground">{publicCopy.changelog.eyebrow}</p>
+        <h1 className="mt-3 text-3xl font-semibold tracking-tight">{publicCopy.changelog.title}</h1>
         <p className="mt-4 text-base leading-7 text-muted-foreground">
-          A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this
-          page records released capabilities.
+          {publicCopy.changelog.summary}
         </p>
         <ol className="mt-8 space-y-6">
           {entries.map((entry) => (
@@ -97,8 +54,7 @@ export function Changelog(): ReactElement {
           ))}
         </ol>
         <p className="mt-8 text-sm leading-6 text-muted-foreground">
-          This public changelog uses Microsoft Clarity to understand navigation and rendering. The
-          owner-key unlock and private dashboard never load it.
+          {publicCopy.changelog.analyticsDisclosure}
         </p>
       </main>
     </div>

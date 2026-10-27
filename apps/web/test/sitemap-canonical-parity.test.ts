@@ -68,6 +68,18 @@ describe('sitemap / canonical parity', () => {
     expect(changelogHtml).toContain('https://www.clarity.ms/tag/');
   });
 
+  it('keeps the privacy prerender intact and does not add Clarity', () => {
+    const indexHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
+    const entry = PUBLIC_ENTRYPOINTS.find((value) => value.path === '/privacy');
+    expect(entry).toBeDefined();
+    const html = renderPublicEntrypoint(indexHtml, entry!);
+    expect(html).not.toContain('clarity.ms/tag');
+    expect(html).toContain(
+      "if (!['/', '/changelog', '/privacy'].includes(window.location.pathname))",
+    );
+    expect(html).toContain('https://health.sassmaker.com/privacy.md');
+  });
+
   it('initializes the Clarity command queue before the asynchronous tag can execute', () => {
     const indexHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8');
     const html = renderPublicEntrypoint(indexHtml, PUBLIC_ENTRYPOINTS[0]);

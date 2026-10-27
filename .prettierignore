@@ -19,3 +19,6 @@ apps/probe/journeys.json
 apps/web/public/footer.css
 apps/web/public/footer.js
 apps/web/public/tracker.js
+
+# Generated shared readability helpers; preserve canonical source bytes.
+apps/worker/src/agent-surfaces

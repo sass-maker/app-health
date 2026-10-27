@@ -1,3 +1,4 @@
+import copy from '../src/public-copy.json' with { type: 'json' };
 /* v8 ignore start -- build-only generator covered by canonical contract tests. */
 import console from 'node:console';
 import { readFile, writeFile } from 'node:fs/promises';
@@ -9,8 +10,13 @@ export const PUBLIC_ENTRYPOINTS = [
     file: 'changelog.html',
     path: '/changelog',
     title: 'Changelog — App Health',
-    description:
-      'Verified product updates to App Health privacy, endpoint telemetry, SDKs, and operator workflows.',
+    description: copy.changelog.summary,
+  },
+  {
+    file: 'privacy.html',
+    path: '/privacy',
+    title: 'Privacy — App Health',
+    description: copy.privacy.summary,
   },
 ];
 
@@ -31,8 +37,19 @@ function replaceMeta(html, attribute, value) {
 }
 
 export function renderPublicEntrypoint(indexHtml, entry) {
+  if (entry.path === '/privacy')
+    indexHtml = indexHtml.replace(
+      "if (!['/', '/changelog'].includes(window.location.pathname))",
+      "if (!['/', '/changelog', '/privacy'].includes(window.location.pathname))",
+    );
   const canonical = `https://health.sassmaker.com${entry.path}`;
   let html = replaceMeta(indexHtml, 'name="description"', entry.description);
+  if (html.includes('name="ai-summary"'))
+    html = replaceMeta(html, 'name="ai-summary"', entry.description);
+  html = html.replace(
+    /(<link\s+rel="alternate"\s+type="text\/markdown"\s+href=")[^"]*(")/,
+    `$1${canonical}.md$2`,
+  );
   html = replaceMeta(html, 'property="og:url"', canonical);
   html = replaceMeta(html, 'property="og:title"', entry.title);
   html = replaceMeta(html, 'property="og:description"', entry.description);
@@ -43,7 +60,9 @@ export function renderPublicEntrypoint(indexHtml, entry) {
     `<link rel="canonical" href="${canonical}" />`,
   );
   html = html.replace(/<title>[^<]*<\/title>/, `<title>${entry.title}</title>`);
-  return html.replace('</head>', `    ${CLARITY_TAG}\n  </head>`);
+  return entry.path === '/changelog'
+    ? html.replace('</head>', `    ${CLARITY_TAG}\n  </head>`)
+    : html;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

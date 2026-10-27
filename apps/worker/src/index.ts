@@ -91,6 +91,7 @@ import { AppHealthService, type LogIngestResult } from './service.js';
 import { deliverSinks, resolveLogRoutes } from './log-routing.js';
 import { InvalidOtlpError, otlpSuccessBody, projectOtlpTraces } from './otlp.js';
 import { handleAgentEdge } from './agent-edge.mjs';
+import { publicHtmlResponse } from './public-site.mjs';
 
 import {
   accountsConfigured,
@@ -958,10 +959,12 @@ async function handleFailuresRoute(
   );
 }
 
-function handleEarlyRoutes(request: Request, env: Env, url: URL): Response | null {
+async function handleEarlyRoutes(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (url.hostname !== env.APP_HEALTH_INGEST_HOST) {
-    const agentResponse = handleAgentEdge(request);
+    const agentResponse = await handleAgentEdge(request);
     if (agentResponse) return agentResponse;
+    const publicHtml = await publicHtmlResponse(request, env.ASSETS);
+    if (publicHtml) return publicHtml;
   }
   if (url.pathname === '/v1/health') return json(200, { ok: true });
   return null;
@@ -1405,7 +1408,7 @@ async function maintainProductArchiveSafely(env: Env) {
 const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
-    const earlyResponse = handleEarlyRoutes(request, env, url);
+    const earlyResponse = await handleEarlyRoutes(request, env, url);
     if (earlyResponse) return earlyResponse;
 
     const selfConfig = selfAnalyticsConfig(request, env);
