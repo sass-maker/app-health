@@ -934,6 +934,7 @@ export function dailyEngagementWindow(date: string | null, now: number): DailyEn
 async function readDailyEngagementCatalog(
   db: D1DatabaseLike,
   workspaceId: string,
+  scope?: { appId: string; environmentId: string },
 ): Promise<CatalogProductRow[]> {
   const result = await db
     .prepare(
@@ -944,9 +945,10 @@ async function readDailyEngagementCatalog(
        LEFT JOIN environment_capabilities ac ON ac.app_id = c.app_id
          AND ac.environment_id = e.id AND ac.capability = 'analytics'
        WHERE c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
+         ${scope ? 'AND c.app_id = ? AND e.id = ?' : ''}
        ORDER BY c.catalog_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,
     )
-    .bind(workspaceId)
+    .bind(workspaceId, ...(scope ? [scope.appId, scope.environmentId] : []))
     .all<CatalogProductRow>();
   if (result.results.length > MAX_PORTFOLIO_CATALOG_PRODUCTS)
     throw new Error('daily engagement catalog exceeds portfolio capacity');
@@ -1250,12 +1252,13 @@ export async function composeDailyEngagementReport(args: {
   ctaFullDayStart?: string;
   ctaNotApplicableCatalogIds?: readonly string[];
   confirmedLogMetricsByCatalogId?: Readonly<Record<string, readonly MetricKind[]>>;
+  scope?: { appId: string; environmentId: string };
   captureCountsService?: DailyCaptureCountsService;
   endpointColdBucket?: Pick<R2Bucket, 'get'>;
 }): Promise<DailyEngagementReportV1> {
   const window = dailyEngagementWindow(args.date, args.now);
   if ('error' in window) throw Object.assign(new Error(window.error), { status: 400 });
-  const catalog = await readDailyEngagementCatalog(args.db, args.workspaceId);
+  const catalog = await readDailyEngagementCatalog(args.db, args.workspaceId, args.scope);
   const appIds = catalog.map((row) => row.app_id);
   const sourceCatalogIds = catalog.map((row) => row.catalog_id);
   const ctaEventNamesByCatalogId = args.ctaEventNamesByCatalogId ?? {};

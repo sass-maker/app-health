@@ -26,6 +26,7 @@ const tokenReads = new Set([
   '/v1/analytics/revenue',
   '/v1/analytics/provider-revenue',
   '/v1/analytics/definitions',
+  '/v1/reports/daily-engagement',
   '/v1/endpoints',
   '/v1/failures',
   '/v1/installation/status',
