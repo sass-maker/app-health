@@ -22,7 +22,10 @@ for (const route of publicRoutes) {
 await writeFile(publicFile('llms.txt'), buildMarkdownIndex(publicManifest, publicRoutes));
 await writeFile(
   publicFile('llms-full.txt'),
-  await buildFullMarkdown(publicManifest, publicRoutes, (path) => publicPages[path]),
+  (await buildFullMarkdown(publicManifest, publicRoutes, (path) => publicPages[path])).replace(
+    /^Generated: \d{4}-\d{2}-\d{2}$/m,
+    `Source updated: ${publicManifest.updatedAt}`,
+  ),
 );
 await writeFile(publicFile('ai.txt'), buildAiTxt(publicManifest, publicRoutes));
 await writeFile(publicFile('robots.txt'), publicRobots);

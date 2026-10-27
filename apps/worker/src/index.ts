@@ -960,6 +960,19 @@ async function handleFailuresRoute(
 }
 
 async function handleEarlyRoutes(request: Request, env: Env, url: URL): Promise<Response | null> {
+  if (
+    url.hostname === env.APP_HEALTH_INGEST_HOST &&
+    url.pathname === '/robots.txt' &&
+    ['GET', 'HEAD'].includes(request.method)
+  ) {
+    return new Response(request.method === 'HEAD' ? null : 'User-agent: *\nDisallow: /\n', {
+      headers: {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'X-Robots-Tag': 'noindex',
+        'Cache-Control': 'public, max-age=300',
+      },
+    });
+  }
   if (url.hostname !== env.APP_HEALTH_INGEST_HOST) {
     const agentResponse = await handleAgentEdge(request);
     if (agentResponse) return agentResponse;

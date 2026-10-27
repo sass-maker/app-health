@@ -1,4 +1,3 @@
-export function advertisePublicHtml(request: Request, response: Response): Response;
 export function publicHtmlResponse(
   request: Request,
   assets?: { fetch(request: Request): Promise<Response> },

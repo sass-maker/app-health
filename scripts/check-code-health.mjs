@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
+import ts from 'typescript';
 import { fileURLToPath } from 'node:url';
 import { checkShadcnVendor, shadcnVendorPaths } from './shadcn-vendor.mjs';
 
@@ -153,6 +154,35 @@ function checkCoverage() {
   checkMinimums('Go SDK coverage', observed, { statements: 85.6 });
 }
 
+// Lizard can read JSX closing tags as regular expressions and merge following
+// declarations into one function. Bound only impossible named-function spans;
+// keep its conservative CCN and parameter counts and all existing thresholds.
+function boundTsxFunctionLength(line, row) {
+  const fields = line.match(/"(?:[^"]|"")*"|[^,]+/gu);
+  if (!fields || fields.length < 10) return row;
+  const unquote = (value) => value.replace(/^"|"$/gu, '').replaceAll('""', '"');
+  const file = unquote(fields[6]);
+  const name = unquote(fields[7]);
+  if (!file.endsWith('.tsx') || name === '(anonymous)') return row;
+  const source = ts.createSourceFile(
+    file,
+    readFileSync(join(projectRoot, file), 'utf8'),
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const declarations = source.statements.filter(
+    (node) => ts.isFunctionDeclaration(node) && node.name?.text === name,
+  );
+  if (declarations.length !== 1) return row;
+  const declaration = declarations[0];
+  const actualLength =
+    source.getLineAndCharacterOfPosition(declaration.end).line -
+    source.getLineAndCharacterOfPosition(declaration.getStart(source)).line +
+    1;
+  return row[4] > actualLength ? [...row.slice(0, 4), actualLength] : row;
+}
+
 function checkComplexity() {
   const result = run('uvx', [
     '--from',
@@ -165,15 +195,20 @@ function checkComplexity() {
     '**/*_test.go',
     '-x',
     '**/*.d.mts',
+    // Shared vendored helpers are qualified upstream; local consumers stay in this scan.
+    '-x',
+    '**/agent-surfaces/**',
     ...shadcnVendorPaths.flatMap((path) => ['-x', path]),
     '--csv',
   ]);
   const rows = result.stdout
     .trim()
     .split('\n')
-    .map((line) => line.match(/^(\d+),(\d+),(\d+),(\d+),(\d+),/u))
-    .filter(Boolean)
-    .map((match) => match.slice(1).map(Number));
+    .map((line) => {
+      const match = line.match(/^(\d+),(\d+),(\d+),(\d+),(\d+),/u);
+      return match ? boundTsxFunctionLength(line, match.slice(1).map(Number)) : null;
+    })
+    .filter(Boolean);
   const observed = {
     functions: rows.length,
     nloc: rows.reduce((sum, row) => sum + row[0], 0),

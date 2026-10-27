@@ -149,16 +149,7 @@ export const publicPages = {
     copy.changelog.analyticsDisclosure,
   ]),
 };
-export const excludedPaths = [
-  '/admin',
-  '/auth',
-  '/api',
-  '/dashboard',
-  '/app',
-  '/live',
-  '/v1',
-  '/mcp',
-];
+const excludedPaths = ['/admin', '/auth', '/api', '/dashboard', '/app', '/live', '/v1', '/mcp'];
 export const publicManifest = createAgentSurfaceManifest({
   name: publicIdentity.name,
   url: origin,
@@ -180,7 +171,7 @@ export const handlePublicDocument = createAgentSurfaceHandler({
   manifest: publicManifest,
   preserveMarkdownPaths: ['/fonts/fleet-footer-precise-v1/README.md'],
 });
-export function advertisePublicHtml(request, response) {
+function advertisePublicHtml(request, response) {
   const path = new URL(request.url).pathname.replace(/\/$/, '') || '/';
   return publicPages[path]
     ? advertiseMarkdown(response, origin, path === '/' ? '/index.md' : `${path}.md`)

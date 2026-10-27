@@ -18,7 +18,7 @@ import {
   publicSitemap,
   handlePublicDocument,
 } from './public-site.mjs';
-export const AGENT_SURFACE = {
+const AGENT_SURFACE = {
   name: publicIdentity.name,
   url: publicIdentity.origin,
   llmsTxt: publicManifest.llmsTxt,

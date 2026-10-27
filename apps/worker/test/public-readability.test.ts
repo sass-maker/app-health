@@ -106,3 +106,21 @@ it('keeps unknown canonical origins local and declares public machine endpoint e
   const response = await handleAgentEdge(new Request(`${origin}/ai.txt`));
   expect(await response?.text()).toContain('public-machine-endpoints: /api/ai, /api/md/*');
 });
+
+it('keeps the telemetry host outside public discovery and explicitly disallows crawlers', async () => {
+  const env = {
+    APP_HEALTH_INGEST_HOST: 'ingest.sassmaker.com',
+    APP_HEALTH_DASHBOARD_HOST: 'health.sassmaker.com',
+  };
+  for (const method of ['GET', 'HEAD']) {
+    const response = await worker.fetch(
+      new Request('https://ingest.sassmaker.com/robots.txt', { method }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(method === 'HEAD' ? '' : 'User-agent: *\nDisallow: /\n');
+  }
+  expect(
+    (await worker.fetch(new Request('https://ingest.sassmaker.com/llms.txt'), env)).status,
+  ).toBe(503); // Production hosts without configured bindings fail closed.
+});
