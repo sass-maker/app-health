@@ -80,9 +80,16 @@ export function WorkspacePanel({
   const [revision, setRevision] = useState(0);
   // Keep the established one-project flow available for a selected non-production environment.
   const availableScopes = tokenScopeChoices(project, projects);
+  const availableScopeKeys = availableScopes.map(scopeKey);
+  const availableScopeKeySet = new Set(availableScopeKeys);
+  const activeSelectedScopes = selectedScopes.filter((key) => availableScopeKeySet.has(key));
+  const availableScopeSignature = availableScopeKeys.join('\u0000');
   useEffect(() => {
     if (project) setSelectedScopes([scopeKey(project)]);
   }, [project?.appId, project?.environmentId]);
+  useEffect(() => {
+    setSelectedScopes((current) => current.filter((key) => availableScopeKeySet.has(key)));
+  }, [availableScopeSignature]);
   useEffect(() => {
     if (!open || ownerToken) return;
     const controller = new AbortController();
@@ -139,12 +146,12 @@ export function WorkspacePanel({
   }
   async function createToken(event: FormEvent) {
     event.preventDefault();
-    if (!project || selectedScopes.length === 0 || selectedScopes.length > 50) return;
+    if (!project || activeSelectedScopes.length === 0 || activeSelectedScopes.length > 50) return;
     setFresh(null);
     const result = await mutate('/v1/workspace/api-tokens', 'POST', {
       name,
       permission,
-      scopes: selectedScopes.map((value) => {
+      scopes: activeSelectedScopes.map((value) => {
         const [appId, environmentId] = JSON.parse(value) as [string, string];
         return { app_id: appId, environment_id: environmentId };
       }),
@@ -323,7 +330,7 @@ export function WorkspacePanel({
                     <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border p-2">
                       {availableScopes.map((candidate) => {
                         const value = scopeKey(candidate);
-                        const checked = selectedScopes.includes(value);
+                        const checked = activeSelectedScopes.includes(value);
                         return (
                           <label
                             key={value}
@@ -332,16 +339,18 @@ export function WorkspacePanel({
                             <input
                               type="checkbox"
                               checked={checked}
-                              disabled={busy || (!checked && selectedScopes.length >= 50)}
+                              disabled={busy || (!checked && activeSelectedScopes.length >= 50)}
                               onChange={(event) => {
                                 const shouldSelect = event.currentTarget.checked;
-                                setSelectedScopes((current) =>
-                                  shouldSelect
-                                    ? current.length < 50 && !current.includes(value)
-                                      ? [...current, value]
-                                      : current
-                                    : current.filter((entry) => entry !== value),
-                                );
+                                setSelectedScopes((current) => {
+                                  const valid = current.filter((key) =>
+                                    availableScopeKeySet.has(key),
+                                  );
+                                  if (!shouldSelect) return valid.filter((key) => key !== value);
+                                  return valid.length < 50 && !valid.includes(value)
+                                    ? [...valid, value]
+                                    : valid;
+                                });
                               }}
                               className="size-4 accent-primary"
                             />
@@ -352,7 +361,7 @@ export function WorkspacePanel({
                       })}
                     </div>
                     <p aria-live="polite" className="text-xs text-muted-foreground">
-                      {selectedScopes.length} of 50 scopes selected
+                      {activeSelectedScopes.length} of 50 scopes selected
                     </p>
                   </fieldset>
                 ) : null}
@@ -377,7 +386,10 @@ export function WorkspacePanel({
                   <Button
                     type="submit"
                     disabled={
-                      busy || !project || selectedScopes.length === 0 || selectedScopes.length > 50
+                      busy ||
+                      !project ||
+                      activeSelectedScopes.length === 0 ||
+                      activeSelectedScopes.length > 50
                     }
                   >
                     create API token

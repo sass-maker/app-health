@@ -69,9 +69,13 @@ async function readCatalog(
          AND EXISTS (SELECT 1 FROM environments e
            WHERE e.app_id = c.app_id AND lower(e.name) = 'production')
          ${appId === undefined ? '' : 'AND c.app_id = ?'}
-         ${environmentId === undefined ? '' : `AND EXISTS (SELECT 1 FROM environments scoped_env
+         ${
+           environmentId === undefined
+             ? ''
+             : `AND EXISTS (SELECT 1 FROM environments scoped_env
            WHERE scoped_env.app_id = c.app_id AND lower(scoped_env.name) = 'production'
-             AND scoped_env.id = ?)`}
+             AND scoped_env.id = ?)`
+         }
        ORDER BY c.catalog_id LIMIT ${PRODUCT_LIMIT}`,
     )
     .bind(

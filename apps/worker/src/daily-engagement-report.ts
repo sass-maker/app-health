@@ -963,6 +963,7 @@ export async function readDailyApiActivity(
   to: number,
   catalog: readonly CatalogProductRow[],
   coldBucket?: Pick<R2Bucket, 'get'>,
+  scope?: { appId: string; environmentId: string },
 ): Promise<ApiActivityRow[]> {
   if (catalog.length === 0) return [];
   const ranges = endpointReadRanges(from, to);
@@ -972,6 +973,9 @@ export async function readDailyApiActivity(
     (_, index) => `(?${index * 3 + 1}, ?${index * 3 + 2}, ?${index * 3 + 3})`,
   );
   const workspaceIndex = values.length;
+  const scopeAppIndex = scope ? values.length + 1 : null;
+  const scopeEnvironmentIndex = scope ? values.length + 2 : null;
+  if (scope) values.push(scope.appId, scope.environmentId);
   const hot = db
     .prepare(
       `WITH ranges(resolution_ms, range_from, range_to) AS (VALUES ${rangeValues.join(',')})
@@ -984,6 +988,7 @@ export async function readDailyApiActivity(
        AND lower(e.name) = 'production'
      JOIN catalog_project_imports c ON c.app_id = r.app_id
        AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
+     ${scope ? `WHERE r.app_id = ?${scopeAppIndex} AND r.environment_id = ?${scopeEnvironmentIndex}` : ''}
      GROUP BY r.app_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,
     )
     .bind(...values);
@@ -1294,6 +1299,7 @@ export async function composeDailyEngagementReport(args: {
       window.to,
       catalog,
       args.endpointColdBucket,
+      args.scope,
     )
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as ApiActivityRow[], measured: false })),

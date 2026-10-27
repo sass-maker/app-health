@@ -95,3 +95,30 @@ it('caps selection at 50 scopes and keeps the selected project as the default', 
   expect(screen.getByText('50 of 50 scopes selected')).toBeVisible();
   expect(screen.getByRole('checkbox', { name: /Project 50 · production/ })).toBeDisabled();
 });
+
+it('drops selected pairs that disappear when the project inventory refreshes', async () => {
+  mockRequests();
+  const { rerender } = render(
+    <WorkspacePanel ownerToken="" project={selected} projects={projects} />,
+  );
+  await openTokenForm();
+  fireEvent.click(screen.getByRole('checkbox', { name: /Papertrail · production/ }));
+  rerender(<WorkspacePanel ownerToken="" project={selected} projects={[projects[0]!]} />);
+  expect(screen.queryByRole('checkbox', { name: /Papertrail · production/ })).toBeNull();
+  expect(screen.getByText('1 of 50 scopes selected')).toBeVisible();
+
+  fireEvent.click(screen.getByRole('button', { name: 'create API token' }));
+  await waitFor(() =>
+    expect(
+      ownerFetch.mock.calls.some(
+        ([path, , init]) => path === '/v1/workspace/api-tokens' && init?.method === 'POST',
+      ),
+    ).toBe(true),
+  );
+  const create = ownerFetch.mock.calls.find(
+    (call) => call[0] === '/v1/workspace/api-tokens' && call[2]?.method === 'POST',
+  );
+  expect(JSON.parse(String(create?.[2]?.body)).scopes).toEqual([
+    { app_id: 'app-one', environment_id: 'prod-one' },
+  ]);
+});

@@ -12,6 +12,7 @@ import {
 } from '../src/accounts.js';
 import worker, { type Env } from '../src/index.js';
 import { composeDailyEngagementReport } from '../src/daily-engagement-report.js';
+import { endpointReadRanges } from '../src/endpoint-read-ranges.js';
 import { readSpeedReportParts } from '../src/speed-report.js';
 import {
   D1ControlPlane,
@@ -1702,7 +1703,51 @@ describe('Google account boundary with real D1 SQL', () => {
         .DB!.prepare(
           'INSERT INTO catalog_project_imports(workspace_id,catalog_id,catalog_name,app_id,lifecycle,payload_sha256,created_at) VALUES (?,?,?,?,?,?,?)',
         )
-        .bind(workspace!.workspace_id, catalogId, name, app.app.id, 'active', 'a'.repeat(64), Date.now())
+        .bind(
+          workspace!.workspace_id,
+          catalogId,
+          name,
+          app.app.id,
+          'active',
+          'a'.repeat(64),
+          Date.now(),
+        )
+        .run();
+    }
+    const dailyFrom = Date.parse('2026-10-24T18:30:00.000Z');
+    const endpointRange = endpointReadRanges(dailyFrom, dailyFrom + 86_400_000)[0]!;
+    const histogramColumns = Array.from({ length: 16 }, (_, index) => `h${index}`).join(',');
+    const histogramValues = Array.from({ length: 16 }, () => '?').join(',');
+    for (const [app, requestCount] of [
+      [appA, 17],
+      [appB, 29],
+    ] as const) {
+      await env
+        .DB!.prepare(
+          `INSERT INTO endpoint_rollups(
+            app_id,environment_id,resolution_ms,bucket_start,method,route,runtime,release,
+            histogram_bounds_ms,request_count,error_count,duration_sum_ms,last_seen,upstream_sampled,
+            ${histogramColumns}
+          ) VALUES (${Array.from({ length: 14 }, () => '?').join(',')},${histogramValues})`,
+        )
+        .bind(
+          app.app.id,
+          app.environment.id,
+          endpointRange.resolution,
+          endpointRange.from,
+          'GET',
+          '/health',
+          'test',
+          'test',
+          '[]',
+          requestCount,
+          0,
+          requestCount * 20,
+          endpointRange.from + 60_000,
+          0,
+          requestCount,
+          ...Array.from({ length: 15 }, () => 0),
+        )
         .run();
     }
     const directReport = await composeDailyEngagementReport({
@@ -1713,6 +1758,7 @@ describe('Google account boundary with real D1 SQL', () => {
       scope: { appId: appA.app.id, environmentId: appA.environment.id },
     });
     expect(directReport.products.map((row) => row.catalog_id)).toEqual(['daily-scope-a']);
+    expect(directReport.products[0]?.api_activity).toBe(17);
     const directSpeed = await readSpeedReportParts({
       db: env.DB!,
       workspaceId: workspace!.workspace_id,
@@ -1776,17 +1822,24 @@ describe('Google account boundary with real D1 SQL', () => {
       .first<{ catalogs: number; logs: number; definitions: number }>();
 
     vi.stubGlobal('caches', { default: cache });
-    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ data: [] })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ data: [] })),
+    );
     try {
       const firstA = await api(route(appA.app.id, appA.environment.id));
       expect(firstA.status, await firstA.clone().text()).toBe(200);
       const reportA = (await firstA.json()) as {
         product_count: number;
-        products: Array<{ app_id: string; catalog_id: string }>;
+        products: Array<{ app_id: string; catalog_id: string; api_activity: number | null }>;
       };
       expect(reportA.product_count).toBe(1);
       expect(reportA.products).toEqual([
-        expect.objectContaining({ app_id: appA.app.id, catalog_id: 'daily-scope-a' }),
+        expect.objectContaining({
+          app_id: appA.app.id,
+          catalog_id: 'daily-scope-a',
+          api_activity: 17,
+        }),
       ]);
 
       const responseB = await api(route(appB.app.id, appB.environment.id));
@@ -1794,7 +1847,11 @@ describe('Google account boundary with real D1 SQL', () => {
       const reportB = (await responseB.json()) as typeof reportA;
       expect(reportB.product_count).toBe(1);
       expect(reportB.products).toEqual([
-        expect.objectContaining({ app_id: appB.app.id, catalog_id: 'daily-scope-b' }),
+        expect.objectContaining({
+          app_id: appB.app.id,
+          catalog_id: 'daily-scope-b',
+          api_activity: 29,
+        }),
       ]);
       expect(reportB.products.some((row) => row.app_id === appA.app.id)).toBe(false);
 
@@ -1805,7 +1862,9 @@ describe('Google account boundary with real D1 SQL', () => {
       };
       expect(speedReport.speed.products.map((row) => row.app_id)).toEqual([appA.app.id]);
 
-      const staging = await api(route(appA.app.id, alternateEnvironment, '&speed=1&speed_class=app'));
+      const staging = await api(
+        route(appA.app.id, alternateEnvironment, '&speed=1&speed_class=app'),
+      );
       expect(staging.status).toBe(200);
       const stagingReport = (await staging.json()) as {
         product_count: number;
