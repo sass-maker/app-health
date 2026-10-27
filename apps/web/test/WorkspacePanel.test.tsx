@@ -74,6 +74,26 @@ it('defaults to the selected production scope and submits only explicitly select
       { app_id: 'app-two', environment_id: 'prod-two' },
     ],
   });
+
+  expect(screen.getByRole('checkbox', { name: /Northstar · production/ })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: /Papertrail · production/ })).not.toBeChecked();
+  fireEvent.change(screen.getByRole('textbox', { name: 'API token name' }), {
+    target: { value: 'Daily collector follow-up' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'create API token' }));
+  await waitFor(() =>
+    expect(
+      ownerFetch.mock.calls.filter(
+        ([path, , init]) => path === '/v1/workspace/api-tokens' && init?.method === 'POST',
+      ),
+    ).toHaveLength(2),
+  );
+  const creates = ownerFetch.mock.calls.filter(
+    ([path, , init]) => path === '/v1/workspace/api-tokens' && init?.method === 'POST',
+  );
+  expect(JSON.parse(String(creates[1]?.[2]?.body)).scopes).toEqual([
+    { app_id: 'app-one', environment_id: 'prod-one' },
+  ]);
 });
 
 it('caps selection at 50 scopes and keeps the selected project as the default', async () => {

@@ -159,6 +159,7 @@ export function WorkspacePanel({
     if (result) {
       setFresh({ value: result.token, api: true });
       setName('');
+      if (project) setSelectedScopes([scopeKey(project)]);
     }
   }
   async function downloadSkill() {
