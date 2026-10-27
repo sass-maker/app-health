@@ -277,7 +277,7 @@ describe('endpoint rollup compaction', () => {
       DAY,
       DAY + 86_400_000,
       [APP_CATALOG],
-      r2Bucket(r2),
+      { coldBucket: r2Bucket(r2) },
     );
     expect(daily).toEqual([{ app_id: APP, request_count: 4, upstream_sampled: 0 }]);
   });
@@ -456,7 +456,7 @@ describe('endpoint rollup compaction', () => {
       DAY,
       DAY + 86_400_000,
       [APP_CATALOG],
-      r2Bucket(r2),
+      { coldBucket: r2Bucket(r2) },
     );
     expect(beforeDaily).toEqual([{ app_id: APP, request_count: 4, upstream_sampled: 0 }]);
 
@@ -502,7 +502,7 @@ describe('endpoint rollup compaction', () => {
       DAY,
       DAY + 86_400_000,
       [APP_CATALOG],
-      r2Bucket(r2),
+      { coldBucket: r2Bucket(r2) },
     );
     expect(afterDaily).toEqual(beforeDaily);
     const completedAt = Number(

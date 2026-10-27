@@ -802,12 +802,14 @@ async function dailySpeedPayload(
   day: Parameters<typeof summarizeSpeedForDay>[1],
   performanceClass: SpeedReportQuery['class'],
   now: number,
+  scope?: { appId: string; environmentId: string },
 ) {
   try {
+    const scopeKey = scope ? `:${JSON.stringify([scope.appId, scope.environmentId])}` : '';
     const speed = await cachedAnalytics(
       env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
       workspaceId,
-      `daily-speed-v1:${day.date}:${performanceClass}`,
+      `daily-speed-v1:${day.date}:${performanceClass}${scopeKey}`,
       async () =>
         summarizeSpeedForDay(
           await readSpeedReportParts({
@@ -816,6 +818,7 @@ async function dailySpeedPayload(
             window: day,
             now,
             performanceClass,
+            ...(scope ? { appId: scope.appId, environmentId: scope.environmentId } : {}),
           }),
           day,
         ),
@@ -824,6 +827,27 @@ async function dailySpeedPayload(
   } catch {
     return { speed_error: 'unavailable' as const };
   }
+}
+
+function requestedDailyApiScope(
+  owner: OwnerIdentity,
+  url: URL,
+): { scope?: { appId: string; environmentId: string }; forbidden: boolean } {
+  if (owner.authKind !== 'api-token') return { forbidden: false };
+  const appIds = url.searchParams.getAll('app_id');
+  const environmentIds = url.searchParams.getAll('environment_id');
+  if (
+    appIds.length !== 1 ||
+    environmentIds.length !== 1 ||
+    !owner.apiScopes?.some(
+      (allowed) => allowed.app_id === appIds[0] && allowed.environment_id === environmentIds[0],
+    )
+  )
+    return { forbidden: true };
+  return {
+    forbidden: false,
+    scope: { appId: appIds[0]!, environmentId: environmentIds[0]! },
+  };
 }
 
 async function handleDailyEngagementRoute(
@@ -840,6 +864,9 @@ async function handleDailyEngagementRoute(
   if (owner.appId) return productScopeForbidden();
   if (!owner.workspaceId) return productScopeForbidden();
   if (!env.DB) return json(503, { error: 'daily engagement storage is unavailable' }, true);
+  const requestedScope = requestedDailyApiScope(owner, url);
+  if (requestedScope.forbidden) return json(403, { error: 'app scope forbidden' }, true);
+  const scope = requestedScope.scope;
   const db = env.DB;
   const workspaceId = owner.workspaceId;
   const query = dailyAnalyticsQuery(env);
@@ -847,16 +874,18 @@ async function handleDailyEngagementRoute(
     const now = Date.now();
     const day = dailyEngagementWindow(url.searchParams.get('date'), now);
     if ('error' in day) throw Object.assign(new Error(day.error), { status: 400 });
+    const scopeKey = scope ? `:${JSON.stringify([scope.appId, scope.environmentId])}` : '';
     const loadReport = () =>
       cachedAnalytics(
         env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
         workspaceId,
-        `daily-briefing-v2:${day.date}`,
+        `daily-briefing-v2:${day.date}${scopeKey}`,
         () =>
           composeDailyEngagementReport({
             db,
             workspaceId,
             query,
+            scope,
             date: url.searchParams.get('date'),
             now,
             ctaEventNamesByCatalogId: dailyCtaEventNamesForDate(day.date),
@@ -899,7 +928,7 @@ async function handleDailyEngagementRoute(
       200,
       {
         ...payload,
-        ...(await dailySpeedPayload(env, workspaceId, day, speedClass, now)),
+        ...(await dailySpeedPayload(env, workspaceId, day, speedClass, now, scope)),
       },
       true,
     );

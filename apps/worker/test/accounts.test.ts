@@ -11,6 +11,9 @@ import {
   type OwnerRequestTimings,
 } from '../src/accounts.js';
 import worker, { type Env } from '../src/index.js';
+import { composeDailyEngagementReport } from '../src/daily-engagement-report.js';
+import { endpointReadRanges } from '../src/endpoint-read-ranges.js';
+import { readSpeedReportParts } from '../src/speed-report.js';
 import {
   D1ControlPlane,
   type D1DatabaseLike,
@@ -74,6 +77,7 @@ describe('Google account boundary with real D1 SQL', () => {
       '0024_browser_archive_queue_evidence.sql',
       '0025_browser_visitor_acceptance_coverage.sql',
       '0026_browser_visitor_day_seals.sql',
+      '0028_log_events_read_indexes.sql',
       '0029_expanded_browser_facts.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
@@ -1666,6 +1670,233 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(revoke.status).toBe(200);
     expect((await api('/v1/apps')).status).toBe(401);
     expect((await api('/mcp', 'POST', { jsonrpc: '2.0', id: 3, method: 'ping' })).status).toBe(401);
+  });
+
+  it('serves daily engagement only for the requested API-token app and environment scope', async () => {
+    const createdA = await request('/v1/apps', aliceCookie, {
+      name: 'Daily scope A',
+      environment: 'production',
+    });
+    const createdB = await request('/v1/apps', aliceCookie, {
+      name: 'Daily scope B',
+      environment: 'production',
+    });
+    expect(createdA.status).toBe(201);
+    expect(createdB.status).toBe(201);
+    const appA = (await createdA.json()) as { app: { id: string }; environment: { id: string } };
+    const appB = (await createdB.json()) as { app: { id: string }; environment: { id: string } };
+    const alternateEnvironment = crypto.randomUUID();
+    await env
+      .DB!.prepare('INSERT INTO environments(id,app_id,name,created_at) VALUES (?,?,?,?)')
+      .bind(alternateEnvironment, appA.app.id, 'staging', Date.now())
+      .run();
+    const workspace = await env
+      .DB!.prepare('SELECT workspace_id FROM workspace_apps WHERE app_id=?')
+      .bind(appA.app.id)
+      .first<{ workspace_id: string }>();
+    expect(workspace?.workspace_id).toBeTruthy();
+    for (const [app, catalogId, name] of [
+      [appA, 'daily-scope-a', 'Daily Scope A Marker'],
+      [appB, 'daily-scope-b', 'Daily Scope B Marker'],
+    ] as const) {
+      await env
+        .DB!.prepare(
+          'INSERT INTO catalog_project_imports(workspace_id,catalog_id,catalog_name,app_id,lifecycle,payload_sha256,created_at) VALUES (?,?,?,?,?,?,?)',
+        )
+        .bind(
+          workspace!.workspace_id,
+          catalogId,
+          name,
+          app.app.id,
+          'active',
+          'a'.repeat(64),
+          Date.now(),
+        )
+        .run();
+    }
+    const dailyFrom = Date.parse('2026-10-24T18:30:00.000Z');
+    const endpointRange = endpointReadRanges(dailyFrom, dailyFrom + 86_400_000)[0]!;
+    const histogramColumns = Array.from({ length: 16 }, (_, index) => `h${index}`).join(',');
+    const histogramValues = Array.from({ length: 16 }, () => '?').join(',');
+    for (const [app, requestCount] of [
+      [appA, 17],
+      [appB, 29],
+    ] as const) {
+      await env
+        .DB!.prepare(
+          `INSERT INTO endpoint_rollups(
+            app_id,environment_id,resolution_ms,bucket_start,method,route,runtime,release,
+            histogram_bounds_ms,request_count,error_count,duration_sum_ms,last_seen,upstream_sampled,
+            ${histogramColumns}
+          ) VALUES (${Array.from({ length: 14 }, () => '?').join(',')},${histogramValues})`,
+        )
+        .bind(
+          app.app.id,
+          app.environment.id,
+          endpointRange.resolution,
+          endpointRange.from,
+          'GET',
+          '/health',
+          'test',
+          'test',
+          '[]',
+          requestCount,
+          0,
+          requestCount * 20,
+          endpointRange.from + 60_000,
+          0,
+          requestCount,
+          ...Array.from({ length: 15 }, () => 0),
+        )
+        .run();
+    }
+    const directReport = await composeDailyEngagementReport({
+      db: env.DB!,
+      workspaceId: workspace!.workspace_id,
+      date: '2026-10-25',
+      now: Date.now(),
+      scope: { appId: appA.app.id, environmentId: appA.environment.id },
+    });
+    expect(directReport.products.map((row) => row.catalog_id)).toEqual(['daily-scope-a']);
+    expect(directReport.products[0]?.api_activity).toBe(17);
+    const directSpeed = await readSpeedReportParts({
+      db: env.DB!,
+      workspaceId: workspace!.workspace_id,
+      window: { from: Date.parse('2026-10-25T00:00:00Z'), to: Date.parse('2026-10-26T00:00:00Z') },
+      now: Date.now(),
+      appId: appA.app.id,
+      environmentId: appA.environment.id,
+      performanceClass: 'app',
+    });
+    expect(directSpeed.report.products.map((row) => row.app_id)).toEqual([appA.app.id]);
+    const tokenResponse = await request('/v1/workspace/api-tokens', aliceCookie, {
+      name: 'Daily scoped reader',
+      permission: 'read',
+      scopes: [
+        { app_id: appA.app.id, environment_id: appA.environment.id },
+        { app_id: appA.app.id, environment_id: alternateEnvironment },
+        { app_id: appB.app.id, environment_id: appB.environment.id },
+      ],
+    });
+    expect(tokenResponse.status).toBe(201);
+    const token = (await tokenResponse.json()) as { token: string };
+    const bobAppResponse = await request('/v1/apps', bobCookie, {
+      name: 'Other workspace',
+      environment: 'production',
+    });
+    expect(bobAppResponse.status).toBe(201);
+    const bobApp = (await bobAppResponse.json()) as { app: { id: string } };
+    const otherWorkspace = await env
+      .DB!.prepare('SELECT workspace_id FROM workspace_apps WHERE app_id=?')
+      .bind(bobApp.app.id)
+      .first<{ workspace_id: string }>();
+    expect(otherWorkspace?.workspace_id).toBeTruthy();
+
+    const cacheRows = new Map<string, unknown>();
+    const cache = {
+      match: vi.fn(async (key: Request) => {
+        const value = cacheRows.get(key.url);
+        return value === undefined ? undefined : Response.json(value);
+      }),
+      put: vi.fn(async (key: Request, response: Response) => {
+        cacheRows.set(key.url, await response.json());
+      }),
+    };
+    const scopedEnv = { ...env };
+    const api = (path: string, selectedWorkspace?: string) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${path}`, {
+          headers: {
+            authorization: `Bearer ${token.token}`,
+            ...(selectedWorkspace ? { 'x-app-health-workspace': selectedWorkspace } : {}),
+          },
+        }),
+        scopedEnv,
+      );
+    const route = (appId: string, environmentId: string, extra = '') =>
+      `/v1/reports/daily-engagement?date=2026-10-25&app_id=${appId}&environment_id=${environmentId}${extra}`;
+    const before = await env
+      .DB!.prepare(
+        'SELECT (SELECT COUNT(*) FROM catalog_project_imports) AS catalogs, (SELECT COUNT(*) FROM log_events) AS logs, (SELECT COUNT(*) FROM analytics_definitions) AS definitions',
+      )
+      .first<{ catalogs: number; logs: number; definitions: number }>();
+
+    vi.stubGlobal('caches', { default: cache });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ data: [] })),
+    );
+    try {
+      const firstA = await api(route(appA.app.id, appA.environment.id));
+      expect(firstA.status, await firstA.clone().text()).toBe(200);
+      const reportA = (await firstA.json()) as {
+        product_count: number;
+        products: Array<{ app_id: string; catalog_id: string; api_activity: number | null }>;
+      };
+      expect(reportA.product_count).toBe(1);
+      expect(reportA.products).toEqual([
+        expect.objectContaining({
+          app_id: appA.app.id,
+          catalog_id: 'daily-scope-a',
+          api_activity: 17,
+        }),
+      ]);
+
+      const responseB = await api(route(appB.app.id, appB.environment.id));
+      expect(responseB.status).toBe(200);
+      const reportB = (await responseB.json()) as typeof reportA;
+      expect(reportB.product_count).toBe(1);
+      expect(reportB.products).toEqual([
+        expect.objectContaining({
+          app_id: appB.app.id,
+          catalog_id: 'daily-scope-b',
+          api_activity: 29,
+        }),
+      ]);
+      expect(reportB.products.some((row) => row.app_id === appA.app.id)).toBe(false);
+
+      const speed = await api(route(appA.app.id, appA.environment.id, '&speed=1&speed_class=app'));
+      expect(speed.status).toBe(200);
+      const speedReport = (await speed.json()) as {
+        speed: { products: Array<{ app_id: string }> };
+      };
+      expect(speedReport.speed.products.map((row) => row.app_id)).toEqual([appA.app.id]);
+
+      const staging = await api(
+        route(appA.app.id, alternateEnvironment, '&speed=1&speed_class=app'),
+      );
+      expect(staging.status).toBe(200);
+      const stagingReport = (await staging.json()) as {
+        product_count: number;
+        products: unknown[];
+        speed: { products: unknown[] };
+      };
+      expect(stagingReport.product_count).toBe(0);
+      expect(stagingReport.products).toEqual([]);
+      expect(stagingReport.speed.products).toEqual([]);
+
+      expect((await api(route(appA.app.id, crypto.randomUUID()))).status).toBe(403);
+      expect(
+        (
+          await api(
+            `/v1/reports/daily-engagement?date=2026-10-25&app_id=${appA.app.id}&environment_id=${appA.environment.id}&environment_id=${alternateEnvironment}`,
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (await api(route(appA.app.id, appA.environment.id), otherWorkspace!.workspace_id)).status,
+      ).toBe(403);
+      expect(cache.put).toHaveBeenCalledTimes(5);
+      expect(new Set(Array.from(cacheRows.keys())).size).toBe(5);
+      const after = await env
+        .DB!.prepare(
+          'SELECT (SELECT COUNT(*) FROM catalog_project_imports) AS catalogs, (SELECT COUNT(*) FROM log_events) AS logs, (SELECT COUNT(*) FROM analytics_definitions) AS definitions',
+        )
+        .first<{ catalogs: number; logs: number; definitions: number }>();
+      expect(after).toEqual(before);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('revokes the actual session on sign-out', async () => {
