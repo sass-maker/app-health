@@ -2821,7 +2821,7 @@ const ProjectSettings = (props: ProjectSettingsProps): ReactElement => {
           settings on this page apply only to the selected environment.
         </AlertDescription>
       </Alert>
-      <WorkspacePanel ownerToken={ownerToken} project={project} />
+      <WorkspacePanel ownerToken={ownerToken} project={project} projects={projects} />
       {workspaceCanManage(scope.role) ? (
         <>
           <CapabilitySettings controller={controller} onOpen={actions.onOpen} />

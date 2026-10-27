@@ -23,6 +23,28 @@ type Token = {
   revoked_at: number | null;
   expires_at: number;
 };
+type ProjectScope = { appId: string; environmentId: string; name: string; environment: string };
+const scopeKey = (scope: Pick<ProjectScope, 'appId' | 'environmentId'>) =>
+  JSON.stringify([scope.appId, scope.environmentId]);
+function tokenScopeChoices(
+  project: Pick<ProjectScope, 'appId' | 'environmentId'> | undefined,
+  projects: ProjectScope[] | undefined,
+) {
+  const production = (projects ?? []).filter(
+    (candidate) => candidate.environment.toLowerCase() === 'production',
+  );
+  if (!project || production.some((candidate) => scopeKey(candidate) === scopeKey(project)))
+    return production;
+  const current = projects?.find((candidate) => scopeKey(candidate) === scopeKey(project));
+  return [
+    ...production,
+    {
+      ...project,
+      name: current?.name ?? 'Selected project',
+      environment: current?.environment ?? 'selected environment',
+    },
+  ];
+}
 async function read(path: string, token: string, init?: RequestInit) {
   const response = await ownerFetch(path, token, init);
   if (!response.ok)
@@ -33,9 +55,11 @@ async function read(path: string, token: string, init?: RequestInit) {
 export function WorkspacePanel({
   ownerToken,
   project,
+  projects,
 }: {
   ownerToken: string;
   project?: { appId: string; environmentId: string };
+  projects?: ProjectScope[];
 }) {
   const scope = useWorkspaceScope();
   const [open, setOpen] = useState(false);
@@ -47,10 +71,18 @@ export function WorkspacePanel({
   const [role, setRole] = useState('viewer');
   const [name, setName] = useState('');
   const [permission, setPermission] = useState('read');
+  const [selectedScopes, setSelectedScopes] = useState<string[]>(() =>
+    project ? [scopeKey(project)] : [],
+  );
   const [fresh, setFresh] = useState<{ value: string; api: boolean } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
+  // Keep the established one-project flow available for a selected non-production environment.
+  const availableScopes = tokenScopeChoices(project, projects);
+  useEffect(() => {
+    if (project) setSelectedScopes([scopeKey(project)]);
+  }, [project?.appId, project?.environmentId]);
   useEffect(() => {
     if (!open || ownerToken) return;
     const controller = new AbortController();
@@ -107,12 +139,15 @@ export function WorkspacePanel({
   }
   async function createToken(event: FormEvent) {
     event.preventDefault();
-    if (!project) return;
+    if (!project || selectedScopes.length === 0 || selectedScopes.length > 50) return;
     setFresh(null);
     const result = await mutate('/v1/workspace/api-tokens', 'POST', {
       name,
       permission,
-      scopes: [{ app_id: project.appId, environment_id: project.environmentId }],
+      scopes: selectedScopes.map((value) => {
+        const [appId, environmentId] = JSON.parse(value) as [string, string];
+        return { app_id: appId, environment_id: environmentId };
+      }),
     });
     if (result) {
       setFresh({ value: result.token, api: true });
@@ -274,9 +309,53 @@ export function WorkspacePanel({
               >
                 <h3 className="text-sm font-medium">analytics API token</h3>
                 <p className="text-xs text-muted-foreground">
-                  Restricted to the selected project and environment. Expires in 90 days. Manage
+                  Restricted to selected project and environment scopes. Expires in 90 days. Manage
                   permission changes goals, funnels and segments only.
                 </p>
+                {project ? (
+                  <fieldset className="space-y-2">
+                    <legend className="text-xs font-medium">API token project scopes</legend>
+                    <p className="text-xs text-muted-foreground">
+                      Choose up to 50 project and environment pairs. Only production environments
+                      are listed, except the currently selected environment when it is not
+                      production.
+                    </p>
+                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border p-2">
+                      {availableScopes.map((candidate) => {
+                        const value = scopeKey(candidate);
+                        const checked = selectedScopes.includes(value);
+                        return (
+                          <label
+                            key={value}
+                            className="flex cursor-pointer items-center gap-3 rounded-md p-2 text-sm hover:bg-muted/50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={busy || (!checked && selectedScopes.length >= 50)}
+                              onChange={(event) => {
+                                const shouldSelect = event.currentTarget.checked;
+                                setSelectedScopes((current) =>
+                                  shouldSelect
+                                    ? current.length < 50 && !current.includes(value)
+                                      ? [...current, value]
+                                      : current
+                                    : current.filter((entry) => entry !== value),
+                                );
+                              }}
+                              className="size-4 accent-primary"
+                            />
+                            <span>{candidate.name}</span>
+                            <span className="text-muted-foreground">· {candidate.environment}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <p aria-live="polite" className="text-xs text-muted-foreground">
+                      {selectedScopes.length} of 50 scopes selected
+                    </p>
+                  </fieldset>
+                ) : null}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Input
                     aria-label="API token name"
@@ -295,7 +374,12 @@ export function WorkspacePanel({
                       { value: 'manage', label: 'manage definitions' },
                     ]}
                   />
-                  <Button type="submit" disabled={busy || !project}>
+                  <Button
+                    type="submit"
+                    disabled={
+                      busy || !project || selectedScopes.length === 0 || selectedScopes.length > 50
+                    }
+                  >
                     create API token
                   </Button>
                 </div>
