@@ -24,7 +24,7 @@
     "quality:go-vet": "node scripts/check-code-health.mjs go-vet",
     "quality:coverage": "node scripts/check-code-health.mjs coverage",
     "quality:unused": "pnpm run knip:strict",
-    "quality:complexity": "node scripts/check-code-health.mjs complexity",
+    "quality:complexity": "node --test scripts/lizard-tsx-spans.test.mjs && node scripts/check-code-health.mjs complexity",
     "quality:duplication": "node scripts/check-code-health.mjs duplication",
     "quality:cycles": "knip --cycles --no-config-hints",
     "quality:dependencies": "node scripts/check-code-health.mjs dependencies",
