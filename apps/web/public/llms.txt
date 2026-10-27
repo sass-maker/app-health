@@ -1,21 +1,22 @@
 # App Health
 
-> A private, privacy-first endpoint-health view for developers and service operators using Node, Go, Cloudflare, or OpenTelemetry.
+> App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
 
-## Purpose
+Only the public product landing, changelog, and privacy notice are included. Operator dashboards, shared analytics, account data, logs, payments, and telemetry APIs are excluded.
 
-App Health replaces fragmented checks across error, analytics, messaging, and cloud consoles with aggregate route traffic, latency, error, and freshness summaries. It stores no request bodies, parameters, identities, or stack traces from traffic; application logs are separate events your code explicitly sends.
+<!-- Keep in sync with robots.txt and ai.txt. -->
 
-The production dashboard and ingest service are live. New evaluators should start with the install guide and verified release history; the hosted operator dashboard is private and has no public signup.
+## Public pages
 
-## Product
+- [privacy at App Health](https://health.sassmaker.com/privacy.md): App Health is a Fleet product operated by Sarthak Agrawal. This notice explains the information used to run the service and the choices available to you.
+- [App Health — Web analytics, product events, and app health](https://health.sassmaker.com/index.md): App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
+- [Changelog — App Health](https://health.sassmaker.com/changelog.md): A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this page records released capabilities.
 
-- [Home](https://health.sassmaker.com/): Endpoint health dashboard
-- [Changelog](https://health.sassmaker.com/changelog): Verified product releases
-- [Install guide](https://github.com/sass-maker/app-health#install-the-sdks): Supported SDK and OpenTelemetry setup
+## Machine-readable
 
-## Machine surfaces
-
-- [Agent catalog](https://health.sassmaker.com/api/ai): JSON inventory of public surfaces
-- [Homepage markdown](https://health.sassmaker.com/index.md): Product brief without JS
-- [This index](https://health.sassmaker.com/llms.txt)
+- [Full content](https://health.sassmaker.com/llms-full.txt): Bounded public page content
+- [Markdown catalog](https://health.sassmaker.com/api/md/_catalog): All registered public routes
+- [Agent catalog](https://health.sassmaker.com/api/ai): Existing discovery contract
+- [AI usage policy](https://health.sassmaker.com/ai.txt): Permissions and attribution
+- [Sitemap](https://health.sassmaker.com/sitemap.xml): Canonical HTML pages
+- [OpenAPI](https://health.sassmaker.com/openapi.json): Public API contract

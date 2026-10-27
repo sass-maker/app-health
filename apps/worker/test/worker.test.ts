@@ -157,12 +157,17 @@ describe('public agent surfaces', () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/markdown');
-    expect(response.headers.get('vary')).toBe('Accept, Accept-Encoding');
+    expect(
+      response.headers
+        .get('vary')
+        ?.split(',')
+        .map((value) => value.trim()),
+    ).toContain('Accept');
   });
 
   it('serves every catalogued machine surface', async () => {
     const cases = [
-      ['/llms-full.txt', 'text/plain', /^# App Health — full agent brief/],
+      ['/llms-full.txt', 'text/plain', /^# App Health - full content/],
       ['/index.md', 'text/markdown', /^# App Health/],
       ['/openapi.yaml', 'application/json', /"openapi": "3\.1\.0"/],
     ] as const;

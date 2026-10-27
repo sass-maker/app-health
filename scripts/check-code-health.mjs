@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
+import { boundTsxFunctionLength } from './lizard-tsx-spans.mjs';
 import { fileURLToPath } from 'node:url';
 import { checkShadcnVendor, shadcnVendorPaths } from './shadcn-vendor.mjs';
 
@@ -165,15 +166,24 @@ function checkComplexity() {
     '**/*_test.go',
     '-x',
     '**/*.d.mts',
+    // Shared vendored helpers are qualified upstream; local consumers stay in this scan.
+    '-x',
+    '**/agent-surfaces/**',
     ...shadcnVendorPaths.flatMap((path) => ['-x', path]),
     '--csv',
   ]);
   const rows = result.stdout
     .trim()
     .split('\n')
-    .map((line) => line.match(/^(\d+),(\d+),(\d+),(\d+),(\d+),/u))
-    .filter(Boolean)
-    .map((match) => match.slice(1).map(Number));
+    .map((line) => {
+      const match = line.match(/^(\d+),(\d+),(\d+),(\d+),(\d+),/u);
+      return match
+        ? boundTsxFunctionLength(line, match.slice(1).map(Number), (file) =>
+            readFileSync(join(projectRoot, file), 'utf8'),
+          )
+        : null;
+    })
+    .filter(Boolean);
   const observed = {
     functions: rows.length,
     nloc: rows.reduce((sum, row) => sum + row[0], 0),

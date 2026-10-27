@@ -1,66 +1,244 @@
-# App Health — full agent brief
+# App Health - full content
 
-App Health gives developers and service operators a private, privacy-first view of endpoint health from observed traffic.
+> App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
 
-## Index
+Source updated: 2026-10-26
 
-# App Health
+---
+<!-- source: https://health.sassmaker.com/privacy -->
+# privacy at App Health
 
-App Health gives developers and service operators a private, privacy-first view of endpoint health from observed traffic.
+> App Health is a Fleet product operated by Sarthak Agrawal. This notice explains the information used to run the service and the choices available to you.
 
-## What it replaces
+Canonical: https://health.sassmaker.com/privacy
 
-Instead of opening separate error, analytics, messaging, and cloud consoles to understand basic service health, one App Health view shows route traffic, latency, errors, and freshness across short time windows.
+Updated September 18, 2026
 
-## How it works
+## your account
 
-- Add the fail-open Node, Hono, Cloudflare Pages, Go, or Echo SDK, or connect an existing OpenTelemetry Collector.
-- Send normalized method-and-route observations to an authenticated ingest endpoint.
-- Inspect aggregate endpoint summaries for 15-minute, 1-hour, 24-hour, and 7-day windows in the private owner dashboard.
+Google sign-in provides your name, email address, profile image, and provider identity. App Health stores these with workspace ownership and authentication records. Provider tokens are encrypted at rest by the authentication library. Secure HttpOnly cookies maintain your session; authentication records can also contain IP address and browser information. These account records are separate from your project telemetry.
 
-## Current proof
+## project telemetry
 
-- The production V0 supports Node, Worker, Go, and OTLP ingestion.
-- Product-scoped keys separate environments while the owner dashboard remains authenticated.
-- The production dashboard and ingest service are live, and the corrected Node and Go canaries returned all five observed routes after the aggregate-ingest migration.
+Endpoint measurements contain HTTP method, normalized route, status, duration, timestamp, and optional release. They do not capture request headers, cookies, bodies, or query values. The browser tracker records page paths with query strings and fragments removed, normalizes likely identifiers, and records the referring hostname. By default, a random anonymous visitor identifier stays in first-party local storage for up to 90 days, scoped to a project. Visits expire after 30 minutes without meaningful activity. Integrations can choose session-only tracking, which omits persistent visitor identifiers. Only one-way hashes scoped to each project and environment are archived, never raw visitor or session identifiers. These identifiers describe browsers, not unique people, and do not link unrelated projects or devices. The tracker does not set analytics cookies. Analytics can also include bounded campaign tags, an entry path, referring hostname, and coarse browser, device, and country categories. Raw IP addresses and user-agent strings are not stored in these analytics events. Explicit events and logs contain the fields your integration submits. Do not submit passwords, credentials, payment details, or other sensitive personal information.
 
-## Public boundary
+## how we use data
 
-- Aggregate endpoint latency, status, and availability summaries
-- Endpoint telemetry carries no request bodies, headers, cookies, query values, identities, or stack traces
-- Application logs are separate, explicit, owner-sent events (not derived from traffic)
-- Owner APIs remain authenticated and are not agent-indexed
+We use account information to authenticate you and keep projects scoped to your workspace. Telemetry powers the analytics, logs, and endpoint-health views you enable. App Health also uses its own tracker to understand product usage and records successful signup and project creation as operational milestones without account names, emails, or project details in those log properties.
 
-## Access and next action
+## storage and retention
 
-New evaluators should start with the install guide and verified release history. Existing operators can open the hosted dashboard with the owner key for their Cloudflare deployment; there is no public signup or pricing claim.
+Cloudflare hosts the service, its database, aggregate analytics, and archive storage. The application currently authorizes no age-based deletion of compressed analytics facts, but the deployed R2 provider lifecycle may still expire older physical archive objects until that lifecycle is removed and independently verified. Future physical replacement requires cryptographic and content-equivalence verification; equal counts alone are not sufficient. Application logs retain their full details for 30 days, while long-term log rollups can retain aggregate counts without message properties. Endpoint failure details retain 24 hours; endpoint counters and latency histograms use separate aggregate storage. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained.
 
-- Install guide: https://github.com/sass-maker/app-health#install-the-sdks
-- Source: https://github.com/sass-maker/app-health
-- Changelog: https://health.sassmaker.com/changelog
+## sharing and service providers
 
-## Agent entrypoints
+Workspace authentication protects private project views. If you create a public analytics share link, anyone holding it can read its limited aggregate view until you revoke it. Treat the link as a credential. Google provides sign-in and Cloudflare provides hosting and data processing. Public website pages also use PostHog for page-visit analytics; the changelog uses Microsoft Clarity to understand navigation and rendering. These services have their own privacy notices.
 
-- https://health.sassmaker.com/llms.txt
-- https://health.sassmaker.com/api/ai
-- https://health.sassmaker.com/index.md
+## your choices
 
-## Product links
+You choose which capabilities to instrument and can revoke integration keys and public share links. Contact the operator to request access, correction, or deletion of account and project information. Do not include credentials or private log contents in your request.
 
-- Home: https://health.sassmaker.com/ — Endpoint health dashboard
-- Changelog: https://health.sassmaker.com/changelog — Verified product releases
-- Install guide: https://github.com/sass-maker/app-health#install-the-sdks — Supported SDK and OpenTelemetry setup
+Questions or privacy requests: [sarthakagrawal927@gmail.com](mailto:sarthakagrawal927@gmail.com)
 
-## Machine surfaces
+## Related
 
-- https://health.sassmaker.com/llms.txt
-- https://health.sassmaker.com/llms-full.txt
-- https://health.sassmaker.com/api/ai
-- https://health.sassmaker.com/index.md
-- https://health.sassmaker.com/sitemap.xml
-- https://health.sassmaker.com/robots.txt
+[App Health](https://health.sassmaker.com/) · [Changelog](https://health.sassmaker.com/changelog) · [Source and roadmap](https://github.com/sass-maker/app-health/issues)
 
-## Contact
 
-- Owner: https://sarthakagrawal.dev
-- Agent email for directory verification: sarthakagrawal@agentmail.to
+---
+<!-- source: https://health.sassmaker.com/ -->
+# App Health — Web analytics, product events, and app health
+
+> App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
+
+Canonical: https://health.sassmaker.com/
+
+for people shaping digital products
+
+## see what people do. know what to improve.
+
+App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
+
+[open App Health](https://health.sassmaker.com/app)
+
+[explore the product](https://health.sassmaker.com/#product)
+
+local preview available
+
+`<script src="/tracker.js">`
+
+`track('signup.completed')`
+
+## acme.app — illustrative data · 24h
+
+The preview below is illustrative data, not live customer telemetry.
+
+- page views: 1,313 — Pages opened
+- product events: 263 — Actions tracked
+- active now: 12 — Browser sessions
+
+### Illustrative chart (24 hours)
+
+| Hour | Page views | Events |
+| --- | ---: | ---: |
+| 0:00 | 12 | 2 |
+| 1:00 | 18 | 4 |
+| 2:00 | 14 | 3 |
+| 3:00 | 25 | 5 |
+| 4:00 | 20 | 4 |
+| 5:00 | 35 | 7 |
+| 6:00 | 28 | 6 |
+| 7:00 | 44 | 9 |
+| 8:00 | 32 | 6 |
+| 9:00 | 38 | 8 |
+| 10:00 | 54 | 11 |
+| 11:00 | 48 | 10 |
+| 12:00 | 64 | 13 |
+| 13:00 | 43 | 9 |
+| 14:00 | 58 | 12 |
+| 15:00 | 76 | 15 |
+| 16:00 | 64 | 13 |
+| 17:00 | 80 | 16 |
+| 18:00 | 72 | 14 |
+| 19:00 | 92 | 18 |
+| 20:00 | 78 | 16 |
+| 21:00 | 98 | 20 |
+| 22:00 | 89 | 18 |
+| 23:00 | 110 | 22 |
+
+### Top pages (illustrative)
+
+- `/pricing`: 482
+- `/`: 391
+- `/docs`: 248
+
+### Product events (illustrative)
+
+- `signup.completed`: 142
+- `checkout.started`: 86
+- `project.created`: 35
+
+- Page views from one browser script
+- Named events with one line
+- App health when you need context
+
+One product picture
+
+## a visit is only the beginning.
+
+See how attention turns into action, then understand the application behind it. App Health keeps the story connected without pretending browser sessions are unique people.
+
+web analytics
+
+### find the pages earning attention.
+
+Follow page views over time, see where visits come from, and move between one product and your whole workspace.
+
+top pages · referral sources · 24-hour trends
+
+product events
+
+### measure the moments you choose.
+
+Name the actions that matter to your product. Open any event to see its trend, pages, and referral sources.
+
+event count · last seen · event drill-down
+
+application health
+
+### bring evidence to the handoff.
+
+When product activity changes, inspect route traffic, latency, errors, and logs without leaving the workspace.
+
+observed routes · latency · errors · logs
+
+small by design
+
+## from a product question to a clearer answer.
+
+Add one browser snippet for automatic page views, then send named events for the actions your team cares about. The tracker stays isolated from your application.
+
+[add your project](https://health.sassmaker.com/app)
+
+your-website.html
+
+browser
+
+```html
+<script defer
+  src="https://YOUR_HOST/tracker.js"
+  data-key="YOUR_PUBLIC_KEY"
+  data-endpoint="https://YOUR_HOST/v1/browser"
+></script>
+
+window.appHealth.track('signup.completed')
+```
+
+- named events
+- active sessions
+- backend health
+
+Built in the open
+
+## your traffic, events, and service health.
+
+Sign in with Google, add a project, and connect the capabilities you need. Start with live sessions, page views, referral sources, named events, or endpoint health.
+
+[see what shipped](https://health.sassmaker.com/changelog)
+
+## Related
+
+[App Health](https://health.sassmaker.com/) · [Changelog](https://health.sassmaker.com/changelog) · [Source and roadmap](https://github.com/sass-maker/app-health/issues)
+
+
+---
+<!-- source: https://health.sassmaker.com/changelog -->
+# Changelog — App Health
+
+> A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this page records released capabilities.
+
+Canonical: https://health.sassmaker.com/changelog
+
+product history
+
+## what changed, and what it means.
+
+A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this page records released capabilities.
+
+## 2026-09-12 — analytics, logs, and endpoint health share one workspace
+
+- Sign in with Google, create projects and environments, and connect each capability when you need it.
+- Web analytics shows live sessions, historical sessions, page views, referral sources, and named events. Sessions are not unique people; sampled counts are labeled.
+- Share an aggregate live page with a revocable link. Private logs, event names, and credentials stay in your dashboard.
+- The JavaScript SDK ships endpoint adapters, explicit logs, and a public analytics viewer as separate imports.
+
+## 2026-07-27 — one product key can now cover multiple environments
+
+- SDK and OpenTelemetry traffic can select a bounded environment while sharing one product-scoped ingest key.
+- The dashboard switches endpoint health, installation status, and retained failures together.
+
+## 2026-07-25 — Cloudflare applications gained first-party adapters
+
+- Hono middleware and a Pages Functions wrapper report trusted route templates without changing application responses.
+- Delivery stays fail-open and can continue through the platform execution context after a response is returned.
+
+## 2026-07-22 — the dashboard made collection boundaries visible
+
+- Operators can inspect recent retained failures and the exact fields App Health accepts for an environment.
+- The product explains aggregate storage, retention, and the request data it never collects.
+
+## 2026-07-21 — endpoint health reached production
+
+- Node, Go, and OpenTelemetry traffic can feed the same focused view of requests, latency, errors, and last-seen time.
+- Every accepted route remains discoverable even when sampled metrics are temporarily unavailable.
+
+This public changelog uses Microsoft Clarity to understand navigation and rendering. The owner-key unlock and private dashboard never load it.
+
+## Related
+
+[App Health](https://health.sassmaker.com/) · [Changelog](https://health.sassmaker.com/changelog) · [Source and roadmap](https://github.com/sass-maker/app-health/issues)
+
+
+Included 3 of 3 registered public pages (limit 50 pages / 500000 characters).
+
+Full catalog: https://health.sassmaker.com/api/md/_catalog

@@ -1,0 +1,180 @@
+{
+  "proofPoints": [
+    "Page views from one browser script",
+    "Named events with one line",
+    "App health when you need context"
+  ],
+  "pages": [
+    ["/pricing", "482"],
+    ["/", "391"],
+    ["/docs", "248"]
+  ],
+  "events": [
+    ["signup.completed", "142"],
+    ["checkout.started", "86"],
+    ["project.created", "35"]
+  ],
+  "features": [
+    {
+      "eyebrow": "web analytics",
+      "title": "find the pages earning attention.",
+      "body": "Follow page views over time, see where visits come from, and move between one product and your whole workspace.",
+      "proof": "top pages · referral sources · 24-hour trends"
+    },
+    {
+      "eyebrow": "product events",
+      "title": "measure the moments you choose.",
+      "body": "Name the actions that matter to your product. Open any event to see its trend, pages, and referral sources.",
+      "proof": "event count · last seen · event drill-down"
+    },
+    {
+      "eyebrow": "application health",
+      "title": "bring evidence to the handoff.",
+      "body": "When product activity changes, inspect route traffic, latency, errors, and logs without leaving the workspace.",
+      "proof": "observed routes · latency · errors · logs"
+    }
+  ],
+  "integrationSnippet": "<script defer\n  src=\"https://YOUR_HOST/tracker.js\"\n  data-key=\"YOUR_PUBLIC_KEY\"\n  data-endpoint=\"https://YOUR_HOST/v1/browser\"\n></script>\n\nwindow.appHealth.track('signup.completed')",
+  "entries": [
+    {
+      "date": "2026-09-12",
+      "title": "analytics, logs, and endpoint health share one workspace",
+      "outcomes": [
+        "Sign in with Google, create projects and environments, and connect each capability when you need it.",
+        "Web analytics shows live sessions, historical sessions, page views, referral sources, and named events. Sessions are not unique people; sampled counts are labeled.",
+        "Share an aggregate live page with a revocable link. Private logs, event names, and credentials stay in your dashboard.",
+        "The JavaScript SDK ships endpoint adapters, explicit logs, and a public analytics viewer as separate imports."
+      ]
+    },
+    {
+      "date": "2026-07-27",
+      "title": "one product key can now cover multiple environments",
+      "outcomes": [
+        "SDK and OpenTelemetry traffic can select a bounded environment while sharing one product-scoped ingest key.",
+        "The dashboard switches endpoint health, installation status, and retained failures together."
+      ]
+    },
+    {
+      "date": "2026-07-25",
+      "title": "Cloudflare applications gained first-party adapters",
+      "outcomes": [
+        "Hono middleware and a Pages Functions wrapper report trusted route templates without changing application responses.",
+        "Delivery stays fail-open and can continue through the platform execution context after a response is returned."
+      ]
+    },
+    {
+      "date": "2026-07-22",
+      "title": "the dashboard made collection boundaries visible",
+      "outcomes": [
+        "Operators can inspect recent retained failures and the exact fields App Health accepts for an environment.",
+        "The product explains aggregate storage, retention, and the request data it never collects."
+      ]
+    },
+    {
+      "date": "2026-07-21",
+      "title": "endpoint health reached production",
+      "outcomes": [
+        "Node, Go, and OpenTelemetry traffic can feed the same focused view of requests, latency, errors, and last-seen time.",
+        "Every accepted route remains discoverable even when sampled metrics are temporarily unavailable."
+      ]
+    }
+  ],
+  "previewMetrics": [
+    {
+      "label": "page views",
+      "value": "1,313",
+      "note": "Pages opened"
+    },
+    {
+      "label": "product events",
+      "value": "263",
+      "note": "Actions tracked"
+    },
+    {
+      "label": "active now",
+      "value": "12",
+      "note": "Browser sessions"
+    }
+  ],
+  "samplePageviews": [
+    12, 18, 14, 25, 20, 35, 28, 44, 32, 38, 54, 48, 64, 43, 58, 76, 64, 80, 72, 92, 78, 98, 89, 110
+  ],
+  "hero": {
+    "audience": "for people shaping digital products",
+    "title": "see what people do.",
+    "titleContinuation": "know what to improve.",
+    "summary": "App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.",
+    "openLabel": "open App Health ",
+    "exploreLabel": "explore the product",
+    "availability": "local preview available",
+    "scriptExample": "<script src=\"/tracker.js\">",
+    "eventExample": "track('signup.completed')"
+  },
+  "preview": {
+    "name": "acme.app",
+    "disclosure": "illustrative data · 24h"
+  },
+  "productSection": {
+    "eyebrow": "One product picture",
+    "title": "a visit is only the beginning.",
+    "summary": "See how attention turns into action, then understand the application behind it. App Health keeps the story connected without pretending browser sessions are unique people."
+  },
+  "integration": {
+    "eyebrow": " small by design",
+    "title": "from a product question to a clearer answer.",
+    "summary": "Add one browser snippet for automatic page views, then send named events for the actions your team cares about. The tracker stays isolated from your application.",
+    "actionLabel": "add your project ",
+    "filename": " your-website.html",
+    "platform": "browser",
+    "namedEvents": " named events",
+    "activeSessions": " active sessions",
+    "backendHealth": " backend health"
+  },
+  "status": {
+    "eyebrow": "Built in the open",
+    "title": "your traffic, events, and service health.",
+    "summary": "Sign in with Google, add a project, and connect the capabilities you need. Start with live sessions, page views, referral sources, named events, or endpoint health.",
+    "changelogLabel": "see what shipped "
+  },
+  "changelog": {
+    "roadmapLabel": "roadmap",
+    "dashboardLabel": "dashboard",
+    "eyebrow": "product history",
+    "title": "what changed, and what it means.",
+    "summary": "A curated record of shipped App Health outcomes. Roadmap work stays in GitHub Issues; this page records released capabilities.",
+    "analyticsDisclosure": "This public changelog uses Microsoft Clarity to understand navigation and rendering. The owner-key unlock and private dashboard never load it."
+  },
+  "privacy": {
+    "updated": "Updated September 18, 2026",
+    "title": "privacy at App Health",
+    "summary": "App Health is a Fleet product operated by Sarthak Agrawal. This notice explains the information used to run the service and the choices available to you.",
+    "sections": [
+      [
+        "your account",
+        "Google sign-in provides your name, email address, profile image, and provider identity. App Health stores these with workspace ownership and authentication records. Provider tokens are encrypted at rest by the authentication library. Secure HttpOnly cookies maintain your session; authentication records can also contain IP address and browser information. These account records are separate from your project telemetry."
+      ],
+      [
+        "project telemetry",
+        "Endpoint measurements contain HTTP method, normalized route, status, duration, timestamp, and optional release. They do not capture request headers, cookies, bodies, or query values. The browser tracker records page paths with query strings and fragments removed, normalizes likely identifiers, and records the referring hostname. By default, a random anonymous visitor identifier stays in first-party local storage for up to 90 days, scoped to a project. Visits expire after 30 minutes without meaningful activity. Integrations can choose session-only tracking, which omits persistent visitor identifiers. Only one-way hashes scoped to each project and environment are archived, never raw visitor or session identifiers. These identifiers describe browsers, not unique people, and do not link unrelated projects or devices. The tracker does not set analytics cookies. Analytics can also include bounded campaign tags, an entry path, referring hostname, and coarse browser, device, and country categories. Raw IP addresses and user-agent strings are not stored in these analytics events. Explicit events and logs contain the fields your integration submits. Do not submit passwords, credentials, payment details, or other sensitive personal information."
+      ],
+      [
+        "how we use data",
+        "We use account information to authenticate you and keep projects scoped to your workspace. Telemetry powers the analytics, logs, and endpoint-health views you enable. App Health also uses its own tracker to understand product usage and records successful signup and project creation as operational milestones without account names, emails, or project details in those log properties."
+      ],
+      [
+        "storage and retention",
+        "Cloudflare hosts the service, its database, aggregate analytics, and archive storage. The application currently authorizes no age-based deletion of compressed analytics facts, but the deployed R2 provider lifecycle may still expire older physical archive objects until that lifecycle is removed and independently verified. Future physical replacement requires cryptographic and content-equivalence verification; equal counts alone are not sufficient. Application logs retain their full details for 30 days, while long-term log rollups can retain aggregate counts without message properties. Endpoint failure details retain 24 hours; endpoint counters and latency histograms use separate aggregate storage. Expired authentication sessions, verification records, and rate-limit records are cleaned in bounded scheduled batches. Account records, project configuration, and ownership remain while the account is maintained."
+      ],
+      [
+        "sharing and service providers",
+        "Workspace authentication protects private project views. If you create a public analytics share link, anyone holding it can read its limited aggregate view until you revoke it. Treat the link as a credential. Google provides sign-in and Cloudflare provides hosting and data processing. Public website pages also use PostHog for page-visit analytics; the changelog uses Microsoft Clarity to understand navigation and rendering. These services have their own privacy notices."
+      ],
+      [
+        "your choices",
+        "You choose which capabilities to instrument and can revoke integration keys and public share links. Contact the operator to request access, correction, or deletion of account and project information. Do not include credentials or private log contents in your request."
+      ]
+    ],
+    "contactLabel": "Questions or privacy requests:",
+    "email": "sarthakagrawal927@gmail.com"
+  }
+}

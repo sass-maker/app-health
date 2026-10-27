@@ -10,50 +10,23 @@
 
 /* global Response, URL */
 
-/** @type {{ name: string, url: string, llmsTxt: string, llmsFullTxt?: string, indexMd: string, catalog: object }} */
-// biome-ignore format: generated payload from apply-agent-surfaces (JSON keys/quotes)
+import {
+  publicIdentity,
+  publicManifest,
+  publicPages,
+  publicRobots,
+  publicSitemap,
+  handlePublicDocument,
+} from './public-site.mjs';
 const AGENT_SURFACE = {
-  name: 'App Health',
-  url: 'https://health.sassmaker.com',
-  llmsFullTxt:
-    '# App Health — full agent brief\n\nPrivacy-first endpoint health for Node, Go, Cloudflare, and OpenTelemetry services.\n\n## Index\n\n# App Health\n\nPrivacy-first endpoint health for Node, Go, Cloudflare, and OpenTelemetry services.\n\n## Public boundary\n\n- Aggregate endpoint latency, status, and availability summaries\n- Endpoint telemetry carries no request bodies, headers, cookies, query values, identities, or stack traces\n- Application logs are separate, explicit, owner-sent events (not derived from traffic)\n- Owner APIs remain authenticated and are not agent-indexed\n\n## Agent entrypoints\n\n- https://health.sassmaker.com/llms.txt\n- https://health.sassmaker.com/api/ai\n- https://health.sassmaker.com/index.md\n\n## Product links\n\n- Home: https://health.sassmaker.com/ — Endpoint health dashboard\n- Changelog: https://health.sassmaker.com/changelog — Verified product releases\n\n## Machine surfaces\n\n- https://health.sassmaker.com/llms.txt\n- https://health.sassmaker.com/llms-full.txt\n- https://health.sassmaker.com/api/ai\n- https://health.sassmaker.com/index.md\n- https://health.sassmaker.com/sitemap.xml\n- https://health.sassmaker.com/robots.txt\n\n## Contact\n\n- Owner: https://sarthakagrawal.dev\n- Agent email for directory verification: sarthakagrawal@agentmail.to\n',
-  llmsTxt:
-    '# App Health\n\n> Privacy-first endpoint health for Node, Go, Cloudflare, and OpenTelemetry services.\n\n## Product\n\n- [Home](https://health.sassmaker.com/): Endpoint health dashboard\n- [Changelog](https://health.sassmaker.com/changelog): Verified product releases\n\n## Machine surfaces\n\n- [Agent catalog](https://health.sassmaker.com/api/ai): JSON inventory of public surfaces\n- [OpenAPI spec](https://health.sassmaker.com/openapi.json): Machine-readable API description\n- [Homepage markdown](https://health.sassmaker.com/index.md): Product brief without JS\n- [This index](https://health.sassmaker.com/llms.txt)\n\n## When to use this\n\n- Monitoring endpoint health and availability for Node, Go, Cloudflare, or OpenTelemetry services\n- Checking aggregate latency, status codes, and uptime summaries (privacy-first, no PII)\n- Integrating a lightweight health-check SDK into a service for endpoint tracking\n- Reviewing verified product releases and changelog history\n',
-  indexMd:
-    '# App Health\n\nPrivacy-first endpoint health for Node, Go, Cloudflare, and OpenTelemetry services.\n\n## Public boundary\n\n- Aggregate endpoint latency, status, and availability summaries\n- Endpoint telemetry carries no request bodies, headers, cookies, query values, identities, or stack traces\n- Application logs are separate, explicit, owner-sent events (not derived from traffic)\n- Owner APIs remain authenticated and are not agent-indexed\n\n## Agent entrypoints\n\n- https://health.sassmaker.com/llms.txt\n- https://health.sassmaker.com/api/ai\n- https://health.sassmaker.com/index.md\n',
+  name: publicIdentity.name,
+  url: publicIdentity.origin,
+  llmsTxt: publicManifest.llmsTxt,
+  indexMd: publicPages['/'],
   catalog: {
-    name: 'App Health',
-    version: '1',
-    url: 'https://health.sassmaker.com',
-    llms: 'https://health.sassmaker.com/llms.txt',
-    llmsFull: 'https://health.sassmaker.com/llms-full.txt',
-    sitemap: 'https://health.sassmaker.com/sitemap.xml',
-    robots: 'https://health.sassmaker.com/robots.txt',
-    openapi: 'https://health.sassmaker.com/openapi.json',
-    markdown: {
-      suffix: '.md',
-      negotiation: true,
-    },
-    surfaces: [
-      {
-        id: 'home',
-        url: 'https://health.sassmaker.com/',
-        md: 'https://health.sassmaker.com/index.md',
-        kind: 'static',
-        description: 'Product home',
-      },
-      {
-        id: 'changelog',
-        url: 'https://health.sassmaker.com/changelog',
-        md: 'https://health.sassmaker.com/changelog.md',
-        kind: 'static',
-        description: 'Verified product releases',
-      },
-    ],
-    auth: {
-      public: true,
-      notes: 'Auth-walled app routes are not agent-indexed unless listed here.',
-    },
+    ...publicManifest.catalog,
+    robots: `${publicIdentity.origin}/robots.txt`,
+    openapi: `${publicIdentity.origin}/openapi.json`,
   },
 };
 
@@ -189,58 +162,31 @@ function catalogResponse(url) {
   });
 }
 
-/** @returns {Response} */
-function homepageMarkdownResponse() {
-  return text(AGENT_SURFACE.indexMd, 'text/markdown; charset=utf-8', {
-    Link: '</index.md>; rel="alternate"; type="text/markdown"',
-    Vary: 'Accept, Accept-Encoding',
-  });
-}
-
-/**
- * Exact-path surfaces. Each entry is a thunk so nothing is built until its path is asked for.
- * Keeping them in a table rather than an if-chain is what holds handleAgentEdge's
- * cyclomatic complexity inside the repo's code-health ceiling.
- * @type {Record<string, (url: URL) => Response | null>}
- */
 const AGENT_ROUTES = {
   '/openapi.json': openApiResponse,
   '/openapi.yaml': openApiResponse,
-  '/llms.txt': () => text(AGENT_SURFACE.llmsTxt, 'text/plain; charset=utf-8'),
-  '/llms-full.txt': () =>
-    AGENT_SURFACE.llmsFullTxt ? text(AGENT_SURFACE.llmsFullTxt, 'text/plain; charset=utf-8') : null,
-  '/index.md': () => text(AGENT_SURFACE.indexMd, 'text/markdown; charset=utf-8'),
+  '/robots.txt': () => text(publicRobots, 'text/plain; charset=utf-8'),
+  '/sitemap.xml': () => text(publicSitemap, 'application/xml; charset=utf-8'),
   '/api/ai': (url) => catalogResponse(url),
 };
 
-/**
- * @param {Request} request
- * @returns {Response | null}
- */
-export function handleAgentEdge(request) {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+/** @param {Request} request @returns {Promise<Response | null>} */
+export async function handleAgentEdge(request) {
   const url = new URL(request.url);
-  const path = url.pathname || '/';
-
-  const route = AGENT_ROUTES[path];
-  if (route) return route(url);
-
-  // Unknown API paths answer in JSON, never the HTML app shell.
-  if (path.startsWith('/api/')) {
-    return jsonError(404, 'not_found', `Unknown API path: ${path}`, path);
+  if (url.pathname !== '/api/ai' && !url.pathname.startsWith('/v1/') && url.pathname !== '/mcp') {
+    const document = await handlePublicDocument(request);
+    if (document) return document;
   }
-
-  // Homepage markdown negotiation
-  if (path === '/' && wantsMarkdown(request)) return homepageMarkdownResponse();
-
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const path = url.pathname || '/';
+  const route = AGENT_ROUTES[path];
+  if (route) {
+    const response = route(url);
+    return request.method === 'HEAD' && response ? new Response(null, response) : response;
+  }
+  if (path.startsWith('/api/'))
+    return jsonError(404, 'not_found', `Unknown API path: ${path}`, path);
   return null;
-}
-
-function wantsMarkdown(request) {
-  const accept = (request.headers.get('accept') || '').toLowerCase();
-  if (!accept.includes('text/markdown')) return false;
-  if (!accept.includes('text/html')) return true;
-  return accept.indexOf('text/markdown') < accept.indexOf('text/html');
 }
 
 function text(body, type, extra = {}) {

@@ -142,6 +142,7 @@ export default defineConfig({
         app: resolve(import.meta.dirname, 'app.html'),
         live: resolve(import.meta.dirname, 'live.html'),
         changelog: resolve(import.meta.dirname, 'changelog.html'),
+        privacy: resolve(import.meta.dirname, 'privacy.html'),
       },
     },
   },

@@ -35,8 +35,11 @@
     },
     "apps/worker": {
       "entry": ["src/analytics-entry.ts"],
-      "ignore": ["src/agent-edge.d.mts"],
-      "ignoreDependencies": ["wrangler", "cloudflare"]
+      "ignore": ["src/agent-edge.d.mts", "src/public-site.d.mts"],
+      "ignoreDependencies": ["wrangler", "cloudflare"],
+      "ignoreIssues": {
+        "src/agent-surfaces/**/*.mjs": ["exports"]
+      }
     },
     "packages/node": {
       "ignoreIssues": {

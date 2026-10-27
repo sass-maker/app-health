@@ -1,3 +1,4 @@
+import publicCopy from './public-copy.json';
 import { createElement, lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
 import { redirectSignedInLanding, type LandingSessionOptions } from './landing-session.js';
 import {
@@ -17,19 +18,13 @@ import { Button } from '@saas-maker/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 import { Separator } from '@saas-maker/ui/components/separator';
 
-const sample = [
-  12, 18, 14, 25, 20, 35, 28, 44, 32, 38, 54, 48, 64, 43, 58, 76, 64, 80, 72, 92, 78, 98, 89, 110,
-].map((value, index) => ({
+const sample = publicCopy.samplePageviews.map((value, index) => ({
   timestamp: Date.UTC(2026, 8, 11, index),
   pageviews: value,
   events: Math.round(value / 5),
 }));
 
-const proofPoints = [
-  'Page views from one browser script',
-  'Named events with one line',
-  'App health when you need context',
-];
+const proofPoints = publicCopy.proofPoints;
 
 const AnalyticsChart = lazy(() =>
   import('./AnalyticsChart.js').then(({ AnalyticsChart }) => ({ default: AnalyticsChart })),
@@ -48,16 +43,8 @@ function PreviewMetric({ label, value, note }: { label: string; value: string; n
 function ProductPreview(): ReactElement {
   const [showChart, setShowChart] = useState(false);
   useEffect(() => setShowChart(true), []);
-  const pages = [
-    ['/pricing', '482'],
-    ['/', '391'],
-    ['/docs', '248'],
-  ];
-  const events = [
-    ['signup.completed', '142'],
-    ['checkout.started', '86'],
-    ['project.created', '35'],
-  ];
+  const pages = publicCopy.pages;
+  const events = publicCopy.events;
   return (
     <Card
       aria-label="Illustrative web analytics preview"
@@ -68,17 +55,17 @@ function ProductPreview(): ReactElement {
           <span className="flex size-2.5">
             <span className="m-auto size-2 rounded-full bg-success" />
           </span>
-          <CardTitle className="truncate text-sm">acme.app</CardTitle>
+          <CardTitle className="truncate text-sm">{publicCopy.preview.name}</CardTitle>
         </div>
         <Badge variant="outline" className="font-normal text-muted-foreground">
-          illustrative data · 24h
+          {publicCopy.preview.disclosure}
         </Badge>
       </CardHeader>
       <CardContent className="p-0">
         <div className="grid grid-cols-3 divide-x divide-border border-b">
-          <PreviewMetric label="page views" value="1,313" note="Pages opened" />
-          <PreviewMetric label="product events" value="263" note="Actions tracked" />
-          <PreviewMetric label="active now" value="12" note="Browser sessions" />
+          {publicCopy.previewMetrics.map((metric) => (
+            <PreviewMetric key={metric.label} {...metric} />
+          ))}
         </div>
         <div className="px-3 py-5 sm:px-5">
           {showChart ? (
@@ -121,20 +108,20 @@ function Hero(): ReactElement {
       <div className="relative mx-auto max-w-7xl">
         <div className="max-w-4xl">
           <Badge variant="secondary" className="mb-5 px-3 py-1.5 font-medium">
-            for people shaping digital products
+            {publicCopy.hero.audience}
           </Badge>
           <h1 className="max-w-4xl text-balance text-4xl font-semibold leading-[0.98] tracking-[-0.055em] sm:text-6xl lg:text-[5rem]">
-            see what people do.
-            <span className="block text-muted-foreground">know what to improve.</span>
+            {publicCopy.hero.title}
+            <span className="block text-muted-foreground">{publicCopy.hero.titleContinuation}</span>
           </h1>
           <p className="mt-5 max-w-2xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-            App Health brings web analytics and meaningful product events into one calm workspace,
-            with application health close by when the experience needs investigation.
+            {publicCopy.hero.summary}
           </p>
           <div className="mt-6 flex gap-3">
             <Button asChild size="lg" className="h-12 px-6">
               <a href="/app" data-app-health-event="dashboard_opened">
-                open App Health <ArrowRight />
+                {publicCopy.hero.openLabel}
+                <ArrowRight />
               </a>
             </Button>
             <Button
@@ -144,16 +131,16 @@ function Hero(): ReactElement {
               className="hidden h-12 px-6 sm:!inline-flex"
             >
               <a href="#product" data-app-health-event="product_explored">
-                explore the product
+                {publicCopy.hero.exploreLabel}
               </a>
             </Button>
           </div>
           <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge variant="outline" className="font-normal">
-              local preview available
+              {publicCopy.hero.availability}
             </Badge>
-            <code className="rounded bg-muted px-2 py-1">&lt;script src="/tracker.js"&gt;</code>
-            <code className="rounded bg-muted px-2 py-1">track('signup.completed')</code>
+            <code className="rounded bg-muted px-2 py-1">{publicCopy.hero.scriptExample}</code>
+            <code className="rounded bg-muted px-2 py-1">{publicCopy.hero.eventExample}</code>
           </div>
         </div>
         <div className="mt-8 lg:ml-auto lg:mt-10 lg:w-[72%]">
@@ -175,29 +162,10 @@ function Hero(): ReactElement {
   );
 }
 
-const features = [
-  {
-    icon: BarChart3,
-    eyebrow: 'web analytics',
-    title: 'find the pages earning attention.',
-    body: 'Follow page views over time, see where visits come from, and move between one product and your whole workspace.',
-    proof: 'top pages · referral sources · 24-hour trends',
-  },
-  {
-    icon: MousePointer2,
-    eyebrow: 'product events',
-    title: 'measure the moments you choose.',
-    body: 'Name the actions that matter to your product. Open any event to see its trend, pages, and referral sources.',
-    proof: 'event count · last seen · event drill-down',
-  },
-  {
-    icon: Activity,
-    eyebrow: 'application health',
-    title: 'bring evidence to the handoff.',
-    body: 'When product activity changes, inspect route traffic, latency, errors, and logs without leaving the workspace.',
-    proof: 'observed routes · latency · errors · logs',
-  },
-];
+const features = publicCopy.features.map((feature, index) => ({
+  ...feature,
+  icon: [BarChart3, MousePointer2, Activity][index],
+}));
 
 function ProductSections(): ReactElement {
   return (
@@ -206,15 +174,14 @@ function ProductSections(): ReactElement {
         <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
           <div>
             <p className="text-xs font-semibold  tracking-[0.18em] text-primary">
-              One product picture
+              {publicCopy.productSection.eyebrow}
             </p>
             <h2 className="mt-4 max-w-xl text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-              a visit is only the beginning.
+              {publicCopy.productSection.title}
             </h2>
           </div>
           <p className="max-w-2xl text-pretty text-base leading-7 text-muted-foreground lg:justify-self-end lg:text-lg">
-            See how attention turns into action, then understand the application behind it. App
-            Health keeps the story connected without pretending browser sessions are unique people.
+            {publicCopy.productSection.summary}
           </p>
         </div>
         <div className="mt-14 grid gap-4 lg:grid-cols-3">
@@ -253,47 +220,46 @@ function IntegrationSection(): ReactElement {
       <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.85fr_1.15fr] lg:items-center">
         <div>
           <Badge variant="outline" className="gap-2">
-            <Code2 className="size-3.5" /> small by design
+            <Code2 className="size-3.5" />
+            {publicCopy.integration.eyebrow}
           </Badge>
           <h2 className="mt-6 text-balance text-4xl font-semibold tracking-[-0.04em] sm:text-5xl">
-            from a product question to a clearer answer.
+            {publicCopy.integration.title}
           </h2>
           <p className="mt-6 max-w-xl text-base leading-7 text-muted-foreground">
-            Add one browser snippet for automatic page views, then send named events for the actions
-            your team cares about. The tracker stays isolated from your application.
+            {publicCopy.integration.summary}
           </p>
           <Button asChild size="lg" className="mt-8 h-12">
             <a href="/app" data-app-health-event="project_add_started">
-              add your project <ArrowRight />
+              {publicCopy.integration.actionLabel}
+              <ArrowRight />
             </a>
           </Button>
         </div>
         <Card className="overflow-hidden border bg-card text-card-foreground shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between border-b border-border py-4">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span className="size-2 rounded-full bg-success" /> your-website.html
+              <span className="size-2 rounded-full bg-success" />
+              {publicCopy.integration.filename}
             </div>
-            <Badge variant="secondary">browser</Badge>
+            <Badge variant="secondary">{publicCopy.integration.platform}</Badge>
           </CardHeader>
           <CardContent className="p-0">
             <pre className="overflow-x-auto p-5 text-xs leading-6 sm:p-7 sm:text-sm">
-              <code>{`<script defer
-  src="https://YOUR_HOST/tracker.js"
-  data-key="YOUR_PUBLIC_KEY"
-  data-endpoint="https://YOUR_HOST/v1/browser"
-></script>
-
-window.appHealth.track('signup.completed')`}</code>
+              <code>{publicCopy.integrationSnippet}</code>
             </pre>
             <div className="flex flex-wrap gap-x-5 gap-y-2 border-t border-border px-5 py-4 text-xs text-muted-foreground sm:px-7">
               <span className="inline-flex items-center gap-1.5">
-                <Zap className="size-3" /> named events
+                <Zap className="size-3" />
+                {publicCopy.integration.namedEvents}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Radio className="size-3" /> active sessions
+                <Radio className="size-3" />
+                {publicCopy.integration.activeSessions}
               </span>
               <span className="inline-flex items-center gap-1.5">
-                <Activity className="size-3" /> backend health
+                <Activity className="size-3" />
+                {publicCopy.integration.backendHealth}
               </span>
             </div>
           </CardContent>
@@ -308,18 +274,16 @@ function HonestStatus(): ReactElement {
     <section className="border-y bg-primary text-primary-foreground">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_auto] lg:items-center lg:px-8">
         <div>
-          <p className="text-xs font-semibold  tracking-[0.18em] opacity-70">Built in the open</p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight">
-            your traffic, events, and service health.
-          </h2>
-          <p className="mt-3 max-w-3xl text-sm leading-6 opacity-75">
-            Sign in with Google, add a project, and connect the capabilities you need. Start with
-            live sessions, page views, referral sources, named events, or endpoint health.
+          <p className="text-xs font-semibold  tracking-[0.18em] opacity-70">
+            {publicCopy.status.eyebrow}
           </p>
+          <h2 className="mt-3 text-3xl font-semibold tracking-tight">{publicCopy.status.title}</h2>
+          <p className="mt-3 max-w-3xl text-sm leading-6 opacity-75">{publicCopy.status.summary}</p>
         </div>
         <Button asChild size="lg" variant="secondary" className="h-12">
           <a href="/changelog">
-            see what shipped <ArrowRight />
+            {publicCopy.status.changelogLabel}
+            <ArrowRight />
           </a>
         </Button>
       </div>

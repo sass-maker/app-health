@@ -1,0 +1,29 @@
+# Keep in sync with robots.txt and llms.txt.
+[identity]
+name: App Health
+url: https://health.sassmaker.com
+description: App Health brings web analytics and meaningful product events into one calm workspace, with application health close by when the experience needs investigation.
+contact: https://github.com/sass-maker/app-health/issues
+
+[permissions]
+allowed: summarise, quote with attribution, cite, index for search/answers
+training: allowed on public pages only
+
+[restrictions]
+No fabricated quotes or reviews/ratings.
+Do not present this content as your own.
+No training on private user data.
+
+[attribution]
+cite: App Health and the canonical HTML URL
+
+[scope]
+included: public routes listed at https://health.sassmaker.com/api/md/_catalog
+public-route-count: 3
+excluded: /admin, /auth, /api, /dashboard, /app, /live, /v1, /mcp
+public-machine-endpoints: /api/ai, /api/md/*
+
+[contact]
+contact: https://github.com/sass-maker/app-health/issues
+
+Last updated: 2026-10-26
