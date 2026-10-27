@@ -45,6 +45,90 @@ function tokenScopeChoices(
     },
   ];
 }
+
+function useTokenScopeSelection(
+  project: Pick<ProjectScope, 'appId' | 'environmentId'> | undefined,
+  projects: ProjectScope[] | undefined,
+) {
+  const availableScopes = tokenScopeChoices(project, projects);
+  const availableScopeKeys = availableScopes.map(scopeKey);
+  const availableScopeKeySet = new Set(availableScopeKeys);
+  const availableScopeSignature = availableScopeKeys.join('\u0000');
+  const [selectedScopes, setSelectedScopes] = useState<string[]>(() =>
+    project ? [scopeKey(project)] : [],
+  );
+  const activeSelectedScopes = selectedScopes.filter((key) => availableScopeKeySet.has(key));
+
+  useEffect(() => {
+    setSelectedScopes(project ? [scopeKey(project)] : []);
+  }, [project?.appId, project?.environmentId]);
+  useEffect(() => {
+    setSelectedScopes((current) => current.filter((key) => availableScopeKeySet.has(key)));
+  }, [availableScopeSignature]);
+
+  function toggleScope(value: string, shouldSelect: boolean) {
+    setSelectedScopes((current) => {
+      const valid = current.filter((key) => availableScopeKeySet.has(key));
+      if (!shouldSelect) return valid.filter((key) => key !== value);
+      return valid.length < 50 && !valid.includes(value) ? [...valid, value] : valid;
+    });
+  }
+
+  function resetToSelectedProject() {
+    if (project) setSelectedScopes([scopeKey(project)]);
+  }
+
+  return { availableScopes, activeSelectedScopes, toggleScope, resetToSelectedProject };
+}
+
+function TokenScopePicker({
+  choices,
+  selected,
+  busy,
+  onToggle,
+}: {
+  choices: ProjectScope[];
+  selected: string[];
+  busy: boolean;
+  onToggle: (value: string, shouldSelect: boolean) => void;
+}) {
+  const selectedSet = new Set(selected);
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-xs font-medium">API token project scopes</legend>
+      <p className="text-xs text-muted-foreground">
+        Choose up to 50 project and environment pairs. Only production environments are listed,
+        except the currently selected environment when it is not production.
+      </p>
+      <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border p-2">
+        {choices.map((candidate) => {
+          const value = scopeKey(candidate);
+          const checked = selectedSet.has(value);
+          return (
+            <label
+              key={value}
+              className="flex cursor-pointer items-center gap-3 rounded-md p-2 text-sm hover:bg-muted/50"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={busy || (!checked && selected.length >= 50)}
+                onChange={(event) => onToggle(value, event.currentTarget.checked)}
+                className="size-4 accent-primary"
+              />
+              <span>{candidate.name}</span>
+              <span className="text-muted-foreground">· {candidate.environment}</span>
+            </label>
+          );
+        })}
+      </div>
+      <p aria-live="polite" className="text-xs text-muted-foreground">
+        {selected.length} of 50 scopes selected
+      </p>
+    </fieldset>
+  );
+}
+
 async function read(path: string, token: string, init?: RequestInit) {
   const response = await ownerFetch(path, token, init);
   if (!response.ok)
@@ -71,25 +155,13 @@ export function WorkspacePanel({
   const [role, setRole] = useState('viewer');
   const [name, setName] = useState('');
   const [permission, setPermission] = useState('read');
-  const [selectedScopes, setSelectedScopes] = useState<string[]>(() =>
-    project ? [scopeKey(project)] : [],
-  );
   const [fresh, setFresh] = useState<{ value: string; api: boolean } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [revision, setRevision] = useState(0);
   // Keep the established one-project flow available for a selected non-production environment.
-  const availableScopes = tokenScopeChoices(project, projects);
-  const availableScopeKeys = availableScopes.map(scopeKey);
-  const availableScopeKeySet = new Set(availableScopeKeys);
-  const activeSelectedScopes = selectedScopes.filter((key) => availableScopeKeySet.has(key));
-  const availableScopeSignature = availableScopeKeys.join('\u0000');
-  useEffect(() => {
-    if (project) setSelectedScopes([scopeKey(project)]);
-  }, [project?.appId, project?.environmentId]);
-  useEffect(() => {
-    setSelectedScopes((current) => current.filter((key) => availableScopeKeySet.has(key)));
-  }, [availableScopeSignature]);
+  const tokenScopeSelection = useTokenScopeSelection(project, projects);
+  const activeSelectedScopes = tokenScopeSelection.activeSelectedScopes;
   useEffect(() => {
     if (!open || ownerToken) return;
     const controller = new AbortController();
@@ -159,7 +231,7 @@ export function WorkspacePanel({
     if (result) {
       setFresh({ value: result.token, api: true });
       setName('');
-      if (project) setSelectedScopes([scopeKey(project)]);
+      tokenScopeSelection.resetToSelectedProject();
     }
   }
   async function downloadSkill() {
@@ -321,50 +393,12 @@ export function WorkspacePanel({
                   permission changes goals, funnels and segments only.
                 </p>
                 {project ? (
-                  <fieldset className="space-y-2">
-                    <legend className="text-xs font-medium">API token project scopes</legend>
-                    <p className="text-xs text-muted-foreground">
-                      Choose up to 50 project and environment pairs. Only production environments
-                      are listed, except the currently selected environment when it is not
-                      production.
-                    </p>
-                    <div className="max-h-64 space-y-1 overflow-y-auto rounded-lg border p-2">
-                      {availableScopes.map((candidate) => {
-                        const value = scopeKey(candidate);
-                        const checked = activeSelectedScopes.includes(value);
-                        return (
-                          <label
-                            key={value}
-                            className="flex cursor-pointer items-center gap-3 rounded-md p-2 text-sm hover:bg-muted/50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              disabled={busy || (!checked && activeSelectedScopes.length >= 50)}
-                              onChange={(event) => {
-                                const shouldSelect = event.currentTarget.checked;
-                                setSelectedScopes((current) => {
-                                  const valid = current.filter((key) =>
-                                    availableScopeKeySet.has(key),
-                                  );
-                                  if (!shouldSelect) return valid.filter((key) => key !== value);
-                                  return valid.length < 50 && !valid.includes(value)
-                                    ? [...valid, value]
-                                    : valid;
-                                });
-                              }}
-                              className="size-4 accent-primary"
-                            />
-                            <span>{candidate.name}</span>
-                            <span className="text-muted-foreground">· {candidate.environment}</span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    <p aria-live="polite" className="text-xs text-muted-foreground">
-                      {activeSelectedScopes.length} of 50 scopes selected
-                    </p>
-                  </fieldset>
+                  <TokenScopePicker
+                    choices={tokenScopeSelection.availableScopes}
+                    selected={activeSelectedScopes}
+                    busy={busy}
+                    onToggle={tokenScopeSelection.toggleScope}
+                  />
                 ) : null}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Input

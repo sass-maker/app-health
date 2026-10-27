@@ -829,6 +829,27 @@ async function dailySpeedPayload(
   }
 }
 
+function requestedDailyApiScope(
+  owner: OwnerIdentity,
+  url: URL,
+): { scope?: { appId: string; environmentId: string }; forbidden: boolean } {
+  if (owner.authKind !== 'api-token') return { forbidden: false };
+  const appIds = url.searchParams.getAll('app_id');
+  const environmentIds = url.searchParams.getAll('environment_id');
+  if (
+    appIds.length !== 1 ||
+    environmentIds.length !== 1 ||
+    !owner.apiScopes?.some(
+      (allowed) => allowed.app_id === appIds[0] && allowed.environment_id === environmentIds[0],
+    )
+  )
+    return { forbidden: true };
+  return {
+    forbidden: false,
+    scope: { appId: appIds[0]!, environmentId: environmentIds[0]! },
+  };
+}
+
 async function handleDailyEngagementRoute(
   request: Request,
   _bundle: AdapterBundle,
@@ -843,20 +864,9 @@ async function handleDailyEngagementRoute(
   if (owner.appId) return productScopeForbidden();
   if (!owner.workspaceId) return productScopeForbidden();
   if (!env.DB) return json(503, { error: 'daily engagement storage is unavailable' }, true);
-  let scope: { appId: string; environmentId: string } | undefined;
-  if (owner.authKind === 'api-token') {
-    const appIds = url.searchParams.getAll('app_id');
-    const environmentIds = url.searchParams.getAll('environment_id');
-    if (
-      appIds.length !== 1 ||
-      environmentIds.length !== 1 ||
-      !owner.apiScopes?.some(
-        (allowed) => allowed.app_id === appIds[0] && allowed.environment_id === environmentIds[0],
-      )
-    )
-      return json(403, { error: 'app scope forbidden' }, true);
-    scope = { appId: appIds[0], environmentId: environmentIds[0] };
-  }
+  const requestedScope = requestedDailyApiScope(owner, url);
+  if (requestedScope.forbidden) return json(403, { error: 'app scope forbidden' }, true);
+  const scope = requestedScope.scope;
   const db = env.DB;
   const workspaceId = owner.workspaceId;
   const query = dailyAnalyticsQuery(env);

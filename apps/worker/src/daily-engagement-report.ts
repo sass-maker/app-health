@@ -21,7 +21,7 @@ import {
   ReportDate,
   type DailyEngagementProductReportV1,
 } from '@app-health/contracts';
-import type { D1DatabaseLike } from './d1-adapter.js';
+import type { D1DatabaseLike, D1PreparedStatement } from './d1-adapter.js';
 import {
   readExactBrowserVisitorDays,
   type ExactBrowserVisitorResult,
@@ -956,17 +956,12 @@ async function readDailyEngagementCatalog(
 }
 
 /** One workspace-scoped grouped read of durable production endpoint rollups. */
-export async function readDailyApiActivity(
+function dailyApiActivityHotQuery(
   db: D1DatabaseLike,
   workspaceId: string,
-  from: number,
-  to: number,
-  catalog: readonly CatalogProductRow[],
-  coldBucket?: Pick<R2Bucket, 'get'>,
+  ranges: ReturnType<typeof endpointReadRanges>,
   scope?: { appId: string; environmentId: string },
-): Promise<ApiActivityRow[]> {
-  if (catalog.length === 0) return [];
-  const ranges = endpointReadRanges(from, to);
+): D1PreparedStatement {
   const values: unknown[] = ranges.flatMap((range) => [range.resolution, range.from, range.to]);
   values.push(workspaceId);
   const rangeValues = ranges.map(
@@ -976,7 +971,10 @@ export async function readDailyApiActivity(
   const scopeAppIndex = scope ? values.length + 1 : null;
   const scopeEnvironmentIndex = scope ? values.length + 2 : null;
   if (scope) values.push(scope.appId, scope.environmentId);
-  const hot = db
+  const scopeFilter = scope
+    ? `WHERE r.app_id = ?${scopeAppIndex} AND r.environment_id = ?${scopeEnvironmentIndex}`
+    : '';
+  return db
     .prepare(
       `WITH ranges(resolution_ms, range_from, range_to) AS (VALUES ${rangeValues.join(',')})
      SELECT r.app_id, SUM(r.request_count) AS request_count,
@@ -988,26 +986,21 @@ export async function readDailyApiActivity(
        AND lower(e.name) = 'production'
      JOIN catalog_project_imports c ON c.app_id = r.app_id
        AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
-     ${scope ? `WHERE r.app_id = ?${scopeAppIndex} AND r.environment_id = ?${scopeEnvironmentIndex}` : ''}
+     ${scopeFilter}
      GROUP BY r.app_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,
     )
     .bind(...values);
-  const { hotRows: historyRows, coldRows } = await readEndpointHistory<ApiActivityRow>({
-    hot,
-    db,
-    bucket: coldBucket,
-    scopes: catalog.flatMap((row) =>
-      row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
-    ),
-    from,
-    to,
-    now: Date.now(),
-  });
-  if (historyRows.length > MAX_PORTFOLIO_CATALOG_PRODUCTS)
+}
+
+function normalizeDailyApiActivityHotRows(
+  rows: readonly ApiActivityRow[],
+  catalog: readonly CatalogProductRow[],
+): ApiActivityRow[] {
+  if (rows.length > MAX_PORTFOLIO_CATALOG_PRODUCTS)
     throw new Error('Daily endpoint query exceeded row limit');
   const allowedApps = new Set(catalog.flatMap((row) => (row.environment_id ? [row.app_id] : [])));
   const seen = new Set<string>();
-  const hotRows = historyRows.map((row) => {
+  return rows.map((row) => {
     const count = Number(row.request_count);
     const sampled = Number(row.upstream_sampled);
     if (
@@ -1021,7 +1014,15 @@ export async function readDailyApiActivity(
     seen.add(row.app_id);
     return { app_id: row.app_id, request_count: count, upstream_sampled: sampled };
   });
-  if (!coldRows.length) return hotRows;
+}
+
+function mergeDailyApiActivityRows(
+  hotRows: readonly ApiActivityRow[],
+  coldRows: readonly ApiActivityRow[],
+  catalog: readonly CatalogProductRow[],
+): ApiActivityRow[] {
+  if (!coldRows.length) return [...hotRows];
+  const allowedApps = new Set(catalog.flatMap((row) => (row.environment_id ? [row.app_id] : [])));
   const merged = new Map(hotRows.map((row) => [row.app_id, row]));
   for (const row of coldRows) {
     const previous = merged.get(row.app_id);
@@ -1035,6 +1036,35 @@ export async function readDailyApiActivity(
     });
   }
   return [...merged.values()];
+}
+
+export async function readDailyApiActivity(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  from: number,
+  to: number,
+  catalog: readonly CatalogProductRow[],
+  options: {
+    coldBucket?: Pick<R2Bucket, 'get'>;
+    scope?: { appId: string; environmentId: string };
+  } = {},
+): Promise<ApiActivityRow[]> {
+  if (catalog.length === 0) return [];
+  const ranges = endpointReadRanges(from, to);
+  const hot = dailyApiActivityHotQuery(db, workspaceId, ranges, options.scope);
+  const { hotRows: historyRows, coldRows } = await readEndpointHistory<ApiActivityRow>({
+    hot,
+    db,
+    bucket: options.coldBucket,
+    scopes: catalog.flatMap((row) =>
+      row.environment_id ? [{ app_id: row.app_id, environment_id: row.environment_id }] : [],
+    ),
+    from,
+    to,
+    now: Date.now(),
+  });
+  const hotRows = normalizeDailyApiActivityHotRows(historyRows, catalog);
+  return mergeDailyApiActivityRows(hotRows, coldRows, catalog);
 }
 
 /** Grouped D1 log_events query for feedback / waitlist / newsletter joins. */
@@ -1292,15 +1322,10 @@ export async function composeDailyEngagementReport(args: {
           ctaMeasured: false,
         }),
     nativeSessionsForReport(args.query, args.workspaceId, catalog, window.from, window.to),
-    readDailyApiActivity(
-      args.db,
-      args.workspaceId,
-      window.from,
-      window.to,
-      catalog,
-      args.endpointColdBucket,
-      args.scope,
-    )
+    readDailyApiActivity(args.db, args.workspaceId, window.from, window.to, catalog, {
+      coldBucket: args.endpointColdBucket,
+      scope: args.scope,
+    })
       .then((rows) => ({ rows, measured: true }))
       .catch(() => ({ rows: [] as ApiActivityRow[], measured: false })),
     readDailyEngagementLogs(args.db, appIds, window.from, window.to)
