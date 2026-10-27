@@ -21,6 +21,7 @@ cite: App Health and the canonical HTML URL
 included: public routes listed at https://health.sassmaker.com/api/md/_catalog
 public-route-count: 3
 excluded: /admin, /auth, /api, /dashboard, /app, /live, /v1, /mcp
+public-machine-endpoints: /api/ai, /api/md/*
 
 [contact]
 contact: https://github.com/sass-maker/app-health/issues

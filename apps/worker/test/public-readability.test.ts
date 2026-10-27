@@ -95,3 +95,14 @@ it('keeps operator, shared analytics and telemetry views outside the public regi
   expect(options.status).toBe(204);
   expect(options.headers.get('Access-Control-Allow-Origin')).toBe('*');
 });
+
+it('keeps unknown canonical origins local and declares public machine endpoint exceptions', async () => {
+  for (const path of ['/api/md//evil.example/x', '//evil.example/x.md']) {
+    const response = await handleAgentEdge(new Request(origin + path));
+    expect(response?.status).toBe(404);
+    expect(new URL(response!.headers.get('Content-Location')!).origin).toBe(origin);
+    expect(response?.headers.get('Link')).toContain(`<${origin}/`);
+  }
+  const response = await handleAgentEdge(new Request(`${origin}/ai.txt`));
+  expect(await response?.text()).toContain('public-machine-endpoints: /api/ai, /api/md/*');
+});
