@@ -9,6 +9,8 @@ test.describe('dashboard with JavaScript disabled', () => {
       await page.setViewportSize({ width, height: 844 });
       await page.goto('/app');
       await expect(page.getByText('JavaScript is required to open App Health.')).toBeVisible();
+      await expect(page.getByText('JavaScript is required to open App Health.')).toBeInViewport();
+      await expect(page.locator('main[aria-busy="true"]')).toHaveCount(1);
       await expect(page.locator('[aria-busy="true"]')).toBeHidden();
       await expect(page.getByRole('link', { name: 'App Health home', exact: true })).toBeVisible();
     });
@@ -115,6 +117,7 @@ for (const outcome of ['success', 'failure'] as const) {
       release = resolve;
     });
     let requested = false;
+    let developmentDocument = false;
     let sessionReads = 0;
     await page.route('**/v1/apps', (route) => {
       sessionReads += 1;
@@ -129,7 +132,9 @@ for (const outcome of ['success', 'failure'] as const) {
     });
     await page.route('**/app?**', async (route) => {
       const response = await route.fetch();
-      const html = (await response.text()).replace(
+      const document = await response.text();
+      developmentDocument = document.includes('/src/main.tsx');
+      const html = document.replace(
         '</head>',
         '<link data-dashboard-style rel="stylesheet" media="print" href="/dashboard-startup.css" onload="this.media=\'all\'" onerror="this.dataset.dashboardStyleError=\'true\'" /></head>',
       );
@@ -141,13 +146,22 @@ for (const outcome of ['success', 'failure'] as const) {
       page.getByRole('main', { name: 'Loading workspace project', exact: true }),
     ).toBeVisible();
     expect(sessionReads).toBe(0);
+    async function expectReady() {
+      // Vite's local-owner mode intentionally bypasses the production sign-in screen.
+      if (developmentDocument) {
+        await expect(page.getByText('project link unavailable', { exact: true })).toBeVisible();
+        expect(sessionReads).toBeGreaterThanOrEqual(1);
+      } else {
+        await expect(
+          page.getByRole('button', { name: 'continue with Google', exact: true }),
+        ).toBeVisible();
+        expect(sessionReads).toBe(1);
+      }
+      await expect(page.locator('[data-initial-dashboard-shell]')).toHaveCount(0);
+    }
     release();
     if (outcome === 'success') {
-      await expect(
-        page.getByRole('button', { name: 'continue with Google', exact: true }),
-      ).toBeVisible();
-      await expect(page.locator('[data-initial-dashboard-shell]')).toHaveCount(0);
-      expect(sessionReads).toBe(1);
+      await expectReady();
     } else {
       await expect(page.getByRole('status')).toHaveText('could not load the workspace. try again.');
       await expect(page.getByRole('button', { name: 'try again', exact: true })).toBeVisible();
@@ -158,11 +172,7 @@ for (const outcome of ['success', 'failure'] as const) {
       shouldFail = false;
       await page.getByRole('button', { name: 'try again', exact: true }).click();
       await expect(page).toHaveURL(/\/app\?project=startup-fixture#backend$/);
-      await expect(
-        page.getByRole('button', { name: 'continue with Google', exact: true }),
-      ).toBeVisible();
-      await expect(page.locator('[data-initial-dashboard-shell]')).toHaveCount(0);
-      expect(sessionReads).toBe(1);
+      await expectReady();
     }
   });
 }

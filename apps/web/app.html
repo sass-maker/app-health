@@ -131,6 +131,7 @@
             App Health
           </a>
         </header>
+        <p class="dashboard-boot-noscript" hidden>JavaScript is required to open App Health.</p>
         <main aria-label="Loading workspace project" aria-busy="true">
           <p role="status">loading the workspace</p>
           <div class="dashboard-boot-row" aria-hidden="true"></div>
@@ -145,8 +146,11 @@
         .dashboard-boot main {
           display: none;
         }
+        .dashboard-boot-noscript[hidden] {
+          display: block;
+          margin: 24px;
+        }
       </style>
-      JavaScript is required to open App Health.
     </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
