@@ -156,7 +156,8 @@ try {
   const app = await globalThis.fetch(`${origin}/app`, navigate);
   assert.equal(app.status, 200);
   const appHtml = await app.text();
-  assert.match(appHtml, /<div id="root"><\/div>/);
+  assert.match(appHtml, /data-initial-dashboard-shell/);
+  assert.match(appHtml, /aria-label="Loading workspace project"/);
   assert.match(appHtml, /\/assets\/main-[^"']+\.js/);
   assert.equal(appHtml.includes('data-initial-landing-shell'), false);
   assert.equal(appHtml.includes('See what people do. Know what to improve.'), false);

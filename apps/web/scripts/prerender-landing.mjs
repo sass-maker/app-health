@@ -46,6 +46,19 @@ try {
     const criticalCss = createCriticalCss('media');
     await writeFile(output, await criticalCss.process(rendered));
   }
+  const dashboard = new URL('../dist/app.html', import.meta.url);
+  const initialDashboard = await createCriticalCss('media').process(
+    await readFile(dashboard, 'utf8'),
+  );
+  await writeFile(
+    dashboard,
+    initialDashboard.replace(/<link\b(?=[^>]*\brel="stylesheet")[^>]*>/g, (link) =>
+      link.replace(
+        '<link',
+        '<link data-dashboard-style onerror="this.dataset.dashboardStyleError=\'true\'"',
+      ),
+    ),
+  );
 } finally {
   await server.close();
 }
