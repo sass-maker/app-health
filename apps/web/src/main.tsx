@@ -23,6 +23,25 @@ const root = document.getElementById('root');
 if (!root) throw new Error('root element missing');
 const path = window.location.pathname;
 const isLanding = path === '/' && !window.location.search.includes('demo=');
+const dashboardStyles =
+  path === '/app' || path === '/app/'
+    ? Promise.all(
+        [...document.querySelectorAll<HTMLLinkElement>('link[data-dashboard-style]')].map(
+          (link) =>
+            new Promise<void>((resolve, reject) => {
+              if (link.dataset.dashboardStyleError)
+                return reject(new Error('dashboard stylesheet unavailable'));
+              if (link.sheet) return resolve();
+              link.addEventListener('load', () => resolve(), { once: true });
+              link.addEventListener(
+                'error',
+                () => reject(new Error('dashboard stylesheet unavailable')),
+                { once: true },
+              );
+            }),
+        ),
+      )
+    : Promise.resolve();
 const view: Promise<{ component: ComponentType; title: string }> =
   path === '/privacy'
     ? import('./PrivacyPage.js').then(({ PrivacyPage }) => ({
@@ -76,20 +95,30 @@ document.addEventListener('click', (event) => {
     .catch(() => undefined)
     .finally(navigate);
 });
-void view.then(({ component: RootView, title }) => {
-  document.title = title;
-  const content = (
-    <StrictMode>
-      <RootView />
-    </StrictMode>
-  );
-  const prerenderedPage = isLanding
-    ? 'landing'
-    : path === '/changelog'
-      ? 'changelog'
-      : path === '/privacy'
-        ? 'privacy'
-        : null;
-  if (prerenderedPage && root.dataset.prerendered === prerenderedPage) hydrateRoot(root, content);
-  else createRoot(root).render(content);
-});
+void Promise.all([view, dashboardStyles])
+  .then(([{ component: RootView, title }]) => {
+    document.title = title;
+    const content = (
+      <StrictMode>
+        <RootView />
+      </StrictMode>
+    );
+    const prerenderedPage = isLanding
+      ? 'landing'
+      : path === '/changelog'
+        ? 'changelog'
+        : path === '/privacy'
+          ? 'privacy'
+          : null;
+    if (prerenderedPage && root.dataset.prerendered === prerenderedPage) hydrateRoot(root, content);
+    else createRoot(root).render(content);
+  })
+  .catch((error: unknown) => {
+    const retry = root.querySelector<HTMLButtonElement>('[data-dashboard-retry]');
+    if (!retry) throw error;
+    const status = root.querySelector('[role="status"]');
+    if (status) status.textContent = 'could not load the workspace. try again.';
+    root.querySelector('main')?.setAttribute('aria-busy', 'false');
+    retry.addEventListener('click', () => window.location.reload(), { once: true });
+    retry.hidden = false;
+  });

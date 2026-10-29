@@ -624,10 +624,12 @@ describe('App Health V0 UI', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
   });
 
-  it('serves the private app from an empty, theme-stable HTML document', () => {
+  it('serves the private app with an anonymous, theme-stable loading shell', () => {
     const html = readFileSync(resolve(process.cwd(), 'app.html'), 'utf8');
 
-    expect(html).toContain('<div id="root"></div>');
+    expect(html).toContain('data-initial-dashboard-shell');
+    expect(html).toContain('aria-label="Loading workspace project"');
+    expect(html).toContain('loading the workspace');
     expect(html).toContain('name="robots" content="noindex, nofollow"');
     expect(html).toContain("localStorage.getItem('app-health-theme')");
     expect(html).not.toContain('data-initial-landing-shell');

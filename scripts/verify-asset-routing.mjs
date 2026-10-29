@@ -156,7 +156,16 @@ try {
   const app = await globalThis.fetch(`${origin}/app`, navigate);
   assert.equal(app.status, 200);
   const appHtml = await app.text();
-  assert.match(appHtml, /<div id="root"><\/div>/);
+  assert.match(appHtml, /data-initial-dashboard-shell/);
+  assert.match(appHtml, /aria-label="Loading workspace project"/);
+  const scriptedAppHtml = appHtml.replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/g, '');
+  const dashboardStyle = scriptedAppHtml.match(/<link\b[^>]*data-dashboard-style[^>]*>/)?.[0];
+  assert(dashboardStyle, 'built dashboard stylesheet must participate in asset readiness');
+  assert.match(dashboardStyle, /rel="stylesheet"/);
+  assert.match(dashboardStyle, /media="print"/);
+  assert.match(dashboardStyle, /onload="this\.media='all'"/);
+  assert.match(dashboardStyle, /onerror="this\.dataset\.dashboardStyleError='true'"/);
+  assert.match(appHtml, /<noscript>[\s\S]*?\.dashboard-boot main\s*\{\s*display:\s*none/);
   assert.match(appHtml, /\/assets\/main-[^"']+\.js/);
   assert.equal(appHtml.includes('data-initial-landing-shell'), false);
   assert.equal(appHtml.includes('See what people do. Know what to improve.'), false);
