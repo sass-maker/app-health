@@ -1,5 +1,20 @@
 import { expect, test } from '@playwright/test';
 
+test.describe('dashboard with JavaScript disabled', () => {
+  test.use({ javaScriptEnabled: false });
+  for (const width of [390, 768, 1440]) {
+    test(`explains the requirement without a permanent busy state at ${width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/app');
+      await expect(page.getByText('JavaScript is required to open App Health.')).toBeVisible();
+      await expect(page.locator('[aria-busy="true"]')).toBeHidden();
+      await expect(page.getByRole('link', { name: 'App Health home', exact: true })).toBeVisible();
+    });
+  }
+});
+
 for (const width of [390, 768, 1440]) {
   test(`dashboard document shows a useful placeholder without JavaScript at ${width}px`, async ({
     page,

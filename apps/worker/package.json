@@ -16,7 +16,7 @@
     "@app-health/contracts": "workspace:*",
     "@bufbuild/protobuf": "2.13.0",
     "@saas-maker/app-health": "workspace:*",
-    "better-auth": "1.7.4",
+    "better-auth": "1.7.7",
     "isbot": "5.2.2"
   },
   "devDependencies": {
