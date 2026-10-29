@@ -163,7 +163,9 @@ try {
   assert(dashboardStyle, 'built dashboard stylesheet must participate in asset readiness');
   assert.match(dashboardStyle, /rel="stylesheet"/);
   assert.match(dashboardStyle, /media="print"/);
+  assert.match(dashboardStyle, /onload="this\.media='all'"/);
   assert.match(dashboardStyle, /onerror="this\.dataset\.dashboardStyleError='true'"/);
+  assert.match(appHtml, /<noscript>[\s\S]*?\.dashboard-boot main\s*\{\s*display:\s*none/);
   assert.match(appHtml, /\/assets\/main-[^"']+\.js/);
   assert.equal(appHtml.includes('data-initial-landing-shell'), false);
   assert.equal(appHtml.includes('See what people do. Know what to improve.'), false);
