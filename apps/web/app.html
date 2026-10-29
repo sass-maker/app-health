@@ -65,6 +65,10 @@
         background: #f5f5f5;
         color: #171717;
       }
+      .dashboard-boot-noscript {
+        display: none;
+        margin: 24px;
+      }
       .dashboard-boot main {
         box-sizing: border-box;
         max-width: 1280px;
@@ -131,7 +135,7 @@
             App Health
           </a>
         </header>
-        <p class="dashboard-boot-noscript" hidden>JavaScript is required to open App Health.</p>
+        <p class="dashboard-boot-noscript">JavaScript is required to open App Health.</p>
         <main aria-label="Loading workspace project" aria-busy="true">
           <p role="status">loading the workspace</p>
           <div class="dashboard-boot-row" aria-hidden="true"></div>
@@ -146,9 +150,8 @@
         .dashboard-boot main {
           display: none;
         }
-        .dashboard-boot-noscript[hidden] {
+        .dashboard-boot .dashboard-boot-noscript {
           display: block;
-          margin: 24px;
         }
       </style>
     </noscript>
