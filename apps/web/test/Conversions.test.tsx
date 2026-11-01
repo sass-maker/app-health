@@ -210,7 +210,45 @@ it('surfaces load/delete/save errors and keeps the form available for retry', as
   fireEvent.click(screen.getByRole('button', { name: 'cancel' }));
   request.mockResolvedValueOnce(Response.json({}, { status: 503 }));
   fireEvent.click(screen.getByRole('button', { name: 'refresh conversions' }));
-  expect(await screen.findByRole('alert')).toHaveTextContent('Conversions could not load');
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'temporarily unavailable for this period',
+  );
+});
+
+it.each([
+  [400, 'filters are invalid'],
+  [401, 'session may have expired'],
+  [403, 'do not have access to this project or environment'],
+  [429, 'rate limited'],
+  [503, 'temporarily unavailable for this period'],
+] as const)(
+  'explains conversion report HTTP %s without guessing the cause',
+  async (status, message) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input) =>
+        String(input).includes('/conversions?')
+          ? Response.json({}, { status })
+          : Response.json({ records: [] }),
+      ),
+    );
+    render(<Conversions query={query} ownerToken="owner" />);
+    open();
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
+  },
+);
+
+it('explains conversion report network errors separately from server responses', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input) => {
+      if (String(input).includes('/conversions?')) throw new TypeError('Failed to fetch');
+      return Response.json({ records: [] });
+    }),
+  );
+  render(<Conversions query={query} ownerToken="owner" />);
+  open();
+  expect(await screen.findByRole('alert')).toHaveTextContent('could not reach App Health');
 });
 
 it('does not invent editable steps when the original definition cannot be loaded', async () => {
