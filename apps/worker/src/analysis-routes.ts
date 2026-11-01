@@ -146,7 +146,51 @@ async function analysisRequest(
   return definitionRequest(request, store, scope, url.pathname.split('/')[4]);
 }
 
-function analysisError(error: unknown) {
+type ConversionFailureReason =
+  'work_limit' | 'deadline' | 'archive_integrity' | 'source_unavailable' | 'unknown';
+
+function conversionFailureReason(error: unknown): ConversionFailureReason {
+  if (!(error instanceof Error)) return 'unknown';
+  switch (error.message) {
+    case 'Conversion scan limit exceeded; choose a shorter period.':
+    case 'Conversion segment limit exceeded.':
+    case 'Combined conversion segment limit exceeded':
+    case 'Combined conversion segment limit exceeded; choose a shorter period':
+    case 'Conversion event limit exceeded; choose a shorter period.':
+    case 'Combined conversion event limit exceeded':
+    case 'Combined conversion byte limit exceeded':
+    case 'global segment byte cap':
+    case 'global decompressed cap':
+    case 'archive fact cap':
+    case 'segment cap':
+      return 'work_limit';
+    case 'Conversion scan time limit exceeded; choose a shorter period.':
+    case 'Product history time limit exceeded':
+      return 'deadline';
+    case 'Archive cursor did not advance':
+    case 'missing manifest':
+    case 'manifest mismatch':
+    case 'checksum mismatch':
+    case 'manifest length mismatch':
+    case 'manifest row mismatch':
+    case 'invalid archive batch':
+    case 'invalid reference':
+    case 'invalid snapshot':
+    case 'snapshot changed':
+    case 'invalid cursor':
+    case 'Product history checksum mismatch':
+    case 'Product history manifest mismatch':
+    case 'Product history object missing or changed':
+      return 'archive_integrity';
+    case 'Archive scope index unavailable':
+    case 'Conversion archive unavailable':
+      return 'source_unavailable';
+    default:
+      return 'unknown';
+  }
+}
+
+function analysisError(error: unknown, report: boolean) {
   if (error instanceof Error && /[Aa]nalysis definition limit/.test(error.message))
     return json(409, {
       error:
@@ -158,6 +202,7 @@ function analysisError(error: unknown) {
   return json(503, {
     error:
       'Analysis unavailable. Reduce the period or retry after archive processing; no complete result is claimed.',
+    ...(report ? { reason: conversionFailureReason(error) } : {}),
   });
 }
 
@@ -173,10 +218,14 @@ export async function handleAnalysisOwner(
   const match = /^\/v1\/analytics\/definitions(?:\/([a-f0-9-]{36}))?$/.exec(url.pathname);
   if (!report && !match) return null;
   if (report && request.method !== 'GET') return json(405, { error: 'method not allowed' });
-  if (!local && !env.DB) return json(503, { error: 'Analysis storage unavailable' });
+  if (!local && !env.DB)
+    return json(503, {
+      error: 'Analysis storage unavailable',
+      ...(report ? { reason: 'source_unavailable' as const } : {}),
+    });
   try {
     return await analysisRequest(request, env, owner, repos, local);
   } catch (error) {
-    return analysisError(error);
+    return analysisError(error, report);
   }
 }
