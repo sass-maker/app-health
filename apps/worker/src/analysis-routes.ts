@@ -149,45 +149,38 @@ async function analysisRequest(
 type ConversionFailureReason =
   'work_limit' | 'deadline' | 'archive_integrity' | 'source_unavailable' | 'unknown';
 
+const conversionFailureReasons = new Map<string, Exclude<ConversionFailureReason, 'unknown'>>([
+  ['Conversion scan limit exceeded; choose a shorter period.', 'work_limit'],
+  ['Conversion segment limit exceeded.', 'work_limit'],
+  ['Combined conversion segment limit exceeded', 'work_limit'],
+  ['Combined conversion segment limit exceeded; choose a shorter period', 'work_limit'],
+  ['Conversion event limit exceeded; choose a shorter period.', 'work_limit'],
+  ['Combined conversion event limit exceeded', 'work_limit'],
+  ['Combined conversion byte limit exceeded', 'work_limit'],
+  ['global segment byte cap', 'work_limit'],
+  ['global decompressed cap', 'work_limit'],
+  ['Tracked revenue exceeds exact report capacity', 'work_limit'],
+  ['Conversion scan time limit exceeded; choose a shorter period.', 'deadline'],
+  ['Product history time limit exceeded', 'deadline'],
+  ['Archive cursor did not advance', 'archive_integrity'],
+  ['missing segment', 'archive_integrity'],
+  ['missing manifest', 'archive_integrity'],
+  ['manifest mismatch', 'archive_integrity'],
+  ['checksum mismatch', 'archive_integrity'],
+  ['manifest length mismatch', 'archive_integrity'],
+  ['manifest row mismatch', 'archive_integrity'],
+  ['invalid archive batch', 'archive_integrity'],
+  ['manifest facts mismatch', 'archive_integrity'],
+  ['Product history checksum mismatch', 'archive_integrity'],
+  ['Product history manifest mismatch', 'archive_integrity'],
+  ['Product history object missing or changed', 'archive_integrity'],
+  ['Archive scope index unavailable', 'source_unavailable'],
+  ['Conversion archive unavailable', 'source_unavailable'],
+]);
+
 function conversionFailureReason(error: unknown): ConversionFailureReason {
   if (!(error instanceof Error)) return 'unknown';
-  switch (error.message) {
-    case 'Conversion scan limit exceeded; choose a shorter period.':
-    case 'Conversion segment limit exceeded.':
-    case 'Combined conversion segment limit exceeded':
-    case 'Combined conversion segment limit exceeded; choose a shorter period':
-    case 'Conversion event limit exceeded; choose a shorter period.':
-    case 'Combined conversion event limit exceeded':
-    case 'Combined conversion byte limit exceeded':
-    case 'global segment byte cap':
-    case 'global decompressed cap':
-    case 'archive fact cap':
-    case 'segment cap':
-      return 'work_limit';
-    case 'Conversion scan time limit exceeded; choose a shorter period.':
-    case 'Product history time limit exceeded':
-      return 'deadline';
-    case 'Archive cursor did not advance':
-    case 'missing manifest':
-    case 'manifest mismatch':
-    case 'checksum mismatch':
-    case 'manifest length mismatch':
-    case 'manifest row mismatch':
-    case 'invalid archive batch':
-    case 'invalid reference':
-    case 'invalid snapshot':
-    case 'snapshot changed':
-    case 'invalid cursor':
-    case 'Product history checksum mismatch':
-    case 'Product history manifest mismatch':
-    case 'Product history object missing or changed':
-      return 'archive_integrity';
-    case 'Archive scope index unavailable':
-    case 'Conversion archive unavailable':
-      return 'source_unavailable';
-    default:
-      return 'unknown';
-  }
+  return conversionFailureReasons.get(error.message) ?? 'unknown';
 }
 
 function analysisError(error: unknown, report: boolean) {

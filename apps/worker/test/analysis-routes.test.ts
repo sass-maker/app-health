@@ -111,6 +111,14 @@ it('returns only static conversion failure categories while preserving error sta
     error: publicError,
     reason: 'archive_integrity',
   });
+  expect(await request('Tracked revenue exceeds exact report capacity')).toEqual({
+    error: publicError,
+    reason: 'work_limit',
+  });
+  expect(await request('manifest facts mismatch')).toEqual({
+    error: publicError,
+    reason: 'archive_integrity',
+  });
   expect(await request('Conversion archive unavailable')).toEqual({
     error: publicError,
     reason: 'source_unavailable',
@@ -120,6 +128,39 @@ it('returns only static conversion failure categories while preserving error sta
   const unknown = await request(privateMessage);
   expect(unknown).toEqual({ error: publicError, reason: 'unknown' });
   expect(JSON.stringify(unknown)).not.toContain(privateMessage);
+  expect(await request('segment byte cap')).toEqual({ error: publicError, reason: 'unknown' });
+  expect(await request('Invalid conversion period')).toEqual({
+    error: publicError,
+    reason: 'unknown',
+  });
+});
+
+it('categorizes a missing referenced archive segment through the real conversion reader path', async () => {
+  const f = await fixture();
+  const env = {
+    DB: {
+      prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }),
+    },
+    BROWSER_ARCHIVE: {
+      getByName: () => ({
+        archiveSegmentsForScope: async () => ({
+          segments: [{ segment_id: 'opaque-segment', object_key: 'opaque-object' }],
+          next_cursor: null,
+        }),
+      }),
+    },
+    BROWSER_HISTORY: { get: async () => null },
+  };
+  const response = (await f.call(
+    `/v1/analytics/conversions?${f.scope}&range=24h`,
+    'GET',
+    undefined,
+    { ...f.owner, workspaceId: 'w' },
+    false,
+    env,
+  ))!;
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ reason: 'archive_integrity' });
 });
 
 it('does not add conversion reasons to forbidden-scope or invalid-query responses', async () => {
