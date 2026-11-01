@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { AnalysisReport } from '@app-health/contracts';
 import { handleAnalysisOwner } from '../src/analysis-routes.js';
 import { InMemoryAdapter } from '../src/in-memory-adapter.js';
@@ -128,6 +128,7 @@ it('returns only static conversion failure categories while preserving error sta
   const unknown = await request(privateMessage);
   expect(unknown).toEqual({ error: publicError, reason: 'unknown' });
   expect(JSON.stringify(unknown)).not.toContain(privateMessage);
+  // One producer message covers both empty objects and per-segment size bounds.
   expect(await request('segment byte cap')).toEqual({ error: publicError, reason: 'unknown' });
   expect(await request('Invalid conversion period')).toEqual({
     error: publicError,
@@ -137,30 +138,66 @@ it('returns only static conversion failure categories while preserving error sta
 
 it('categorizes a missing referenced archive segment through the real conversion reader path', async () => {
   const f = await fixture();
-  const env = {
+  const env = (archiveSegmentsForScope: (...args: unknown[]) => Promise<unknown>) => ({
     DB: {
       prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }),
     },
     BROWSER_ARCHIVE: {
-      getByName: () => ({
-        archiveSegmentsForScope: async () => ({
-          segments: [{ segment_id: 'opaque-segment', object_key: 'opaque-object' }],
-          next_cursor: null,
-        }),
-      }),
+      getByName: () => ({ archiveSegmentsForScope }),
     },
     BROWSER_HISTORY: { get: async () => null },
-  };
-  const response = (await f.call(
-    `/v1/analytics/conversions?${f.scope}&range=24h`,
-    'GET',
-    undefined,
-    { ...f.owner, workspaceId: 'w' },
-    false,
-    env,
-  ))!;
+  });
+  const path = `/v1/analytics/conversions?${f.scope}&range=24h`;
+  const owner = { ...f.owner, workspaceId: 'w' };
+  const call = async (runtime: unknown) =>
+    (await f.call(path, 'GET', undefined, owner, false, runtime))!;
+  const response = await call(
+    env(async () => ({
+      segments: [{ segment_id: 'opaque-segment', object_key: 'opaque-object' }],
+      next_cursor: null,
+    })),
+  );
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ reason: 'archive_integrity' });
+
+  const deadline = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(16000);
+  try {
+    const timedOut = await call(env(async () => ({ segments: [], next_cursor: null })));
+    expect(timedOut.status).toBe(503);
+    expect(await timedOut.json()).toMatchObject({ reason: 'deadline' });
+  } finally {
+    deadline.mockRestore();
+  }
+
+  const references = vi.spyOn(performance, 'now').mockReturnValue(1);
+  try {
+    const capped = await call(
+      env(async (...args) => {
+        const cursor = args[1] as { object_key?: string } | null;
+        if (cursor?.object_key === 'page-one')
+          return {
+            segments: Array.from({ length: 100 }, (_, index) => ({
+              segment_id: `segment-${100 + index}`,
+              object_key: `object-${100 + index}`,
+            })),
+            next_cursor: { object_key: 'page-two' },
+          };
+        if (cursor?.object_key === 'page-two')
+          throw new Error('Reference cap check should run first');
+        return {
+          segments: Array.from({ length: 100 }, (_, index) => ({
+            segment_id: `segment-${index}`,
+            object_key: `object-${index}`,
+          })),
+          next_cursor: { object_key: 'page-one' },
+        };
+      }),
+    );
+    expect(capped.status).toBe(503);
+    expect(await capped.json()).toMatchObject({ reason: 'work_limit' });
+  } finally {
+    references.mockRestore();
+  }
 });
 
 it('does not add conversion reasons to forbidden-scope or invalid-query responses', async () => {
