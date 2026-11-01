@@ -13,6 +13,14 @@ import { ConversionEditor } from './ConversionEditor.js';
 import { apiUrl, ownerFetch } from './lib/owner-fetch.js';
 
 const percent = (value: number | null) => (value === null ? '—' : `${(value * 100).toFixed(1)}%`);
+const conversionReportErrors: Record<number, string> = {
+  400: 'the conversion filters are invalid. clear filters and try again.',
+  401: 'your session may have expired. sign in again to load conversions.',
+  403: 'you do not have access to this project or environment.',
+  429: 'conversion reports are rate limited. wait a moment, then retry.',
+  503: 'conversions are temporarily unavailable for this period. try a shorter period or retry later.',
+};
+
 function queryString(query: AnalysisQuery) {
   const params = new URLSearchParams({
     app_id: query.app_id,
@@ -192,17 +200,25 @@ function ScopedConversions({ query, ownerToken }: ConversionProps) {
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok)
+        if (!response.ok) {
           throw new Error(
-            'Conversions could not load. The archive may still be processing, or this period may exceed the scan limit. Try a shorter period.',
+            conversionReportErrors[response.status] ??
+              `conversions could not load (HTTP ${response.status}). please retry.`,
           );
+        }
         const result = AnalysisReport.parse(await response.json());
         if (!controller.signal.aborted) setReport({ key, data: result });
       })
       .catch((cause: unknown) => {
         if (!controller.signal.aborted) {
           setReport(null);
-          setError(cause instanceof Error ? cause.message : 'Conversions could not load.');
+          setError(
+            cause instanceof TypeError
+              ? 'could not reach App Health. check your connection and retry.'
+              : cause instanceof Error
+                ? cause.message
+                : 'conversions could not load. please retry.',
+          );
         }
       })
       .finally(() => {
