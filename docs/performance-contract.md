@@ -161,7 +161,11 @@ Opt-in browser tracker emission is implemented: one debug-level `web.vitals`
 log per document goes to the existing browser Logs endpoint. Add `data-vitals`
 to the tracker tag; the tracker lazily loads `/vitals.js` from the same host.
 Vitals are a separate opt-in static file; only the loader (about 180 bytes)
-raises the tracker gzip budget, from 3250 to 3400 bytes. See
+originally raised the tracker gzip budget from 3250 to 3400 bytes. The current
+3600-byte ceiling also includes navigation-safe action handoff: the first
+measured candidate adds 157 compressed bytes while avoiding a collector-response
+wait on tracked links. Batch sizes, privacy bounds and the separate vitals
+payload are unchanged. See
 [browser analytics](browser-analytics.md#web-vitals) for attributes and sampling.
 The owner speed report API above reads both event types. Dashboard speed views,
 per-product wiring, runtime alert routing, probe

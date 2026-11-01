@@ -3,6 +3,7 @@
   if (!script || window.appHealth || !script.dataset.key?.startsWith('ahk_pub_')) return;
   const endpoint = script.dataset.endpoint || 'https://ingest.sassmaker.com/v1/browser';
   const queue = [];
+  const handoffs = [];
   let pending = null;
   let delivery;
   let request;
@@ -195,6 +196,36 @@
       }, delay);
   }
 
+  function batch() {
+    const context = queue[0]?.context || visitContext();
+    if (!context) return null;
+    const events = [];
+    const batch_id = crypto.randomUUID();
+    while (events.length < 25 && queue[0]?.context.session_id === context.session_id) {
+      const { context: _context, ...event } = queue[0];
+      const candidate = body({ batch_id, context, events: [...events, event] });
+      if (new Blob([candidate]).size > 32768) {
+        if (events.length) break;
+        queue.shift();
+        diagnostics.dropped++;
+        continue;
+      }
+      queue.shift();
+      events.push(event);
+    }
+    return { attempts: 0, events, batch_id, context };
+  }
+
+  function body(batch) {
+    return JSON.stringify({
+      schema_version: 1,
+      public_key: script.dataset.key,
+      batch_id: batch.batch_id,
+      ...batch.context,
+      events: batch.events,
+    });
+  }
+
   function payload() {
     if (
       pending &&
@@ -202,38 +233,8 @@
       pending.context.session_id !== visitContext()?.session_id
     )
       pending = null;
-    if (!pending) {
-      const context = queue[0]?.context || visitContext();
-      if (!context) return null;
-      const events = [];
-      const batch_id = crypto.randomUUID();
-      while (events.length < 25 && queue[0]?.context.session_id === context.session_id) {
-        const { context: _context, ...event } = queue[0];
-        const candidate = JSON.stringify({
-          schema_version: 1,
-          public_key: script.dataset.key,
-          batch_id,
-          ...context,
-          events: [...events, event],
-        });
-        if (new Blob([candidate]).size > 32768) {
-          if (events.length) break;
-          queue.shift();
-          diagnostics.dropped++;
-          continue;
-        }
-        queue.shift();
-        events.push(event);
-      }
-      pending = { attempts: 0, events, batch_id, context };
-    }
-    return JSON.stringify({
-      schema_version: 1,
-      public_key: script.dataset.key,
-      batch_id: pending.batch_id,
-      ...pending.context,
-      events: pending.events,
-    });
+    pending ||= handoffs.shift() || batch();
+    return pending ? body(pending) : null;
   }
 
   async function flush() {
@@ -241,7 +242,7 @@
     if (!enabled() || document.visibilityState === 'hidden') return;
     if (delivery) {
       await delivery.catch(() => {});
-      if (queue.length) return flush();
+      if (queue.length || handoffs.length) return flush();
       return;
     }
     clearTimeout(timer);
@@ -249,6 +250,7 @@
     const body = payload();
     if (!body) return;
     const attempt = pending;
+    attempt.handedOff = false;
     const version = generation;
     const controller = new AbortController();
     request = controller;
@@ -280,12 +282,16 @@
       clearTimeout(timeout);
       request = null;
       delivery = null;
-      if (pending || queue.length) schedule(1500 * Math.pow(2, attempt.attempts));
+      if (pending || queue.length || handoffs.length)
+        schedule(1500 * Math.pow(2, attempt.attempts));
     }
   }
 
   function emit(...args) {
-    if (!enabled() || waiting + queue.length >= 100) {
+    if (
+      !enabled() ||
+      waiting + queue.length + handoffs.reduce((sum, item) => sum + item.events.length, 0) >= 100
+    ) {
       diagnostics.dropped++;
       return;
     }
@@ -367,13 +373,29 @@
   }
   async function beacon() {
     if (waiting) await recording;
-    if (enabled() && (pending || queue.length)) {
-      try {
-        const body = payload();
-        if (body) navigator.sendBeacon(endpoint, new Blob([body], { type: 'text/plain' }));
-      } catch {
-        return;
+    if (!enabled()) return true;
+    const send = (item) => {
+      if (item.handedOff) return true;
+      item.handedOff = navigator.sendBeacon(
+        endpoint,
+        new Blob([body(item)], { type: 'text/plain' }),
+      );
+      return item.handedOff;
+    };
+    try {
+      // The active fetch already owns a keepalive request. Send new actions
+      // separately, retaining their immutable IDs until an acknowledged retry.
+      if (pending && !delivery && payload() && !send(pending)) return false;
+      for (const item of handoffs) if (!send(item)) return false;
+      while (queue.length) {
+        const item = batch();
+        if (!item) break;
+        handoffs.push(item);
+        if (!send(item)) return false;
       }
+      return true;
+    } catch {
+      return false;
     }
   }
   function visibility() {
@@ -390,6 +412,7 @@
     stopHooks?.();
     stopHooks = undefined;
     queue.length = 0;
+    handoffs.length = 0;
     pending = null;
     waiting = 0;
     recording = undefined;
@@ -457,6 +480,7 @@
     page,
     track,
     flush,
+    flushForNavigation: beacon,
     checkoutMetadata,
     consent(value) {
       value = value === true;
@@ -479,7 +503,11 @@
     isIgnored: () => ignored,
     diagnostics: () => ({
       ...diagnostics,
-      queued: waiting + queue.length + (pending?.events.length || 0),
+      queued:
+        waiting +
+        queue.length +
+        (pending?.events.length || 0) +
+        handoffs.reduce((sum, item) => sum + item.events.length, 0),
     }),
     stop() {
       stopped = true;

@@ -61,7 +61,7 @@ Add `data-vitals` (empty, `"1"`, or `"true"`) to the tracker tag to opt in.
 When its script pathname ends in `/tracker.js`, the tracker lazily loads shared
 `/tracker-extras.js`, which loads `/vitals.js` from the same host;
 `vitals.js` is a separate opt-in static file with no runtime dependencies.
-The core tracker keeps its **3400-byte gzip** budget; optional vitals code stays
+The core tracker keeps its **3600-byte gzip** budget; optional vitals code stays
 separate. A bounded `?v=` release token propagates to optional assets for cache
 separation; it does not provide immutable historical version hosting. Vitals emit one `web.vitals`
 log per document, sent on the first hidden transition or pagehide. Optional
@@ -132,12 +132,22 @@ complete India calendar day after activation is the earliest bot-filtered
 visitor qualification candidate; historical days, including October 1, are not
 retroactively classified.
 
-The standalone tracker has no runtime dependencies and a tested **3400-byte gzip**
+The standalone tracker has no runtime dependencies and a tested **3600-byte gzip**
 budget. It queues at most 100 events, sends at most 25 per batch, flushes after
 1.5 seconds, and reuses its batch ID on retry. A request times out after ten
 seconds; retryable failures get at most three attempts with backoff. Permanent
 4xx responses drop that batch. Navigation beacons are best effort and do not
 count as acknowledgements. Events can still be lost if the page closes offline.
+
+For a tracked same-tab link, feature-detect and await `appHealth.flushForNavigation?.()` before
+navigating. It waits for cross-tab recording, then hands batches to the browser
+without waiting for the collector response. `true` permits navigation because collection is disabled, nothing needs sending,
+or browser transport accepted the handoff. It never proves ingestion or a user
+outcome. `false` leaves the
+same batch and event IDs available for `flush()` fallback. Feature-detect the
+method for cached older trackers and keep a bounded navigation fallback.
+Queued actions use a separate retained batch while an earlier keepalive request
+is in flight; repeated lifecycle events do not resend a successful handoff.
 
 `POST /v1/browser` bounds the body to 32 KiB and 25 events, checks timestamps,
 validates the public key and origin, and limits each key to 6,000 event/heartbeat
@@ -403,7 +413,7 @@ redirect preserves the browser source without extra landing-request cookies;
 there is no demonstrated need for an edge fallback in this change. A stripped
 referrer cannot be recovered by reading the destination request's Referer header.
 
-The tracker remains dependency-free with a 3400-byte gzip budget (3250 plus the opt-in vitals loader).
+The tracker remains dependency-free with a 3600-byte gzip budget (including the opt-in vitals loader and navigation handoff).
 The opt-in `vitals.js` (about 2.9 KB gzip) is served separately and only loaded on request. Delivery is bounded to
 100 queued/waiting events, 25 per batch and three fetch attempts; retries keep
 stable batch/event IDs. Storage restrictions prevent reliable cross-tab or
