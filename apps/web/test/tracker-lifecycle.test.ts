@@ -1,3 +1,4 @@
+import { Blob as NodeBlob } from 'node:buffer';
 import { BrowserBatchV1 } from '@app-health/contracts';
 import type { AppHealthTracker } from '../public/tracker.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -60,6 +61,113 @@ it('sends an event queued during an in-flight pageview before a caller finishes 
   expect(fetch).toHaveBeenCalledTimes(2);
   expect(validPayloads()[1].events.map((event) => event.name)).toEqual(['library_opened']);
   expect(tracker().diagnostics().accepted).toBe(2);
+});
+
+it('hands off a queued action on pagehide while the earlier keepalive request is still pending', async () => {
+  vi.stubGlobal('Blob', NodeBlob);
+  let finish!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementationOnce(
+    () =>
+      new Promise<Response>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const beacon = vi.fn().mockReturnValue(true);
+  vi.stubGlobal('navigator', { sendBeacon: beacon });
+  const first = tracker().flush();
+  const firstBody = String(vi.mocked(fetch).mock.calls[0][1]?.body);
+  tracker().track('directory_opened', { traffic_class: 'qa' });
+  window.dispatchEvent(new Event('pagehide'));
+  await Promise.resolve();
+  const bodies = await Promise.all(
+    beacon.mock.calls.map(async ([, body]) => (body as Blob).text()),
+  );
+  const batch = bodies
+    .map((body) => BrowserBatchV1.parse(JSON.parse(body)))
+    .find((batch) => batch.events.some((event) => event.name === 'directory_opened'));
+  expect(batch?.events.map((event) => event.name)).toEqual(['directory_opened']);
+  expect(batch?.batch_id).not.toBe(JSON.parse(firstBody).batch_id);
+  expect(beacon).toHaveBeenCalledTimes(1);
+  finish({ ok: true, status: 202 } as Response);
+  await first;
+  await tracker().flush();
+  expect(validPayloads().at(-1)?.batch_id).toBe(batch?.batch_id);
+  expect(validPayloads().at(-1)?.events[0].event_id).toBe(batch?.events[0].event_id);
+  expect(tracker().diagnostics()).toMatchObject({ accepted: 2, queued: 0 });
+});
+
+it('waits for coordinated recording but not a collector response when handing off navigation', async () => {
+  tracker().stop();
+  vi.stubGlobal('Blob', NodeBlob);
+  const beacon = vi.fn().mockReturnValue(true);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request: vi.fn((_key: string, record: () => void) => gate.then(record)) },
+  });
+  Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: beacon });
+  try {
+    await install();
+    tracker().track('directory_opened', { traffic_class: 'qa' });
+    const handoff = tracker().flushForNavigation();
+    await Promise.resolve();
+    expect(beacon).not.toHaveBeenCalled();
+    release();
+    expect(await handoff).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    const body = await (beacon.mock.calls[0][1] as NodeBlob).text();
+    expect(BrowserBatchV1.parse(JSON.parse(body)).events.map((event) => event.name)).toEqual([
+      undefined,
+      'directory_opened',
+    ]);
+    expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 2 });
+  } finally {
+    Reflect.deleteProperty(navigator, 'locks');
+    Reflect.deleteProperty(navigator, 'sendBeacon');
+  }
+});
+
+it('retains a refused navigation handoff for an acknowledged fetch with the same identities', async () => {
+  vi.stubGlobal('Blob', NodeBlob);
+  const beacon = vi.fn().mockReturnValue(false);
+  vi.stubGlobal('navigator', { sendBeacon: beacon });
+  expect(await tracker().flushForNavigation()).toBe(false);
+  const body = await (beacon.mock.calls[0][1] as NodeBlob).text();
+  const refused = BrowserBatchV1.parse(JSON.parse(body));
+  expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 1 });
+  await tracker().flush();
+  expect(validPayloads()[0].batch_id).toBe(refused.batch_id);
+  expect(validPayloads()[0].events[0].event_id).toBe(refused.events[0].event_id);
+  expect(tracker().diagnostics()).toMatchObject({ accepted: 1, queued: 0 });
+});
+
+it('does not resend accepted navigation beacons on repeated lifecycle events', async () => {
+  const beacon = vi.fn().mockReturnValue(true);
+  vi.stubGlobal('navigator', { sendBeacon: beacon });
+  expect(await tracker().flushForNavigation()).toBe(true);
+  window.dispatchEvent(new Event('pagehide'));
+  window.dispatchEvent(new Event('pagehide'));
+  await Promise.resolve();
+  expect(beacon).toHaveBeenCalledTimes(1);
+  expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 1 });
+  await tracker().flush();
+  expect(tracker().diagnostics()).toMatchObject({ accepted: 1, queued: 0 });
+});
+
+it('clears handed-off actions and forwards nothing after consent revocation', async () => {
+  const beacon = vi.fn().mockReturnValue(true);
+  vi.stubGlobal('navigator', { sendBeacon: beacon });
+  expect(await tracker().flushForNavigation()).toBe(true);
+  tracker().consent(false);
+  tracker().track('directory_opened', { traffic_class: 'qa' });
+  expect(await tracker().flushForNavigation()).toBe(true);
+  await tracker().flush();
+  expect(beacon).toHaveBeenCalledTimes(1);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(tracker().diagnostics().queued).toBe(0);
 });
 
 it('uses one stable unknown session when reads fail even if writes appear to succeed', async () => {

@@ -3,6 +3,8 @@ export interface AppHealthTracker {
   page(path?: string): void;
   track(name: string, properties?: Record<string, string | number | boolean>, value?: number): void;
   flush(): Promise<void>;
+  /** Hand off queued events before navigation; true means queued for transport, not acknowledged. */
+  flushForNavigation(): Promise<boolean>;
   /** Enable or revoke collection; data-consent="required" starts with collection disabled. */
   consent(granted: boolean): void;
   /** Persist this project's local exclusion preference; false undoes it. */
