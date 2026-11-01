@@ -18,7 +18,9 @@ async function shardReferences(
   let cursor: ArchiveScopeCursor | null = null;
   const refs: Reference[] = [];
   do {
-    if (performance.now() > deadline || refs.length >= 200)
+    if (performance.now() > deadline)
+      throw new Error('Conversion scan time limit exceeded; choose a shorter period.');
+    if (refs.length >= 200)
       throw new Error('Conversion scan limit exceeded; choose a shorter period.');
     const page = await shard.archiveSegmentsForScope(scope, cursor, 100);
     refs.push(...page.segments);
