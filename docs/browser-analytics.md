@@ -139,10 +139,11 @@ seconds; retryable failures get at most three attempts with backoff. Permanent
 4xx responses drop that batch. Navigation beacons are best effort and do not
 count as acknowledgements. Events can still be lost if the page closes offline.
 
-For a tracked same-tab link, await `appHealth.flushForNavigation()` before
+For a tracked same-tab link, feature-detect and await `appHealth.flushForNavigation?.()` before
 navigating. It waits for cross-tab recording, then hands batches to the browser
-without waiting for the collector response. `true` means transport accepted the
-handoff, not that ingestion or a user outcome was verified. `false` leaves the
+without waiting for the collector response. `true` permits navigation because collection is disabled, nothing needs sending,
+or browser transport accepted the handoff. It never proves ingestion or a user
+outcome. `false` leaves the
 same batch and event IDs available for `flush()` fallback. Feature-detect the
 method for cached older trackers and keep a bounded navigation fallback.
 Queued actions use a separate retained batch while an earlier keepalive request

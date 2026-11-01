@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { Blob as NodeBlob } from 'node:buffer';
 import { BrowserBatchV1 } from '@app-health/contracts';
 import type { AppHealthTracker } from '../public/tracker.js';
@@ -112,7 +113,7 @@ it('waits for coordinated recording but not a collector response when handing of
   try {
     await install();
     tracker().track('directory_opened', { traffic_class: 'qa' });
-    const handoff = tracker().flushForNavigation();
+    const handoff = tracker().flushForNavigation!();
     await Promise.resolve();
     expect(beacon).not.toHaveBeenCalled();
     release();
@@ -134,7 +135,7 @@ it('retains a refused navigation handoff for an acknowledged fetch with the same
   vi.stubGlobal('Blob', NodeBlob);
   const beacon = vi.fn().mockReturnValue(false);
   vi.stubGlobal('navigator', { sendBeacon: beacon });
-  expect(await tracker().flushForNavigation()).toBe(false);
+  expect(await tracker().flushForNavigation!()).toBe(false);
   const body = await (beacon.mock.calls[0][1] as NodeBlob).text();
   const refused = BrowserBatchV1.parse(JSON.parse(body));
   expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 1 });
@@ -147,7 +148,7 @@ it('retains a refused navigation handoff for an acknowledged fetch with the same
 it('does not resend accepted navigation beacons on repeated lifecycle events', async () => {
   const beacon = vi.fn().mockReturnValue(true);
   vi.stubGlobal('navigator', { sendBeacon: beacon });
-  expect(await tracker().flushForNavigation()).toBe(true);
+  expect(await tracker().flushForNavigation!()).toBe(true);
   window.dispatchEvent(new Event('pagehide'));
   window.dispatchEvent(new Event('pagehide'));
   await Promise.resolve();
@@ -160,10 +161,10 @@ it('does not resend accepted navigation beacons on repeated lifecycle events', a
 it('clears handed-off actions and forwards nothing after consent revocation', async () => {
   const beacon = vi.fn().mockReturnValue(true);
   vi.stubGlobal('navigator', { sendBeacon: beacon });
-  expect(await tracker().flushForNavigation()).toBe(true);
+  expect(await tracker().flushForNavigation!()).toBe(true);
   tracker().consent(false);
   tracker().track('directory_opened', { traffic_class: 'qa' });
-  expect(await tracker().flushForNavigation()).toBe(true);
+  expect(await tracker().flushForNavigation!()).toBe(true);
   await tracker().flush();
   expect(beacon).toHaveBeenCalledTimes(1);
   expect(fetch).not.toHaveBeenCalled();
