@@ -1,4 +1,7 @@
-import { readBrowserArchiveAuditSegment } from './browser-archive-day-audit.js';
+import {
+  BrowserArchiveSegmentError,
+  readBrowserArchiveAuditSegment,
+} from './browser-archive-day-audit.js';
 import { projectBrowserBatch } from './browser-projection.js';
 import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
@@ -90,6 +93,10 @@ export type ArchiveScopePage = {
 export type ArchiveScopeIndexResult = {
   checked: number;
   indexed: number;
+  failed: Array<{
+    offset: number;
+    reason: 'archive_integrity' | 'object_limit' | 'source_unavailable';
+  }>;
   next_cursor: ArchiveDayIndexCursor | null;
   snapshot_sequence: number;
   complete: false;
@@ -587,55 +594,97 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         throw new Error('Archive scope index workspace mismatch');
       const bytes = { compressed: 0, decompressed: 0 };
       let indexed = 0;
-      for (const reference of page.segments) {
+      const failed: ArchiveScopeIndexResult['failed'] = [];
+      for (const [offset, reference] of page.segments.entries()) {
         assertDeadline();
-        const result = await readBrowserArchiveAuditSegment(
-          { workspace: workspace!, history: this.env.BROWSER_HISTORY },
-          reference,
-          bytes,
-        );
-        if (
-          result.batches.some((batch) =>
-            [batch.app_id, batch.environment_id, batch.batch_id].some((id) => id.length > 200),
-          )
-        )
-          throw new Error('Archive scope index identity limit');
-        if (result.batches.length > 1024) throw new Error('Archive scope index batch limit');
-        const scopes = this.scopeBounds(result.batches);
+        const result = await this.readScopeIndexBounds(reference, workspace!, bytes);
         assertDeadline();
-        this.ctx.storage.transactionSync(() => {
-          const currentWorkspace = this.ctx.storage.sql
-            .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
-            .one().workspace;
-          const retained = this.ctx.storage.sql
-            .exec<{ oldest: number | null; selected: number }>(
-              `SELECT MIN(indexed_at) AS oldest,
-                 MAX(CASE WHEN event_day = ? AND segment_id = ? AND index_seq <= ? THEN 1 ELSE 0 END) AS selected
-               FROM archive_day_segments WHERE object_key = ? AND indexed_at > ?`,
-              day,
-              reference.segment_id,
-              page.snapshot_sequence,
-              reference.object_key,
-              Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
-            )
-            .one();
-          if (currentWorkspace !== workspace || !retained.selected || retained.oldest === null)
-            throw new Error('Archive scope index reference no longer retained');
-          this.replaceScopeSegments(reference.object_key, scopes, retained.oldest);
-        });
-        indexed++;
+        this.publishScopeIndex(day, reference, page.snapshot_sequence, workspace!, result.scopes);
+        if (result.reason) failed.push({ offset, reason: result.reason });
+        else indexed++;
       }
       return {
         checked: page.segments.length,
         indexed,
+        failed,
         next_cursor: page.next_cursor,
         snapshot_sequence: page.snapshot_sequence,
         complete: false,
-        note: 'Scope indexing repairs metadata only. It does not prove traffic or queue completeness.',
+        note: 'Partial metadata repair only. Failed objects have derived scope metadata invalidated and remain unknown candidates. Indexing does not prove traffic or queue completeness.',
       };
     } finally {
       this.reindexing = false;
     }
+  }
+
+  private async readScopeIndexBounds(
+    reference: { segment_id: string; object_key: string },
+    workspace: string,
+    bytes: { compressed: number; decompressed: number },
+  ): Promise<
+    | { scopes: ScopeBounds[]; reason?: never }
+    | { scopes: null; reason: ArchiveScopeIndexResult['failed'][number]['reason'] }
+  > {
+    try {
+      const result = await readBrowserArchiveAuditSegment(
+        { workspace, history: this.env.BROWSER_HISTORY },
+        reference,
+        bytes,
+      );
+      if (result.batches.length > 1024)
+        throw new BrowserArchiveSegmentError('Archive scope index batch limit', 'object_limit');
+      if (
+        result.batches.some((batch) =>
+          [batch.app_id, batch.environment_id, batch.batch_id].some((id) => id.length > 200),
+        )
+      )
+        throw new BrowserArchiveSegmentError('Archive scope index identity limit', 'object_limit');
+      return { scopes: this.scopeBounds(result.batches) };
+    } catch (error) {
+      return {
+        scopes: null,
+        reason:
+          error instanceof BrowserArchiveSegmentError
+            ? error.reason
+            : error instanceof SyntaxError
+              ? 'archive_integrity'
+              : 'source_unavailable',
+      };
+    }
+  }
+
+  private publishScopeIndex(
+    day: string,
+    reference: { segment_id: string; object_key: string },
+    snapshotSequence: number,
+    workspace: string,
+    scopes: ScopeBounds[] | null,
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      const currentWorkspace = this.ctx.storage.sql
+        .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
+        .one().workspace;
+      const retained = this.ctx.storage.sql
+        .exec<{ oldest: number | null; selected: number }>(
+          `SELECT MIN(indexed_at) AS oldest,
+             MAX(CASE WHEN event_day = ? AND segment_id = ? AND index_seq <= ? THEN 1 ELSE 0 END) AS selected
+           FROM archive_day_segments WHERE object_key = ? AND indexed_at > ?`,
+          day,
+          reference.segment_id,
+          snapshotSequence,
+          reference.object_key,
+          Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        )
+        .one();
+      if (currentWorkspace !== workspace || !retained.selected || retained.oldest === null)
+        throw new Error('Archive scope index reference no longer retained');
+      if (scopes) this.replaceScopeSegments(reference.object_key, scopes, retained.oldest);
+      else
+        this.ctx.storage.sql.exec(
+          'DELETE FROM archive_scope_segments WHERE object_key = ?',
+          reference.object_key,
+        );
+    });
   }
 
   /** A successful archive receipt candidate for one batch identity in this shard. */

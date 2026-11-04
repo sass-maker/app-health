@@ -118,7 +118,7 @@ async function harness() {
   const digest = await readFile(new URL('../src/browser-facts-digest.ts', import.meta.url), 'utf8');
   const archiveSource = source
     .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
-    .replace("import { readBrowserArchiveAuditSegment } from './browser-archive-day-audit.js';", '')
+    .replace(/import \{[^}]+\} from '.\/browser-archive-day-audit.js';/, '')
     .replace("import { persistArchiveSegment } from './archive-segment.js';", '')
     .replace(/import \{[^}]+\} from '.\/browser-facts-digest.js';/, '');
   const script =
@@ -1003,7 +1003,7 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     ).toEqual([{ segment_id: 'one', object_key: 'one' }]);
   });
 
-  it('replaces a partial mixed-scope map atomically and preserves it on corrupt or missing facts', async () => {
+  it('replaces mixed-scope maps atomically and invalidates unverified derived metadata', async () => {
     unit = unitArchive();
     await unit.ready();
     const now = Date.now();
@@ -1018,23 +1018,24 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     unit.db.prepare('DELETE FROM archive_scope_segments WHERE app_id = ?').run('other');
     const partial = () =>
       unit.db.prepare('SELECT * FROM archive_scope_segments ORDER BY app_id').all();
-    const initial = partial();
     unit.metadata.set(key, {});
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'manifest',
-    );
-    expect(partial()).toEqual(initial);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
     unit.metadata.set(key, metadata);
     unit.objects.set(key, new Uint8Array(bytes.byteLength).buffer);
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'checksum',
-    );
-    expect(partial()).toEqual(initial);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
     unit.objects.delete(key);
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'missing',
-    );
-    expect(partial()).toEqual(initial);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
     unit.objects.set(key, bytes);
     unit.db.exec(
       `CREATE TRIGGER fail_scope BEFORE INSERT ON archive_scope_segments WHEN NEW.app_id = 'other' BEGIN SELECT RAISE(ABORT, 'injected scope failure'); END;`,
@@ -1042,7 +1043,7 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
       'injected scope failure',
     );
-    expect(partial()).toEqual(initial);
+    expect(partial()).toEqual([]);
     unit.db.exec('DROP TRIGGER fail_scope');
     expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
       checked: 1,
@@ -1197,13 +1198,14 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
       body,
       compressed,
     );
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'batch limit',
-    );
-    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(before);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'object_limit' }],
+    });
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
   });
 
-  it('retries committed objects after a later failure and rejects elapsed reads before publication', async () => {
+  it('returns partial progress after a later failure and rejects elapsed reads before publication', async () => {
     unit = unitArchive();
     await unit.ready();
     const now = Date.now();
@@ -1232,15 +1234,136 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
         'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
       )
       .run(day, 'missing', `${key}~missing`, now);
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'missing',
-    );
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 1,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      next_cursor: null,
+    });
     const committed = unit.db.prepare('SELECT * FROM archive_scope_segments').all();
     expect(committed).toHaveLength(1);
-    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
-      'missing',
-    );
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 1,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      next_cursor: null,
+    });
     expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(committed);
+  });
+
+  it('continues past an unreadable middle object and page while retaining unknown report candidates', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await unit.archive.stage([
+      {
+        ...collected('one'),
+        app_id: 'other',
+        events: [{ ...collected('x').events[0]!, timestamp: now }],
+      },
+    ]);
+    await unit.archive.flush();
+    const originalKey = [...unit.objects.keys()][0]!;
+    const bytes = unit.objects.get(originalKey)!;
+    const metadata = unit.metadata.get(originalKey)!;
+    unit.db.exec('DELETE FROM archive_day_segments; DELETE FROM archive_scope_segments');
+    for (const letter of ['a', 'b', 'c', 'd']) {
+      const key = `repair-${letter}`;
+      unit.objects.set(key, bytes);
+      unit.metadata.set(key, {
+        manifest: JSON.stringify({ ...JSON.parse(metadata.manifest!), object_key: key }),
+      });
+      unit.db
+        .prepare(
+          'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+        )
+        .run(day, key, key, now - 1000);
+    }
+    const badMetadata = unit.metadata.get('repair-b')!;
+    unit.metadata.set('repair-b', {});
+    unit.db
+      .prepare('INSERT INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)')
+      .run('repair-b', 'other', 'production', now, now, now - 1000);
+    const first = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    expect(first).toMatchObject({
+      checked: 3,
+      indexed: 2,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      complete: false,
+    });
+    expect(first.next_cursor?.object_key).toBe('repair-c');
+    expect(
+      unit.db.prepare('SELECT object_key FROM archive_scope_segments ORDER BY object_key').all(),
+    ).toEqual([{ object_key: 'repair-a' }, { object_key: 'repair-c' }]);
+    const second = await unit.archive.reindexScopeSegments(day, first.next_cursor, 'workspace-one');
+    expect(second).toMatchObject({
+      checked: 1,
+      indexed: 1,
+      failed: [],
+      next_cursor: null,
+      snapshot_sequence: first.snapshot_sequence,
+    });
+    const query = { app_id: 'app-one', environment_id: 'production', range: '1h' as const };
+    const scope = { ...query, from: now - 1000, to: now + 1000 };
+    expect(unit.archive.archiveSegmentsForScope(scope).segments).toEqual([
+      { segment_id: 'repair-b', object_key: 'repair-b' },
+    ]);
+    const env = {
+      BROWSER_ARCHIVE: {
+        getByName: () => ({
+          archiveSegmentsForScope: async (
+            ...args: Parameters<BrowserArchive['archiveSegmentsForScope']>
+          ) => unit.archive.archiveSegmentsForScope(...args),
+        }),
+      },
+      BROWSER_HISTORY: { get: unit.get },
+    } as unknown as BrowserEnvironment;
+    await expect(
+      readConversionArchive(env, 'workspace-one', query, scope.from, scope.to),
+    ).rejects.toThrow('manifest');
+    unit.metadata.set('repair-b', badMetadata);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 3,
+      indexed: 3,
+      failed: [],
+    });
+    expect(await readConversionArchive(env, 'workspace-one', query, scope.from, scope.to)).toEqual(
+      [],
+    );
+    expect(unit.objects.get('repair-b')).toEqual(bytes);
+    expect(unit.db.prepare('SELECT DISTINCT indexed_at FROM archive_scope_segments').all()).toEqual(
+      [{ indexed_at: now - 1000 }],
+    );
+  });
+
+  it('uses static failure categories for JSON, manifest schema, and unavailable sources', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await unit.archive.stage([
+      { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+    ]);
+    await unit.archive.flush();
+    const key = [...unit.objects.keys()][0]!;
+    const metadata = unit.metadata.get(key)!;
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    for (const manifest of ['{', '{}']) {
+      unit.metadata.set(key, { manifest });
+      expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+        indexed: 0,
+        failed: [{ offset: 0, reason: 'archive_integrity' }],
+      });
+    }
+    unit.metadata.set(key, metadata);
+    expect((await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).indexed).toBe(1);
+    unit.get.mockRejectedValueOnce(new Error('private object SQL diagnostics'));
+    const result = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    expect(result).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'source_unavailable' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
   });
 
   it('keeps constant-time counters through rollback, duplicate stages, restart, archival and expiry', async () => {
