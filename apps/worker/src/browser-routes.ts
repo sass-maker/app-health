@@ -1,3 +1,4 @@
+import { browserScopeIndexOwnerRoute } from './browser-scope-index.js';
 import { apiScopeAllows } from './api-scope.js';
 import { isBot } from 'isbot';
 import { browserMetadata } from './browser-metadata.js';
@@ -614,6 +615,8 @@ export async function handleBrowserOwner(
   timings?: OwnerRequestTimings,
 ): Promise<Response | null> {
   const path = new URL(request.url).pathname;
+  const scopeIndexResponse = await browserScopeIndexOwnerRoute(request, env, owner, local);
+  if (scopeIndexResponse) return scopeIndexResponse;
   const coverageResponse = await browserVisitorCoverageOwnerRoute(request, env, owner, local);
   if (coverageResponse) return coverageResponse;
   const auditResponse = await handleBrowserArchiveAuditOwner(request, env, owner, local, path);

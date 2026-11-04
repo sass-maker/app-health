@@ -1,3 +1,7 @@
+import {
+  BrowserArchiveSegmentError,
+  readBrowserArchiveAuditSegment,
+} from './browser-archive-day-audit.js';
 import { projectBrowserBatch } from './browser-projection.js';
 import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
@@ -86,6 +90,19 @@ export type ArchiveScopePage = {
   segments: Array<{ segment_id: string; object_key: string }>;
   next_cursor: ArchiveScopeCursor | null;
 };
+export type ArchiveScopeIndexResult = {
+  checked: number;
+  indexed: number;
+  failed: Array<{
+    offset: number;
+    reason: 'archive_integrity' | 'object_limit' | 'source_unavailable';
+  }>;
+  next_cursor: ArchiveDayIndexCursor | null;
+  snapshot_sequence: number;
+  complete: false;
+  note: string;
+};
+type ScopeBounds = { app: string; environment: string; min: number; max: number };
 type ArchiveBatchIndexEntry = { segment_id: string; object_key: string };
 
 function eventIndiaDay(timestamp: number): string {
@@ -95,6 +112,7 @@ function eventIndiaDay(timestamp: number): string {
 }
 
 function validIndiaDay(day: string): boolean {
+  if (typeof day !== 'string') return false;
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
   if (!match) return false;
   const [year, month, date] = match.slice(1).map(Number);
@@ -109,7 +127,8 @@ function validIndiaDay(day: string): boolean {
 function validDayIndexCursor(day: string, cursor: ArchiveDayIndexCursor | null): boolean {
   return (
     cursor === null ||
-    (cursor.event_day === day &&
+    (typeof cursor === 'object' &&
+      cursor.event_day === day &&
       typeof cursor.object_key === 'string' &&
       cursor.object_key.length <= 1024 &&
       Number.isSafeInteger(cursor.snapshot_sequence) &&
@@ -212,6 +231,7 @@ async function archiveFingerprint(content: string): Promise<string> {
 /** Queue consumers route consistently by workspace + shard, including every retry. */
 export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   private flushing: Promise<void> | null = null;
+  private reindexing = false;
 
   constructor(ctx: DurableObjectState, env: BrowserArchiveEnvironment) {
     super(ctx, env);
@@ -254,6 +274,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         UNIQUE (event_day, object_key)
       );
       CREATE INDEX IF NOT EXISTS archive_day_segments_expiry ON archive_day_segments(indexed_at);
+      CREATE INDEX IF NOT EXISTS archive_day_segments_object ON archive_day_segments(object_key, indexed_at);
       CREATE TABLE IF NOT EXISTS archive_scope_segments (
         object_key TEXT NOT NULL, app_id TEXT NOT NULL, environment_id TEXT NOT NULL,
         min_event_at INTEGER NOT NULL, max_event_at INTEGER NOT NULL, indexed_at INTEGER NOT NULL,
@@ -428,6 +449,15 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     cursor: ArchiveDayIndexCursor | null = null,
     limit = MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE,
   ): ArchiveDayIndexPage {
+    return this.archiveDayIndexPage(day, cursor, limit, true);
+  }
+
+  private archiveDayIndexPage(
+    day: string,
+    cursor: ArchiveDayIndexCursor | null,
+    limit: number,
+    prune: boolean,
+  ): ArchiveDayIndexPage {
     if (!validIndiaDay(day)) throw new Error('Invalid India calendar day');
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE)
       throw new Error('Archive day index page exceeds limit');
@@ -442,11 +472,12 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
           now - ARCHIVE_DAY_INDEX_RETENTION_MS,
         )
         .one().high_water;
-    this.ctx.storage.sql.exec(
-      'DELETE FROM archive_day_segments WHERE rowid IN (SELECT rowid FROM archive_day_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
-      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
-      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
-    );
+    if (prune)
+      this.ctx.storage.sql.exec(
+        'DELETE FROM archive_day_segments WHERE rowid IN (SELECT rowid FROM archive_day_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+        now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+      );
     const rows = this.ctx.storage.sql
       .exec<{ segment_id: string; object_key: string }>(
         `SELECT segment_id, object_key FROM archive_day_segments
@@ -492,22 +523,25 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
           'SELECT COALESCE(MAX(index_seq), 0) AS value FROM archive_day_segments',
         )
         .one().value;
+    const cutoff = Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS;
     // Legacy segments without scope metadata remain candidates; never silently omit them.
     const rows = this.ctx.storage.sql
       .exec<{ segment_id: string; object_key: string }>(
         `SELECT DISTINCT d.segment_id, d.object_key FROM archive_day_segments d
        WHERE d.event_day >= ? AND d.event_day <= ? AND d.index_seq <= ? AND d.indexed_at > ?
          AND (? IS NULL OR d.object_key > ?)
-         AND (NOT EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key)
-           OR EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key
+         AND (NOT EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key AND s.indexed_at > ?)
+           OR EXISTS (SELECT 1 FROM archive_scope_segments s WHERE s.object_key = d.object_key AND s.indexed_at > ?
              AND s.app_id = ? AND s.environment_id = ? AND s.max_event_at >= ? AND s.min_event_at < ?))
        ORDER BY d.object_key LIMIT ?`,
         eventIndiaDay(scope.from),
         eventIndiaDay(scope.to - 1),
         snapshot,
-        Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        cutoff,
         cursor?.object_key ?? null,
         cursor?.object_key ?? null,
+        cutoff,
+        cutoff,
         scope.app_id,
         scope.environment_id,
         scope.from,
@@ -527,6 +561,138 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
             }
           : null,
     };
+  }
+
+  /** Repairs only metadata for retained references; archive facts and ingest state stay immutable. */
+  async reindexScopeSegments(
+    day: string,
+    cursor: ArchiveDayIndexCursor | null,
+    expectedWorkspace: string,
+  ): Promise<ArchiveScopeIndexResult> {
+    if (!validIndiaDay(day) || !validDayIndexCursor(day, cursor))
+      throw new Error('Invalid archive scope index request');
+    if (
+      typeof expectedWorkspace !== 'string' ||
+      !expectedWorkspace ||
+      expectedWorkspace.length > 200
+    )
+      throw new Error('Invalid archive scope index workspace');
+    if (this.reindexing) throw new Error('Archive scope index already running');
+    this.reindexing = true;
+    try {
+      const workspace = this.ctx.storage.sql
+        .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
+        .one().workspace;
+      if (workspace !== null && workspace !== expectedWorkspace)
+        throw new Error('Archive scope index workspace mismatch');
+      const deadline = performance.now() + 15_000;
+      const assertDeadline = () => {
+        if (performance.now() > deadline) throw new Error('Archive scope index time limit');
+      };
+      const page = this.archiveDayIndexPage(day, cursor, 3, false);
+      if (!workspace && page.segments.length)
+        throw new Error('Archive scope index workspace mismatch');
+      const bytes = { compressed: 0, decompressed: 0 };
+      let indexed = 0;
+      const failed: ArchiveScopeIndexResult['failed'] = [];
+      for (const [offset, reference] of page.segments.entries()) {
+        assertDeadline();
+        const result = await this.readScopeIndexBounds(reference, workspace!, bytes);
+        assertDeadline();
+        this.publishScopeIndex(
+          day,
+          reference,
+          page.snapshot_sequence,
+          workspace!,
+          result.scopes,
+          result.reason,
+        );
+        if (result.reason) failed.push({ offset, reason: result.reason });
+        else indexed++;
+      }
+      return {
+        checked: page.segments.length,
+        indexed,
+        failed,
+        next_cursor: page.next_cursor,
+        snapshot_sequence: page.snapshot_sequence,
+        complete: false,
+        note: 'Partial metadata repair only. Deterministic failures invalidate derived scope metadata; transient source failures preserve prior verified metadata. Unindexed objects remain unknown candidates. Indexing does not prove traffic or queue completeness.',
+      };
+    } finally {
+      this.reindexing = false;
+    }
+  }
+
+  private async readScopeIndexBounds(
+    reference: { segment_id: string; object_key: string },
+    workspace: string,
+    bytes: { compressed: number; decompressed: number },
+  ): Promise<
+    | { scopes: ScopeBounds[]; reason?: never }
+    | { scopes: null; reason: ArchiveScopeIndexResult['failed'][number]['reason'] }
+  > {
+    try {
+      const result = await readBrowserArchiveAuditSegment(
+        { workspace, history: this.env.BROWSER_HISTORY },
+        reference,
+        bytes,
+      );
+      if (result.batches.length > 1024)
+        throw new BrowserArchiveSegmentError('Archive scope index batch limit', 'object_limit');
+      if (
+        result.batches.some((batch) =>
+          [batch.app_id, batch.environment_id, batch.batch_id].some((id) => id.length > 200),
+        )
+      )
+        throw new BrowserArchiveSegmentError('Archive scope index identity limit', 'object_limit');
+      return { scopes: this.scopeBounds(result.batches) };
+    } catch (error) {
+      return {
+        scopes: null,
+        reason:
+          error instanceof BrowserArchiveSegmentError
+            ? error.reason
+            : error instanceof SyntaxError
+              ? 'archive_integrity'
+              : 'source_unavailable',
+      };
+    }
+  }
+
+  private publishScopeIndex(
+    day: string,
+    reference: { segment_id: string; object_key: string },
+    snapshotSequence: number,
+    workspace: string,
+    scopes: ScopeBounds[] | null,
+    failure?: ArchiveScopeIndexResult['failed'][number]['reason'],
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      const currentWorkspace = this.ctx.storage.sql
+        .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
+        .one().workspace;
+      const retained = this.ctx.storage.sql
+        .exec<{ oldest: number | null; selected: number }>(
+          `SELECT MIN(indexed_at) AS oldest,
+             MAX(CASE WHEN event_day = ? AND segment_id = ? AND index_seq <= ? THEN 1 ELSE 0 END) AS selected
+           FROM archive_day_segments WHERE object_key = ? AND indexed_at > ?`,
+          day,
+          reference.segment_id,
+          snapshotSequence,
+          reference.object_key,
+          Date.now() - ARCHIVE_DAY_INDEX_RETENTION_MS,
+        )
+        .one();
+      if (currentWorkspace !== workspace || !retained.selected || retained.oldest === null)
+        throw new Error('Archive scope index reference no longer retained');
+      if (scopes) this.replaceScopeSegments(reference.object_key, scopes, retained.oldest);
+      else if (failure !== 'source_unavailable')
+        this.ctx.storage.sql.exec(
+          'DELETE FROM archive_scope_segments WHERE object_key = ?',
+          reference.object_key,
+        );
+    });
   }
 
   /** A successful archive receipt candidate for one batch identity in this shard. */
@@ -674,7 +840,12 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     const objectKey = this.ctx.storage.sql
       .exec<{ object_key: string }>('SELECT object_key FROM archive_segments WHERE id = ?', segment)
       .one().object_key;
-    this.indexScopeSegments(objectKey, batches, now);
+    this.replaceScopeSegments(objectKey, this.scopeBounds(batches), now);
+    this.ctx.storage.sql.exec(
+      'DELETE FROM archive_scope_segments WHERE rowid IN (SELECT rowid FROM archive_scope_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
+      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
+      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
+    );
     for (const day of days) {
       this.ctx.storage.sql.exec(
         'INSERT OR IGNORE INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
@@ -715,15 +886,8 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     this.ctx.storage.sql.exec('UPDATE archive_meta SET retry_after = 0 WHERE id = 1');
   }
 
-  private indexScopeSegments(
-    objectKey: string,
-    batches: CollectedBrowserBatch[],
-    now: number,
-  ): void {
-    const scopes = new Map<
-      string,
-      { app: string; environment: string; min: number; max: number }
-    >();
+  private scopeBounds(batches: CollectedBrowserBatch[]): ScopeBounds[] {
+    const scopes = new Map<string, ScopeBounds>();
     for (const batch of batches) {
       const key = JSON.stringify([batch.app_id, batch.environment_id]);
       const scope = scopes.get(key) ?? {
@@ -738,21 +902,21 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       }
       scopes.set(key, scope);
     }
-    for (const scope of scopes.values())
+    return [...scopes.values()];
+  }
+
+  private replaceScopeSegments(objectKey: string, scopes: ScopeBounds[], indexedAt: number): void {
+    this.ctx.storage.sql.exec('DELETE FROM archive_scope_segments WHERE object_key = ?', objectKey);
+    for (const scope of scopes)
       this.ctx.storage.sql.exec(
-        'INSERT OR IGNORE INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)',
         objectKey,
         scope.app,
         scope.environment,
         scope.min,
         scope.max,
-        now,
+        indexedAt,
       );
-    this.ctx.storage.sql.exec(
-      'DELETE FROM archive_scope_segments WHERE rowid IN (SELECT rowid FROM archive_scope_segments WHERE indexed_at <= ? ORDER BY indexed_at LIMIT ?)',
-      now - ARCHIVE_DAY_INDEX_RETENTION_MS,
-      ARCHIVE_DAY_INDEX_PRUNE_BATCH,
-    );
   }
 
   override async alarm(): Promise<void> {

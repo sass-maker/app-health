@@ -22,6 +22,7 @@ vi.mock('cloudflare:workers', () => ({
   },
 }));
 import { BrowserArchive, type ArchiveScopePage } from '../src/browser-archive.js';
+import { persistArchiveSegment } from '../src/archive-segment.js';
 import { readConversionArchive } from '../src/conversion-archive.js';
 import type { BrowserEnvironment } from '../src/browser-routes.js';
 import type { CollectedBrowserBatch } from '../src/browser-analytics.js';
@@ -117,6 +118,7 @@ async function harness() {
   const digest = await readFile(new URL('../src/browser-facts-digest.ts', import.meta.url), 'utf8');
   const archiveSource = source
     .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
+    .replace(/import \{[^}]+\} from '.\/browser-archive-day-audit.js';/, '')
     .replace("import { persistArchiveSegment } from './archive-segment.js';", '')
     .replace(/import \{[^}]+\} from '.\/browser-facts-digest.js';/, '');
   const script =
@@ -800,10 +802,22 @@ function unitArchive(withAnalytics = false) {
   let alarm: number | null = null;
   let ready = Promise.resolve();
   const objects = new Map<string, ArrayBuffer>();
-  const put = vi.fn(async (key: string, data: ArrayBuffer) => {
+  const metadata = new Map<string, Record<string, string>>();
+  const put = vi.fn(async (key: string, data: ArrayBuffer, options?: R2PutOptions) => {
     if (objects.has(key)) return null;
     objects.set(key, data);
+    metadata.set(key, options?.customMetadata ?? {});
     return { key };
+  });
+  const get = vi.fn(async (key: string) => {
+    const data = objects.get(key);
+    if (!data) return null;
+    return {
+      size: data.byteLength,
+      customMetadata: metadata.get(key),
+      body: new Blob([data]).stream(),
+      arrayBuffer: async () => data,
+    };
   });
   const writeDataPoint = vi.fn();
   const storage = {
@@ -844,7 +858,7 @@ function unitArchive(withAnalytics = false) {
   };
   const create = () =>
     new BrowserArchive(ctx as unknown as DurableObjectState, {
-      BROWSER_HISTORY: { put } as unknown as Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>,
+      BROWSER_HISTORY: { put, get } as unknown as Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>,
       ...(withAnalytics ? { BROWSER_ANALYTICS: { writeDataPoint } } : {}),
     });
   const archive = create();
@@ -854,6 +868,8 @@ function unitArchive(withAnalytics = false) {
     db,
     statements,
     objects,
+    metadata,
+    get,
     put,
     writeDataPoint,
     storage,
@@ -871,6 +887,491 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
   afterEach(() => {
     unit?.db.close();
     vi.restoreAllMocks();
+  });
+
+  it('repairs retained legacy candidates in fixed slices without changing archive bytes or counters', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    const row = {
+      ...collected('legacy'),
+      app_id: 'other',
+      events: [{ ...collected('x').events[0]!, timestamp: now }],
+    };
+    await unit.archive.stage([row]);
+    await unit.archive.flush();
+    const originalKey = [...unit.objects.keys()][0]!;
+    const originalBytes = unit.objects.get(originalKey)!;
+    const originalMetadata = unit.metadata.get(originalKey)!;
+    unit.db.exec('DELETE FROM archive_scope_segments; DELETE FROM archive_day_segments');
+    for (let n = 0; n < 225; n++) {
+      const key = `legacy-${String(n).padStart(3, '0')}`;
+      const manifest = JSON.parse(originalMetadata.manifest!);
+      unit.objects.set(key, originalBytes);
+      unit.metadata.set(key, { manifest: JSON.stringify({ ...manifest, object_key: key }) });
+      unit.db
+        .prepare(
+          'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+        )
+        .run(day, key, key, now - 1000);
+    }
+    const scope = {
+      app_id: 'app-one',
+      environment_id: 'production',
+      from: now - 1000,
+      to: now + 1000,
+    };
+    const first = unit.archive.archiveSegmentsForScope(scope);
+    expect(first.segments).toHaveLength(100);
+    expect(first.next_cursor).not.toBeNull();
+    await unit.archive.stage([{ ...row, app_id: 'app-one', batch_id: 'matching' }]);
+    await unit.archive.flush();
+    const matchingKey = [...unit.objects.keys()].at(-1)!;
+    unit.db.prepare('DELETE FROM archive_scope_segments WHERE object_key = ?').run(matchingKey);
+    const { env, get } = {
+      env: {
+        BROWSER_ARCHIVE: {
+          getByName: () => ({
+            archiveSegmentsForScope: async (
+              ...args: Parameters<BrowserArchive['archiveSegmentsForScope']>
+            ) => unit.archive.archiveSegmentsForScope(...args),
+          }),
+        },
+        BROWSER_HISTORY: { get: unit.get },
+      } as unknown as BrowserEnvironment,
+      get: unit.get,
+    };
+    await expect(
+      readConversionArchive(env, 'workspace-one', { ...scope, range: '1h' }, scope.from, scope.to),
+    ).rejects.toThrow();
+    expect(get).not.toHaveBeenCalled();
+    const before = unit.archive.status();
+    const repair = unit.archive;
+    let cursor: import('../src/browser-archive.js').ArchiveDayIndexCursor | null = null;
+    let slices = 0;
+    do {
+      const result = await repair.reindexScopeSegments(day, cursor, 'workspace-one');
+      expect(result.checked).toBeLessThanOrEqual(3);
+      expect(result.complete).toBe(false);
+      cursor = result.next_cursor;
+      slices++;
+    } while (cursor);
+    expect(slices).toBe(76);
+    expect(unit.archive.archiveSegmentsForScope(scope).segments).toEqual([
+      { segment_id: expect.any(String), object_key: matchingKey },
+    ]);
+    expect(
+      await readConversionArchive(
+        env,
+        'workspace-one',
+        { ...scope, range: '1h' },
+        scope.from,
+        scope.to,
+      ),
+    ).toMatchObject([{ app_id: 'app-one', batch_id: 'matching', events: [{ timestamp: now }] }]);
+    expect(unit.archive.status()).toEqual(before);
+    expect(unit.objects.get(originalKey)).toEqual(originalBytes);
+    expect(unit.metadata.get(originalKey)).toEqual(originalMetadata);
+    expect(
+      unit.db
+        .prepare('SELECT DISTINCT indexed_at FROM archive_scope_segments WHERE object_key LIKE ?')
+        .all('legacy-%'),
+    ).toEqual([{ indexed_at: now - 1000 }]);
+  });
+
+  it('treats expired scope metadata as unknown even when only some physical rows survive pruning', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    unit.db
+      .prepare(
+        'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(day, 'one', 'one', now);
+    unit.db
+      .prepare('INSERT INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)')
+      .run('one', 'other', 'production', now, now, 1);
+    expect(
+      unit.archive.archiveSegmentsForScope({
+        app_id: 'app-one',
+        environment_id: 'production',
+        from: now - 1000,
+        to: now + 1000,
+      }).segments,
+    ).toEqual([{ segment_id: 'one', object_key: 'one' }]);
+  });
+
+  it('replaces mixed-scope maps atomically and invalidates unverified derived metadata', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    const one = { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] };
+    await unit.archive.stage([one, { ...one, batch_id: 'two', app_id: 'other' }]);
+    await unit.archive.flush();
+    const key = [...unit.objects.keys()][0]!;
+    const metadata = unit.metadata.get(key)!;
+    const bytes = unit.objects.get(key)!;
+    const before = unit.archive.status();
+    unit.db.prepare('DELETE FROM archive_scope_segments WHERE app_id = ?').run('other');
+    const partial = () =>
+      unit.db.prepare('SELECT * FROM archive_scope_segments ORDER BY app_id').all();
+    unit.metadata.set(key, {});
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
+    unit.metadata.set(key, metadata);
+    unit.objects.set(key, new Uint8Array(bytes.byteLength).buffer);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
+    unit.objects.delete(key);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      failed: [{ offset: 0, reason: 'archive_integrity' }],
+    });
+    expect(partial()).toEqual([]);
+    unit.objects.set(key, bytes);
+    unit.db.exec(
+      `CREATE TRIGGER fail_scope BEFORE INSERT ON archive_scope_segments WHEN NEW.app_id = 'other' BEGIN SELECT RAISE(ABORT, 'injected scope failure'); END;`,
+    );
+    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
+      'injected scope failure',
+    );
+    expect(partial()).toEqual([]);
+    unit.db.exec('DROP TRIGGER fail_scope');
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 1,
+      indexed: 1,
+      next_cursor: null,
+      complete: false,
+    });
+    expect(partial()).toHaveLength(2);
+    const lookup = unit.statements.find((sql) => sql.includes('MAX(CASE WHEN event_day'))!;
+    const plan = unit.db.prepare(`EXPLAIN QUERY PLAN ${lookup}`).all(day, 'one', 1000, key, 0);
+    expect(plan.some((row) => String(row.detail).includes('archive_day_segments_object'))).toBe(
+      true,
+    );
+    const repaired = partial();
+    const restarted = unit.create();
+    await unit.ready();
+    await restarted.reindexScopeSegments(day, null, 'workspace-one');
+    expect(partial()).toEqual(repaired);
+    expect(unit.archive.status()).toEqual(before);
+    expect(unit.objects.get(key)).toEqual(bytes);
+    expect(unit.metadata.get(key)).toEqual(metadata);
+  });
+
+  it('validates before I/O, handles empty shards, and fences concurrent changes and reads', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    unit.statements.length = 0;
+    await expect(
+      unit.archive.reindexScopeSegments('2026-02-30', null, 'workspace-one'),
+    ).rejects.toThrow('request');
+    await expect(
+      unit.archive.reindexScopeSegments(
+        day,
+        { event_day: '2026-01-01', object_key: 'x', snapshot_sequence: 1 },
+        'workspace-one',
+      ),
+    ).rejects.toThrow('request');
+    expect(unit.statements).toEqual([]);
+    expect(unit.get).not.toHaveBeenCalled();
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 0,
+      indexed: 0,
+      next_cursor: null,
+    });
+    expect(unit.db.prepare('SELECT workspace FROM archive_meta').get()!.workspace).toBeNull();
+    await unit.archive.stage([
+      { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+    ]);
+    await unit.archive.flush();
+    await expect(unit.archive.reindexScopeSegments(day, null, 'foreign')).rejects.toThrow(
+      'workspace',
+    );
+    const read = unit.get.getMockImplementation()!;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    unit.get.mockImplementationOnce(async (key) => {
+      await waiting;
+      return read(key);
+    });
+    const pending = unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
+      'already running',
+    );
+    unit.db.exec('DELETE FROM archive_day_segments');
+    release();
+    await expect(pending).rejects.toThrow('no longer retained');
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 0,
+    });
+  });
+
+  it('keeps a cursor high-water across new flushes and never renews retained scope age', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    for (let n = 0; n < 4; n++) {
+      await unit.archive.stage([
+        { ...collected(String(n)), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+      ]);
+      await unit.archive.flush();
+    }
+    unit.db.prepare('UPDATE archive_day_segments SET indexed_at = ?').run(now - 1000);
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    const first = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    expect(first).toMatchObject({ checked: 3, indexed: 3 });
+    expect(first.next_cursor).not.toBeNull();
+    await unit.archive.stage([
+      { ...collected('concurrent'), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+    ]);
+    await unit.archive.flush();
+    const restarted = unit.create();
+    await unit.ready();
+    const second = await restarted.reindexScopeSegments(day, first.next_cursor, 'workspace-one');
+    expect(second).toMatchObject({
+      checked: 1,
+      indexed: 1,
+      next_cursor: null,
+      snapshot_sequence: first.snapshot_sequence,
+    });
+    const ages = unit.db
+      .prepare('SELECT indexed_at FROM archive_scope_segments WHERE indexed_at = ?')
+      .all(now - 1000);
+    expect(ages).toHaveLength(4);
+    unit.db.exec(
+      'UPDATE archive_day_segments SET indexed_at = 1; UPDATE archive_scope_segments SET indexed_at = 1',
+    );
+    expect(await restarted.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 0,
+    });
+    expect(unit.db.prepare('SELECT COUNT(*) AS count FROM archive_day_segments').get()!.count).toBe(
+      5,
+    );
+  });
+
+  it('rejects oversized verified row maps and workspace changes without replacing metadata', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    const row = { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] };
+    await unit.archive.stage([row]);
+    await unit.archive.flush();
+    const before = unit.db.prepare('SELECT * FROM archive_scope_segments').all();
+    const key = [...unit.objects.keys()][0]!;
+    const read = unit.get.getMockImplementation()!;
+    unit.get.mockImplementationOnce(async (objectKey) => {
+      const result = await read(objectKey);
+      unit.db.prepare('UPDATE archive_meta SET workspace = ?').run('foreign');
+      return result;
+    });
+    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
+      'no longer retained',
+    );
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(before);
+    unit.db.prepare('UPDATE archive_meta SET workspace = ?').run('workspace-one');
+    const body =
+      Array.from({ length: 1025 }, (_, n) => JSON.stringify({ ...row, batch_id: String(n) })).join(
+        '\n',
+      ) + '\n';
+    const compressed = await new Response(
+      new Blob([body]).stream().pipeThrough(new CompressionStream('gzip')),
+    ).arrayBuffer();
+    unit.objects.delete(key);
+    await persistArchiveSegment(
+      { put: unit.put } as unknown as Pick<R2Bucket, 'put' | 'get'>,
+      key,
+      body,
+      compressed,
+    );
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'object_limit' }],
+    });
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
+  });
+
+  it('returns partial progress after a later failure and rejects elapsed reads before publication', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await unit.archive.stage([
+      { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+    ]);
+    await unit.archive.flush();
+    const key = [...unit.objects.keys()][0]!;
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    const read = unit.get.getMockImplementation()!;
+    const clock = performance.now();
+    const time = vi.spyOn(performance, 'now').mockReturnValue(clock);
+    unit.get.mockImplementationOnce(async (objectKey) => {
+      const object = await read(objectKey);
+      time.mockReturnValue(clock + 15_001);
+      return object;
+    });
+    await expect(unit.archive.reindexScopeSegments(day, null, 'workspace-one')).rejects.toThrow(
+      'time limit',
+    );
+    time.mockRestore();
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
+    unit.db
+      .prepare(
+        'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+      )
+      .run(day, 'missing', `${key}~missing`, now);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 1,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      next_cursor: null,
+    });
+    const committed = unit.db.prepare('SELECT * FROM archive_scope_segments').all();
+    expect(committed).toHaveLength(1);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 1,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      next_cursor: null,
+    });
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(committed);
+  });
+
+  it('continues past an unreadable middle object and page while retaining unknown report candidates', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await unit.archive.stage([
+      {
+        ...collected('one'),
+        app_id: 'other',
+        events: [{ ...collected('x').events[0]!, timestamp: now }],
+      },
+    ]);
+    await unit.archive.flush();
+    const originalKey = [...unit.objects.keys()][0]!;
+    const bytes = unit.objects.get(originalKey)!;
+    const metadata = unit.metadata.get(originalKey)!;
+    unit.db.exec('DELETE FROM archive_day_segments; DELETE FROM archive_scope_segments');
+    for (const letter of ['a', 'b', 'c', 'd']) {
+      const key = `repair-${letter}`;
+      unit.objects.set(key, bytes);
+      unit.metadata.set(key, {
+        manifest: JSON.stringify({ ...JSON.parse(metadata.manifest!), object_key: key }),
+      });
+      unit.db
+        .prepare(
+          'INSERT INTO archive_day_segments (event_day, segment_id, object_key, indexed_at) VALUES (?, ?, ?, ?)',
+        )
+        .run(day, key, key, now - 1000);
+    }
+    const badMetadata = unit.metadata.get('repair-b')!;
+    unit.metadata.set('repair-b', {});
+    unit.db
+      .prepare('INSERT INTO archive_scope_segments VALUES (?, ?, ?, ?, ?, ?)')
+      .run('repair-b', 'other', 'production', now, now, now - 1000);
+    const first = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    expect(first).toMatchObject({
+      checked: 3,
+      indexed: 2,
+      failed: [{ offset: 1, reason: 'archive_integrity' }],
+      complete: false,
+    });
+    expect(first.next_cursor?.object_key).toBe('repair-c');
+    expect(
+      unit.db.prepare('SELECT object_key FROM archive_scope_segments ORDER BY object_key').all(),
+    ).toEqual([{ object_key: 'repair-a' }, { object_key: 'repair-c' }]);
+    const second = await unit.archive.reindexScopeSegments(day, first.next_cursor, 'workspace-one');
+    expect(second).toMatchObject({
+      checked: 1,
+      indexed: 1,
+      failed: [],
+      next_cursor: null,
+      snapshot_sequence: first.snapshot_sequence,
+    });
+    const query = { app_id: 'app-one', environment_id: 'production', range: '1h' as const };
+    const scope = { ...query, from: now - 1000, to: now + 1000 };
+    expect(unit.archive.archiveSegmentsForScope(scope).segments).toEqual([
+      { segment_id: 'repair-b', object_key: 'repair-b' },
+    ]);
+    const env = {
+      BROWSER_ARCHIVE: {
+        getByName: () => ({
+          archiveSegmentsForScope: async (
+            ...args: Parameters<BrowserArchive['archiveSegmentsForScope']>
+          ) => unit.archive.archiveSegmentsForScope(...args),
+        }),
+      },
+      BROWSER_HISTORY: { get: unit.get },
+    } as unknown as BrowserEnvironment;
+    await expect(
+      readConversionArchive(env, 'workspace-one', query, scope.from, scope.to),
+    ).rejects.toThrow('manifest');
+    unit.metadata.set('repair-b', badMetadata);
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      checked: 3,
+      indexed: 3,
+      failed: [],
+    });
+    expect(await readConversionArchive(env, 'workspace-one', query, scope.from, scope.to)).toEqual(
+      [],
+    );
+    expect(unit.objects.get('repair-b')).toEqual(bytes);
+    expect(unit.db.prepare('SELECT DISTINCT indexed_at FROM archive_scope_segments').all()).toEqual(
+      [{ indexed_at: now - 1000 }],
+    );
+  });
+
+  it('uses static failure categories for JSON, manifest schema, and unavailable sources', async () => {
+    unit = unitArchive();
+    await unit.ready();
+    const now = Date.now();
+    const day = new Date(now + 19800000).toISOString().slice(0, 10);
+    await unit.archive.stage([
+      { ...collected('one'), events: [{ ...collected('x').events[0]!, timestamp: now }] },
+    ]);
+    await unit.archive.flush();
+    const key = [...unit.objects.keys()][0]!;
+    const metadata = unit.metadata.get(key)!;
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    for (const manifest of ['{', '{}']) {
+      unit.metadata.set(key, { manifest });
+      expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+        indexed: 0,
+        failed: [{ offset: 0, reason: 'archive_integrity' }],
+      });
+    }
+    unit.metadata.set(key, metadata);
+    expect((await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).indexed).toBe(1);
+    const verified = unit.db.prepare('SELECT * FROM archive_scope_segments').all();
+    unit.get.mockRejectedValueOnce(new Error('private object SQL diagnostics'));
+    const result = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
+    expect(result).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'source_unavailable' }],
+    });
+    expect(JSON.stringify(result)).not.toContain('private');
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(verified);
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    unit.get.mockRejectedValueOnce(new Error('source unavailable'));
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'source_unavailable' }],
+    });
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
   });
 
   it('keeps constant-time counters through rollback, duplicate stages, restart, archival and expiry', async () => {

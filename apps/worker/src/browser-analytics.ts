@@ -14,6 +14,8 @@ import type {
   BrowserArchiveStageResult,
   BrowserArchiveStagingLookup,
   ArchiveScopeWindow,
+  ArchiveDayIndexCursor,
+  ArchiveScopeIndexResult,
   ArchiveScopeCursor,
   ArchiveScopePage,
 } from './browser-archive.js';
@@ -63,6 +65,11 @@ export interface BrowserBindings {
       lookupStaged(
         batches: Array<Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>>,
       ): Promise<BrowserArchiveStagingLookup>;
+      reindexScopeSegments?(
+        day: string,
+        cursor: ArchiveDayIndexCursor | null,
+        expectedWorkspace: string,
+      ): Promise<ArchiveScopeIndexResult>;
       archiveSegmentsForScope?(
         scope: ArchiveScopeWindow,
         cursor?: ArchiveScopeCursor | null,

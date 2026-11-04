@@ -90,6 +90,15 @@ function cappedReason(error: unknown): string {
   return 'comparison_failed';
 }
 
+export class BrowserArchiveSegmentError extends Error {
+  constructor(
+    message: string,
+    readonly reason: 'archive_integrity' | 'object_limit',
+  ) {
+    super(message);
+  }
+}
+
 async function readBoundedBody(
   body: ReadableStream<Uint8Array>,
   maxBytes: number,
@@ -103,7 +112,7 @@ async function readBoundedBody(
       if (done) break;
       if (!value) continue;
       size += value.byteLength;
-      if (size > maxBytes) throw new Error('segment byte cap');
+      if (size > maxBytes) throw new BrowserArchiveSegmentError('segment byte cap', 'object_limit');
       chunks.push(value);
     }
   } catch (error) {
@@ -158,7 +167,7 @@ async function readVerifiedSegment(
   byteState: { compressed: number; decompressed: number },
 ): Promise<{ batches: CollectedBrowserBatch[]; content_sha256: string }> {
   const object = await input.history.get(reference.object_key);
-  if (!object) throw new Error('missing segment');
+  if (!object) throw new BrowserArchiveSegmentError('missing segment', 'archive_integrity');
   try {
     const { compressed, manifest } = await readCompressedSegment(
       input,
@@ -190,12 +199,17 @@ async function readCompressedSegment(
   object: R2ObjectBody,
   byteState: { compressed: number; decompressed: number },
 ) {
-  if (object.size < 1 || object.size > SEGMENT_BYTES_MAX) throw new Error('segment byte cap');
+  if (object.size < 1 || object.size > SEGMENT_BYTES_MAX)
+    throw new BrowserArchiveSegmentError('segment byte cap', 'object_limit');
   byteState.compressed += object.size;
-  if (byteState.compressed > SEGMENT_BYTES_LIMIT) throw new Error('global segment byte cap');
+  if (byteState.compressed > SEGMENT_BYTES_LIMIT)
+    throw new BrowserArchiveSegmentError('global segment byte cap', 'object_limit');
   const manifestValue = object.customMetadata?.manifest;
-  if (!manifestValue) throw new Error('missing manifest');
-  const manifest = ArchiveSegmentManifestV1.parse(JSON.parse(manifestValue));
+  if (!manifestValue) throw new BrowserArchiveSegmentError('missing manifest', 'archive_integrity');
+  const parsed = ArchiveSegmentManifestV1.safeParse(JSON.parse(manifestValue));
+  if (!parsed.success)
+    throw new BrowserArchiveSegmentError('invalid manifest', 'archive_integrity');
+  const manifest = parsed.data;
   if (
     manifest.object_key !== reference.object_key ||
     manifest.workspace_id !== input.workspace ||
@@ -203,11 +217,12 @@ async function readCompressedSegment(
     manifest.state !== 'active' ||
     manifest.compressed_bytes !== object.size
   )
-    throw new Error('manifest mismatch');
+    throw new BrowserArchiveSegmentError('manifest mismatch', 'archive_integrity');
   const compressed = await readBoundedBody(object.body, SEGMENT_BYTES_MAX);
   const checksum = new Uint8Array(await crypto.subtle.digest('SHA-256', compressed));
   const checksumHex = [...checksum].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-  if (checksumHex !== manifest.content_sha256) throw new Error('checksum mismatch');
+  if (checksumHex !== manifest.content_sha256)
+    throw new BrowserArchiveSegmentError('checksum mismatch', 'archive_integrity');
   return { compressed, manifest };
 }
 
@@ -217,16 +232,23 @@ async function parseSegmentFacts(
   manifest: ReturnType<typeof ArchiveSegmentManifestV1.parse>,
   byteState: { compressed: number; decompressed: number },
 ): Promise<CollectedBrowserBatch[]> {
-  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'));
-  const raw = await readBoundedBody(stream as ReadableStream<Uint8Array>, DECOMPRESSED_BYTES_MAX);
-  byteState.decompressed += raw.byteLength;
-  if (byteState.decompressed > DECOMPRESSED_BYTES_LIMIT) throw new Error('global decompressed cap');
-  if (raw.byteLength !== manifest.uncompressed_bytes) throw new Error('manifest length mismatch');
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(raw);
-  const lines = text.trimEnd().split('\n');
-  if (!text.endsWith('\n') || lines.length !== manifest.row_count)
-    throw new Error('manifest row mismatch');
-  return validateSegmentRows(lines, workspace, manifest);
+  try {
+    const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'));
+    const raw = await readBoundedBody(stream as ReadableStream<Uint8Array>, DECOMPRESSED_BYTES_MAX);
+    byteState.decompressed += raw.byteLength;
+    if (byteState.decompressed > DECOMPRESSED_BYTES_LIMIT)
+      throw new BrowserArchiveSegmentError('global decompressed cap', 'object_limit');
+    if (raw.byteLength !== manifest.uncompressed_bytes)
+      throw new BrowserArchiveSegmentError('manifest length mismatch', 'archive_integrity');
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(raw);
+    const lines = text.trimEnd().split('\n');
+    if (!text.endsWith('\n') || lines.length !== manifest.row_count)
+      throw new BrowserArchiveSegmentError('manifest row mismatch', 'archive_integrity');
+    return validateSegmentRows(lines, workspace, manifest);
+  } catch (error) {
+    if (error instanceof BrowserArchiveSegmentError || error instanceof SyntaxError) throw error;
+    throw new BrowserArchiveSegmentError('invalid archive gzip or UTF-8', 'archive_integrity');
+  }
 }
 
 function validateSegmentRows(
@@ -237,8 +259,9 @@ function validateSegmentRows(
   const batches: CollectedBrowserBatch[] = [];
   const bounds = { count: 0, minimum: Infinity, maximum: -Infinity };
   for (const line of lines) {
-    const parsed: unknown = JSON.parse(line);
-    if (!isArchiveBatch(parsed, workspace)) throw new Error('invalid archive batch');
+    const parsed = JSON.parse(line);
+    if (!isArchiveBatch(parsed, workspace))
+      throw new BrowserArchiveSegmentError('invalid archive batch', 'archive_integrity');
     for (const event of parsed.events) {
       bounds.count++;
       bounds.minimum = Math.min(bounds.minimum, event.timestamp);
@@ -251,7 +274,7 @@ function validateSegmentRows(
     bounds.minimum !== manifest.min_event_at ||
     bounds.maximum !== manifest.max_event_at
   )
-    throw new Error('manifest facts mismatch');
+    throw new BrowserArchiveSegmentError('manifest facts mismatch', 'archive_integrity');
   return batches;
 }
 

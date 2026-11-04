@@ -693,6 +693,40 @@ describe('Google account boundary with real D1 SQL', () => {
     expect(hidden.status).toBe(404);
   });
 
+  it('routes archive scope repair through the cookie-authenticated owner boundary', async () => {
+    const repair = vi.fn(async () => ({
+      checked: 0,
+      indexed: 0,
+      next_cursor: null,
+      snapshot_sequence: 0,
+      complete: false,
+    }));
+    const getByName = vi.fn(() => ({ reindexScopeSegments: repair }));
+    env.BROWSER_ARCHIVE = { getByName } as unknown as Env['BROWSER_ARCHIVE'];
+    const identity = await accountIdentity(
+      new Request('https://dashboard.example.com/v1/apps', { headers: { cookie: aliceCookie } }),
+      env,
+    );
+    const response = await request('/v1/browser/archive-scope-index', aliceCookie, {
+      day: '2026-11-03',
+      shard: 0,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ checked: 0, complete: false });
+    expect(getByName).toHaveBeenCalledWith(`${identity!.owner.workspaceId}:browser-archive-v1:0`);
+    expect(repair).toHaveBeenCalledWith('2026-11-03', null, identity!.owner.workspaceId);
+    const anonymous = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/browser/archive-scope-index', {
+        method: 'POST',
+        headers: { origin: 'https://dashboard.example.com' },
+        body: JSON.stringify({ day: '2026-11-03', shard: 0 }),
+      }),
+      env,
+    );
+    expect(anonymous.status).toBe(401);
+    expect(repair).toHaveBeenCalledTimes(1);
+  });
+
   it('returns anonymous Server-Timing stages only on authenticated owner read paths', async () => {
     const apps = await request('/v1/apps?private_marker=not-for-timing');
     const capabilities = await request(

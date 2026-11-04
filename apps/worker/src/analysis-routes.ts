@@ -149,38 +149,73 @@ async function analysisRequest(
 type ConversionFailureReason =
   'work_limit' | 'deadline' | 'archive_integrity' | 'source_unavailable' | 'unknown';
 
-const conversionFailureReasons = new Map<string, Exclude<ConversionFailureReason, 'unknown'>>([
-  ['Conversion scan limit exceeded; choose a shorter period.', 'work_limit'],
-  ['Conversion segment limit exceeded.', 'work_limit'],
-  ['Combined conversion segment limit exceeded', 'work_limit'],
-  ['Combined conversion segment limit exceeded; choose a shorter period', 'work_limit'],
-  ['Conversion event limit exceeded; choose a shorter period.', 'work_limit'],
-  ['Combined conversion event limit exceeded', 'work_limit'],
-  ['Combined conversion byte limit exceeded', 'work_limit'],
-  ['global segment byte cap', 'work_limit'],
-  ['global decompressed cap', 'work_limit'],
-  ['Tracked revenue exceeds exact report capacity', 'work_limit'],
-  ['Conversion scan time limit exceeded; choose a shorter period.', 'deadline'],
-  ['Product history time limit exceeded', 'deadline'],
-  ['Archive cursor did not advance', 'archive_integrity'],
-  ['missing segment', 'archive_integrity'],
-  ['missing manifest', 'archive_integrity'],
-  ['manifest mismatch', 'archive_integrity'],
-  ['checksum mismatch', 'archive_integrity'],
-  ['manifest length mismatch', 'archive_integrity'],
-  ['manifest row mismatch', 'archive_integrity'],
-  ['invalid archive batch', 'archive_integrity'],
-  ['manifest facts mismatch', 'archive_integrity'],
-  ['Product history checksum mismatch', 'archive_integrity'],
-  ['Product history manifest mismatch', 'archive_integrity'],
-  ['Product history object missing or changed', 'archive_integrity'],
-  ['Archive scope index unavailable', 'source_unavailable'],
-  ['Conversion archive unavailable', 'source_unavailable'],
+type ConversionWorkLimit =
+  | 'browser_shard_segments'
+  | 'browser_window_segments'
+  | 'combined_segments'
+  | 'product_remaining_segments'
+  | 'browser_events'
+  | 'combined_events'
+  | 'combined_bytes'
+  | 'browser_compressed_bytes'
+  | 'browser_decompressed_bytes'
+  | 'revenue_capacity';
+type ConversionFailure =
+  | { reason: Exclude<ConversionFailureReason, 'work_limit'> }
+  | { reason: 'work_limit'; limit: ConversionWorkLimit };
+
+const conversionFailures = new Map<string, ConversionFailure>([
+  [
+    'Conversion scan limit exceeded; choose a shorter period.',
+    { reason: 'work_limit', limit: 'browser_shard_segments' },
+  ],
+  [
+    'Conversion segment limit exceeded.',
+    { reason: 'work_limit', limit: 'browser_window_segments' },
+  ],
+  [
+    'Combined conversion segment limit exceeded',
+    { reason: 'work_limit', limit: 'combined_segments' },
+  ],
+  [
+    'Combined conversion segment limit exceeded; choose a shorter period',
+    { reason: 'work_limit', limit: 'product_remaining_segments' },
+  ],
+  [
+    'Conversion event limit exceeded; choose a shorter period.',
+    { reason: 'work_limit', limit: 'browser_events' },
+  ],
+  ['Combined conversion event limit exceeded', { reason: 'work_limit', limit: 'combined_events' }],
+  ['Combined conversion byte limit exceeded', { reason: 'work_limit', limit: 'combined_bytes' }],
+  ['global segment byte cap', { reason: 'work_limit', limit: 'browser_compressed_bytes' }],
+  ['global decompressed cap', { reason: 'work_limit', limit: 'browser_decompressed_bytes' }],
+  [
+    'Tracked revenue exceeds exact report capacity',
+    { reason: 'work_limit', limit: 'revenue_capacity' },
+  ],
+  ['Conversion scan time limit exceeded; choose a shorter period.', { reason: 'deadline' }],
+  ['Product history time limit exceeded', { reason: 'deadline' }],
+  ['Archive cursor did not advance', { reason: 'archive_integrity' }],
+  ['missing segment', { reason: 'archive_integrity' }],
+  ['missing manifest', { reason: 'archive_integrity' }],
+  ['invalid manifest', { reason: 'archive_integrity' }],
+  ['invalid archive gzip or UTF-8', { reason: 'archive_integrity' }],
+  ['manifest mismatch', { reason: 'archive_integrity' }],
+  ['checksum mismatch', { reason: 'archive_integrity' }],
+  ['manifest length mismatch', { reason: 'archive_integrity' }],
+  ['manifest row mismatch', { reason: 'archive_integrity' }],
+  ['invalid archive batch', { reason: 'archive_integrity' }],
+  ['manifest facts mismatch', { reason: 'archive_integrity' }],
+  ['Product history checksum mismatch', { reason: 'archive_integrity' }],
+  ['Product history manifest mismatch', { reason: 'archive_integrity' }],
+  ['Product history object missing or changed', { reason: 'archive_integrity' }],
+  ['Archive scope index unavailable', { reason: 'source_unavailable' }],
+  ['Conversion archive unavailable', { reason: 'source_unavailable' }],
 ]);
 
-function conversionFailureReason(error: unknown): ConversionFailureReason {
-  if (!(error instanceof Error)) return 'unknown';
-  return conversionFailureReasons.get(error.message) ?? 'unknown';
+function conversionFailure(error: unknown): ConversionFailure {
+  if (!(error instanceof Error)) return { reason: 'unknown' };
+  return conversionFailures.get(error.message) ?? { reason: 'unknown' };
 }
 
 function analysisError(error: unknown, report: boolean) {
@@ -195,7 +230,7 @@ function analysisError(error: unknown, report: boolean) {
   return json(503, {
     error:
       'Analysis unavailable. Reduce the period or retry after archive processing; no complete result is claimed.',
-    ...(report ? { reason: conversionFailureReason(error) } : {}),
+    ...(report ? conversionFailure(error) : {}),
   });
 }
 

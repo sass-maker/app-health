@@ -99,10 +99,22 @@ it('returns only static conversion failure categories while preserving error sta
   const publicError =
     'Analysis unavailable. Reduce the period or retry after archive processing; no complete result is claimed.';
 
-  expect(await request('Conversion scan limit exceeded; choose a shorter period.')).toEqual({
-    error: publicError,
-    reason: 'work_limit',
-  });
+  for (const [message, limit] of [
+    ['Conversion scan limit exceeded; choose a shorter period.', 'browser_shard_segments'],
+    ['Conversion segment limit exceeded.', 'browser_window_segments'],
+    ['Combined conversion segment limit exceeded', 'combined_segments'],
+    [
+      'Combined conversion segment limit exceeded; choose a shorter period',
+      'product_remaining_segments',
+    ],
+    ['Conversion event limit exceeded; choose a shorter period.', 'browser_events'],
+    ['Combined conversion event limit exceeded', 'combined_events'],
+    ['Combined conversion byte limit exceeded', 'combined_bytes'],
+    ['global segment byte cap', 'browser_compressed_bytes'],
+    ['global decompressed cap', 'browser_decompressed_bytes'],
+    ['Tracked revenue exceeds exact report capacity', 'revenue_capacity'],
+  ])
+    expect(await request(message)).toEqual({ error: publicError, reason: 'work_limit', limit });
   expect(await request('Conversion scan time limit exceeded; choose a shorter period.')).toEqual({
     error: publicError,
     reason: 'deadline',
@@ -111,18 +123,27 @@ it('returns only static conversion failure categories while preserving error sta
     error: publicError,
     reason: 'archive_integrity',
   });
-  expect(await request('Tracked revenue exceeds exact report capacity')).toEqual({
-    error: publicError,
-    reason: 'work_limit',
-  });
   expect(await request('manifest facts mismatch')).toEqual({
     error: publicError,
     reason: 'archive_integrity',
   });
+  for (const message of ['invalid manifest', 'invalid archive gzip or UTF-8'])
+    expect(await request(message)).toEqual({ error: publicError, reason: 'archive_integrity' });
   expect(await request('Conversion archive unavailable')).toEqual({
     error: publicError,
     reason: 'source_unavailable',
   });
+
+  const definitions = (await f.call(
+    `/v1/analytics/definitions?${f.scope}`,
+    'GET',
+    undefined,
+    { ...f.owner, workspaceId: 'w' },
+    false,
+    failure('Conversion scan limit exceeded; choose a shorter period.'),
+  ))!;
+  expect(definitions.status).toBe(503);
+  expect(await definitions.json()).toEqual({ error: publicError });
 
   const privateMessage = 'untrusted provider response with customer data';
   const unknown = await request(privateMessage);
@@ -194,7 +215,10 @@ it('categorizes a missing referenced archive segment through the real conversion
       }),
     );
     expect(capped.status).toBe(503);
-    expect(await capped.json()).toMatchObject({ reason: 'work_limit' });
+    expect(await capped.json()).toMatchObject({
+      reason: 'work_limit',
+      limit: 'browser_shard_segments',
+    });
   } finally {
     references.mockRestore();
   }
