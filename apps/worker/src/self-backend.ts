@@ -23,6 +23,7 @@ const ROUTES = new Set([
   '/v1/installation/status',
   '/v1/analytics',
   '/v1/analytics/report',
+  '/v1/analytics/traffic-quality',
   '/v1/analytics/shares',
   '/v1/shared/analytics',
   '/v1/reports/daily-engagement',

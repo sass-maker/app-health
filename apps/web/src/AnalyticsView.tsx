@@ -1,3 +1,4 @@
+import { TrafficQuality } from './TrafficQuality.js';
 import { BrowserTrafficPolicy } from './BrowserTrafficPolicy.js';
 import { BrowserReportFilter, type BrowserSegmentFilter } from '@app-health/contracts';
 import { AnalyticsSegments } from './AnalyticsSegments.js';
@@ -253,19 +254,20 @@ function useReportController(props: AnalyticsViewProps) {
     active,
     sourceNote,
     selectEvent,
+    query: {
+      app_id: appId,
+      environment_id: environmentId,
+      range: range as '1h' | '24h' | '7d' | '30d',
+      filters: segments,
+    },
+    scopeKey: `${ownerToken}:${appId}:${environmentId}`,
   };
 }
 
 export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
   const { ownerToken, mode = 'web', onInstall } = props;
   const v = useReportController(props);
-  const query = {
-    app_id: v.appId,
-    environment_id: v.environmentId,
-    range: v.range as '1h' | '24h' | '7d' | '30d',
-    filters: v.segments,
-  };
-  const scopeKey = `${ownerToken}:${v.appId}:${v.environmentId}`;
+  const { query, scopeKey } = v;
   return (
     <section aria-label="Workspace analytics" className="space-y-5 overflow-x-hidden">
       <ReportFilters
@@ -310,6 +312,16 @@ export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
           query={query}
           ownerToken={ownerToken}
           onApply={v.setSegments}
+        />
+      ) : null}
+      {v.appId !== 'all' && mode === 'web' ? (
+        <TrafficQuality
+          ownerToken={ownerToken}
+          appId={v.appId}
+          environmentId={v.environmentId}
+          report={v.detail.report}
+          period={v.date ? `date:${v.date}` : `range:${v.range}`}
+          filtered={!!v.selected || Object.keys(v.segments).length > 0}
         />
       ) : null}
       <AnalyticsResults

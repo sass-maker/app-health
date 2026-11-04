@@ -5,6 +5,7 @@ const dataReads = new Set([
   '/v1/analytics',
   '/v1/analytics/live',
   '/v1/analytics/report',
+  '/v1/analytics/traffic-quality',
   '/v1/analytics/conversions',
   '/v1/analytics/revenue',
   '/v1/analytics/provider-revenue',
@@ -22,6 +23,7 @@ const dataReads = new Set([
 const tokenReads = new Set([
   '/v1/apps',
   '/v1/analytics/report',
+  '/v1/analytics/traffic-quality',
   '/v1/analytics/conversions',
   '/v1/analytics/revenue',
   '/v1/analytics/provider-revenue',
