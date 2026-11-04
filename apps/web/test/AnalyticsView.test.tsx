@@ -33,11 +33,25 @@ const report = {
   sessions: 2,
 };
 function install() {
-  const mock = vi.fn(async (url: string) =>
-    Response.json(url.startsWith('/v1/analytics/report') ? report : summary),
-  );
+  const mock = vi.fn(async (url: string) => {
+    if (url.startsWith('/v1/analytics/traffic-quality'))
+      return Response.json({
+        app_id: 'one',
+        environment_id: 'prod',
+        from: report.from,
+        to: report.to,
+        generated_at: Date.now(),
+        time_basis: 'receipt_time',
+        qa_internal: 'not_separately_identified',
+        bots: { status: 'unknown', reason: 'local' },
+      });
+    return Response.json(url.startsWith('/v1/analytics/report') ? report : summary);
+  });
   vi.stubGlobal('fetch', mock);
   return mock;
+}
+function latestReport(mock: ReturnType<typeof install>) {
+  return mock.mock.calls.filter(([url]) => url.startsWith('/v1/analytics/report')).at(-1)?.[0];
 }
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -65,7 +79,11 @@ it('shows focused project traffic, sources and events without a duplicate projec
   expect(screen.queryByRole('combobox', { name: 'Analytics project' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: /install tracker/ }));
   expect(setup).toHaveBeenCalledOnce();
-  expect(fetch).toHaveBeenCalledTimes(2);
+  expect(fetch).toHaveBeenCalledTimes(3);
+  expect(screen.getByLabelText('Traffic quality')).toBeVisible();
+  expect(fetch.mock.calls.some(([url]) => url.startsWith('/v1/analytics/traffic-quality'))).toBe(
+    true,
+  );
   fireEvent.click(screen.getByRole('tab', { name: /product events/ }));
   expect(await screen.findByRole('heading', { name: 'product events over time' })).toBeTruthy();
 });
@@ -84,6 +102,7 @@ it('queries an event drill-down, project and time filters, and clears the select
   expect(screen.getByRole('heading', { name: 'product events over time' })).toBeTruthy();
   expect(screen.queryByText('page views')).toBeNull();
   expect(screen.queryByRole('heading', { name: 'top pages' })).toBeNull();
+  expect(screen.queryByLabelText('Traffic quality')).toBeNull();
   expect(screen.queryByRole('tab', { name: 'audience' })).toBeNull();
   fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
   await waitFor(() =>
@@ -105,9 +124,7 @@ it('queries an event drill-down, project and time filters, and clears the select
   );
   fireEvent.click(screen.getByRole('button', { name: /Clear event filter/ }));
   await waitFor(() =>
-    expect(mock.mock.calls.at(-1)?.[0]).toBe(
-      '/v1/analytics/report?range=1h&app_id=one&environment_id=prod',
-    ),
+    expect(latestReport(mock)).toBe('/v1/analytics/report?range=1h&app_id=one&environment_id=prod'),
   );
 });
 it('recovers from unavailable reports and explains empty events', async () => {
@@ -178,12 +195,12 @@ it('stacks clicked page and source filters, preserves them across periods, and c
     <AnalyticsView project={project} projects={[project]} ownerToken="" onSelect={() => {}} />,
   );
   fireEvent.click(await screen.findByRole('button', { name: 'Filter Top pages by /pricing' }));
-  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('path=%2Fpricing'));
+  await waitFor(() => expect(latestReport(mock)).toContain('path=%2Fpricing'));
   fireEvent.click(
     await screen.findByRole('button', { name: 'Filter Referral sources by google.com' }),
   );
   await waitFor(() => {
-    const url = new URL(mock.mock.calls.at(-1)![0], 'https://local.test');
+    const url = new URL(latestReport(mock)!, 'https://local.test');
     expect(url.searchParams.get('path')).toBe('/pricing');
     expect(url.searchParams.get('source')).toBe('google.com');
   });
@@ -192,17 +209,17 @@ it('stacks clicked page and source filters, preserves them across periods, and c
     key: 'ArrowDown',
   });
   fireEvent.click(await screen.findByRole('option', { name: 'last 7 days' }));
-  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('range=7d'));
-  expect(mock.mock.calls.at(-1)?.[0]).toContain('path=%2Fpricing');
+  await waitFor(() => expect(latestReport(mock)).toContain('range=7d'));
+  expect(latestReport(mock)).toContain('path=%2Fpricing');
   fireEvent.click(screen.getByRole('button', { name: 'Remove Page: /pricing filter' }));
-  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).not.toContain('path='));
-  expect(mock.mock.calls.at(-1)?.[0]).toContain('source=google.com');
+  await waitFor(() => expect(latestReport(mock)).not.toContain('path='));
+  expect(latestReport(mock)).toContain('source=google.com');
   fireEvent.click(await screen.findByRole('button', { name: 'Explore signup.completed' }));
-  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).toContain('event=signup.completed'));
+  await waitFor(() => expect(latestReport(mock)).toContain('event=signup.completed'));
   fireEvent.click(screen.getByRole('button', { name: 'clear all filters' }));
-  await waitFor(() => expect(mock.mock.calls.at(-1)?.[0]).not.toContain('source='));
+  await waitFor(() => expect(latestReport(mock)).not.toContain('source='));
   expect(screen.queryByRole('button', { name: /Remove Source/ })).toBeNull();
-  expect(mock.mock.calls.at(-1)?.[0]).not.toContain('event=');
+  expect(latestReport(mock)).not.toContain('event=');
 });
 
 it('uses the matching prior-period counts in the main KPI cards', async () => {
@@ -276,4 +293,21 @@ it('keeps briefing source and completed India day in the focused report, then pe
   expect(
     screen.getByRole('heading', { name: 'traffic over time' }).parentElement,
   ).not.toHaveTextContent('2026-09-30');
+});
+
+it('keeps traffic quality specific to one selected project', async () => {
+  const fetch = install();
+  render(
+    <AnalyticsView
+      project={{ ...project, appId: 'all' }}
+      projects={[project]}
+      ownerToken="owner"
+      onSelect={() => {}}
+    />,
+  );
+  await screen.findByText('/pricing');
+  expect(screen.queryByLabelText('Traffic quality')).toBeNull();
+  expect(fetch.mock.calls.some(([url]) => url.startsWith('/v1/analytics/traffic-quality'))).toBe(
+    false,
+  );
 });

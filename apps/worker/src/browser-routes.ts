@@ -1,3 +1,4 @@
+import { handleTrafficQuality } from './traffic-quality.js';
 import { browserScopeIndexOwnerRoute } from './browser-scope-index.js';
 import { apiScopeAllows } from './api-scope.js';
 import { isBot } from 'isbot';
@@ -621,10 +622,20 @@ export async function handleBrowserOwner(
   if (coverageResponse) return coverageResponse;
   const auditResponse = await handleBrowserArchiveAuditOwner(request, env, owner, local, path);
   if (auditResponse) return auditResponse;
-  if (!['/v1/analytics', '/v1/analytics/live', '/v1/analytics/report'].includes(path)) return null;
+  if (
+    ![
+      '/v1/analytics',
+      '/v1/analytics/live',
+      '/v1/analytics/report',
+      '/v1/analytics/traffic-quality',
+    ].includes(path)
+  )
+    return null;
   if (request.method !== 'GET') return json(405, { error: 'method not allowed' });
   const workspace = browserWorkspace(owner, local);
   if (!workspace) return json(403, { error: 'Sign in with Google to view workspace analytics.' });
+  if (path === '/v1/analytics/traffic-quality')
+    return handleTrafficQuality(request, env, owner, local);
   if (path === '/v1/analytics/report')
     return measureOwnerRouteRead(timings, () => browserReport(request, env, owner, local, timings));
   if (local) return json(200, localAnalytics.summary());

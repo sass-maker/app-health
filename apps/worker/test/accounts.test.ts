@@ -1533,6 +1533,52 @@ describe('Google account boundary with real D1 SQL', () => {
     expect((await request('/v1/apps', bobCookie)).status).toBe(200);
   });
 
+  it('authenticates traffic quality and denies cross-workspace and token scope reads through the production router', async () => {
+    const created = await request('/v1/apps', aliceCookie, {
+      name: 'Traffic quality scope',
+      environment: 'production',
+    });
+    const project = (await created.json()) as { app: { id: string }; environment: { id: string } };
+    const to = Date.now();
+    const params = new URLSearchParams({
+      app_id: project.app.id,
+      environment_id: project.environment.id,
+      from: String(to - 3_600_000),
+      to: String(to),
+    });
+    const path = `/v1/analytics/traffic-quality?${params}`;
+    expect((await request(path, '')).status).toBe(401);
+    expect((await request(path, bobCookie)).status).toBe(403);
+    const allowed = await request(path, aliceCookie);
+    expect(allowed.status).toBe(200);
+    expect(await allowed.json()).toMatchObject({
+      app_id: project.app.id,
+      environment_id: project.environment.id,
+      bots: { status: 'unknown', reason: 'unavailable' },
+    });
+    const minted = await request('/v1/workspace/api-tokens', aliceCookie, {
+      name: 'Traffic quality token',
+      permission: 'read',
+      scopes: [{ app_id: project.app.id, environment_id: project.environment.id }],
+    });
+    const token = (await minted.json()) as { token: string };
+    const api = (target: string, workspace?: string) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${target}`, {
+          headers: {
+            authorization: `Bearer ${token.token}`,
+            ...(workspace ? { 'x-app-health-workspace': workspace } : {}),
+          },
+        }),
+        env,
+      );
+    expect((await api(path)).status).toBe(200);
+    expect((await api(path.replace(project.environment.id, 'foreign-env'))).status).toBe(403);
+    expect((await api(path.replace(project.app.id, 'foreign-app'))).status).toBe(403);
+    expect((await api(path, 'foreign-workspace')).status).toBe(403);
+    expect((await api(`${path}&app_id=${project.app.id}`)).status).toBe(403);
+  });
+
   it('routes scoped API tokens and MCP through the production owner boundary', async () => {
     const ownProject = await request('/v1/apps', aliceCookie, {
       name: 'Isolated scope case',
