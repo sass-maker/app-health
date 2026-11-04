@@ -48,11 +48,26 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
     (value) => localStorage.setItem('app-health-v0-project', JSON.stringify(value)),
     { appId: app_id, environmentId: environment_id, name: created.app.name, environment: 'local' },
   );
-  let fail = true;
+  await page.clock.install();
+  let shift = 0;
+  await page.route('**/v1/analytics/report?**', async (route) => {
+    const body = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...body, from: body.from + shift, to: body.to + shift } });
+  });
+  let mode: 'failed' | 'observed' | 'deferred' | 'unavailable' = 'failed';
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   let calls = 0;
   await page.route('**/v1/analytics/traffic-quality?**', async (route) => {
     calls++;
-    if (fail) return route.fulfill({ status: 503, body: '{}' });
+    if (mode === 'deferred') {
+      await gate;
+      return route.fulfill({ status: 503, body: '{}' });
+    }
+    if (mode === 'failed') return route.fulfill({ status: 503, body: '{}' });
+    if (mode === 'unavailable') return route.fulfill({ status: 400, body: '{}' });
     const params = new URL(route.request().url()).searchParams;
     await route.fulfill({
       json: {
@@ -79,7 +94,7 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.getByText('12', { exact: true })).toBeVisible();
   await expect(card.getByText('Bot counters could not load.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Filter Top pages by /pricing' })).toBeVisible();
-  fail = false;
+  mode = 'observed';
   await card.getByRole('button', { name: 'Retry traffic quality' }).click();
   await expect(card.getByText('7', { exact: true })).toBeVisible();
   await expect(card.getByText('estimated · partial coverage')).toBeVisible();
@@ -96,6 +111,35 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
       animations: 'disabled',
     });
   }
+  mode = 'deferred';
+  shift = 60_000;
+  await page.clock.fastForward(60_000);
+  await expect(card.getByText('Refreshing bot counters. Showing previous reading.')).toBeVisible();
+  await expect(card.getByText('7', { exact: true })).toBeVisible();
+  await expect(card.getByText(/Previous bot window:/)).toBeVisible();
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1100 });
+    await card.screenshot({
+      path: resolve(evidence, `refreshing-${width}.png`),
+      animations: 'disabled',
+    });
+  }
+  release();
+  await expect(card.getByText('Refresh failed. Showing previous reading.')).toBeVisible();
+  await expect(card.getByText('7', { exact: true })).toBeVisible();
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1100 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    await card.screenshot({
+      path: resolve(evidence, `refresh-failed-${width}.png`),
+      animations: 'disabled',
+    });
+  }
+  mode = 'observed';
+  await card.getByRole('button', { name: 'Retry traffic quality' }).click();
+  await expect(card.getByText(/Showing previous reading/)).toHaveCount(0);
   const beforeFilter = calls;
   await page.getByRole('button', { name: 'Filter Referral sources by Google' }).click();
   await expect(card.getByText(/unavailable for segment or named event filters/)).toBeVisible();
@@ -105,4 +149,17 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(page.getByRole('button', { name: 'Filter Top pages by /pricing' })).toBeVisible();
   await page.getByRole('button', { name: 'clear all filters' }).click();
   await expect(card.getByText('7', { exact: true })).toBeVisible();
+  mode = 'unavailable';
+  shift = 120_000;
+  await page.clock.fastForward(60_000);
+  await expect(card.getByText('Bot counters are not available for this period.')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Retry traffic quality' })).toHaveCount(0);
+  await expect(card.getByText('7', { exact: true })).toHaveCount(0);
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 1100 });
+    await card.screenshot({
+      path: resolve(evidence, `unavailable-${width}.png`),
+      animations: 'disabled',
+    });
+  }
 });

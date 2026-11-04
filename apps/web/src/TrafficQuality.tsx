@@ -1,3 +1,8 @@
+import {
+  loadingTrafficQuality,
+  failedTrafficQuality,
+  type TrafficQualityState,
+} from './traffic-quality-state.js';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   TrafficQuality as TrafficQualitySchema,
@@ -10,18 +15,13 @@ import { Button } from '@saas-maker/ui/components/button';
 import { ownerFetch } from './lib/owner-fetch.js';
 import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
 
-type State = { key: string } & (
-  | { status: 'waiting' }
-  | { status: 'loading' }
-  | { status: 'error' }
-  | { status: 'ready'; report: Report }
-);
 interface Props {
   ownerToken: string;
   appId: string;
   environmentId: string;
   report: BrowserReport | null;
   filtered: boolean;
+  period: string;
 }
 
 function useTrafficQuality(props: Props) {
@@ -33,6 +33,8 @@ function useTrafficQuality(props: Props) {
     workspace.epoch,
     appId,
     environmentId,
+    props.period,
+    filtered,
   ]);
   const context = useRef({ report: props.report, identity });
   if (context.current.report !== props.report) context.current = { report: props.report, identity };
@@ -40,40 +42,28 @@ function useTrafficQuality(props: Props) {
   const from = report?.from;
   const to = report?.to;
   const key = JSON.stringify([identity, from, to, filtered]);
-  const [state, setState] = useState<State>({ key, status: 'loading' });
+  const target = { context: identity, key, from: from ?? 0, to: to ?? 0 };
+  const [state, setState] = useState<TrafficQualityState>({ ...target, status: 'waiting' });
   const [retry, setRetry] = useState(0);
   useEffect(() => {
-    if (filtered || from === undefined || to === undefined) return;
+    if (filtered || from === undefined || to === undefined) {
+      setState({ ...target, status: 'waiting' });
+      return;
+    }
     const controller = new AbortController();
     let cancelled = false;
     const timer = setTimeout(() => controller.abort(), 12_000);
     const current = () => !cancelled && workspaceScope().epoch === workspace.epoch;
-    setState({ key, status: 'loading' });
+    setState((previous) => loadingTrafficQuality(previous, target));
     async function load() {
       try {
-        const params = new URLSearchParams({
-          app_id: appId,
-          environment_id: environmentId,
-          from: String(from),
-          to: String(to),
-        });
-        const response = await ownerFetch(`/v1/analytics/traffic-quality?${params}`, ownerToken, {
-          signal: controller.signal,
-          cache: 'no-store',
-        });
-        if (!response.ok) throw new Error('Traffic quality unavailable');
-        const parsed = TrafficQualitySchema.parse(await response.json());
-        if (
-          parsed.app_id !== appId ||
-          parsed.environment_id !== environmentId ||
-          parsed.from !== from ||
-          parsed.to !== to
-        )
-          throw new Error('Traffic quality scope mismatch');
-        if (current() && !controller.signal.aborted)
-          setState({ key, status: 'ready', report: parsed });
+        const result = await readTrafficQuality(
+          { ownerToken, appId, environmentId, from: target.from, to: target.to },
+          controller.signal,
+        );
+        if (current() && !controller.signal.aborted) setState({ ...target, ...result });
       } catch {
-        if (current()) setState({ key, status: 'error' });
+        if (current()) setState((previous) => failedTrafficQuality(previous, target));
       } finally {
         clearTimeout(timer);
       }
@@ -87,13 +77,47 @@ function useTrafficQuality(props: Props) {
   }, [key, retry, ownerToken, appId, environmentId, from, to, filtered, workspace.epoch]);
   return {
     report,
-    state: !report
-      ? { key, status: 'waiting' as const }
-      : state.key === key
-        ? state
-        : { key, status: 'loading' as const },
+    state:
+      !report || filtered
+        ? { ...target, status: 'waiting' as const }
+        : state.key === key && state.context === identity
+          ? state
+          : loadingTrafficQuality(state, target),
     retry: () => setRetry((value) => value + 1),
   };
+}
+
+async function readTrafficQuality(
+  scope: Pick<Props, 'ownerToken' | 'appId' | 'environmentId'> & { from: number; to: number },
+  signal: AbortSignal,
+): Promise<{ status: 'ready'; report: Report } | { status: 'unavailable' }> {
+  const { ownerToken, appId, environmentId, from, to } = scope;
+  const params = new URLSearchParams({
+    app_id: appId,
+    environment_id: environmentId,
+    from: String(from),
+    to: String(to),
+  });
+  const response = await ownerFetch(`/v1/analytics/traffic-quality?${params}`, ownerToken, {
+    signal,
+    cache: 'no-store',
+  });
+  if (response.status === 400) return { status: 'unavailable' };
+  if (!response.ok) throw new Error('Traffic quality unavailable');
+  const parsed = TrafficQualitySchema.parse(await response.json());
+  if (
+    parsed.app_id !== appId ||
+    parsed.environment_id !== environmentId ||
+    parsed.from !== from ||
+    parsed.to !== to
+  )
+    throw new Error('Traffic quality scope mismatch');
+  if (
+    parsed.bots.status === 'unknown' &&
+    ['unavailable', 'invalid_response'].includes(parsed.bots.reason)
+  )
+    throw new Error('Traffic quality read failed');
+  return { status: 'ready', report: parsed };
 }
 
 const count = (value: number) => value.toLocaleString();
@@ -118,6 +142,12 @@ function BotReading({ state, retry }: ReturnType<typeof useTrafficQuality>): Rea
         Loading bot counters…
       </p>
     );
+  if (state.status === 'unavailable')
+    return (
+      <p className="text-sm text-muted-foreground">
+        Bot counters are not available for this period.
+      </p>
+    );
   if (state.status === 'error')
     return (
       <div className="space-y-2">
@@ -127,7 +157,57 @@ function BotReading({ state, retry }: ReturnType<typeof useTrafficQuality>): Rea
         </Button>
       </div>
     );
-  const bots = state.report.bots;
+  return (
+    <div className="space-y-3">
+      <BotCounts report={state.report} retry={state.status === 'ready' ? retry : undefined} />
+      <RefreshNotice state={state} retry={retry} />
+    </div>
+  );
+}
+
+function RefreshNotice({
+  state,
+  retry,
+}: {
+  state: Extract<TrafficQualityState, { report: Report }>;
+  retry: () => void;
+}): ReactElement | null {
+  if (state.status === 'ready') return null;
+  const format = (timestamp: number) =>
+    new Date(timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  return (
+    <div className="space-y-2 border-t pt-2 text-xs leading-5 text-muted-foreground">
+      <p role="status">
+        {state.status === 'refreshing'
+          ? 'Refreshing bot counters. Showing previous reading.'
+          : 'Refresh failed. Showing previous reading.'}
+      </p>
+      <p>
+        Previous bot window:{' '}
+        <time dateTime={new Date(state.report.from).toISOString()}>
+          {format(state.report.from)}
+        </time>{' '}
+        to <time dateTime={new Date(state.report.to).toISOString()}>{format(state.report.to)}</time>
+        .
+      </p>
+      <p>
+        Read at{' '}
+        <time dateTime={new Date(state.report.generated_at).toISOString()}>
+          {format(state.report.generated_at)}
+        </time>
+        .
+      </p>
+      {state.status === 'refresh_error' ? (
+        <Button size="sm" variant="outline" onClick={retry}>
+          Retry traffic quality
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function BotCounts({ report, retry }: { report: Report; retry?: () => void }): ReactElement {
+  const bots = report.bots;
   if (bots.status === 'unknown')
     return (
       <div className="space-y-2">
@@ -135,9 +215,11 @@ function BotReading({ state, retry }: ReturnType<typeof useTrafficQuality>): Rea
         <p className="text-xs text-muted-foreground">
           {unknownReason[bots.reason]} Unknown does not mean zero.
         </p>
-        <Button size="sm" variant="outline" onClick={retry}>
-          Retry traffic quality
-        </Button>
+        {retry ? (
+          <Button size="sm" variant="outline" onClick={retry}>
+            Retry traffic quality
+          </Button>
+        ) : null}
       </div>
     );
   return (

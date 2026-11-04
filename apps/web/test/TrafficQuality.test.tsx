@@ -20,13 +20,14 @@ const props = {
   environmentId: 'env-one',
   report,
   filtered: false,
+  period: 'range:24h',
 };
 const response = (patch = {}) => ({
   app_id: 'app-one',
   environment_id: 'env-one',
   from: Date.UTC(2026, 10, 1),
   to: Date.UTC(2026, 10, 2),
-  generated_at: 3000,
+  generated_at: report.to + 1000,
   time_basis: 'receipt_time',
   qa_internal: 'not_separately_identified',
   bots: {
@@ -92,7 +93,7 @@ it('suppresses queries and comparison counts for segment or named event selectio
   expect(screen.queryByText('Not detected as bots')).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
   fetcher.mockResolvedValue(Response.json(response()));
-  view.rerender(<TrafficQuality {...props} />);
+  view.rerender(<TrafficQuality {...props} report={{ ...report }} />);
   await screen.findByText('7');
   view.rerender(<TrafficQuality {...props} filtered />);
   expect(screen.queryByText('7')).toBeNull();
@@ -183,4 +184,128 @@ it('waits explicitly for a current analytics report without pretending to load b
   ).toBeVisible();
   expect(screen.queryByText('Loading bot counters…')).toBeNull();
   expect(fetcher).not.toHaveBeenCalled();
+});
+
+it.each(['http', 'unavailable', 'invalid_response'] as const)(
+  'retains and labels the previous reading while the same rolling period refreshes and fails with %s',
+  async (failure) => {
+    let finish!: (response: Response) => void;
+    const fetcher = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json(response()))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    const view = render(<TrafficQuality {...props} />);
+    await screen.findByText('7');
+    const shifted = { ...report, from: report.from + 60_000, to: report.to + 60_000 };
+    view.rerender(<TrafficQuality {...props} report={shifted} />);
+    expect(screen.getByText('7')).toBeVisible();
+    expect(screen.getByText('Refreshing bot counters. Showing previous reading.')).toBeVisible();
+    expect(screen.queryByText('Loading bot counters…')).toBeNull();
+    expect(screen.getByText(/Previous bot window:/)).toBeVisible();
+    expect(
+      document.querySelector(`time[datetime="${new Date(report.to).toISOString()}"]`),
+    ).not.toBeNull();
+    expect(
+      document.querySelector(`time[datetime="${new Date(report.to + 1000).toISOString()}"]`),
+    ).not.toBeNull();
+    expect(fetcher.mock.calls[1][0]).toContain(`from=${shifted.from}&to=${shifted.to}`);
+    await act(async () =>
+      finish(
+        failure === 'http'
+          ? new Response(null, { status: 503 })
+          : Response.json(
+              response({
+                from: shifted.from,
+                to: shifted.to,
+                bots: { status: 'unknown', reason: failure },
+              }),
+            ),
+      ),
+    );
+    expect(screen.getByText('Refresh failed. Showing previous reading.')).toBeVisible();
+    expect(screen.getByText('7')).toBeVisible();
+    fetcher.mockResolvedValueOnce(
+      Response.json(
+        response({
+          from: shifted.from,
+          to: shifted.to,
+          bots: { ...response().bots, pageview_attempts: 9, cloudflare_verified: 6 },
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Retry traffic quality' }));
+    await screen.findByText('9');
+    expect(screen.queryByText(/Showing previous reading/)).toBeNull();
+    expect(screen.queryByText(/Previous bot window:/)).toBeNull();
+  },
+);
+
+it.each([
+  { period: 'range:7d' },
+  { period: 'date:2026-11-02' },
+  { ownerToken: 'other-owner' },
+  { appId: 'other-app' },
+  { environmentId: 'other-env' },
+  { filtered: true },
+])('clears an existing reading when its selected context changes %s', async (patch) => {
+  vi.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json(response()))
+    .mockImplementation(() => new Promise(() => {}));
+  const view = render(<TrafficQuality {...props} />);
+  await screen.findByText('7');
+  view.rerender(<TrafficQuality {...props} {...patch} report={{ ...report }} />);
+  expect(screen.queryByText('7')).toBeNull();
+  expect(screen.queryByText(/Showing previous reading/)).toBeNull();
+});
+
+it('clears an existing reading across workspace changes and backward window shifts', async () => {
+  vi.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json(response()))
+    .mockImplementation(() => new Promise(() => {}));
+  const view = render(<TrafficQuality {...props} />);
+  await screen.findByText('7');
+  view.rerender(
+    <TrafficQuality
+      {...props}
+      report={{ ...report, from: report.from - 60_000, to: report.to - 60_000 }}
+    />,
+  );
+  expect(screen.queryByText('7')).toBeNull();
+  act(() => selectWorkspace('other-workspace'));
+  expect(screen.queryByText('7')).toBeNull();
+  expect(screen.queryByText('12')).toBeNull();
+});
+
+it('treats an unsupported period response as terminal without a futile retry', async () => {
+  const fetcher = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValue(new Response(null, { status: 400 }));
+  const view = render(<TrafficQuality {...props} period="date:2026-01-01" />);
+  await screen.findByText('Bot counters are not available for this period.');
+  expect(screen.queryByRole('button', { name: 'Retry traffic quality' })).toBeNull();
+  expect(screen.queryByText('Bot counters could not load.')).toBeNull();
+  view.rerender(<TrafficQuality {...props} period="date:2026-01-01" report={{ ...report }} />);
+  expect(fetcher).toHaveBeenCalledTimes(1);
+});
+
+it('clears a previous reading when the refreshed period is unsupported', async () => {
+  vi.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json(response()))
+    .mockResolvedValueOnce(new Response(null, { status: 400 }));
+  const view = render(<TrafficQuality {...props} />);
+  await screen.findByText('7');
+  view.rerender(
+    <TrafficQuality
+      {...props}
+      report={{ ...report, from: report.from + 60_000, to: report.to + 60_000 }}
+    />,
+  );
+  await screen.findByText('Bot counters are not available for this period.');
+  expect(screen.queryByText('7')).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Retry traffic quality' })).toBeNull();
 });

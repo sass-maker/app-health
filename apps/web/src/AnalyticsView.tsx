@@ -320,6 +320,7 @@ export function AnalyticsView(props: AnalyticsViewProps): ReactElement {
           appId={v.appId}
           environmentId={v.environmentId}
           report={v.detail.report}
+          period={v.date ? `date:${v.date}` : `range:${v.range}`}
           filtered={!!v.selected || Object.keys(v.segments).length > 0}
         />
       ) : null}
