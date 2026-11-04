@@ -98,9 +98,13 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await card.getByRole('button', { name: 'Retry traffic quality' }).click();
   await expect(card.getByText('7', { exact: true })).toBeVisible();
   await expect(card.getByText('estimated · partial coverage')).toBeVisible();
+  await expect(card.getByText('Current reading.')).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Refresh traffic quality' })).toBeEnabled();
+  const readyHeights = new Map<number, number>();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
     await expect(card).toBeVisible();
+    readyHeights.set(width, (await card.boundingBox())!.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -117,8 +121,14 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.getByText('Refreshing bot counters. Showing previous reading.')).toBeVisible();
   await expect(card.getByText('7', { exact: true })).toBeVisible();
   await expect(card.getByText(/Previous bot window:/)).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Refresh traffic quality' })).toBeDisabled();
+  await expect(card.getByRole('status')).toHaveCount(0);
+  await expect(card.locator('[aria-live]')).toHaveCount(0);
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
+    expect(
+      Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
+    ).toBeLessThanOrEqual(1);
     await card.screenshot({
       path: resolve(evidence, `refreshing-${width}.png`),
       animations: 'disabled',
@@ -132,13 +142,16 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
+    expect(
+      Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
+    ).toBeLessThanOrEqual(1);
     await card.screenshot({
       path: resolve(evidence, `refresh-failed-${width}.png`),
       animations: 'disabled',
     });
   }
   mode = 'observed';
-  await card.getByRole('button', { name: 'Retry traffic quality' }).click();
+  await card.getByRole('button', { name: 'Refresh traffic quality' }).click();
   await expect(card.getByText(/Showing previous reading/)).toHaveCount(0);
   const beforeFilter = calls;
   await page.getByRole('button', { name: 'Filter Referral sources by Google' }).click();
@@ -154,6 +167,7 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await page.clock.fastForward(60_000);
   await expect(card.getByText('Bot counters are not available for this period.')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Retry traffic quality' })).toHaveCount(0);
+  await expect(card.getByRole('button', { name: 'Refresh traffic quality' })).toHaveCount(0);
   await expect(card.getByText('7', { exact: true })).toHaveCount(0);
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });

@@ -159,31 +159,32 @@ function BotReading({ state, retry }: ReturnType<typeof useTrafficQuality>): Rea
     );
   return (
     <div className="space-y-3">
-      <BotCounts report={state.report} retry={state.status === 'ready' ? retry : undefined} />
-      <RefreshNotice state={state} retry={retry} />
+      <BotCounts report={state.report} />
+      <ReadingMetadata state={state} retry={retry} />
     </div>
   );
 }
 
-function RefreshNotice({
+function ReadingMetadata({
   state,
   retry,
 }: {
   state: Extract<TrafficQualityState, { report: Report }>;
   retry: () => void;
-}): ReactElement | null {
-  if (state.status === 'ready') return null;
+}): ReactElement {
   const format = (timestamp: number) =>
     new Date(timestamp).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   return (
     <div className="space-y-2 border-t pt-2 text-xs leading-5 text-muted-foreground">
-      <p role="status">
-        {state.status === 'refreshing'
-          ? 'Refreshing bot counters. Showing previous reading.'
-          : 'Refresh failed. Showing previous reading.'}
+      <p className="min-h-5">
+        {state.status === 'ready'
+          ? 'Current reading.'
+          : state.status === 'refreshing'
+            ? 'Refreshing bot counters. Showing previous reading.'
+            : 'Refresh failed. Showing previous reading.'}
       </p>
       <p>
-        Previous bot window:{' '}
+        {state.status === 'ready' ? 'Current bot window:' : 'Previous bot window:'}{' '}
         <time dateTime={new Date(state.report.from).toISOString()}>
           {format(state.report.from)}
         </time>{' '}
@@ -197,16 +198,14 @@ function RefreshNotice({
         </time>
         .
       </p>
-      {state.status === 'refresh_error' ? (
-        <Button size="sm" variant="outline" onClick={retry}>
-          Retry traffic quality
-        </Button>
-      ) : null}
+      <Button size="sm" variant="outline" onClick={retry} disabled={state.status === 'refreshing'}>
+        Refresh traffic quality
+      </Button>
     </div>
   );
 }
 
-function BotCounts({ report, retry }: { report: Report; retry?: () => void }): ReactElement {
+function BotCounts({ report }: { report: Report }): ReactElement {
   const bots = report.bots;
   if (bots.status === 'unknown')
     return (
@@ -215,11 +214,6 @@ function BotCounts({ report, retry }: { report: Report; retry?: () => void }): R
         <p className="text-xs text-muted-foreground">
           {unknownReason[bots.reason]} Unknown does not mean zero.
         </p>
-        {retry ? (
-          <Button size="sm" variant="outline" onClick={retry}>
-            Retry traffic quality
-          </Button>
-        ) : null}
       </div>
     );
   return (

@@ -64,6 +64,9 @@ it('shows ordinary pageviews immediately while bot counters load independently, 
     'Recognized user agent: 3',
   );
   expect(within(card).getByText('Not separately identified')).toBeVisible();
+  expect(within(card).getByText('Current reading.')).toBeVisible();
+  expect(within(card).getByText(/Current bot window:/)).toBeVisible();
+  expect(within(card).getByRole('button', { name: 'Refresh traffic quality' })).toBeEnabled();
   expect(within(card).getByText(/These are not verified humans/)).toBeVisible();
   fireEvent.click(within(card).getByText('How these counts work'));
   expect(within(card).getByText(/appHealth.ignore/)).toBeVisible();
@@ -83,6 +86,8 @@ it('isolates failed bot loads, retries them, and never displays unknown as zero'
   await screen.findByText('Unknown');
   expect(screen.getByText(/Unknown does not mean zero/)).toBeVisible();
   expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByRole('button', { name: 'Refresh traffic quality' })).toHaveLength(1);
+  expect(screen.queryByRole('button', { name: 'Retry traffic quality' })).toBeNull();
 });
 
 it('suppresses queries and comparison counts for segment or named event selections', async () => {
@@ -206,6 +211,9 @@ it.each(['http', 'unavailable', 'invalid_response'] as const)(
     expect(screen.getByText('7')).toBeVisible();
     expect(screen.getByText('Refreshing bot counters. Showing previous reading.')).toBeVisible();
     expect(screen.queryByText('Loading bot counters…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Refresh traffic quality' })).toBeDisabled();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(document.querySelector('[aria-live]')).toBeNull();
     expect(screen.getByText(/Previous bot window:/)).toBeVisible();
     expect(
       document.querySelector(`time[datetime="${new Date(report.to).toISOString()}"]`),
@@ -238,10 +246,12 @@ it.each(['http', 'unavailable', 'invalid_response'] as const)(
         }),
       ),
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Retry traffic quality' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh traffic quality' }));
     await screen.findByText('9');
     expect(screen.queryByText(/Showing previous reading/)).toBeNull();
     expect(screen.queryByText(/Previous bot window:/)).toBeNull();
+    expect(screen.getByText(/Current bot window:/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Refresh traffic quality' })).toBeEnabled();
   },
 );
 
@@ -288,6 +298,7 @@ it('treats an unsupported period response as terminal without a futile retry', a
   const view = render(<TrafficQuality {...props} period="date:2026-01-01" />);
   await screen.findByText('Bot counters are not available for this period.');
   expect(screen.queryByRole('button', { name: 'Retry traffic quality' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Refresh traffic quality' })).toBeNull();
   expect(screen.queryByText('Bot counters could not load.')).toBeNull();
   view.rerender(<TrafficQuality {...props} period="date:2026-01-01" report={{ ...report }} />);
   expect(fetcher).toHaveBeenCalledTimes(1);
