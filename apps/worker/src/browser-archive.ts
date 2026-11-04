@@ -599,7 +599,14 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         assertDeadline();
         const result = await this.readScopeIndexBounds(reference, workspace!, bytes);
         assertDeadline();
-        this.publishScopeIndex(day, reference, page.snapshot_sequence, workspace!, result.scopes);
+        this.publishScopeIndex(
+          day,
+          reference,
+          page.snapshot_sequence,
+          workspace!,
+          result.scopes,
+          result.reason,
+        );
         if (result.reason) failed.push({ offset, reason: result.reason });
         else indexed++;
       }
@@ -610,7 +617,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
         next_cursor: page.next_cursor,
         snapshot_sequence: page.snapshot_sequence,
         complete: false,
-        note: 'Partial metadata repair only. Failed objects have derived scope metadata invalidated and remain unknown candidates. Indexing does not prove traffic or queue completeness.',
+        note: 'Partial metadata repair only. Deterministic failures invalidate derived scope metadata; transient source failures preserve prior verified metadata. Unindexed objects remain unknown candidates. Indexing does not prove traffic or queue completeness.',
       };
     } finally {
       this.reindexing = false;
@@ -659,6 +666,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     snapshotSequence: number,
     workspace: string,
     scopes: ScopeBounds[] | null,
+    failure?: ArchiveScopeIndexResult['failed'][number]['reason'],
   ): void {
     this.ctx.storage.transactionSync(() => {
       const currentWorkspace = this.ctx.storage.sql
@@ -679,7 +687,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
       if (currentWorkspace !== workspace || !retained.selected || retained.oldest === null)
         throw new Error('Archive scope index reference no longer retained');
       if (scopes) this.replaceScopeSegments(reference.object_key, scopes, retained.oldest);
-      else
+      else if (failure !== 'source_unavailable')
         this.ctx.storage.sql.exec(
           'DELETE FROM archive_scope_segments WHERE object_key = ?',
           reference.object_key,

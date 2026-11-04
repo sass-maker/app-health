@@ -198,6 +198,8 @@ const conversionFailures = new Map<string, ConversionFailure>([
   ['Archive cursor did not advance', { reason: 'archive_integrity' }],
   ['missing segment', { reason: 'archive_integrity' }],
   ['missing manifest', { reason: 'archive_integrity' }],
+  ['invalid manifest', { reason: 'archive_integrity' }],
+  ['invalid archive gzip or UTF-8', { reason: 'archive_integrity' }],
   ['manifest mismatch', { reason: 'archive_integrity' }],
   ['checksum mismatch', { reason: 'archive_integrity' }],
   ['manifest length mismatch', { reason: 'archive_integrity' }],

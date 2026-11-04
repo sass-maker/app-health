@@ -1356,6 +1356,7 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
     }
     unit.metadata.set(key, metadata);
     expect((await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).indexed).toBe(1);
+    const verified = unit.db.prepare('SELECT * FROM archive_scope_segments').all();
     unit.get.mockRejectedValueOnce(new Error('private object SQL diagnostics'));
     const result = await unit.archive.reindexScopeSegments(day, null, 'workspace-one');
     expect(result).toMatchObject({
@@ -1363,6 +1364,13 @@ describe('BrowserArchive instrumented SQLite coverage and counter invariants', (
       failed: [{ offset: 0, reason: 'source_unavailable' }],
     });
     expect(JSON.stringify(result)).not.toContain('private');
+    expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual(verified);
+    unit.db.exec('DELETE FROM archive_scope_segments');
+    unit.get.mockRejectedValueOnce(new Error('source unavailable'));
+    expect(await unit.archive.reindexScopeSegments(day, null, 'workspace-one')).toMatchObject({
+      indexed: 0,
+      failed: [{ offset: 0, reason: 'source_unavailable' }],
+    });
     expect(unit.db.prepare('SELECT * FROM archive_scope_segments').all()).toEqual([]);
   });
 

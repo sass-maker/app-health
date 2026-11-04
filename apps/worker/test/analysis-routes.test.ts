@@ -127,6 +127,8 @@ it('returns only static conversion failure categories while preserving error sta
     error: publicError,
     reason: 'archive_integrity',
   });
+  for (const message of ['invalid manifest', 'invalid archive gzip or UTF-8'])
+    expect(await request(message)).toEqual({ error: publicError, reason: 'archive_integrity' });
   expect(await request('Conversion archive unavailable')).toEqual({
     error: publicError,
     reason: 'source_unavailable',
