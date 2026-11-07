@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { operationsPreview } from './operations-preview.js';
 
 interface LocalWorkerModule {
   default: {
@@ -125,6 +126,7 @@ export default defineConfig({
     dashboardModulePreloads(),
     react(),
     tailwindcss(),
+    operationsPreview(),
     localWorkerApi(),
   ],
   optimizeDeps: {

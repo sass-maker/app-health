@@ -584,6 +584,71 @@ describe('App Health V0 UI', () => {
     expect(screen.getByRole('button', { name: 'create project' })).toBeTruthy();
   });
 
+  it('shares Operations navigation with the project dashboard and resets to setup with one history entry', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#operations');
+    installFetch({
+      apps: [
+        {
+          app: { id: savedProject.appId, name: savedProject.name, created_at: 1 },
+          environments: [
+            {
+              id: savedProject.environmentId,
+              app_id: savedProject.appId,
+              name: savedProject.environment,
+              created_at: 1,
+            },
+          ],
+        },
+      ],
+    });
+    render(<App />);
+    await screen.findByRole('heading', { name: 'operations', level: 1 });
+    fireEvent.click(await screen.findByRole('button', { name: savedProject.name }));
+    await waitFor(() => expect(location.hash).toBe('#analytics'));
+    const previousUrl = location.href;
+    const push = vi.spyOn(history, 'pushState');
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: 'Add another project' }));
+      expect(await screen.findByRole('button', { name: 'create project' })).toBeVisible();
+      expect(location.hash).toBe('');
+      expect(location.search).toBe('');
+      expect(push).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('heading', { name: 'operations', level: 1 })).toBeNull();
+      await act(async () => {
+        history.back();
+      });
+      await waitFor(() => expect(location.href).toBe(previousUrl));
+      await waitFor(() => expectSelectedProject(savedProject.name));
+    } finally {
+      push.mockRestore();
+    }
+  });
+
+  it('does not read operations while an explicit project inventory is unavailable', async () => {
+    history.replaceState(null, '', '/app?project=foreign&environment=production#operations');
+    const fetch = installFetch({ appsFail: true });
+    render(<App />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('project list could not load');
+    expect(
+      fetch.mock.calls.some(
+        ([input]) =>
+          new URL(String(input), location.origin).pathname === '/v1/workspace/operations',
+      ),
+    ).toBe(false);
+    expect(screen.queryByRole('heading', { name: 'operations', level: 1 })).toBeNull();
+  });
+
+  it('keeps failed sign-out visible in Operations without a selected project', async () => {
+    history.replaceState(null, '', '/app#operations');
+    installFetch({ google: true, signOutFail: true });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'sign out' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not sign out');
+    expect(screen.getByRole('heading', { name: 'operations', level: 1 })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'sign out' })).toBeEnabled();
+  });
+
   it('keeps Google sign-in available when the signed-out inventory probe is unauthorized', async () => {
     vi.stubEnv('DEV', false);
     installFetch({ google: true, appsFail: true });
