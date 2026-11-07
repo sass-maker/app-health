@@ -1,5 +1,5 @@
 import { WorkspaceManage } from './lib/workspace-scope.js';
-import { type DashboardView } from './dashboard-navigation.js';
+import { isWorkspaceView, type DashboardView } from './dashboard-navigation.js';
 import { useMemo, useState, type ReactNode, type ReactElement } from 'react';
 import {
   Activity,
@@ -139,11 +139,11 @@ function ProjectNavigation({
           {matches.map((app) => (
             <SidebarMenuItem key={app.appId}>
               <SidebarMenuButton
-                isActive={view !== 'overview' && view !== 'speed' && project.appId === app.appId}
+                isActive={!isWorkspaceView(view) && project.appId === app.appId}
                 title={app.name}
                 onClick={() => {
                   onProject(projectForApp(app, project, projects));
-                  if (view === 'overview' || view === 'speed') onView('analytics');
+                  if (isWorkspaceView(view)) onView('analytics');
                   setOpenMobile(false);
                 }}
               >
@@ -176,13 +176,16 @@ function WorkspaceSidebar(props: WorkspaceSidebarProps): ReactElement {
         <NavigationGroup
           label="workspace"
           items={[
+            { id: 'operations', label: 'operations', icon: Activity },
             { id: 'overview', label: 'daily briefing', icon: Layers3 },
             { id: 'speed', label: 'speed', icon: Gauge },
           ]}
           view={props.view}
           onView={props.onView}
         />
-        <ProjectNavigation {...props} />
+        {props.projects.length || props.view !== 'operations' ? (
+          <ProjectNavigation {...props} />
+        ) : null}
         <WorkspaceSidebarFooter onAdd={props.onAdd} />
       </SidebarContent>
     </Sidebar>
@@ -267,11 +270,11 @@ function ProjectPicker({
     <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
       <span
         className="min-w-0 flex-1 truncate text-sm font-medium"
-        title={view === 'overview' || view === 'speed' ? 'portfolio' : project.name}
+        title={isWorkspaceView(view) ? 'portfolio' : project.name}
       >
-        {view === 'overview' || view === 'speed' ? 'portfolio' : project.name}
+        {isWorkspaceView(view) ? 'portfolio' : project.name}
       </span>
-      {view !== 'overview' && view !== 'speed' ? (
+      {!isWorkspaceView(view) ? (
         <LabeledSelect
           label="Environment"
           triggerClassName="h-9 w-28 text-xs"
@@ -346,7 +349,7 @@ export function ProductShell(props: Props): ReactElement {
               </Badge>
             ) : null}
           </div>
-          {props.view !== 'overview' && props.view !== 'speed' ? (
+          {!isWorkspaceView(props.view) ? (
             <Tabs
               value={props.view.split('/')[0]}
               onValueChange={(value) => props.onView(value as DashboardView)}

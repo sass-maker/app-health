@@ -127,6 +127,7 @@ import {
 } from '@saas-maker/ui/components/table';
 import { ThemeToggle } from './ThemeToggle.js';
 import { ProjectsView } from './ProjectsView.js';
+import { OperationsView } from './OperationsView.js';
 
 const INGEST_ORIGIN =
   (import.meta.env.VITE_APP_HEALTH_INGEST_ORIGIN as string | undefined) ?? window.location.origin;
@@ -3378,6 +3379,7 @@ function DashboardBackend(props: DashboardContentProps & { view: BackendView }):
 
 function DashboardContent(props: DashboardContentProps): ReactElement {
   const { view } = props;
+  if (view === 'operations') return <OperationsView ownerToken={props.ownerToken} />;
   if (view === 'speed') return <SpeedView ownerToken={props.ownerToken} />;
   if (isBackendView(view)) return <DashboardBackend {...props} view={view} />;
   return view === 'analytics' || view === 'events' ? (
@@ -3657,6 +3659,7 @@ function workspaceEntry(
 }
 
 function AppSession(): ReactElement {
+  const [workspaceView, changeWorkspaceView] = useDashboardNavigation();
   const bootstrap = useAccountBootstrap();
   const bootstrapApplied = useRef(false);
   const [accountSession, setAccountSession] = useState(false);
@@ -3880,6 +3883,23 @@ function AppSession(): ReactElement {
   }
 
   if (ownerToken === null) return workspaceEntry(bootstrap, bootstrapApplied.current, handleUnlock);
+
+  if (!project && workspaceView === 'operations')
+    return (
+      <ProductShell
+        view="operations"
+        {...DASHBOARD_PAGES.operations}
+        project={{ appId: '', environmentId: '', name: 'portfolio', environment: '' }}
+        projects={import.meta.env.DEV ? [] : projects}
+        onView={changeWorkspaceView}
+        onProject={selectProject}
+        onAdd={() => changeWorkspaceView('settings')}
+        onLock={() => void lock()}
+        accountSession={accountSession}
+      >
+        <OperationsView ownerToken={ownerToken} />
+      </ProductShell>
+    );
 
   if (created)
     return (

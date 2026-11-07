@@ -7,6 +7,12 @@ const backend = {
 };
 
 export const DASHBOARD_PAGES = {
+  operations: {
+    eyebrow: 'workspace',
+    title: 'operations',
+    description:
+      'See what reported, what failed, and where coverage is still missing across your portfolio.',
+  },
   overview: {
     eyebrow: 'workspace',
     title: 'daily briefing',
@@ -43,6 +49,9 @@ export const DASHBOARD_PAGES = {
 };
 
 export type DashboardView = keyof typeof DASHBOARD_PAGES;
+export function isWorkspaceView(view: DashboardView): boolean {
+  return view === 'overview' || view === 'speed' || view === 'operations';
+}
 export type BackendView = Extract<DashboardView, `backend${string}`>;
 
 export function capabilityView(id: CapabilityId): DashboardView {
