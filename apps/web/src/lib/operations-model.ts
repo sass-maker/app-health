@@ -56,17 +56,17 @@ const health = ['healthy', 'failing', 'degraded', 'unknown', 'running', 'attenti
 const freshness = ['current', 'stale', 'missing'];
 const record = (value: unknown): value is Record<string, unknown> =>
   Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const boundedText = (value: unknown): value is string =>
+  typeof value === 'string' && value.length <= 2000;
 const text = (value: unknown): value is string =>
-  typeof value === 'string' &&
-  value.length <= 2000 &&
-  !/\/(?:Users|home|private|tmp)\/[^\s]/.test(value);
+  boundedText(value) && !/\/(?:Users|home|private|tmp)\/[^\s]/.test(value);
 const date = (value: unknown) =>
   value === null || (text(value) && Number.isFinite(Date.parse(value)));
 const textFields = (value: Record<string, unknown>, keys: string[]) =>
   keys.every((key) => text(value[key]));
 function safeUrl(value: unknown): boolean {
   if (value === undefined) return true;
-  if (!text(value)) return false;
+  if (!boundedText(value)) return false;
   try {
     const url = new URL(value);
     return (

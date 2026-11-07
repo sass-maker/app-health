@@ -3173,7 +3173,10 @@ function useEndpointData(
   return { data, status, error, loading };
 }
 
-function useDashboardNavigation(): [DashboardView, (value: DashboardView) => void] {
+function useDashboardNavigation(): [
+  DashboardView,
+  (value: DashboardView, writeHistory?: boolean) => void,
+] {
   const [view, setView] = useState<DashboardView>(viewFromHash);
   useEffect(() => {
     document.title = `${DASHBOARD_PAGES[view].title} — App Health`;
@@ -3181,7 +3184,7 @@ function useDashboardNavigation(): [DashboardView, (value: DashboardView) => voi
   useEffect(() => {
     const syncView = () => {
       const next = viewFromHash();
-      if (location.hash !== `#${next}`) history.replaceState(null, '', `#${next}`);
+      if (location.hash && location.hash !== `#${next}`) history.replaceState(null, '', `#${next}`);
       setView(next);
     };
     syncView();
@@ -3194,9 +3197,9 @@ function useDashboardNavigation(): [DashboardView, (value: DashboardView) => voi
   }, []);
   return [
     view,
-    (value) => {
+    (value, writeHistory = true) => {
       setView(value);
-      if (location.hash !== `#${value}`) history.pushState(null, '', `#${value}`);
+      if (writeHistory && location.hash !== `#${value}`) history.pushState(null, '', `#${value}`);
     },
   ];
 }
@@ -3455,18 +3458,16 @@ function DashboardManagement(props: DashboardContentProps): ReactElement {
   );
 }
 
-function Dashboard({
-  project,
-  projects,
-  ownerToken,
-  handlers,
-}: {
+interface DashboardProps {
   project: SavedProject;
   projects: SavedProject[];
   ownerToken: string;
   handlers: DashboardHandlers;
-}): ReactElement {
-  const [view, changeView] = useDashboardNavigation();
+  view: DashboardView;
+  onView: (view: DashboardView) => void;
+}
+function Dashboard(props: DashboardProps): ReactElement {
+  const { project, projects, ownerToken, handlers, view, onView: changeView } = props;
   const [windowKey, setWindowKey] = useState<Window>('15m');
   const [sortKey, setSortKey] = useState<SortKey>('health');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
@@ -3658,6 +3659,16 @@ function workspaceEntry(
   return <OwnerUnlock onUnlock={onUnlock} googleEnabled={bootstrap.result?.google ?? false} />;
 }
 
+function SessionErrorNotice({ message }: { message: string }): ReactElement | null {
+  return message ? (
+    <Alert variant="destructive" className="fixed right-4 top-4 z-50 max-w-sm shadow-lg">
+      <AlertTriangle />
+      <AlertTitle>account action failed</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
+  ) : null;
+}
+
 function AppSession(): ReactElement {
   const [workspaceView, changeWorkspaceView] = useDashboardNavigation();
   const bootstrap = useAccountBootstrap();
@@ -3806,6 +3817,7 @@ function AppSession(): ReactElement {
       '',
       `${url.pathname}${url.search}${url.hash}`,
     );
+    changeWorkspaceView(viewFromHash());
     setCreated(null);
   }
 
@@ -3846,11 +3858,11 @@ function AppSession(): ReactElement {
     else if (strictRequestedProject && requestedProject) {
       setProject(null);
       setSelectionError(projectUnavailableMessage(requestedProject));
-    } else reset(true);
+    } else reset(true, workspaceView);
     setOwnerToken(token);
   }
 
-  function reset(replaceHistory = false): void {
+  function reset(replaceHistory = false, preserveView?: DashboardView): void {
     localStorage.removeItem(projectStorageKey());
     setCreated(null);
     setProject(null);
@@ -3860,7 +3872,9 @@ function AppSession(): ReactElement {
     const url = new URL(window.location.href);
     url.pathname = '/app';
     url.search = '';
+    url.hash = preserveView && location.hash ? `#${preserveView}` : '';
     history[replaceHistory ? 'replaceState' : 'pushState'](null, '', `${url.pathname}${url.hash}`);
+    changeWorkspaceView(preserveView ?? 'analytics', false);
   }
 
   async function lock(): Promise<void> {
@@ -3884,29 +3898,13 @@ function AppSession(): ReactElement {
 
   if (ownerToken === null) return workspaceEntry(bootstrap, bootstrapApplied.current, handleUnlock);
 
-  if (!project && workspaceView === 'operations')
-    return (
-      <ProductShell
-        view="operations"
-        {...DASHBOARD_PAGES.operations}
-        project={{ appId: '', environmentId: '', name: 'portfolio', environment: '' }}
-        projects={import.meta.env.DEV ? [] : projects}
-        onView={changeWorkspaceView}
-        onProject={selectProject}
-        onAdd={() => changeWorkspaceView('settings')}
-        onLock={() => void lock()}
-        accountSession={accountSession}
-      >
-        <OperationsView ownerToken={ownerToken} />
-      </ProductShell>
-    );
-
   if (created)
     return (
       <KeySetup
         created={created}
         onDone={() => {
           history.replaceState(null, '', '#settings');
+          changeWorkspaceView('settings', false);
           setCreated(null);
         }}
       />
@@ -3927,6 +3925,26 @@ function AppSession(): ReactElement {
         </Alert>
       </div>
     );
+  if (!project && !strictRequestedProject && !selectionError && workspaceView === 'operations')
+    return (
+      <>
+        <SessionErrorNotice message={sessionError} />
+        <ProductShell
+          view="operations"
+          {...DASHBOARD_PAGES.operations}
+          project={{ appId: '', environmentId: '', name: 'portfolio', environment: '' }}
+          projects={import.meta.env.DEV ? [] : projects}
+          onView={changeWorkspaceView}
+          onProject={selectProject}
+          onAdd={() => reset()}
+          onLock={() => void lock()}
+          accountSession={accountSession}
+        >
+          <OperationsView ownerToken={ownerToken} />
+        </ProductShell>
+      </>
+    );
+
   if (!project)
     return (
       <ProjectSetupShell
@@ -3943,15 +3961,11 @@ function AppSession(): ReactElement {
 
   return (
     <>
-      {sessionError ? (
-        <Alert variant="destructive" className="fixed right-4 top-4 z-50 max-w-sm shadow-lg">
-          <AlertTriangle />
-          <AlertTitle>account action failed</AlertTitle>
-          <AlertDescription>{sessionError}</AlertDescription>
-        </Alert>
-      ) : null}
+      <SessionErrorNotice message={sessionError} />
       <Dashboard
         key={`${project.appId}/${project.environmentId}`}
+        view={workspaceView}
+        onView={changeWorkspaceView}
         project={project}
         projects={
           projects.some((candidate) => candidate.environmentId === project.environmentId)

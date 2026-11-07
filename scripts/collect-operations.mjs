@@ -4,6 +4,7 @@ import { fileURLToPath, URL } from 'node:url';
 import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import { buildOperationsSnapshot } from './lib/operations-normalize.mjs';
+import { readOperationsSnapshot } from '../apps/web/src/lib/operations-model.ts';
 
 const options = new Set([
   'catalog',
@@ -75,15 +76,17 @@ async function main() {
       optionalSource(() => readInput(args.security)),
     ],
   );
-  const snapshot = buildOperationsSnapshot({
-    catalog,
-    github,
-    deployments,
-    workspace,
-    probes,
-    siteHealth,
-    security,
-  });
+  const snapshot = readOperationsSnapshot(
+    buildOperationsSnapshot({
+      catalog,
+      github,
+      deployments,
+      workspace,
+      probes,
+      siteHealth,
+      security,
+    }),
+  );
   const output = resolve(args.output);
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   if (output === repo || output.startsWith(repo + '/'))

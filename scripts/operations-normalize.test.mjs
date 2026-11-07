@@ -1,5 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import process from 'node:process';
+import { fileURLToPath, URL } from 'node:url';
 import { buildOperationsSnapshot } from './lib/operations-normalize.mjs';
 
 const now = '2026-11-07T13:00:00Z';
@@ -46,6 +52,64 @@ const workflow = (values = {}) => ({
 const github = (workflows, extra = {}) => ({
   completedAt: now,
   repositories: [{ repository: 'example/alpha', branch: 'main', sha: 'head', workflows, ...extra }],
+});
+
+test('the collector validates legitimate home URLs and preserves prior output on invalid schema', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'operations-collector-'));
+  const catalogFile = join(dir, 'catalog.json');
+  const probeFile = join(dir, 'probes.json');
+  const githubFile = join(dir, 'github.json');
+  const output = join(dir, 'snapshot.json');
+  const input = globalThis.structuredClone(catalog);
+  input.projects[0].repositories.url = 'https://github.com/acme/home';
+  const source = github([
+    workflow({ defaultBranch: run({ url: 'https://github.com/acme/home/actions/runs/1' }) }),
+  ]);
+  source.repositories[0].repository = 'acme/home';
+  const args = [
+    fileURLToPath(new URL('./collect-operations.mjs', import.meta.url)),
+    '--catalog',
+    catalogFile,
+    '--probe-results',
+    probeFile,
+    '--github',
+    githubFile,
+    '--output',
+    output,
+  ];
+  try {
+    writeFileSync(catalogFile, JSON.stringify(input));
+    writeFileSync(githubFile, JSON.stringify(source));
+    writeFileSync(
+      probeFile,
+      JSON.stringify({
+        generatedAt: now,
+        results: [
+          {
+            id: 'home',
+            projectId: 'alpha',
+            name: 'Home feed',
+            url: 'https://a.example/home/feed',
+            observedAt: now,
+            status: 'healthy',
+          },
+        ],
+      }),
+    );
+    const accepted = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(accepted.status, 0, accepted.stderr);
+    const previous = readFileSync(output, 'utf8');
+    assert.match(previous, /https:\/\/a.example\/home\/feed/);
+    assert.match(previous, /https:\/\/github.com\/acme\/home\/actions\/runs\/1/);
+    input.projects[0].name = '/Users/private/invalid';
+    writeFileSync(catalogFile, JSON.stringify(input));
+    const rejected = spawnSync(process.execPath, args, { encoding: 'utf8' });
+    assert.equal(rejected.status, 1);
+    assert.equal(readFileSync(output, 'utf8'), previous);
+    assert.doesNotMatch(rejected.stderr, /\/Users\/private/);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
 });
 
 test('counts canonical active scope and keeps absent integrations unconnected', () => {

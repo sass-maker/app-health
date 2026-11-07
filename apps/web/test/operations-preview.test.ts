@@ -68,6 +68,15 @@ it('rejects unsafe evidence, incomplete relationships and duplicate identities',
   orphan.observations[0].feedId = 'missing';
   expect(() => readOperationsSnapshot(orphan)).toThrow();
 });
+
+it('accepts HTTP URL paths with home/private/tmp while rejecting real private free text', () => {
+  const snapshot = operationsFixture();
+  snapshot.feeds[0].evidenceUrl = 'https://a.example/home/feed';
+  snapshot.observations[0].evidenceUrl = 'https://github.com/acme/home/actions/runs/1';
+  expect(readOperationsSnapshot(snapshot).feeds[0].evidenceUrl).toBe('https://a.example/home/feed');
+  snapshot.feeds[0].summary = '/Users/private/source';
+  expect(() => readOperationsSnapshot(snapshot)).toThrow();
+});
 it('does not refresh old source collection by rereading or generating a newer snapshot', () => {
   const snapshot = operationsFixture();
   snapshot.feeds[0].collectedAt = '2026-01-01T00:00:00Z';

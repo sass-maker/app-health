@@ -20,6 +20,27 @@ import {
 type Audience = 'all' | 'public' | 'internal';
 type WorkStatus = 'attention' | 'coverage' | 'all' | 'running' | 'resolved' | 'unknown';
 
+function observationOrder(left: OperationsObservation, right: OperationsObservation): number {
+  const priority = { error: 0, warning: 1, info: 2 };
+  const severity = priority[left.severity] - priority[right.severity];
+  if (severity) return severity;
+  const leftTime = left.observedAt ? Date.parse(left.observedAt) : -Infinity;
+  const rightTime = right.observedAt ? Date.parse(right.observedAt) : -Infinity;
+  return leftTime === rightTime ? left.id.localeCompare(right.id) : rightTime - leftTime;
+}
+function snapshotReadError(status: number): string {
+  return status === 401 || status === 403
+    ? `Operations preview returned ${status}. It is available only in the local owner's personal workspace. Return to that workspace and try again.`
+    : `Source snapshot returned ${status}. Collect the sources again, then reload.`;
+}
+function securityAccessGap(entry: OperationsObservation, feed?: OperationsFeed): boolean {
+  return (
+    feed?.familyId === 'github-security' &&
+    feed.health === 'unavailable' &&
+    entry.scope === 'collector'
+  );
+}
+
 function ObservationRow({
   entry,
   feed,
@@ -93,7 +114,7 @@ function selectOperations(
   const all = snapshot.observations.filter(
     (entry) => feedMap.has(entry.feedId) && (entry.projectId === null || ids.has(entry.projectId)),
   );
-  const coverage = all.filter((entry) => feedMap.get(entry.feedId)?.health === 'unavailable');
+  const coverage = all.filter((entry) => securityAccessGap(entry, feedMap.get(entry.feedId)));
   const actionable = all.filter(
     (entry) =>
       entry.severity !== 'info' && entry.status !== 'resolved' && !coverage.includes(entry),
@@ -306,20 +327,14 @@ function OperationsReports({
       <TabsContent value="attention">
         {matches.length ? (
           <ol aria-label="Operational observations">
-            {matches
-              .sort(
-                (a, b) =>
-                  ({ error: 0, warning: 1, info: 2 })[a.severity] -
-                  { error: 0, warning: 1, info: 2 }[b.severity],
-              )
-              .map((entry) => (
-                <ObservationRow
-                  key={entry.id}
-                  entry={entry}
-                  feed={feedMap.get(entry.feedId)!}
-                  projects={snapshot.projects}
-                />
-              ))}
+            {matches.sort(observationOrder).map((entry) => (
+              <ObservationRow
+                key={entry.id}
+                entry={entry}
+                feed={feedMap.get(entry.feedId)!}
+                projects={snapshot.projects}
+              />
+            ))}
           </ol>
         ) : (
           <EmptyState
@@ -400,22 +415,46 @@ function Metric({
     </div>
   );
 }
-export function OperationsView({ ownerToken }: { ownerToken: string }): ReactElement {
-  const [state, setState] = useState<{
-    token: string;
-    data: OperationsSnapshot | null;
-    error: string;
-    loading: boolean;
-    unavailable: boolean;
-  }>({ token: ownerToken, data: null, error: '', loading: true, unavailable: false });
+interface OperationsLoad {
+  token: string;
+  data: OperationsSnapshot | null;
+  error: string;
+  loading: boolean;
+  unavailable: boolean;
+}
+function useOperationsSnapshot(ownerToken: string) {
+  const [state, setState] = useState<OperationsLoad>({
+    token: ownerToken,
+    data: null,
+    error: '',
+    loading: true,
+    unavailable: false,
+  });
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
-    setState({ token: ownerToken, data: null, error: '', loading: true, unavailable: false });
+    setState((previous) => ({
+      token: ownerToken,
+      data: previous.token === ownerToken ? previous.data : null,
+      error: '',
+      loading: true,
+      unavailable: false,
+    }));
     const timer = window.setTimeout(() => controller.abort(), 10_000);
     void ownerFetch('/v1/workspace/operations', ownerToken, { signal: controller.signal })
       .then(async (response) => {
+        if ([401, 403].includes(response.status)) {
+          if (!disposed)
+            setState({
+              token: ownerToken,
+              data: null,
+              error: snapshotReadError(response.status),
+              loading: false,
+              unavailable: false,
+            });
+          return;
+        }
         if (response.status === 404) {
           if (!disposed)
             setState({
@@ -427,19 +466,16 @@ export function OperationsView({ ownerToken }: { ownerToken: string }): ReactEle
             });
           return;
         }
-        if (!response.ok)
-          throw new Error(
-            `Source snapshot returned ${response.status}. Collect the sources again, then reload.`,
-          );
+        if (!response.ok) throw new Error(snapshotReadError(response.status));
         const data = readOperationsSnapshot(await response.json());
         if (!disposed)
           setState({ token: ownerToken, data, error: '', loading: false, unavailable: false });
       })
       .catch((error: unknown) => {
         if (!disposed)
-          setState({
+          setState((previous) => ({
             token: ownerToken,
-            data: null,
+            data: previous.token === ownerToken ? previous.data : null,
             error: controller.signal.aborted
               ? 'Source snapshot request timed out. Try again.'
               : error instanceof Error
@@ -447,7 +483,7 @@ export function OperationsView({ ownerToken }: { ownerToken: string }): ReactEle
                 : 'Source snapshot unavailable.',
             loading: false,
             unavailable: false,
-          });
+          }));
       })
       .finally(() => window.clearTimeout(timer));
     return () => {
@@ -457,13 +493,17 @@ export function OperationsView({ ownerToken }: { ownerToken: string }): ReactEle
     };
   }, [ownerToken, revision]);
   const refresh = () => setRevision((value) => value + 1);
-  if (state.token !== ownerToken || state.loading)
+  return { state, refresh };
+}
+export function OperationsView({ ownerToken }: { ownerToken: string }): ReactElement {
+  const { state, refresh } = useOperationsSnapshot(ownerToken);
+  if (state.token !== ownerToken || (state.loading && !state.data))
     return (
       <div role="status" className="py-16 text-sm text-muted-foreground">
         Reading the collected operations sources…
       </div>
     );
-  if (state.error)
+  if (state.error && !state.data)
     return (
       <ErrorState
         title="Operations sources are unavailable"
@@ -478,5 +518,17 @@ export function OperationsView({ ownerToken }: { ownerToken: string }): ReactEle
         description="This view reads an explicitly configured private snapshot in the local owner preview. Production sources have not been activated."
       />
     );
-  return <OperationsData data={state.data} loading={state.loading} onRefresh={refresh} />;
+  return (
+    <>
+      {state.error ? (
+        <div role="alert" className="mb-5 rounded-lg border border-destructive/40 p-4 text-sm">
+          <p className="font-medium">
+            Reload failed. Showing the retained snapshot from {dateLabel(state.data.generatedAt)}.
+          </p>
+          <p className="mt-1 text-muted-foreground">{state.error}</p>
+        </div>
+      ) : null}
+      <OperationsData data={state.data} loading={state.loading} onRefresh={refresh} />
+    </>
+  );
 }
