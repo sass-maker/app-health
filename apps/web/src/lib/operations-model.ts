@@ -1,13 +1,13 @@
-export type OperationsHealth =
+type OperationsHealth =
   'healthy' | 'failing' | 'degraded' | 'unknown' | 'running' | 'attention' | 'unavailable';
-export type OperationsFreshness = 'current' | 'stale' | 'missing';
-export interface OperationsProject {
+type OperationsFreshness = 'current' | 'stale' | 'missing';
+interface OperationsProject {
   id: string;
   name: string;
   audience: 'public' | 'internal';
   kind: 'product' | 'experiment' | 'platform';
 }
-export interface OperationsFamily {
+interface OperationsFamily {
   id: string;
   name: string;
   producer: string;
