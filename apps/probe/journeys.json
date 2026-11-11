@@ -46,7 +46,7 @@
     {
       "project": "live",
       "journey": "home",
-      "url": "https://live.significanthobbies.com/",
+      "url": "https://significanthobbies.com/",
       "budget_ms": 3000,
       "expect": {
         "content_type": "text/html",
@@ -508,6 +508,19 @@
         "content_type": "text/html",
         "body_includes": [
           "<title>ContextDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "agent-inbox",
+      "journey": "home",
+      "url": "https://agentinbox.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "Agent Inbox"
         ],
         "first_party_asset": false
       }
