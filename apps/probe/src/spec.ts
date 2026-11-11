@@ -1,7 +1,7 @@
 // Journey probe policy. A journey is one fixed, read-only, public request
 // against a production hostname, plus the checks that make its response count
 // as usable. Policy is data: apps/probe/journeys.json is generated from the
-// canonical SaaS Maker catalog (`projects[].systems.probe`, `pnpm catalog:sync`)
+// canonical Site Health catalog (`projects[].systems.probe`, `pnpm catalog:sync`)
 // and is never hand-edited. Catalog policy is GET-only; POST support remains
 // for fixed public fixtures passed explicitly with --config.
 
