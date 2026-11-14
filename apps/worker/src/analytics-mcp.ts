@@ -13,6 +13,22 @@ const tools: {
   write?: boolean;
 }[] = [
   {
+    name: 'monitoring_report',
+    description:
+      'Declared monitoring coverage, latest synthetic check results and freshness for one authorized production project. Missing, stale and private coverage is explicit; a public check does not prove private or native workflows.',
+    path: '/v1/workspace/monitoring',
+    properties: scopeProperties,
+    required: ['app_id', 'environment_id'],
+  },
+  {
+    name: 'alerts',
+    description:
+      'Recent production failures, degradation, recovery and response receipts for one authorized production project. Returns event metadata only.',
+    path: '/v1/workspace/alerts',
+    properties: scopeProperties,
+    required: ['app_id', 'environment_id'],
+  },
+  {
     name: 'sites',
     description: 'List projects and environments authorized by this token.',
     path: '/v1/apps',

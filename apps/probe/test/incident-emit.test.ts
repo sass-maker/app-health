@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { advance, type JourneyState, type Outcome, type Transition } from '../src/incident.ts';
-import { createDeliver, heartbeatLog, transitionLog } from '../src/emit.ts';
+import { createDeliver, heartbeatLog, transitionLog, type ProbeLog } from '../src/emit.ts';
 import { parseSpec } from '../src/spec.ts';
 
 function replay(outcomes: Outcome[]): Array<Transition['kind'] | Transition['status'] | '-'> {
@@ -185,5 +185,30 @@ describe('createDeliver', () => {
     );
     await expect(broken([log])).resolves.toBe(false);
     await expect(broken([])).resolves.toBe(true);
+  });
+
+  it('splits large runs into accepted batches and keeps log identities stable on retry', async () => {
+    const received: ProbeLog[][] = [];
+    let reject = true;
+    const deliver = createDeliver(
+      {
+        key: 'test',
+        url: 'https://ingest.test/v1/logs',
+        timeoutMs: 1000,
+        fetch: async (_url, init) => {
+          received.push(JSON.parse(String(init?.body)).logs);
+          return new Response(null, { status: received.length === 2 && reject ? 503 : 202 });
+        },
+      },
+      () => crypto.randomUUID(),
+    );
+    const logs = Array.from({ length: 145 }, (_, i) => ({ ...log, log_id: `log-${i}` }));
+    expect(await deliver(logs)).toBe(false);
+    reject = false;
+    expect(await deliver(logs)).toBe(true);
+    expect(received.map((batch) => batch.length)).toEqual([100, 45, 100, 45]);
+    expect(received[0].map((entry) => entry.log_id)).toEqual(
+      received[2].map((entry) => entry.log_id),
+    );
   });
 });

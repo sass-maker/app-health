@@ -30,6 +30,8 @@ const ROUTES = new Set([
   '/v1/reports/portfolio-briefing',
   '/v1/workspace/health',
   '/v1/workspace/alerts',
+  '/v1/workspace/monitoring',
+  '/v1/workspace/monitoring/policy',
   '/v1/auth/get-session',
   '/v1/auth/sign-in/social',
   '/v1/auth/sign-out',

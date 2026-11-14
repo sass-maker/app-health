@@ -36,6 +36,7 @@ import { CardSkeleton } from '@saas-maker/ui/blocks/skeletons';
 import { useWorkspaceAnalytics, useWorkspaceHealth } from './useAnalytics.js';
 import { DailyEngagement } from './DailyEngagement.js';
 import { OwnerAlertFeed } from './OwnerAlertFeed.js';
+import { MonitoringCoverage } from './MonitoringCoverage.js';
 
 interface ProjectsViewProject {
   appId: string;
@@ -823,6 +824,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
         }}
       />
       <OwnerAlertFeed ownerToken={ownerToken} />
+      <MonitoringCoverage ownerToken={ownerToken} />
       <details className="group rounded-xl border bg-card/40">
         <summary className="flex min-h-12 cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium">
           request health and collection details

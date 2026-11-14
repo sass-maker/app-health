@@ -4,6 +4,8 @@ import { readEndpointBuckets } from './endpoint-read.js';
 import { ownerRouteAllowed } from './access-policy.js';
 import { apiTokenIdentity } from './workspace-access.js';
 import { handleWorkspaceAccess } from './workspace-routes.js';
+import { handleMonitoringRoute } from './monitoring.js';
+import { startScheduledMonitoring } from './monitoring-scheduled.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
 import { handleProductEventIngest } from './product-event-routes.js';
@@ -951,8 +953,25 @@ async function handleOwnerAlertsRoute(
   const db = env.DB;
   const workspaceId = owner.workspaceId;
   if (!db) return json(503, { error: 'alert storage is unavailable' }, true);
+  const appId = url.searchParams.get('app_id');
+  const environmentId = url.searchParams.get('environment_id');
+  if (
+    (appId === null) !== (environmentId === null) ||
+    (appId !== null && (!appId || !environmentId)) ||
+    url.searchParams.getAll('app_id').length > 1 ||
+    url.searchParams.getAll('environment_id').length > 1
+  )
+    return json(400, { error: 'Select one project and environment together' }, true);
   try {
-    const feed = await measureOwnerRouteRead(timings, () => readOwnerAlertFeed(db, workspaceId));
+    const feed = await measureOwnerRouteRead(timings, () =>
+      readOwnerAlertFeed(
+        db,
+        workspaceId,
+        Date.now(),
+        undefined,
+        appId && environmentId ? { appId, environmentId } : undefined,
+      ),
+    );
     return json(200, feed, true);
   } catch {
     return json(503, { error: 'alerts are unavailable' }, true);
@@ -1064,6 +1083,8 @@ async function handleOwnerRoutes(
       headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
     });
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
+  const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner);
+  if (monitoringResponse) return monitoringResponse;
   const providerResponse = await handleProviderOwner(request, env, owner, bundle.repos, {
     local: bundle.local,
     waitUntil: options?.ctx ? (promise) => options.ctx!.waitUntil(promise) : undefined,
@@ -1481,84 +1502,92 @@ const unmonitoredWorker = {
     return handleBearerOwner(request, env, url, bundle, ctx);
   },
 
-  async scheduled(_controller: unknown, env: Env): Promise<void> {
+  async scheduled(_controller: unknown, env: Env, ctx?: WorkerContext): Promise<void> {
     writeBotCounterHeartbeat(env.BROWSER_ANALYTICS, Date.now());
     if (!env.DB) return;
-    if (env.BROWSER_EVENTS) {
-      try {
-        const runtime = providerRuntime(env);
-        await pumpProviderJobs(runtime);
-        await cleanupProviderJobs(runtime);
-      } catch {
-        console.warn(JSON.stringify({ event: 'payment_provider_job_unavailable' }));
-      }
-    }
-    await compactEndpointHistoryIfEnabled(env);
-    const control = new D1ControlPlane(env.DB);
-    await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);
-    await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());
+    const monitoring = startScheduledMonitoring(env, ctx);
     try {
-      const visitorRetention = await cleanupBrowserVisitorDays(env.DB, Date.now(), 10_000);
-      if (
-        visitorRetention.backlog.visitors ||
-        visitorRetention.backlog.receipts ||
-        visitorRetention.backlog.fences ||
-        visitorRetention.backlog.audits
-      )
-        console.warn(
-          JSON.stringify({
-            event: 'browser_visitor_retention_backlog',
-            ...visitorRetention.backlog,
-          }),
-        );
-    } catch {
-      console.warn(JSON.stringify({ event: 'browser_visitor_retention_failed' }));
-    }
-    try {
-      await cleanupExpiredBrowserArchiveAuditJobs(env.DB, Date.now());
-    } catch {
-      console.warn(JSON.stringify({ event: 'browser_archive_audit_cleanup_failed' }));
-    }
-    const archiveBinding = env.BROWSER_ARCHIVE;
-    const historyBinding = env.BROWSER_HISTORY;
-    if (archiveBinding && historyBinding?.get) {
-      try {
-        const archive: BrowserArchiveAuditJobBindings['archive'] = {
-          getByName(name) {
-            const shard = archiveBinding.getByName(name);
-            return {
-              archiveSegmentsForEventDay: (...args) => {
-                if (!shard.archiveSegmentsForEventDay)
-                  throw new Error('archive day index unavailable');
-                return shard.archiveSegmentsForEventDay(...args);
-              },
-              archiveSegmentForBatch: (...args) => {
-                if (!shard.archiveSegmentForBatch)
-                  throw new Error('archive batch index unavailable');
-                return shard.archiveSegmentForBatch(...args);
-              },
-            };
-          },
-        };
-        await processPendingBrowserArchiveAuditJobs(
-          {
-            db: env.DB,
-            archive,
-            history: { get: (...args) => historyBinding.get!(...args) },
-          },
-          Date.now(),
-        );
-      } catch {
-        console.warn(JSON.stringify({ event: 'browser_archive_audit_slice_failed' }));
+      if (env.BROWSER_EVENTS) {
+        try {
+          const runtime = providerRuntime(env);
+          await pumpProviderJobs(runtime);
+          await cleanupProviderJobs(runtime);
+        } catch {
+          console.warn(JSON.stringify({ event: 'payment_provider_job_unavailable' }));
+        }
       }
-    }
-    await maintainProductArchiveSafely(env);
-    await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
-    await control.cleanupLogsExpired(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000, 10_000);
-    await control.cleanupBrowserQuotaExpired(Date.now() - 60 * 60 * 1000);
-    if (env.APP_HEALTH_ACCOUNTS === 'enabled') {
-      const accounts = await cleanupExpiredAccountRecords(env.DB);
-      if (!accounts.ok) console.warn(JSON.stringify({ event: 'account_cleanup_failed' }));
+      await compactEndpointHistoryIfEnabled(env);
+      const control = new D1ControlPlane(env.DB);
+      await control.cleanupExpired(Date.now() - DEDUPE_WINDOW_MS, 10_000);
+      await new D1EndpointWriter(env.DB).cleanupReceipts(Date.now());
+      try {
+        const visitorRetention = await cleanupBrowserVisitorDays(env.DB, Date.now(), 10_000);
+        if (
+          visitorRetention.backlog.visitors ||
+          visitorRetention.backlog.receipts ||
+          visitorRetention.backlog.fences ||
+          visitorRetention.backlog.audits
+        )
+          console.warn(
+            JSON.stringify({
+              event: 'browser_visitor_retention_backlog',
+              ...visitorRetention.backlog,
+            }),
+          );
+      } catch {
+        console.warn(JSON.stringify({ event: 'browser_visitor_retention_failed' }));
+      }
+      try {
+        await cleanupExpiredBrowserArchiveAuditJobs(env.DB, Date.now());
+      } catch {
+        console.warn(JSON.stringify({ event: 'browser_archive_audit_cleanup_failed' }));
+      }
+      const archiveBinding = env.BROWSER_ARCHIVE;
+      const historyBinding = env.BROWSER_HISTORY;
+      if (archiveBinding && historyBinding?.get) {
+        try {
+          const archive: BrowserArchiveAuditJobBindings['archive'] = {
+            getByName(name) {
+              const shard = archiveBinding.getByName(name);
+              return {
+                archiveSegmentsForEventDay: (...args) => {
+                  if (!shard.archiveSegmentsForEventDay)
+                    throw new Error('archive day index unavailable');
+                  return shard.archiveSegmentsForEventDay(...args);
+                },
+                archiveSegmentForBatch: (...args) => {
+                  if (!shard.archiveSegmentForBatch)
+                    throw new Error('archive batch index unavailable');
+                  return shard.archiveSegmentForBatch(...args);
+                },
+              };
+            },
+          };
+          await processPendingBrowserArchiveAuditJobs(
+            {
+              db: env.DB,
+              archive,
+              history: { get: (...args) => historyBinding.get!(...args) },
+            },
+            Date.now(),
+          );
+        } catch {
+          console.warn(JSON.stringify({ event: 'browser_archive_audit_slice_failed' }));
+        }
+      }
+      await maintainProductArchiveSafely(env);
+      await control.cleanupFailuresExpired(Date.now() - 24 * 60 * 60 * 1000, 10_000);
+      await control.cleanupLogsExpired(
+        Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000,
+        10_000,
+      );
+      await control.cleanupBrowserQuotaExpired(Date.now() - 60 * 60 * 1000);
+      if (env.APP_HEALTH_ACCOUNTS === 'enabled') {
+        const accounts = await cleanupExpiredAccountRecords(env.DB);
+        if (!accounts.ok) console.warn(JSON.stringify({ event: 'account_cleanup_failed' }));
+      }
+    } finally {
+      await monitoring;
     }
   },
 };

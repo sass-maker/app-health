@@ -7,55 +7,10 @@
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { Socket } from 'node:net';
+import type { FailureKind, HttpResult, Phases, Measure } from './types.d.ts';
+export type { FailureKind, HttpResult, Measure } from './types.d.ts';
 
-export type FailureKind =
-  | 'dns'
-  | 'connect'
-  | 'tls'
-  | 'timeout'
-  | 'network'
-  | 'incomplete'
-  | 'body_too_large'
-  | 'http'
-  | 'content_type'
-  | 'parse'
-  | 'semantic'
-  | 'asset';
-
-export interface Phases {
-  dns_ms?: number;
-  connect_ms?: number;
-  tls_ms?: number;
-  /** Request start to response headers. */
-  headers_ms?: number;
-  /** Response headers to the last body byte. */
-  body_ms?: number;
-  /** Request start to the last body byte, or to the failure. */
-  total_ms: number;
-}
-
-export interface HttpResult {
-  failure?: FailureKind;
-  status?: number;
-  contentType?: string;
-  body?: Buffer;
-  phases: Phases;
-  /** Backend `Server-Timing` total (or the largest entry) in milliseconds. */
-  serverMs?: number;
-  /** Coarse Cloudflare edge colo from `cf-ray`, e.g. `BOM`. */
-  edge?: string;
-}
-
-interface HttpRequest {
-  url: string;
-  method: 'GET' | 'POST';
-  body?: string;
-  timeoutMs: number;
-  maxBytes: number;
-  userAgent: string;
-}
-
-export type Measure = (request: HttpRequest) => Promise<HttpResult>;
+type HttpRequest = Parameters<Measure>[0];
 
 interface Marks {
   start: number;

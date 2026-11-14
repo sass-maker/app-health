@@ -5,7 +5,7 @@
 
 import type { Journey } from './spec.ts';
 import type { Transition } from './incident.ts';
-import type { FailureKind, Phases } from './measure.ts';
+import type { FailureKind, Phases } from './types.d.ts';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 type PropValue = string | number | boolean | null;
@@ -97,6 +97,35 @@ export interface HeartbeatCounts {
   pending_logs: number;
 }
 
+export function resultLog(
+  observation: Observation,
+  status: 'healthy' | 'degraded' | 'failing',
+  options: { location: string; intervalSeconds: number; vantageOffline: boolean },
+  context: { now: number; uuid: () => string },
+): ProbeLog {
+  return {
+    log_id: context.uuid(),
+    timestamp: context.now,
+    event: 'probe.result',
+    level: 'debug',
+    title: `Synthetic check ${observation.journey.project} ${observation.journey.journey}`,
+    props: definedProps({
+      project: observation.journey.project,
+      journey: observation.journey.journey,
+      location: options.location,
+      interval_seconds: options.intervalSeconds,
+      vantage_offline: options.vantageOffline,
+      synthetic: true,
+      status,
+      outcome: observation.outcome,
+      failure: observation.failure,
+      http_status: observation.status,
+      total_ms: observation.phases.total_ms,
+      budget_ms: observation.journey.budget_ms,
+    }),
+  };
+}
+
 /**
  * One debug-level heartbeat per run. Debug keeps it out of default Slack routes;
  * the owner feed reads it to mark a probe location fresh or stale.
@@ -138,18 +167,21 @@ export function createDeliver(config: DeliveryConfig, uuid: () => string): Deliv
     if (logs.length === 0) return true;
     const fetchImpl = config.fetch ?? fetch;
     try {
-      const response = await fetchImpl(config.url, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` },
-        body: JSON.stringify({
-          batch_id: uuid(),
-          schema_version: 'v1',
-          environment: 'production',
-          logs,
-        }),
-        signal: AbortSignal.timeout(config.timeoutMs),
-      });
-      return response.ok;
+      for (let offset = 0; offset < logs.length; offset += 100) {
+        const response = await fetchImpl(config.url, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` },
+          body: JSON.stringify({
+            batch_id: uuid(),
+            schema_version: 'v1',
+            environment: 'production',
+            logs: logs.slice(offset, offset + 100),
+          }),
+          signal: AbortSignal.timeout(config.timeoutMs),
+        });
+        if (!response.ok) return false;
+      }
+      return true;
     } catch {
       return false;
     }

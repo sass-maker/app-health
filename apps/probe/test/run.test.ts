@@ -79,13 +79,23 @@ const healthy = {
 };
 
 describe('runProbes', () => {
-  it('records healthy runs with only a heartbeat', async () => {
+  it('records each healthy check and a heartbeat', async () => {
     const { deps, sent } = harness(healthy);
     const { state, summary } = await runProbes(spec, emptyState(), options, deps);
     expect(summary.journeys.map((item) => item.outcome)).toEqual(['ok', 'ok']);
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.map((log) => log.event)).toEqual(['probe.heartbeat']);
-    expect(sent[0]?.[0]?.props).toMatchObject({ healthy: 2, failing: 0, journeys: 2 });
+    expect(sent[0]?.map((log) => log.event)).toEqual([
+      'probe.result',
+      'probe.result',
+      'probe.heartbeat',
+    ]);
+    expect(sent[0]?.at(-1)?.props).toMatchObject({ healthy: 2, failing: 0, journeys: 2 });
+    expect(sent[0]?.[0]?.props).toMatchObject({
+      project: 'anime-list',
+      journey: 'home',
+      status: 'healthy',
+      interval_seconds: 300,
+    });
     expect(state.pending).toEqual([]);
   });
 
@@ -102,6 +112,8 @@ describe('runProbes', () => {
     expect(sent[0]?.map((log) => log.event)).toEqual([
       'journey.failed',
       'journey.failed',
+      'probe.result',
+      'probe.result',
       'probe.heartbeat',
     ]);
   });
@@ -142,7 +154,11 @@ describe('runProbes', () => {
     const { state, summary } = await runProbes(spec, emptyState(), options, deps);
     expect(summary.vantage_offline).toBe(true);
     expect(state.journeys).toEqual({});
-    expect(sent[0]?.map((log) => log.event)).toEqual(['probe.heartbeat']);
+    expect(sent[0]?.map((log) => log.event)).toEqual([
+      'probe.result',
+      'probe.result',
+      'probe.heartbeat',
+    ]);
     expect(sent[0]?.[0]?.props.vantage_offline).toBe(true);
   });
 
@@ -246,7 +262,10 @@ describe('cli', () => {
       expect(code).toBe(0);
       const output = JSON.parse(String(write.mock.calls[0]?.[0]));
       expect(output).toMatchObject({ dry_run: true, journeys: [{ outcome: 'ok' }] });
-      expect(output.would_send[0].event).toBe('probe.heartbeat');
+      expect(output.would_send.map((log: ProbeLog) => log.event)).toEqual([
+        'probe.result',
+        'probe.heartbeat',
+      ]);
     } finally {
       write.mockRestore();
     }

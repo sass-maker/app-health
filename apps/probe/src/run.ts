@@ -8,12 +8,13 @@
 import { advance, type JourneyState } from './incident.ts';
 import {
   heartbeatLog,
+  resultLog,
   transitionLog,
   type Deliver,
   type Observation,
   type ProbeLog,
 } from './emit.ts';
-import type { FailureKind, HttpResult, Measure } from './measure.ts';
+import type { FailureKind, HttpResult, Measure } from './types.d.ts';
 import { journeyKey, type Journey, type ProbeSpec } from './spec.ts';
 import { firstPartyAsset, validateResponse } from './validate.ts';
 
@@ -182,7 +183,15 @@ export async function runProbes(
     },
     context,
   );
-  const delivered = await deps.deliver([...queued, heartbeat]);
+  const results = measured.map(({ observation }) =>
+    resultLog(
+      observation,
+      journeys[journeyKey(observation.journey)]?.status ?? 'healthy',
+      { ...options, vantageOffline },
+      context,
+    ),
+  );
+  const delivered = await deps.deliver([...queued, ...results, heartbeat]);
   const pending = delivered ? [] : queued;
   return {
     state: { schema_version: 1, journeys, pending },

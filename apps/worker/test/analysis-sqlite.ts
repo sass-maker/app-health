@@ -35,7 +35,7 @@ export function analysisDatabase() {
       return (await this.all<T>()).results[0] ?? null;
     }
     async run(): Promise<D1RunResult> {
-      if (/^\s*SELECT|RETURNING\b/i.test(this.sql))
+      if (/^\s*(?:SELECT|WITH)\b|RETURNING\b/i.test(this.sql))
         return {
           success: true,
           meta: {},

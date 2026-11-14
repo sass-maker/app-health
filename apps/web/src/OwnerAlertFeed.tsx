@@ -1,4 +1,5 @@
 import { ownerFetch } from './lib/owner-fetch.js';
+import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
 import { useEffect, useState, type ReactElement } from 'react';
 import type { LogLevel, LogSource } from '@app-health/contracts';
 import {
@@ -48,17 +49,17 @@ interface Feed {
 
 // Keep account data in memory only. A changed transport gets its own cache.
 const feedCaches = new WeakMap<typeof fetch, Map<string, { feed: Feed; receivedAt: number }>>();
-function cachedFeed(ownerToken: string): Feed | null {
-  const entry = feedCaches.get(fetch)?.get(ownerToken);
+function cachedFeed(scopeKey: string): Feed | null {
+  const entry = feedCaches.get(fetch)?.get(scopeKey);
   return entry && Date.now() - entry.receivedAt < 300_000 ? entry.feed : null;
 }
-function retainFeed(ownerToken: string, feed: Feed): void {
+function retainFeed(scopeKey: string, feed: Feed): void {
   let cache = feedCaches.get(fetch);
   if (!cache) {
     cache = new Map();
     feedCaches.set(fetch, cache);
   }
-  cache.set(ownerToken, { feed, receivedAt: Date.now() });
+  cache.set(scopeKey, { feed, receivedAt: Date.now() });
 }
 
 const JOURNEY_LABELS: Record<string, string> = {
@@ -89,13 +90,16 @@ function AlertEntries({ entries }: { entries: AlertEntry[] }): ReactElement {
   return (
     <ol aria-label="Latest workspace alerts" className="divide-y">
       {entries.map((entry) => (
-        <li key={entry.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-          <span className="rounded-md border bg-muted/40 p-2 text-muted-foreground">
+        <li
+          key={entry.id}
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+        >
+          <span className="row-span-2 rounded-md border bg-muted/40 p-2 text-muted-foreground sm:row-span-1">
             <EventIcon event={entry.event} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">{eventLabel(entry)}</p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="break-words text-xs text-muted-foreground">
               {entry.project_name} <span aria-hidden="true">·</span> {entry.catalog_id}
               {entry.journey && entry.location ? (
                 <>
@@ -114,7 +118,7 @@ function AlertEntries({ entries }: { entries: AlertEntry[] }): ReactElement {
             </p>
           </div>
           <time
-            className="shrink-0 text-xs text-muted-foreground"
+            className="col-start-2 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1"
             dateTime={new Date(entry.timestamp).toISOString()}
           >
             {new Date(entry.timestamp).toLocaleString()}
@@ -220,16 +224,21 @@ function ProbeCoverageLine({ feed }: { feed: Feed }): ReactElement | null {
 }
 
 export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactElement {
-  const [feed, setFeed] = useState<Feed | null>(() => cachedFeed(ownerToken));
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const scope = useWorkspaceScope();
+  const cacheKey = JSON.stringify([ownerToken, scope.id, scope.epoch]);
+  const [loaded, setLoaded] = useState(() => ({ key: cacheKey, feed: cachedFeed(cacheKey) }));
+  const feed = loaded.key === cacheKey ? loaded.feed : null;
+  const [loadError, setError] = useState('');
+  const [isLoading, setLoading] = useState(true);
+  const error = loaded.key === cacheKey ? loadError : '';
+  const loading = loaded.key === cacheKey ? isLoading : true;
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     let disposed = false;
     let timedOut = false;
-    setFeed(cachedFeed(ownerToken));
+    setLoaded({ key: cacheKey, feed: cachedFeed(cacheKey) });
     setLoading(true);
     setError('');
     const timeout = window.setTimeout(() => {
@@ -249,9 +258,9 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
         return (await response.json()) as Feed;
       })
       .then((next) => {
-        if (!disposed && !timedOut) {
-          retainFeed(ownerToken, next);
-          setFeed(next);
+        if (!disposed && !timedOut && workspaceScope().epoch === scope.epoch) {
+          retainFeed(cacheKey, next);
+          setLoaded({ key: cacheKey, feed: next });
         }
       })
       .catch((cause: unknown) => {
@@ -267,7 +276,7 @@ export function OwnerAlertFeed({ ownerToken }: { ownerToken: string }): ReactEle
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [ownerToken, retry]);
+  }, [cacheKey, ownerToken, retry]);
 
   useEffect(() => {
     const refresh = () => setRetry((value) => value + 1);

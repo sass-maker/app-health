@@ -52,6 +52,9 @@ const selfEnvironmentId = 'self-analytics-production';
 const selfBackendKey = 'ahk_local_self_backend_runtime_only';
 const selfBatches = [];
 const selfReceipts = [];
+let monitoringHttpStatus = 503;
+let monitoringGate;
+let monitoringProbeStarted = false;
 
 async function verifyPaymentsRuntime(runtime, project, ownerRequest) {
   const timestamp = Date.now() - 1000;
@@ -192,7 +195,13 @@ function splitMigrationSql(sql) {
 
 const mf = new Miniflare({
   cf: false,
+  unsafeTriggerHandlers: true,
   outboundService: async (request) => {
+    if (request.url === 'https://health.sassmaker.com/v1/health') {
+      monitoringProbeStarted = true;
+      if (monitoringGate) await monitoringGate;
+      return Response.json({ ok: true }, { status: monitoringHttpStatus });
+    }
     if (request.url === 'https://ingest.example.com/v1/ingest') {
       selfBatches.push(await request.clone().json());
       const response = await mf.dispatchFetch(request.url, {
@@ -774,6 +783,131 @@ try {
   );
   log(
     'Browser runtime: queue, immutable archive, scoped live stream, and origin rejection verified.',
+  );
+  await db
+    .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+    .bind(selfAppId, workspace)
+    .run();
+  assert.equal(
+    (
+      await request('/v1/catalog/import', {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Monitoring runtime canary',
+            lifecycle: 'active',
+            existing_app_id: selfAppId,
+          },
+        ],
+      })
+    ).status,
+    200,
+  );
+  const monitoringPolicy = await mf.dispatchFetch(
+    'https://dashboard.example.com/v1/workspace/monitoring/policy',
+    {
+      method: 'PUT',
+      headers: {
+        cookie,
+        origin: 'https://dashboard.example.com',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Monitoring runtime canary',
+            scope: 'public',
+            reason: null,
+            journeys: ['api-health'],
+          },
+        ],
+      }),
+    },
+  );
+  assert.equal(monitoringPolicy.status, 200);
+  const monitoringState = async () => {
+    const response = await request('/v1/workspace/monitoring');
+    assert.equal(response.status, 200);
+    return (await response.json()).projects[0].state;
+  };
+  const waitForMonitoringResults = async (expected) => {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const count = await db
+        .prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'")
+        .first();
+      if (count.n === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.fail(`Expected ${expected} committed scheduled probe receipts`);
+  };
+  assert.equal(await monitoringState(), 'missing');
+  const expiredProbeBatch = randomUUID();
+  await db
+    .prepare(
+      'INSERT INTO seen_batches (app_id, environment_id, batch_id, seen_at) VALUES (?, ?, ?, 0)',
+    )
+    .bind(selfAppId, selfEnvironmentId, expiredProbeBatch)
+    .run();
+  let releaseMonitoring;
+  monitoringGate = new Promise((resolve) => {
+    releaseMonitoring = resolve;
+  });
+  const pausedCron = mf.dispatchFetch('http://localhost/cdn-cgi/handler/scheduled');
+  try {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const retained = await db
+        .prepare('SELECT batch_id FROM seen_batches WHERE batch_id = ?')
+        .bind(expiredProbeBatch)
+        .first();
+      if (monitoringProbeStarted && !retained) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal(monitoringProbeStarted, true);
+    assert.equal(
+      await db
+        .prepare('SELECT batch_id FROM seen_batches WHERE batch_id = ?')
+        .bind(expiredProbeBatch)
+        .first(),
+      null,
+      'existing retention proceeds while the scheduled public probe remains paused',
+    );
+    assert.equal(
+      (await db.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").first())
+        .n,
+      0,
+    );
+  } finally {
+    releaseMonitoring();
+    monitoringGate = undefined;
+  }
+  assert.equal((await pausedCron).status, 200);
+  await waitForMonitoringResults(1);
+  assert.equal(await monitoringState(), 'failing');
+  monitoringHttpStatus = 200;
+  log(
+    'Monitoring concurrency runtime: actual workerd retention completes while public probe fetch remains paused in the scheduled lifetime.',
+  );
+  for (const [index, expected] of ['failing', 'healthy'].entries()) {
+    await db.prepare('UPDATE workspace_monitoring_runs SET lease_started_at = 0').run();
+    const triggered = await mf.dispatchFetch('http://localhost/cdn-cgi/handler/scheduled');
+    assert.equal(triggered.status, 200);
+    await waitForMonitoringResults(index + 2);
+    assert.equal(await monitoringState(), expected);
+    monitoringHttpStatus = 200;
+  }
+  const monitoringLogs = (
+    await db.prepare("SELECT props FROM log_events WHERE event='probe.result'").all()
+  ).results;
+  assert.equal(monitoringLogs.length, 3);
+  assert.equal(
+    monitoringLogs.some((row) => row.props.includes(selfBackendKey)),
+    false,
+  );
+  log(
+    'Monitoring runtime: explicit owner policy, actual workerd scheduled failure/recovery, persisted check receipts and dashboard API projection verified.',
   );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);
