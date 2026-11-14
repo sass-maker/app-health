@@ -274,7 +274,7 @@ export async function handleMonitoringRoute(
   }
 }
 
-function monitoringReadScope(url: URL): MonitoringScope | undefined | null {
+export function monitoringReadScope(url: URL): MonitoringScope | undefined | null {
   const appId = url.searchParams.get('app_id');
   const environmentId = url.searchParams.get('environment_id');
   if (

@@ -4,7 +4,7 @@ import { readEndpointBuckets } from './endpoint-read.js';
 import { ownerRouteAllowed } from './access-policy.js';
 import { apiTokenIdentity } from './workspace-access.js';
 import { handleWorkspaceAccess } from './workspace-routes.js';
-import { handleMonitoringRoute } from './monitoring.js';
+import { handleMonitoringRoute, monitoringReadScope } from './monitoring.js';
 import { startScheduledMonitoring } from './monitoring-scheduled.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
@@ -953,24 +953,12 @@ async function handleOwnerAlertsRoute(
   const db = env.DB;
   const workspaceId = owner.workspaceId;
   if (!db) return json(503, { error: 'alert storage is unavailable' }, true);
-  const appId = url.searchParams.get('app_id');
-  const environmentId = url.searchParams.get('environment_id');
-  if (
-    (appId === null) !== (environmentId === null) ||
-    (appId !== null && (!appId || !environmentId)) ||
-    url.searchParams.getAll('app_id').length > 1 ||
-    url.searchParams.getAll('environment_id').length > 1
-  )
+  const selected = monitoringReadScope(url);
+  if (selected === null)
     return json(400, { error: 'Select one project and environment together' }, true);
   try {
     const feed = await measureOwnerRouteRead(timings, () =>
-      readOwnerAlertFeed(
-        db,
-        workspaceId,
-        Date.now(),
-        undefined,
-        appId && environmentId ? { appId, environmentId } : undefined,
-      ),
+      readOwnerAlertFeed(db, workspaceId, Date.now(), undefined, selected),
     );
     return json(200, feed, true);
   } catch {
