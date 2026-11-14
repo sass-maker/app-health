@@ -7,6 +7,11 @@ import {
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 import { readPublicJson } from './public-body.js';
+import {
+  resolveMonitoringSource,
+  type MonitoringBindings,
+  type MonitoringSource,
+} from './monitoring-source.js';
 
 type Project = MonitoringReport['projects'][number];
 type Check = Project['checks'][number];
@@ -148,6 +153,7 @@ function monitoringStatements(
   workspaceId: string,
   now: number,
   scope?: MonitoringScope,
+  source?: MonitoringSource,
 ) {
   const selected = scope ? 'AND c.app_id = ? AND e.id = ?' : '';
   const selectedBinds = scope ? [scope.appId, scope.environmentId] : [];
@@ -188,15 +194,26 @@ function monitoringStatements(
       JOIN environments source_env ON source_env.id = l.environment_id
         AND source_env.app_id = l.app_id AND lower(source_env.name) = 'production'
       WHERE p.workspace_id = ? ${selected}
+        AND l.app_id = ? AND l.environment_id = ?
         AND l.event = 'probe.result' AND l.source = 'server'
         AND l.timestamp >= ? AND l.timestamp <= ?
         AND EXISTS (SELECT 1 FROM workspace_apps sender
           WHERE sender.workspace_id = p.workspace_id AND sender.app_id = l.app_id)
         AND EXISTS (SELECT 1 FROM json_each(p.journeys_json) expected
           WHERE expected.value = json_extract(l.props, '$.journey'))
-    ) SELECT * FROM latest WHERE rank = 1 LIMIT ${MAX_OBSERVATIONS + 1}`,
+    ) , locations AS (
+      SELECT *, ROW_NUMBER() OVER (PARTITION BY catalog_id, journey
+        ORDER BY timestamp DESC, location) AS location_rank FROM latest WHERE rank = 1
+    ) SELECT * FROM locations WHERE location_rank <= 10 LIMIT ${MAX_OBSERVATIONS + 1}`,
       )
-      .bind(workspaceId, ...selectedBinds, Math.max(0, now - RETENTION_MS), now),
+      .bind(
+        workspaceId,
+        ...selectedBinds,
+        source?.appId ?? null,
+        source?.environmentId ?? null,
+        Math.max(0, now - RETENTION_MS),
+        now,
+      ),
   ];
 }
 
@@ -205,8 +222,9 @@ export async function readMonitoringReport(
   workspaceId: string,
   now: number,
   scope?: MonitoringScope,
+  source?: MonitoringSource,
 ): Promise<MonitoringReport> {
-  const results = await db.batch(monitoringStatements(db, workspaceId, now, scope));
+  const results = await db.batch(monitoringStatements(db, workspaceId, now, scope, source));
   if (results.length !== 2 || results.some((r) => !r.success || !Array.isArray(r.results)))
     throw new Error('Monitoring report read failed');
   const policyRows = results[0].results!;
@@ -220,7 +238,6 @@ export async function readMonitoringReport(
     const key = JSON.stringify([row.catalog_id, row.journey]);
     const rows = byCheck.get(key) ?? [];
     rows.push(value);
-    if (rows.length > 10) throw new Error('Monitoring location capacity exceeded');
     byCheck.set(key, rows);
   }
   const projects = policyRows.map((row): Project => {
@@ -255,6 +272,7 @@ export async function handleMonitoringRoute(
   request: Request,
   db: D1DatabaseLike | undefined,
   owner: OwnerIdentity,
+  env: MonitoringBindings = {},
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (!['/v1/workspace/monitoring', '/v1/workspace/monitoring/policy'].includes(url.pathname))
@@ -268,7 +286,17 @@ export async function handleMonitoringRoute(
     if (request.method !== 'GET') return json(405, { error: 'Use GET' });
     const scope = monitoringReadScope(url);
     if (scope === null) return json(400, { error: 'Select one project and environment together' });
-    return json(200, await readMonitoringReport(db, owner.workspaceId, Date.now(), scope));
+    const source = await resolveMonitoringSource({ ...env, DB: db });
+    return json(
+      200,
+      await readMonitoringReport(
+        db,
+        owner.workspaceId,
+        Date.now(),
+        scope,
+        source?.workspaceId === owner.workspaceId ? source : undefined,
+      ),
+    );
   } catch {
     return json(503, { error: 'Monitoring is unavailable' });
   }

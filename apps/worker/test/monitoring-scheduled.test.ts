@@ -65,24 +65,30 @@ it('runs only an explicitly declared owned public check, persists incidents and 
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(fetcher.mock.calls[0][0]).toBe('https://health.sassmaker.com/v1/health');
     expect(
-      (await readMonitoringReport(db, 'ws', now)).projects.find(
-        (p) => p.catalog_id === 'app-health',
-      )?.state,
+      (
+        await readMonitoringReport(db, 'ws', now, undefined, { appId: 'app', environmentId: 'env' })
+      ).projects.find((p) => p.catalog_id === 'app-health')?.state,
     ).toBe('failing');
     await runScheduledMonitoring(env, fetcher, now + 60000);
     expect(fetcher).toHaveBeenCalledTimes(1);
     fetcher.mockImplementation(async () => Response.json({ ok: true }));
     await runScheduledMonitoring(env, fetcher, now + 3600000);
     expect(
-      (await readMonitoringReport(db, 'ws', now + 3600000)).projects.find(
-        (p) => p.catalog_id === 'app-health',
-      )?.state,
+      (
+        await readMonitoringReport(db, 'ws', now + 3600000, undefined, {
+          appId: 'app',
+          environmentId: 'env',
+        })
+      ).projects.find((p) => p.catalog_id === 'app-health')?.state,
     ).toBe('failing');
     await runScheduledMonitoring(env, fetcher, now + 7200000);
     expect(
-      (await readMonitoringReport(db, 'ws', now + 7200000)).projects.find(
-        (p) => p.catalog_id === 'app-health',
-      )?.state,
+      (
+        await readMonitoringReport(db, 'ws', now + 7200000, undefined, {
+          appId: 'app',
+          environmentId: 'env',
+        })
+      ).projects.find((p) => p.catalog_id === 'app-health')?.state,
     ).toBe('healthy');
     expect(
       sqlite
@@ -94,9 +100,12 @@ it('runs only an explicitly declared owned public check, persists incidents and 
       sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").get()?.n,
     ).toBe(3);
     expect(
-      (await readMonitoringReport(db, 'ws', now + 19000000)).projects.find(
-        (p) => p.catalog_id === 'app-health',
-      )?.state,
+      (
+        await readMonitoringReport(db, 'ws', now + 19000000, undefined, {
+          appId: 'app',
+          environmentId: 'env',
+        })
+      ).projects.find((p) => p.catalog_id === 'app-health')?.state,
     ).toBe('stale');
     const before = fetcher.mock.calls.length;
     await runScheduledMonitoring(
@@ -353,6 +362,75 @@ it('starts retention before a paused probe finishes and retains the probe in the
     release(Response.json({ ok: true }));
     await Promise.all(waiting);
     vi.unstubAllGlobals();
+    sqlite.close();
+  }
+});
+
+it('commits measured evidence and timeout results after the run deadline', async () => {
+  const { db, sqlite } = analysisDatabase();
+  const now = 1800000000000;
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+  try {
+    const key = await new D1ControlPlane(db).createKey('app', 'env', now);
+    await importCatalogProjects(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Health',
+            existing_app_id: 'app',
+            repository: null,
+            hostname: null,
+            lifecycle: 'active',
+          },
+        ],
+      },
+      now,
+    );
+    await saveMonitoringPolicy(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Health',
+            scope: 'public',
+            reason: null,
+            journeys: ['api-health', 'ingest-health'],
+          },
+        ],
+      },
+      now,
+    );
+    const fetcher = vi.fn<typeof fetch>(async () => {
+      clock.mockReturnValue(now + 600001);
+      return Response.json({ ok: true });
+    });
+    await runScheduledMonitoring({ DB: db, APP_HEALTH_SELF_BACKEND_KEY: key.rawKey }, fetcher, now);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const report = await readMonitoringReport(db, 'ws', now, undefined, {
+      appId: 'app',
+      environmentId: 'env',
+    });
+    expect(
+      report.projects[0].checks.map((c) => [c.journey, c.health, c.observations[0]?.failure]),
+    ).toEqual([
+      ['api-health', 'healthy', null],
+      ['ingest-health', 'failing', 'timeout'],
+    ]);
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").get()?.n,
+    ).toBe(2);
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='journey.failed'").get()?.n,
+    ).toBe(1);
+  } finally {
+    clock.mockRestore();
     sqlite.close();
   }
 });

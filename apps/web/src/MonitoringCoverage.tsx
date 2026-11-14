@@ -97,7 +97,18 @@ function useMonitoringReport(ownerToken: string) {
     const controller = new AbortController();
     let disposed = false;
     const update = (report: MonitoringReport | null, error: string, loading: boolean) => {
-      if (!disposed) setResult({ epoch: scope.epoch, token: ownerToken, report, error, loading });
+      if (!disposed)
+        setResult((previous) => ({
+          epoch: scope.epoch,
+          token: ownerToken,
+          report:
+            report ??
+            (previous.epoch === scope.epoch && previous.token === ownerToken
+              ? previous.report
+              : null),
+          error,
+          loading,
+        }));
     };
     update(null, '', true);
     const timeout = window.setTimeout(() => {
@@ -279,7 +290,20 @@ function MonitoringBody({
   const { scope, upload } = roster;
   return (
     <CardContent className="p-5">
-      {!current || current.loading ? <p role="status">Loading monitoring coverage…</p> : null}
+      {!current || current.loading ? (
+        <p role="status">
+          {report ? 'Refreshing monitoring coverage…' : 'Loading monitoring coverage…'}
+        </p>
+      ) : null}
+      {report && (current?.loading || current?.error) ? (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Showing the last successful report from{' '}
+          <time dateTime={new Date(report.generated_at).toISOString()}>
+            {new Date(report.generated_at).toLocaleString()}
+          </time>
+          . Coverage may be outdated.
+        </p>
+      ) : null}
       {current?.error ? (
         <p role="alert" className="text-sm text-destructive">
           {current.error}

@@ -1,8 +1,8 @@
 import { expect, it } from 'vitest';
-import { MonitoringPolicyV1 } from '@app-health/contracts';
+import { MonitoringPolicyV1, type MonitoringReport } from '@app-health/contracts';
 import {
   handleMonitoringRoute,
-  readMonitoringReport,
+  readMonitoringReport as readReport,
   saveMonitoringPolicy,
 } from '../src/monitoring.js';
 import { importCatalogProjects } from '../src/catalog-import.js';
@@ -11,7 +11,17 @@ import { ownerRouteAllowed } from '../src/access-policy.js';
 import type { OwnerIdentity } from '../src/identity.js';
 import worker, { type Env } from '../src/index.js';
 import { createApiToken } from '../src/workspace-access.js';
+import { D1ControlPlane } from '../src/d1-adapter.js';
+import { readOwnerAlertFeed } from '../src/alert-feed.js';
 
+// This fixture explicitly designates app/env as its trusted probe sender.
+const readMonitoringReport: typeof readReport = (
+  db,
+  workspace,
+  time,
+  scope,
+  source = { appId: 'app', environmentId: 'env' },
+) => readReport(db, workspace, time, scope, source);
 const owner: OwnerIdentity = {
   id: 'user',
   label: 'Owner',
@@ -332,6 +342,225 @@ it('dispatches monitoring and alerts through MCP with actual token scope enforce
         error: 'Credential or workspace role does not permit this route',
       });
     }
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('keeps the ten most recent locations without failing the workspace for retired locations', async () => {
+  const { db, sqlite } = analysisDatabase();
+  try {
+    await importCatalogProjects(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'product',
+            name: 'Product',
+            lifecycle: 'active',
+            hostname: null,
+            repository: null,
+            existing_app_id: 'app',
+          },
+        ],
+      },
+      now,
+    );
+    await saveMonitoringPolicy(db, 'ws', policy, now);
+    const insert = sqlite.prepare(
+      `INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level, props, source) VALUES (?, 'app', 'env', ?, 'probe.result', 'debug', ?, 'server')`,
+    );
+    for (let i = 0; i < 15; i++)
+      insert.run(
+        `location-${i}`,
+        now - i * 1000,
+        JSON.stringify({
+          project: 'product',
+          journey: 'home',
+          location: `location-${i}`,
+          interval_seconds: 300,
+          status: 'healthy',
+        }),
+      );
+    const result = await readMonitoringReport(db, 'ws', now);
+    const check = result.projects.find((p) => p.catalog_id === 'product')!.checks[0];
+    expect(result.projects).toHaveLength(3);
+    expect(check.observations.map((o) => o.location)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `location-${i}`),
+    );
+    expect(check.health).toBe('healthy');
+    expect(
+      (await readReport(db, 'ws', now)).projects.find((p) => p.catalog_id === 'product')!.checks[0]
+        .freshness,
+    ).toBe('missing');
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('rejects another owned app impersonating the designated probe through REST and MCP', async () => {
+  const { db, sqlite } = analysisDatabase();
+  const timestamp = Date.now();
+  try {
+    sqlite.exec(`INSERT INTO workspace_apps VALUES ('other-app', 'ws');
+      INSERT INTO apps(id, name, created_at) VALUES ('rogue-app', 'Unrelated', 1);
+      INSERT INTO environments(id, app_id, name, created_at) VALUES ('rogue-env', 'rogue-app', 'production', 1);
+      INSERT INTO workspace_apps VALUES ('rogue-app', 'ws');`);
+    await importCatalogProjects(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'self',
+            name: 'Self',
+            existing_app_id: 'app',
+            lifecycle: 'active',
+            hostname: null,
+            repository: null,
+          },
+          {
+            catalog_id: 'product',
+            name: 'Product',
+            existing_app_id: 'other-app',
+            lifecycle: 'active',
+            hostname: null,
+            repository: null,
+          },
+          {
+            catalog_id: 'rogue',
+            name: 'Unrelated',
+            existing_app_id: 'rogue-app',
+            lifecycle: 'active',
+            hostname: null,
+            repository: null,
+          },
+        ],
+      },
+      timestamp,
+    );
+    await saveMonitoringPolicy(
+      db,
+      'ws',
+      { schema_version: 1, projects: [policy.projects[0]] },
+      timestamp,
+    );
+    const control = new D1ControlPlane(db);
+    const trusted = await control.createKey('app', 'env', timestamp);
+    const rogue = await control.createKey('rogue-app', 'rogue-env', timestamp);
+    const token = await createApiToken(db, owner, {
+      name: 'Victim only',
+      permission: 'read',
+      scopes: [{ app_id: 'other-app', environment_id: 'other-env' }],
+    });
+    const env: Env = {
+      DB: db,
+      APP_HEALTH_SELF_BACKEND_KEY: trusted.rawKey,
+      APP_HEALTH_DASHBOARD_HOST: 'dashboard.test',
+      APP_HEALTH_INGEST_HOST: 'ingest.test',
+      APP_HEALTH_INGEST_ORIGIN: 'https://ingest.test',
+      OWNER_AUTH_TOKEN: 'synthetic-owner-secret-for-monitoring-tests',
+      CLOUDFLARE_ACCOUNT_ID: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ANALYTICS_ENGINE_QUERY_TOKEN: 'synthetic',
+      TELEMETRY: { writeDataPoint() {} },
+    };
+    const ingest = async (key: string, status: string) => {
+      const logs = ['probe.result', 'journey.failed', 'probe.heartbeat'].map((event) => ({
+        log_id: crypto.randomUUID(),
+        timestamp,
+        event,
+        level: event === 'journey.failed' ? 'error' : 'debug',
+        title: 'Synthetic fixture',
+        props: {
+          project: 'product',
+          journey: 'home',
+          location: 'cloudflare-hourly',
+          status,
+          interval_seconds: 3600,
+        },
+      }));
+      const response = await worker.fetch(
+        new Request('https://ingest.test/v1/logs', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            schema_version: 'v1',
+            batch_id: crypto.randomUUID(),
+            environment: 'production',
+            logs,
+          }),
+        }),
+        env,
+      );
+      expect(response.status).toBe(202);
+    };
+    const read = async (path: string, mcp = false) => {
+      const response = await worker.fetch(
+        new Request(
+          `https://dashboard.test${mcp ? '/mcp' : `/v1/workspace/${path}?app_id=other-app&environment_id=other-env`}`,
+          {
+            method: mcp ? 'POST' : 'GET',
+            headers: {
+              authorization: `Bearer ${token.token}`,
+              accept: 'application/json, text/event-stream',
+              'content-type': 'application/json',
+            },
+            ...(mcp
+              ? {
+                  body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'tools/call',
+                    params: {
+                      name: path === 'monitoring' ? 'monitoring_report' : 'alerts',
+                      arguments: { app_id: 'other-app', environment_id: 'other-env' },
+                    },
+                  }),
+                }
+              : {}),
+          },
+        ),
+        env,
+      );
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as { result: { content: { text: string }[] } };
+      return (mcp ? JSON.parse(body.result.content[0].text) : body) as MonitoringReport & {
+        total_count: number;
+        entries: { app_id: string }[];
+      };
+    };
+    await ingest(rogue.rawKey, 'healthy');
+    for (const mcp of [false, true]) {
+      expect(
+        (await read('monitoring', mcp)).projects[0].checks.every(
+          (c: { freshness: string }) => c.freshness === 'missing',
+        ),
+      ).toBe(true);
+      expect((await read('alerts', mcp)).total_count).toBe(0);
+    }
+    await ingest(trusted.rawKey, 'failing');
+    for (const mcp of [false, true]) {
+      expect((await read('monitoring', mcp)).projects[0].state).toBe('failing');
+      expect((await read('alerts', mcp)).entries.map((e: { app_id: string }) => e.app_id)).toEqual([
+        'other-app',
+      ]);
+    }
+    sqlite.exec("DELETE FROM workspace_apps WHERE app_id = 'other-app'");
+    expect(
+      (
+        await readOwnerAlertFeed(db, 'ws', Date.now(), undefined, undefined, {
+          appId: 'app',
+          environmentId: 'env',
+        })
+      ).entries,
+    ).toEqual([]);
+    sqlite.exec("INSERT INTO workspace_apps VALUES ('other-app', 'ws')");
+    await control.revokeKey(trusted.record.id, timestamp + 1);
+    expect((await read('monitoring')).projects[0].state).toBe('missing');
+    expect((await read('alerts')).total_count).toBe(0);
   } finally {
     sqlite.close();
   }

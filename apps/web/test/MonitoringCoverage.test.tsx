@@ -211,3 +211,44 @@ it('does not upload a pending file after its initiating workspace closes', async
   });
   expect(fetcher).toHaveBeenCalledTimes(1);
 });
+
+it('retains an expanded same-scope roster during refresh and errors, then clears it on scope change', async () => {
+  let finish!: (response: Response) => void;
+  const pending = new Promise<Response>((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(report))
+    .mockReturnValueOnce(pending)
+    .mockResolvedValue(
+      Response.json({
+        schema_version: 1,
+        generated_at: now,
+        policy_updated_at: null,
+        projects: [],
+      }),
+    );
+  vi.stubGlobal('fetch', fetcher);
+  render(<MonitoringCoverage ownerToken="owner" />);
+  await screen.findByText('Project 0');
+  const detail = screen.getByText('Project 0').closest('li')!.querySelector('details')!;
+  detail.open = true;
+  fireEvent(window, new Event('focus'));
+  expect(await screen.findByText('Refreshing monitoring coverage…')).toBeTruthy();
+  expect(screen.getByText('Project 0').closest('li')!.querySelector('details')).toBe(detail);
+  expect(detail.open).toBe(true);
+  await act(async () => {
+    finish(new Response('', { status: 503 }));
+    await pending;
+  });
+  expect(await screen.findByRole('alert')).toHaveProperty(
+    'textContent',
+    'Monitoring returned 503. Try again.',
+  );
+  expect(screen.getByText(/Showing the last successful report from/)).toBeTruthy();
+  expect(detail.open).toBe(true);
+  act(() => selectWorkspace('different'));
+  expect(screen.queryByText('Project 0')).toBeNull();
+  await screen.findByText('Monitoring coverage is not configured for this workspace.');
+});

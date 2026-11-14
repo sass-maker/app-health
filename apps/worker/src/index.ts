@@ -5,6 +5,7 @@ import { ownerRouteAllowed } from './access-policy.js';
 import { apiTokenIdentity } from './workspace-access.js';
 import { handleWorkspaceAccess } from './workspace-routes.js';
 import { handleMonitoringRoute, monitoringReadScope } from './monitoring.js';
+import { resolveMonitoringSource } from './monitoring-source.js';
 import { startScheduledMonitoring } from './monitoring-scheduled.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
@@ -957,8 +958,16 @@ async function handleOwnerAlertsRoute(
   if (selected === null)
     return json(400, { error: 'Select one project and environment together' }, true);
   try {
+    const source = await resolveMonitoringSource(env);
     const feed = await measureOwnerRouteRead(timings, () =>
-      readOwnerAlertFeed(db, workspaceId, Date.now(), undefined, selected),
+      readOwnerAlertFeed(
+        db,
+        workspaceId,
+        Date.now(),
+        undefined,
+        selected,
+        source?.workspaceId === workspaceId ? source : undefined,
+      ),
     );
     return json(200, feed, true);
   } catch {
@@ -1071,7 +1080,7 @@ async function handleOwnerRoutes(
       headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
     });
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
-  const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner);
+  const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner, env);
   if (monitoringResponse) return monitoringResponse;
   const providerResponse = await handleProviderOwner(request, env, owner, bundle.repos, {
     local: bundle.local,

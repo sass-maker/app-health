@@ -1,27 +1,25 @@
 import { Buffer } from 'node:buffer';
-import { D1ControlPlane, type D1DatabaseLike } from './d1-adapter.js';
+import { resolveMonitoringSource, type MonitoringBindings } from './monitoring-source.js';
 import { emptyState, runProbes, type ProbeState } from '../../probe/src/run.ts';
 import { journeyKey, parseSpec } from '../../probe/src/spec.ts';
 import type { HttpResult, Measure } from '../../probe/src/types.d.ts';
 import type { ProbeLog } from '../../probe/src/emit.ts';
 import generated from '../../probe/journeys.json';
 
-interface Bindings {
-  DB?: D1DatabaseLike;
-  APP_HEALTH_SELF_BACKEND_KEY?: string;
-  APP_HEALTH_SELF_APP_ID?: string;
-  APP_HEALTH_SELF_ENVIRONMENT_ID?: string;
-}
 const INTERVAL_SECONDS = 3600;
 const LEASE_MS = 45 * 60000;
 const RUN_DEADLINE_MS = 10 * 60000;
 
 export function startScheduledMonitoring(
-  env: Bindings,
+  env: MonitoringBindings,
   ctx?: { waitUntil(task: Promise<unknown>): void },
 ) {
-  const monitoring = runScheduledMonitoring(env).catch(() => {
-    console.warn(JSON.stringify({ event: 'scheduled_monitoring_failed' }));
+  const monitoring = runScheduledMonitoring(env).catch((error: unknown) => {
+    const reason =
+      error instanceof Error && error.message === 'Monitoring run commit failed'
+        ? 'commit_fenced_or_failed'
+        : 'run_failed';
+    console.warn(JSON.stringify({ event: 'scheduled_monitoring_failed', reason }));
   });
   if (ctx) {
     ctx.waitUntil(monitoring);
@@ -34,7 +32,7 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
   return async (request) => {
     const started = performance.now();
     const remaining = deadline - Date.now();
-    if (remaining <= 0) throw new Error('Monitoring run deadline exceeded');
+    if (remaining <= 0) return { failure: 'timeout', phases: { total_ms: 0 } };
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
@@ -83,44 +81,14 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
   };
 }
 
-async function monitoringTarget(env: Bindings, control: D1ControlPlane) {
-  if (!env.DB || !env.APP_HEALTH_SELF_BACKEND_KEY) return null;
-  const key = await control.verifyKey(env.APP_HEALTH_SELF_BACKEND_KEY);
-  if (
-    !key?.environment_id ||
-    (env.APP_HEALTH_SELF_APP_ID && env.APP_HEALTH_SELF_APP_ID !== key.app_id) ||
-    (env.APP_HEALTH_SELF_ENVIRONMENT_ID &&
-      env.APP_HEALTH_SELF_ENVIRONMENT_ID !== key.environment_id)
-  )
-    return null;
-  const target = await env.DB.prepare(
-    `SELECT wa.workspace_id FROM workspace_apps wa
-    JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
-    JOIN environments e ON e.app_id = a.id AND e.id = ? AND lower(e.name) = 'production'
-    JOIN catalog_project_imports c ON c.workspace_id = wa.workspace_id AND c.app_id = a.id
-      AND c.lifecycle IN ('primary', 'active')
-    WHERE wa.app_id = ? LIMIT 1`,
-  )
-    .bind(key.environment_id, key.app_id)
-    .first<{ workspace_id: string }>();
-  return target
-    ? {
-        workspaceId: target.workspace_id,
-        appId: key.app_id,
-        environmentId: key.environment_id,
-        keyId: key.id,
-      }
-    : null;
-}
-
 export async function runScheduledMonitoring(
-  env: Bindings,
+  env: MonitoringBindings,
   fetcher: typeof fetch = fetch,
   now = Date.now(),
 ): Promise<void> {
   if (!env.DB || !env.APP_HEALTH_SELF_BACKEND_KEY) return;
   const db = env.DB;
-  const target = await monitoringTarget(env, new D1ControlPlane(db));
+  const target = await resolveMonitoringSource(env);
   if (!target) return;
   const policy = (
     await db

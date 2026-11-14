@@ -133,7 +133,7 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
   await expect(period).toHaveText('last 7 days');
   await page.getByRole('button', { name: 'daily briefing', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'daily briefing', exact: true })).toBeVisible();
-  const briefingDay = page.getByRole('region').filter({ hasText: 'completed India day' });
+  const briefingDay = page.locator('#daily-engagement');
   await expect(briefingDay.getByRole('heading', { level: 2 })).toBeVisible();
   await page
     .locator('summary')

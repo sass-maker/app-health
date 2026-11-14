@@ -23,7 +23,7 @@ const tools: {
   {
     name: 'alerts',
     description:
-      'Recent production failures, degradation, recovery and response receipts for one authorized production project. Returns event metadata only.',
+      'Recent production failures, degradation, recovery and response receipts for one authorized production project. Returns event metadata only. Use monitoring_report for check coverage; this scoped feed omits workspace probe heartbeats.',
     path: '/v1/workspace/alerts',
     properties: scopeProperties,
     required: ['app_id', 'environment_id'],
