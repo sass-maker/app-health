@@ -14,7 +14,7 @@ import {
   type Observation,
   type ProbeLog,
 } from './emit.ts';
-import type { FailureKind, HttpResult, Measure } from './types.ts';
+import type { FailureKind, HttpResult, Measure } from './types.d.ts';
 import { journeyKey, type Journey, type ProbeSpec } from './spec.ts';
 import { firstPartyAsset, validateResponse } from './validate.ts';
 

@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { D1ControlPlane, type D1DatabaseLike } from './d1-adapter.js';
 import { emptyState, runProbes, type ProbeState } from '../../probe/src/run.ts';
 import { journeyKey, parseSpec } from '../../probe/src/spec.ts';
-import type { HttpResult, Measure } from '../../probe/src/types.ts';
+import type { HttpResult, Measure } from '../../probe/src/types.d.ts';
 import type { ProbeLog } from '../../probe/src/emit.ts';
 import generated from '../../probe/journeys.json';
 

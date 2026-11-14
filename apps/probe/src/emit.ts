@@ -5,7 +5,7 @@
 
 import type { Journey } from './spec.ts';
 import type { Transition } from './incident.ts';
-import type { FailureKind, Phases } from './types.ts';
+import type { FailureKind, Phases } from './types.d.ts';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 type PropValue = string | number | boolean | null;
