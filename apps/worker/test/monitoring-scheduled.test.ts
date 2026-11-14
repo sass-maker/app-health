@@ -4,6 +4,7 @@ import { importCatalogProjects } from '../src/catalog-import.js';
 import { readMonitoringReport, saveMonitoringPolicy } from '../src/monitoring.js';
 import { runScheduledMonitoring, workerMeasure } from '../src/monitoring-scheduled.js';
 import { analysisDatabase } from './analysis-sqlite.js';
+import worker, { type Env } from '../src/index.js';
 
 it('runs only an explicitly declared owned public check, persists incidents and recovery atomically, and respects the lease', async () => {
   const { db, sqlite } = analysisDatabase();
@@ -261,3 +262,97 @@ it.each(['key-revoked', 'policy-changed', 'source-moved'])(
     }
   },
 );
+
+it('starts retention before a paused probe finishes and retains the probe in the scheduled lifetime', async () => {
+  const { db, sqlite } = analysisDatabase();
+  let release!: (response: Response) => void;
+  const paused = new Promise<Response>((resolve) => {
+    release = resolve;
+  });
+  let observedProbe!: () => void;
+  const probeStarted = new Promise<void>((resolve) => {
+    observedProbe = resolve;
+  });
+  let observedCleanup!: () => void;
+  const cleanupStarted = new Promise<void>((resolve) => {
+    observedCleanup = resolve;
+  });
+  const waiting: Promise<unknown>[] = [];
+  try {
+    const now = Date.now();
+    const key = await new D1ControlPlane(db).createKey('app', 'env', now);
+    await importCatalogProjects(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Health',
+            existing_app_id: 'app',
+            repository: null,
+            hostname: null,
+            lifecycle: 'active',
+          },
+        ],
+      },
+      now,
+    );
+    await saveMonitoringPolicy(
+      db,
+      'ws',
+      {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Health',
+            scope: 'public',
+            reason: null,
+            journeys: ['api-health'],
+          },
+        ],
+      },
+      now,
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        observedProbe();
+        return paused;
+      }),
+    );
+    const env: Env = {
+      DB: {
+        ...db,
+        prepare(sql) {
+          if (sql.startsWith('DELETE FROM seen_batches')) observedCleanup();
+          return db.prepare(sql);
+        },
+      },
+      APP_HEALTH_SELF_BACKEND_KEY: key.rawKey,
+    };
+    const maintenance = worker.scheduled({}, env, {
+      waitUntil(promise) {
+        waiting.push(promise);
+      },
+    });
+    await Promise.all([probeStarted, cleanupStarted]);
+    await maintenance;
+    expect(waiting).toHaveLength(1);
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").get()?.n,
+    ).toBe(0);
+    release(Response.json({ ok: true }));
+    await Promise.all(waiting);
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").get()?.n,
+    ).toBe(1);
+  } finally {
+    release(Response.json({ ok: true }));
+    await Promise.all(waiting);
+    vi.unstubAllGlobals();
+    sqlite.close();
+  }
+});

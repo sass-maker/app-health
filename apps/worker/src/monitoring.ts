@@ -65,6 +65,14 @@ export async function saveMonitoringPolicy(
     throw new Error('Monitoring policy transaction failed');
 }
 
+function validProbeTime(timestamp: number, now: number) {
+  return Number.isSafeInteger(timestamp) && timestamp >= 0 && timestamp <= now;
+}
+
+function validProbeInterval(seconds: number) {
+  return Number.isSafeInteger(seconds) && seconds >= 60 && seconds <= 86400;
+}
+
 function observation(row: Record<string, unknown>, now: number): Observation | null {
   const interval = Number(row.interval_seconds);
   const lastSeen = Number(row.timestamp);
@@ -72,12 +80,8 @@ function observation(row: Record<string, unknown>, now: number): Observation | n
   const health = row.health;
   if (
     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(location) ||
-    !Number.isSafeInteger(interval) ||
-    interval < 60 ||
-    interval > 86400 ||
-    !Number.isSafeInteger(lastSeen) ||
-    lastSeen < 0 ||
-    lastSeen > now ||
+    !validProbeInterval(interval) ||
+    !validProbeTime(lastSeen, now) ||
     !['healthy', 'degraded', 'failing'].includes(String(health))
   )
     return null;
@@ -139,15 +143,15 @@ function projectState(project: Omit<Project, 'state'>): Project['state'] {
   return 'healthy';
 }
 
-export async function readMonitoringReport(
+function monitoringStatements(
   db: D1DatabaseLike,
   workspaceId: string,
   now: number,
   scope?: MonitoringScope,
-): Promise<MonitoringReport> {
+) {
   const selected = scope ? 'AND c.app_id = ? AND e.id = ?' : '';
   const selectedBinds = scope ? [scope.appId, scope.environmentId] : [];
-  const results = await db.batch([
+  return [
     db
       .prepare(
         `SELECT p.catalog_id, p.name, p.scope, p.reason, p.journeys_json, p.updated_at,
@@ -193,7 +197,16 @@ export async function readMonitoringReport(
     ) SELECT * FROM latest WHERE rank = 1 LIMIT ${MAX_OBSERVATIONS + 1}`,
       )
       .bind(workspaceId, ...selectedBinds, Math.max(0, now - RETENTION_MS), now),
-  ]);
+  ];
+}
+
+export async function readMonitoringReport(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  now: number,
+  scope?: MonitoringScope,
+): Promise<MonitoringReport> {
+  const results = await db.batch(monitoringStatements(db, workspaceId, now, scope));
   if (results.length !== 2 || results.some((r) => !r.success || !Array.isArray(r.results)))
     throw new Error('Monitoring report read failed');
   const policyRows = results[0].results!;
@@ -250,44 +263,51 @@ export async function handleMonitoringRoute(
   if (!db) return json(503, { error: 'Monitoring storage is unavailable' });
   try {
     if (url.pathname.endsWith('/policy')) {
-      if (owner.authKind !== 'account' || owner.workspaceRole !== 'owner')
-        return json(403, { error: 'Workspace owner access required' });
-      if (request.method !== 'PUT') return json(405, { error: 'Use PUT' });
-      let input: unknown;
-      try {
-        input = await readPublicJson(request, 65536);
-      } catch {
-        return json(400, { error: 'Invalid monitoring policy' });
-      }
-      const policy = MonitoringPolicyV1.safeParse(input);
-      if (!policy.success) return json(400, { error: 'Invalid monitoring policy' });
-      await saveMonitoringPolicy(db, owner.workspaceId, policy.data, Date.now());
-      return json(200, {
-        schema_version: 1,
-        state: 'declared',
-        project_count: policy.data.projects.length,
-      });
+      return await writeMonitoringPolicy(request, db, owner, owner.workspaceId);
     }
     if (request.method !== 'GET') return json(405, { error: 'Use GET' });
-    const appId = url.searchParams.get('app_id');
-    const environmentId = url.searchParams.get('environment_id');
-    if (
-      (appId === null) !== (environmentId === null) ||
-      (appId !== null && (!appId || !environmentId)) ||
-      url.searchParams.getAll('app_id').length > 1 ||
-      url.searchParams.getAll('environment_id').length > 1
-    )
-      return json(400, { error: 'Select one project and environment together' });
-    return json(
-      200,
-      await readMonitoringReport(
-        db,
-        owner.workspaceId,
-        Date.now(),
-        appId && environmentId ? { appId, environmentId } : undefined,
-      ),
-    );
+    const scope = monitoringReadScope(url);
+    if (scope === null) return json(400, { error: 'Select one project and environment together' });
+    return json(200, await readMonitoringReport(db, owner.workspaceId, Date.now(), scope));
   } catch {
     return json(503, { error: 'Monitoring is unavailable' });
   }
+}
+
+function monitoringReadScope(url: URL): MonitoringScope | undefined | null {
+  const appId = url.searchParams.get('app_id');
+  const environmentId = url.searchParams.get('environment_id');
+  if (
+    (appId === null) !== (environmentId === null) ||
+    (appId !== null && (!appId || !environmentId)) ||
+    url.searchParams.getAll('app_id').length > 1 ||
+    url.searchParams.getAll('environment_id').length > 1
+  )
+    return null;
+  return appId && environmentId ? { appId, environmentId } : undefined;
+}
+
+async function writeMonitoringPolicy(
+  request: Request,
+  db: D1DatabaseLike,
+  owner: OwnerIdentity,
+  workspaceId: string,
+) {
+  if (owner.authKind !== 'account' || owner.workspaceRole !== 'owner')
+    return json(403, { error: 'Workspace owner access required' });
+  if (request.method !== 'PUT') return json(405, { error: 'Use PUT' });
+  let input: unknown;
+  try {
+    input = await readPublicJson(request, 65536);
+  } catch {
+    return json(400, { error: 'Invalid monitoring policy' });
+  }
+  const policy = MonitoringPolicyV1.safeParse(input);
+  if (!policy.success) return json(400, { error: 'Invalid monitoring policy' });
+  await saveMonitoringPolicy(db, workspaceId, policy.data, Date.now());
+  return json(200, {
+    schema_version: 1,
+    state: 'declared',
+    project_count: policy.data.projects.length,
+  });
 }

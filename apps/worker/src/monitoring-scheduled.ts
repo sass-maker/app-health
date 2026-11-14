@@ -16,6 +16,20 @@ const INTERVAL_SECONDS = 3600;
 const LEASE_MS = 45 * 60000;
 const RUN_DEADLINE_MS = 10 * 60000;
 
+export function startScheduledMonitoring(
+  env: Bindings,
+  ctx?: { waitUntil(task: Promise<unknown>): void },
+) {
+  const monitoring = runScheduledMonitoring(env).catch(() => {
+    console.warn(JSON.stringify({ event: 'scheduled_monitoring_failed' }));
+  });
+  if (ctx) {
+    ctx.waitUntil(monitoring);
+    return;
+  }
+  return monitoring;
+}
+
 export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure {
   return async (request) => {
     const started = performance.now();
