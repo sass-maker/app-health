@@ -4,6 +4,8 @@ import { readEndpointBuckets } from './endpoint-read.js';
 import { ownerRouteAllowed } from './access-policy.js';
 import { apiTokenIdentity } from './workspace-access.js';
 import { handleWorkspaceAccess } from './workspace-routes.js';
+import { handleMonitoringRoute } from './monitoring.js';
+import { runScheduledMonitoring } from './monitoring-scheduled.js';
 import { handleAnalyticsMcp, integrationSkill } from './analytics-mcp.js';
 import { handleAnalysisOwner } from './analysis-routes.js';
 import { handleProductEventIngest } from './product-event-routes.js';
@@ -951,8 +953,25 @@ async function handleOwnerAlertsRoute(
   const db = env.DB;
   const workspaceId = owner.workspaceId;
   if (!db) return json(503, { error: 'alert storage is unavailable' }, true);
+  const appId = url.searchParams.get('app_id');
+  const environmentId = url.searchParams.get('environment_id');
+  if (
+    (appId === null) !== (environmentId === null) ||
+    (appId !== null && (!appId || !environmentId)) ||
+    url.searchParams.getAll('app_id').length > 1 ||
+    url.searchParams.getAll('environment_id').length > 1
+  )
+    return json(400, { error: 'Select one project and environment together' }, true);
   try {
-    const feed = await measureOwnerRouteRead(timings, () => readOwnerAlertFeed(db, workspaceId));
+    const feed = await measureOwnerRouteRead(timings, () =>
+      readOwnerAlertFeed(
+        db,
+        workspaceId,
+        Date.now(),
+        undefined,
+        appId && environmentId ? { appId, environmentId } : undefined,
+      ),
+    );
     return json(200, feed, true);
   } catch {
     return json(503, { error: 'alerts are unavailable' }, true);
@@ -1064,6 +1083,8 @@ async function handleOwnerRoutes(
       headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
     });
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
+  const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner);
+  if (monitoringResponse) return monitoringResponse;
   const providerResponse = await handleProviderOwner(request, env, owner, bundle.repos, {
     local: bundle.local,
     waitUntil: options?.ctx ? (promise) => options.ctx!.waitUntil(promise) : undefined,
@@ -1484,6 +1505,11 @@ const unmonitoredWorker = {
   async scheduled(_controller: unknown, env: Env): Promise<void> {
     writeBotCounterHeartbeat(env.BROWSER_ANALYTICS, Date.now());
     if (!env.DB) return;
+    try {
+      await runScheduledMonitoring(env);
+    } catch {
+      console.warn(JSON.stringify({ event: 'scheduled_monitoring_failed' }));
+    }
     if (env.BROWSER_EVENTS) {
       try {
         const runtime = providerRuntime(env);

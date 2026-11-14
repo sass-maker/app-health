@@ -52,6 +52,7 @@ const selfEnvironmentId = 'self-analytics-production';
 const selfBackendKey = 'ahk_local_self_backend_runtime_only';
 const selfBatches = [];
 const selfReceipts = [];
+let monitoringHttpStatus = 503;
 
 async function verifyPaymentsRuntime(runtime, project, ownerRequest) {
   const timestamp = Date.now() - 1000;
@@ -192,7 +193,10 @@ function splitMigrationSql(sql) {
 
 const mf = new Miniflare({
   cf: false,
+  unsafeTriggerHandlers: true,
   outboundService: async (request) => {
+    if (request.url === 'https://health.sassmaker.com/v1/health')
+      return Response.json({ ok: true }, { status: monitoringHttpStatus });
     if (request.url === 'https://ingest.example.com/v1/ingest') {
       selfBatches.push(await request.clone().json());
       const response = await mf.dispatchFetch(request.url, {
@@ -774,6 +778,74 @@ try {
   );
   log(
     'Browser runtime: queue, immutable archive, scoped live stream, and origin rejection verified.',
+  );
+  await db
+    .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+    .bind(selfAppId, workspace)
+    .run();
+  assert.equal(
+    (
+      await request('/v1/catalog/import', {
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Monitoring runtime canary',
+            lifecycle: 'active',
+            existing_app_id: selfAppId,
+          },
+        ],
+      })
+    ).status,
+    200,
+  );
+  const monitoringPolicy = await mf.dispatchFetch(
+    'https://dashboard.example.com/v1/workspace/monitoring/policy',
+    {
+      method: 'PUT',
+      headers: {
+        cookie,
+        origin: 'https://dashboard.example.com',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'app-health',
+            name: 'Monitoring runtime canary',
+            scope: 'public',
+            reason: null,
+            journeys: ['api-health'],
+          },
+        ],
+      }),
+    },
+  );
+  assert.equal(monitoringPolicy.status, 200);
+  const monitoringState = async () => {
+    const response = await request('/v1/workspace/monitoring');
+    assert.equal(response.status, 200);
+    return (await response.json()).projects[0].state;
+  };
+  assert.equal(await monitoringState(), 'missing');
+  for (const expected of ['failing', 'failing', 'healthy']) {
+    await db.prepare('UPDATE workspace_monitoring_runs SET lease_started_at = 0').run();
+    const triggered = await mf.dispatchFetch('http://localhost/cdn-cgi/handler/scheduled');
+    assert.equal(triggered.status, 200);
+    assert.equal(await monitoringState(), expected);
+    monitoringHttpStatus = 200;
+  }
+  const monitoringLogs = (
+    await db.prepare("SELECT props FROM log_events WHERE event='probe.result'").all()
+  ).results;
+  assert.equal(monitoringLogs.length, 3);
+  assert.equal(
+    monitoringLogs.some((row) => row.props.includes(selfBackendKey)),
+    false,
+  );
+  log(
+    'Monitoring runtime: explicit owner policy, actual workerd scheduled failure/recovery, persisted check receipts and dashboard API projection verified.',
   );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);

@@ -89,13 +89,16 @@ function AlertEntries({ entries }: { entries: AlertEntry[] }): ReactElement {
   return (
     <ol aria-label="Latest workspace alerts" className="divide-y">
       {entries.map((entry) => (
-        <li key={entry.id} className="flex items-center gap-3 py-3 first:pt-0 last:pb-0">
-          <span className="rounded-md border bg-muted/40 p-2 text-muted-foreground">
+        <li
+          key={entry.id}
+          className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-1 py-3 first:pt-0 last:pb-0 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
+        >
+          <span className="row-span-2 rounded-md border bg-muted/40 p-2 text-muted-foreground sm:row-span-1">
             <EventIcon event={entry.event} />
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium">{eventLabel(entry)}</p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="break-words text-xs text-muted-foreground">
               {entry.project_name} <span aria-hidden="true">·</span> {entry.catalog_id}
               {entry.journey && entry.location ? (
                 <>
@@ -114,7 +117,7 @@ function AlertEntries({ entries }: { entries: AlertEntry[] }): ReactElement {
             </p>
           </div>
           <time
-            className="shrink-0 text-xs text-muted-foreground"
+            className="col-start-2 text-xs text-muted-foreground sm:col-start-3 sm:row-start-1"
             dateTime={new Date(entry.timestamp).toISOString()}
           >
             {new Date(entry.timestamp).toLocaleString()}

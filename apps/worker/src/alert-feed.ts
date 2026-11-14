@@ -85,6 +85,7 @@ export async function readOwnerAlertFeed(
   workspaceId: string,
   now = Date.now(),
   requestedLimit = ALERT_FEED_LIMIT,
+  selected?: { appId: string; environmentId: string },
 ): Promise<OwnerAlertFeed> {
   const limit = Math.max(1, Math.min(ALERT_FEED_LIMIT, Math.floor(requestedLimit)));
   const scope = `FROM log_events l
@@ -117,13 +118,27 @@ export async function readOwnerAlertFeed(
           AND c.app_id = l.app_id)
         OR c.catalog_id = json_extract(l.props, '$.project_id')
         OR c.catalog_id = json_extract(l.props, '$.project')
-      )`;
+      )${
+        selected
+          ? ` AND c.app_id = ? AND EXISTS (
+        SELECT 1 FROM environments target WHERE target.id = ?
+          AND target.app_id = c.app_id AND lower(target.name) = 'production')`
+          : ''
+      }`;
   const from = Math.max(0, now - RETENTION_MS);
-  const binds = [workspaceId, from, now, workspaceId, workspaceId, workspaceId];
+  const binds = [
+    workspaceId,
+    from,
+    now,
+    workspaceId,
+    workspaceId,
+    workspaceId,
+    ...(selected ? [selected.appId, selected.environmentId] : []),
+  ];
   const countStatement = db.prepare(`SELECT COUNT(*) AS total_count ${scope}`).bind(...binds);
   const entriesStatement = db
     .prepare(
-      `SELECT l.log_id AS id, l.app_id AS app_id, c.catalog_id AS catalog_id,
+      `SELECT l.log_id AS id, ${selected ? 'c.app_id' : 'l.app_id'} AS app_id, c.catalog_id AS catalog_id,
         c.catalog_name AS project_name, l.event AS event, l.level AS level,
         l.source AS source, l.timestamp AS timestamp,
         CASE WHEN l.event LIKE 'journey.%' THEN json_extract(l.props, '$.journey') END AS journey,
@@ -136,7 +151,7 @@ export async function readOwnerAlertFeed(
   const results = await db.batch([
     countStatement,
     entriesStatement,
-    probeStatement(db, workspaceId, from, now),
+    selected ? db.prepare('SELECT 1 WHERE 0').bind() : probeStatement(db, workspaceId, from, now),
   ]);
   const countRows = results[0]?.results;
   const rows = results[1]?.results;

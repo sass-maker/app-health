@@ -2,7 +2,7 @@
 // result: expected status and type, required markers, and semantic JSON
 // invariants. Details are fixed descriptions; body content is never echoed.
 
-import type { FailureKind, HttpResult } from './measure.ts';
+import type { FailureKind, HttpResult } from './types.ts';
 import type { Expectation, JsonCheck } from './spec.ts';
 
 export interface Verdict {
