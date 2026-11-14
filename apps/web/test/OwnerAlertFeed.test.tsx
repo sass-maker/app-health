@@ -1,8 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OwnerAlertFeed } from '../src/OwnerAlertFeed.js';
+import { selectWorkspace } from '../src/lib/workspace-scope.js';
 
 afterEach(() => {
+  cleanup();
+  selectWorkspace('');
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -280,4 +283,36 @@ it('keeps cached alerts visible on revisit while revalidating the same account',
   expect(screen.queryByText('new feedback')).toBeNull();
   expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeTruthy();
   revisit.unmount();
+});
+
+it('isolates cookie-session workspace caches and rejects an old response body after switching', async () => {
+  let releaseOldBody!: (value: unknown) => void;
+  const lateBody = new Promise((resolve) => {
+    releaseOldBody = resolve;
+  });
+  const other = { ...feed, entries: [{ ...feed.entries[0], project_name: 'Other workspace' }] };
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(feed))
+    .mockResolvedValueOnce({ ok: true, json: () => lateBody, headers: new Headers() })
+    .mockResolvedValueOnce(Response.json(other))
+    .mockImplementation(() => new Promise<Response>(() => {}));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<OwnerAlertFeed ownerToken="" />);
+  await screen.findByText(/Atlas/);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  act(() => selectWorkspace('other'));
+  expect(screen.queryByText(/Atlas/)).toBeNull();
+  await screen.findByText(/Other workspace/);
+  await act(async () => {
+    releaseOldBody(feed);
+    await lateBody;
+  });
+  expect(screen.queryByText(/Atlas/)).toBeNull();
+  view.unmount();
+  act(() => selectWorkspace(''));
+  render(<OwnerAlertFeed ownerToken="" />);
+  expect(screen.queryByText(/Atlas|Other workspace/)).toBeNull();
+  expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeTruthy();
 });
