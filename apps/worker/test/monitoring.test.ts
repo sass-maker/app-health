@@ -500,7 +500,7 @@ it('rejects another owned app impersonating the designated probe through REST an
     const read = async (path: string, mcp = false) => {
       const response = await worker.fetch(
         new Request(
-          `https://dashboard.test${mcp ? '/mcp' : `/v1/workspace/${path}?app_id=other-app&environment_id=other-env`}`,
+          `https://dashboard.test${mcp ? '/v1/mcp' : `/v1/workspace/${path}?app_id=other-app&environment_id=other-env`}`,
           {
             method: mcp ? 'POST' : 'GET',
             headers: {

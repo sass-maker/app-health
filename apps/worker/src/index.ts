@@ -1482,7 +1482,8 @@ const unmonitoredWorker = {
     if (ingestHostResponse) return ingestHostResponse;
 
     if (!hostAllowed(url, bundle, env, 'owner')) return json(404, { error: 'not found' });
-    if (url.pathname === '/mcp') return handleMcpRequest(request, env, bundle, ctx);
+    if (['/mcp', '/v1/mcp'].includes(url.pathname))
+      return handleMcpRequest(request, env, bundle, ctx);
     const sharedResponse = await handlePublicAnalytics(request, env, bundle.repos, bundle.local);
     if (sharedResponse) return sharedResponse;
     if (!url.pathname.startsWith('/v1/')) {

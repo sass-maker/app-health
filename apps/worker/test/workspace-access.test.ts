@@ -148,6 +148,9 @@ it('stores API verifiers only, isolates project/environment scopes and observes 
       ),
     ).toBe(false);
     expect(integrationSkill(identity, 'https://health.test')).not.toContain(minted.token);
+    expect(integrationSkill(identity, 'https://health.test')).toContain(
+      'https://health.test/v1/mcp',
+    );
     await expect(
       createApiToken(db, owner, {
         name: 'Foreign',
