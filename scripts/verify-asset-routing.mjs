@@ -124,6 +124,13 @@ async function waitForWorker() {
 
 try {
   await waitForWorker();
+  const mcp = await globalThis.fetch(`${origin}/v1/mcp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+  });
+  assert.equal(mcp.status, 401);
+  assert.deepEqual(await mcp.json(), { error: 'Workspace API token required' });
   const navigate = { headers: { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' } };
   const callback = await globalThis.fetch(
     `${origin}/v1/auth/callback/google?code=invalid&state=invalid`,
