@@ -18,9 +18,12 @@ const dataReads = new Set([
   '/v1/reports/daily-engagement',
   '/v1/reports/portfolio-briefing',
   '/v1/workspace/alerts',
+  '/v1/workspace/monitoring',
   '/v1/capabilities',
 ]);
 const tokenReads = new Set([
+  '/v1/workspace/alerts',
+  '/v1/workspace/monitoring',
   '/v1/apps',
   '/v1/analytics/report',
   '/v1/analytics/traffic-quality',

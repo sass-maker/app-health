@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_from": "saas-maker catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
+  "generated_from": "site-health/catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
   "purpose": "Complete-response, read-only public GET journeys that App Health probes from scheduled vantages. Each journey is attributed to its catalog project.",
   "source_issue": "https://github.com/sass-maker/app-health/issues/175",
   "journeys": [
@@ -370,6 +370,19 @@
       }
     },
     {
+      "project": "motion",
+      "journey": "home",
+      "url": "https://motion.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Motion"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
       "project": "web-playables",
       "journey": "home",
       "url": "https://idle.aliveville.com/",
@@ -424,12 +437,12 @@
     {
       "project": "storagedaddy",
       "journey": "home",
-      "url": "https://storage.daddyrad.com/",
+      "url": "https://daddyrad.com/storage/",
       "budget_ms": 3000,
       "expect": {
         "content_type": "text/html",
         "body_includes": [
-          "storagedaddy</title>"
+          "<title>StorageDaddy"
         ],
         "first_party_asset": true
       }
@@ -437,7 +450,7 @@
     {
       "project": "browserdaddy",
       "journey": "home",
-      "url": "https://browser.daddyrad.com/",
+      "url": "https://daddyrad.com/browser/",
       "budget_ms": 3000,
       "expect": {
         "content_type": "text/html",
@@ -450,7 +463,7 @@
     {
       "project": "performancedaddy",
       "journey": "home",
-      "url": "https://performance.daddyrad.com/",
+      "url": "https://daddyrad.com/performance/",
       "budget_ms": 3000,
       "expect": {
         "content_type": "text/html",
@@ -481,7 +494,7 @@
       "expect": {
         "content_type": "text/html",
         "body_includes": [
-          "<title>Formula Calculator"
+          "<title>Batch formula and nutrient calculator"
         ],
         "first_party_asset": true
       }
@@ -494,7 +507,7 @@
       "expect": {
         "content_type": "text/html",
         "body_includes": [
-          "<title>every song is a website"
+          "<title>Interactive song websites"
         ],
         "first_party_asset": true
       }
@@ -502,7 +515,7 @@
     {
       "project": "contextdaddy",
       "journey": "home",
-      "url": "https://context.daddyrad.com/",
+      "url": "https://daddyrad.com/context/",
       "budget_ms": 3000,
       "expect": {
         "content_type": "text/html",
@@ -510,6 +523,38 @@
           "<title>ContextDaddy"
         ],
         "first_party_asset": false
+      }
+    },
+    {
+      "project": "fleet-social",
+      "journey": "api-health",
+      "url": "https://fleet-social.sarthakagrawal927.workers.dev/api/health",
+      "budget_ms": 1000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "ok",
+            "equals": true
+          },
+          {
+            "path": "service",
+            "equals": "fleet-social"
+          }
+        ]
+      }
+    },
+    {
+      "project": "protein-index",
+      "journey": "home",
+      "url": "https://food.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>Food"
+        ],
+        "first_party_asset": true
       }
     },
     {
@@ -523,6 +568,32 @@
           "Agent Inbox"
         ],
         "first_party_asset": false
+      }
+    },
+    {
+      "project": "techdata",
+      "journey": "home",
+      "url": "https://data.highsignal.app/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>overview"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "linkedin-insights",
+      "journey": "home",
+      "url": "https://linkedin.significanthobbies.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>LinkedIn Archive"
+        ],
+        "first_party_asset": true
       }
     }
   ]

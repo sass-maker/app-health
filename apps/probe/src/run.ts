@@ -8,12 +8,13 @@
 import { advance, type JourneyState } from './incident.ts';
 import {
   heartbeatLog,
+  resultLog,
   transitionLog,
   type Deliver,
   type Observation,
   type ProbeLog,
 } from './emit.ts';
-import type { FailureKind, HttpResult, Measure } from './measure.ts';
+import type { FailureKind, HttpResult, Measure } from './types.d.ts';
 import { journeyKey, type Journey, type ProbeSpec } from './spec.ts';
 import { firstPartyAsset, validateResponse } from './validate.ts';
 
@@ -45,7 +46,7 @@ export interface RunSummary {
   journeys: Array<{
     key: string;
     outcome: Observation['outcome'];
-    status: JourneyState['status'];
+    status: JourneyState['status'] | null;
     failure?: FailureKind;
     detail?: string;
     headers_ms?: number;
@@ -55,7 +56,12 @@ export interface RunSummary {
 
 export const MAX_PENDING_LOGS = 90;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-const NETWORK_FAILURES = new Set<FailureKind | undefined>(['dns', 'connect', 'network']);
+const VANTAGE_FAILURES = new Set<FailureKind | undefined>([
+  'dns',
+  'connect',
+  'network',
+  'run_deadline',
+]);
 
 export function emptyState(): ProbeState {
   return { schema_version: 1, journeys: {}, pending: [] };
@@ -85,6 +91,7 @@ async function fetchAsset(
 }
 
 function judge(journey: Journey, totals: number[], failure?: FailureKind): Observation['outcome'] {
+  if (failure === 'run_deadline') return 'not_completed';
   if (failure) return 'failed';
   return totals.some((total) => total > journey.budget_ms) ? 'slow' : 'ok';
 }
@@ -111,7 +118,7 @@ async function measureJourney(
     const assetFailed = asset.missing || asset.result?.failure || asset.result?.status !== 200;
     if (assetFailed)
       verdict = {
-        failure: 'asset',
+        failure: asset.result?.failure === 'run_deadline' ? 'run_deadline' : 'asset',
         detail: asset.missing ? 'no first-party asset' : 'asset failed',
       };
   }
@@ -139,7 +146,7 @@ async function measureJourney(
 }
 
 function countStatuses(journeys: Record<string, JourneyState>, keys: string[]) {
-  const statuses = keys.map((key) => journeys[key]?.status ?? 'healthy');
+  const statuses = keys.map((key) => journeys[key]?.status);
   return {
     healthy: statuses.filter((status) => status === 'healthy').length,
     degraded: statuses.filter((status) => status === 'degraded').length,
@@ -158,11 +165,12 @@ export async function runProbes(
   const measured: Measured[] = [];
   for (const journey of spec.journeys)
     measured.push(await measureJourney(journey, deps, options.userAgent));
-  const vantageOffline = measured.every((item) => NETWORK_FAILURES.has(item.observation.failure));
+  const vantageOffline = measured.every((item) => VANTAGE_FAILURES.has(item.observation.failure));
   const journeys = { ...previous.journeys };
   const logs: ProbeLog[] = [];
   const context = { now: startedAt, uuid: deps.uuid };
   for (const { observation } of vantageOffline ? [] : measured) {
+    if (observation.outcome === 'not_completed') continue;
     const key = journeyKey(observation.journey);
     const next = advance(journeys[key], observation.outcome, startedAt, deps.uuid);
     journeys[key] = next.state;
@@ -176,13 +184,26 @@ export async function runProbes(
     options.intervalSeconds,
     {
       journeys: keys.length,
-      ...countStatuses(journeys, keys),
+      ...countStatuses(
+        journeys,
+        measured
+          .filter(({ observation }) => observation.outcome !== 'not_completed')
+          .map(({ observation }) => journeyKey(observation.journey)),
+      ),
       vantage_offline: vantageOffline,
       pending_logs: queued.length,
     },
     context,
   );
-  const delivered = await deps.deliver([...queued, heartbeat]);
+  const results = measured.map(({ observation }) =>
+    resultLog(
+      observation,
+      journeys[journeyKey(observation.journey)]?.status ?? 'healthy',
+      { ...options, vantageOffline },
+      context,
+    ),
+  );
+  const delivered = await deps.deliver([...queued, ...results, heartbeat]);
   const pending = delivered ? [] : queued;
   return {
     state: { schema_version: 1, journeys, pending },
@@ -195,7 +216,10 @@ export async function runProbes(
       journeys: measured.map(({ observation, detail }) => ({
         key: journeyKey(observation.journey),
         outcome: observation.outcome,
-        status: journeys[journeyKey(observation.journey)]?.status ?? 'healthy',
+        status:
+          observation.outcome === 'not_completed'
+            ? null
+            : (journeys[journeyKey(observation.journey)]?.status ?? 'healthy'),
         failure: observation.failure,
         detail,
         headers_ms: observation.phases.headers_ms,

@@ -78,14 +78,72 @@ const healthy = {
   'https://anime.test/api/search': json({ filteredList: [1] }),
 };
 
+it('keeps a completed outage while a later journey is skipped by the run budget', async () => {
+  const { deps, sent } = harness({
+    'https://anime.test/': { ...html(), status: 503 },
+    'https://anime.test/api/search': { failure: 'run_deadline', phases: { total_ms: 0 } },
+  });
+  const { state, summary } = await runProbes(spec, emptyState(), options, deps);
+  expect(summary.journeys.map((row) => row.outcome)).toEqual(['failed', 'not_completed']);
+  expect(Object.keys(state.journeys)).toEqual(['anime-list/home']);
+  expect(
+    sent[0]?.filter((log) => log.event === 'journey.failed').map((log) => log.props.journey),
+  ).toEqual(['home']);
+  expect(
+    sent[0]?.find((log) => log.event === 'probe.result' && log.props.journey === 'search')?.props,
+  ).toMatchObject({ status: null, vantage_offline: true, failure: 'run_deadline' });
+  expect(sent[0]?.at(-1)?.props).toMatchObject({ healthy: 0, failing: 1, journeys: 2 });
+});
+
+it.each(['main', 'asset', 'warm'] as const)(
+  'preserves incident recovery state when the run deadline interrupts %s',
+  async (phase) => {
+    const journey = spec.journeys[phase === 'warm' ? 1 : 0]!;
+    const single = { ...spec, journeys: [journey] };
+    const failing = harness({ [journey.url]: { ...json({}), status: 503 } });
+    const opened = await runProbes(single, emptyState(), options, failing.deps);
+    const good = harness({ ...healthy });
+    const recovering = await runProbes(single, opened.state, options, good.deps);
+    const deadline: HttpResult = { failure: 'run_deadline', phases: { total_ms: 0 } };
+    const responses: Record<string, HttpResult | HttpResult[]> = { ...healthy };
+    if (phase === 'main') responses[journey.url] = deadline;
+    if (phase === 'asset') responses['https://anime.test/assets/app.js'] = deadline;
+    if (phase === 'warm') responses[journey.url] = [json({ filteredList: [1] }), deadline];
+    const skipped = harness(responses);
+    const result = await runProbes(single, recovering.state, options, skipped.deps);
+    expect(result.state.journeys).toEqual(recovering.state.journeys);
+    expect(result.summary.journeys[0]).toMatchObject({
+      outcome: 'not_completed',
+      failure: 'run_deadline',
+      status: null,
+    });
+    expect(skipped.sent[0]?.filter((log) => log.event.startsWith('journey.'))).toEqual([]);
+    expect(skipped.sent[0]?.find((log) => log.event === 'probe.result')?.props).toMatchObject({
+      status: null,
+      vantage_offline: true,
+      failure: 'run_deadline',
+    });
+  },
+);
+
 describe('runProbes', () => {
-  it('records healthy runs with only a heartbeat', async () => {
+  it('records each healthy check and a heartbeat', async () => {
     const { deps, sent } = harness(healthy);
     const { state, summary } = await runProbes(spec, emptyState(), options, deps);
     expect(summary.journeys.map((item) => item.outcome)).toEqual(['ok', 'ok']);
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.map((log) => log.event)).toEqual(['probe.heartbeat']);
-    expect(sent[0]?.[0]?.props).toMatchObject({ healthy: 2, failing: 0, journeys: 2 });
+    expect(sent[0]?.map((log) => log.event)).toEqual([
+      'probe.result',
+      'probe.result',
+      'probe.heartbeat',
+    ]);
+    expect(sent[0]?.at(-1)?.props).toMatchObject({ healthy: 2, failing: 0, journeys: 2 });
+    expect(sent[0]?.[0]?.props).toMatchObject({
+      project: 'anime-list',
+      journey: 'home',
+      status: 'healthy',
+      interval_seconds: 300,
+    });
     expect(state.pending).toEqual([]);
   });
 
@@ -102,6 +160,8 @@ describe('runProbes', () => {
     expect(sent[0]?.map((log) => log.event)).toEqual([
       'journey.failed',
       'journey.failed',
+      'probe.result',
+      'probe.result',
       'probe.heartbeat',
     ]);
   });
@@ -142,7 +202,11 @@ describe('runProbes', () => {
     const { state, summary } = await runProbes(spec, emptyState(), options, deps);
     expect(summary.vantage_offline).toBe(true);
     expect(state.journeys).toEqual({});
-    expect(sent[0]?.map((log) => log.event)).toEqual(['probe.heartbeat']);
+    expect(sent[0]?.map((log) => log.event)).toEqual([
+      'probe.result',
+      'probe.result',
+      'probe.heartbeat',
+    ]);
     expect(sent[0]?.[0]?.props.vantage_offline).toBe(true);
   });
 
@@ -246,7 +310,10 @@ describe('cli', () => {
       expect(code).toBe(0);
       const output = JSON.parse(String(write.mock.calls[0]?.[0]));
       expect(output).toMatchObject({ dry_run: true, journeys: [{ outcome: 'ok' }] });
-      expect(output.would_send[0].event).toBe('probe.heartbeat');
+      expect(output.would_send.map((log: ProbeLog) => log.event)).toEqual([
+        'probe.result',
+        'probe.heartbeat',
+      ]);
     } finally {
       write.mockRestore();
     }

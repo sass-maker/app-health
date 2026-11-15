@@ -14,8 +14,8 @@ export { WorkspacePresence } from './browser-presence.js';
 export { BrowserArchive } from './browser-archive.js';
 
 export default {
-  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
-    await worker.scheduled(controller, env);
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await worker.scheduled(controller, env, ctx);
   },
   fetch: (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> =>
     worker.fetch(request, env, ctx),

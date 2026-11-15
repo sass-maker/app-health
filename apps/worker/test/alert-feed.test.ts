@@ -7,7 +7,11 @@ describe('readOwnerAlertFeed', () => {
   it('returns only recent production event metadata from the authenticated workspace', async () => {
     const sqlite = new DatabaseSync(':memory:');
     try {
-      sqlite.exec(`CREATE TABLE environments (id TEXT, app_id TEXT, name TEXT);
+      sqlite.exec(`CREATE TABLE apps (id TEXT, archived_at INTEGER);
+        CREATE TABLE workspace_apps (app_id TEXT, workspace_id TEXT);
+        CREATE TABLE workspace_monitoring_projects
+        (workspace_id TEXT, catalog_id TEXT, scope TEXT, journeys_json TEXT);
+        CREATE TABLE environments (id TEXT, app_id TEXT, name TEXT);
         CREATE TABLE catalog_project_imports
           (workspace_id TEXT, catalog_id TEXT, catalog_name TEXT, app_id TEXT, lifecycle TEXT);
         CREATE TABLE log_events
@@ -282,7 +286,11 @@ describe('readOwnerAlertFeed', () => {
   it('surfaces synthetic journey incidents and probe location freshness', async () => {
     const sqlite = new DatabaseSync(':memory:');
     try {
-      sqlite.exec(`CREATE TABLE environments (id TEXT, app_id TEXT, name TEXT);
+      sqlite.exec(`CREATE TABLE apps (id TEXT, archived_at INTEGER);
+        CREATE TABLE workspace_apps (app_id TEXT, workspace_id TEXT);
+        CREATE TABLE workspace_monitoring_projects
+        (workspace_id TEXT, catalog_id TEXT, scope TEXT, journeys_json TEXT);
+        CREATE TABLE environments (id TEXT, app_id TEXT, name TEXT);
         CREATE TABLE catalog_project_imports
           (workspace_id TEXT, catalog_id TEXT, catalog_name TEXT, app_id TEXT, lifecycle TEXT);
         CREATE TABLE log_events
@@ -390,6 +398,28 @@ describe('readOwnerAlertFeed', () => {
           'server',
         ],
       ];
+      rows.push(
+        [
+          'owned-forged-incident',
+          'app-anime',
+          'prod-anime',
+          now,
+          'journey.failed',
+          '{"project":"anime-list","journey":"anime-search","location":"cloudflare-hourly"}',
+          'error',
+          'server',
+        ],
+        [
+          'owned-forged-heartbeat',
+          'app-anime',
+          'prod-anime',
+          now,
+          'probe.heartbeat',
+          '{"location":"cloudflare-hourly","interval_seconds":3600}',
+          'debug',
+          'server',
+        ],
+      );
       for (const row of rows) insert.run(...row);
       const db = {
         batch: async (statements: Array<{ all(): Promise<{ results: unknown[] }> }>) =>
@@ -413,7 +443,14 @@ describe('readOwnerAlertFeed', () => {
         },
       } as unknown as D1DatabaseLike;
 
-      const feed = await readOwnerAlertFeed(db, 'ws-a', now, 10);
+      sqlite.exec(`INSERT INTO apps VALUES ('app-anime', NULL);
+        INSERT INTO workspace_apps VALUES ('app-anime', 'ws-a');
+        INSERT INTO workspace_monitoring_projects VALUES
+        ('ws-a', 'anime-list', 'public', '["anime-search","manga-search"]');`);
+      const feed = await readOwnerAlertFeed(db, 'ws-a', now, 10, undefined, {
+        appId: 'app-health',
+        environmentId: 'prod-health',
+      });
       expect(
         feed.entries.map((entry) => [entry.id, entry.catalog_id, entry.journey, entry.location]),
       ).toEqual([
@@ -467,6 +504,8 @@ describe('readOwnerAlertFeed', () => {
     expect(statements[1]).toContain('LIMIT ?');
     expect(bindings[1]).toEqual([
       'ws-a',
+      null,
+      null,
       1_697_408_000_000,
       1_700_000_000_000,
       'ws-a',

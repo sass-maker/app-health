@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './d1-adapter.js';
+import type { MonitoringSource } from './monitoring-source.js';
 import type { LogLevel, LogSource } from '@app-health/contracts';
 
 const ALERT_FEED_LIMIT = 50;
@@ -38,7 +39,13 @@ export interface OwnerAlertFeed {
   probes: ProbeCoverage[];
 }
 
-function probeStatement(db: D1DatabaseLike, workspaceId: string, from: number, now: number) {
+function probeStatement(
+  db: D1DatabaseLike,
+  workspaceId: string,
+  from: number,
+  now: number,
+  source?: MonitoringSource,
+) {
   // SQLite returns the bare interval column from the row holding MAX(timestamp).
   return db
     .prepare(
@@ -47,7 +54,8 @@ function probeStatement(db: D1DatabaseLike, workspaceId: string, from: number, n
        FROM log_events l
        JOIN environments e ON e.id = l.environment_id AND e.app_id = l.app_id
          AND lower(e.name) = 'production'
-       WHERE l.event = 'probe.heartbeat' AND l.timestamp >= ? AND l.timestamp <= ?
+       WHERE l.source = 'server' AND l.app_id = ? AND l.environment_id = ?
+         AND l.event = 'probe.heartbeat' AND l.timestamp >= ? AND l.timestamp <= ?
          AND json_extract(l.props, '$.location') IS NOT NULL
          AND l.app_id IN (SELECT source.app_id FROM catalog_project_imports source
            WHERE source.workspace_id = ? AND source.lifecycle IN ('primary', 'active'))
@@ -55,7 +63,14 @@ function probeStatement(db: D1DatabaseLike, workspaceId: string, from: number, n
        ORDER BY location
        LIMIT ?`,
     )
-    .bind(from, now, workspaceId, PROBE_LOCATION_LIMIT);
+    .bind(
+      source?.appId ?? null,
+      source?.environmentId ?? null,
+      from,
+      now,
+      workspaceId,
+      PROBE_LOCATION_LIMIT,
+    );
 }
 
 function probeCoverage(row: Record<string, unknown>, now: number): ProbeCoverage {
@@ -85,8 +100,13 @@ export async function readOwnerAlertFeed(
   workspaceId: string,
   now = Date.now(),
   requestedLimit = ALERT_FEED_LIMIT,
+  selected?: { appId: string; environmentId: string },
+  source?: MonitoringSource,
 ): Promise<OwnerAlertFeed> {
   const limit = Math.max(1, Math.min(ALERT_FEED_LIMIT, Math.floor(requestedLimit)));
+  const probeEvent = "l.event IN ('journey.failed', 'journey.degraded', 'journey.recovered')";
+  const syntheticJourney = `(${probeEvent} AND (json_type(l.props, '$.journey') IS NOT NULL
+    OR json_type(l.props, '$.location') IS NOT NULL)) OR json_extract(l.props, '$.synthetic') IS 1`;
   const scope = `FROM log_events l
     JOIN environments e ON e.id = l.environment_id AND e.app_id = l.app_id
       AND lower(e.name) = 'production'
@@ -96,6 +116,21 @@ export async function readOwnerAlertFeed(
         'journey.recovered')
       OR l.level = 'error'
       OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
+      AND (l.event NOT LIKE 'journey.%'
+        OR (NOT (${probeEvent}) AND NOT (${syntheticJourney}) AND c.app_id = l.app_id)
+        OR (${probeEvent} AND json_type(l.props, '$.journey') = 'text'
+        AND json_type(l.props, '$.location') = 'text'
+        AND l.source = 'server' AND l.app_id = ? AND l.environment_id = ?
+        AND EXISTS (SELECT 1 FROM workspace_apps owned
+          JOIN apps target ON target.id = owned.app_id AND target.archived_at IS NULL
+          JOIN environments target_env ON target_env.app_id = target.id AND lower(target_env.name) = 'production'
+          WHERE owned.workspace_id = c.workspace_id AND owned.app_id = c.app_id)
+        AND (NOT EXISTS (SELECT 1 FROM workspace_monitoring_projects any_policy
+          WHERE any_policy.workspace_id = c.workspace_id)
+        OR EXISTS (SELECT 1 FROM workspace_monitoring_projects policy
+          JOIN json_each(policy.journeys_json) expected
+          WHERE policy.workspace_id = c.workspace_id AND policy.catalog_id = c.catalog_id
+            AND policy.scope = 'public' AND expected.value = json_extract(l.props, '$.journey')))))
       AND l.timestamp >= ? AND l.timestamp <= ?
       AND EXISTS (SELECT 1 FROM catalog_project_imports source
         WHERE source.workspace_id = ? AND source.app_id = l.app_id
@@ -117,13 +152,29 @@ export async function readOwnerAlertFeed(
           AND c.app_id = l.app_id)
         OR c.catalog_id = json_extract(l.props, '$.project_id')
         OR c.catalog_id = json_extract(l.props, '$.project')
-      )`;
+      )${
+        selected
+          ? ` AND c.app_id = ? AND EXISTS (
+        SELECT 1 FROM environments target WHERE target.id = ?
+          AND target.app_id = c.app_id AND lower(target.name) = 'production')`
+          : ''
+      }`;
   const from = Math.max(0, now - RETENTION_MS);
-  const binds = [workspaceId, from, now, workspaceId, workspaceId, workspaceId];
+  const binds = [
+    workspaceId,
+    source?.appId ?? null,
+    source?.environmentId ?? null,
+    from,
+    now,
+    workspaceId,
+    workspaceId,
+    workspaceId,
+    ...(selected ? [selected.appId, selected.environmentId] : []),
+  ];
   const countStatement = db.prepare(`SELECT COUNT(*) AS total_count ${scope}`).bind(...binds);
   const entriesStatement = db
     .prepare(
-      `SELECT l.log_id AS id, l.app_id AS app_id, c.catalog_id AS catalog_id,
+      `SELECT l.log_id AS id, ${selected ? 'c.app_id' : 'l.app_id'} AS app_id, c.catalog_id AS catalog_id,
         c.catalog_name AS project_name, l.event AS event, l.level AS level,
         l.source AS source, l.timestamp AS timestamp,
         CASE WHEN l.event LIKE 'journey.%' THEN json_extract(l.props, '$.journey') END AS journey,
@@ -136,7 +187,9 @@ export async function readOwnerAlertFeed(
   const results = await db.batch([
     countStatement,
     entriesStatement,
-    probeStatement(db, workspaceId, from, now),
+    selected
+      ? db.prepare('SELECT 1 WHERE 0').bind()
+      : probeStatement(db, workspaceId, from, now, source),
   ]);
   const countRows = results[0]?.results;
   const rows = results[1]?.results;
