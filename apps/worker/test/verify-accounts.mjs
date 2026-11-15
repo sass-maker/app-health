@@ -954,11 +954,59 @@ try {
       ],
     },
   };
+  const syncPreview = await (await request('/v1/catalog/sync')).json();
+  assert.ok(syncPreview.unlinked_apps.length > 0);
+  assert.equal((await request('/v1/catalog/sync', catalogProjection)).status, 409);
+  const outsideApp = syncPreview.unlinked_apps[0];
+  catalogProjection.preserve_outside_catalog_app_ids = [outsideApp.app_id];
+  const outsideBefore = await db
+    .prepare(
+      `SELECT a.id, a.name,
+    (SELECT COUNT(*) FROM keys WHERE app_id = a.id) AS keys,
+    (SELECT COUNT(*) FROM log_events WHERE app_id = a.id) AS history
+    FROM apps a WHERE a.id = ?`,
+    )
+    .bind(outsideApp.app_id)
+    .first();
+  const linkable = syncPreview.unlinked_apps.slice(1);
+  for (let offset = 0; offset < linkable.length; offset += 10) {
+    const linked = await request('/v1/catalog/import', {
+      schema_version: 1,
+      projects: linkable.slice(offset, offset + 10).map((app, index) => ({
+        catalog_id: `runtime-legacy-${offset + index}`,
+        name: app.name,
+        lifecycle: 'retired',
+        existing_app_id: app.app_id,
+      })),
+    });
+    assert.equal(linked.status, 200, await linked.clone().text());
+  }
   const keysBeforeSync = (await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n;
   const syncResponse = await request('/v1/catalog/sync', catalogProjection);
   assert.equal(syncResponse.status, 200, await syncResponse.clone().text());
   const synced = await syncResponse.json();
   assert.equal(synced.project_count, 2);
+  assert.deepEqual(
+    await db
+      .prepare(
+        `SELECT a.id, a.name,
+    (SELECT COUNT(*) FROM keys WHERE app_id = a.id) AS keys,
+    (SELECT COUNT(*) FROM log_events WHERE app_id = a.id) AS history
+    FROM apps a WHERE a.id = ?`,
+      )
+      .bind(outsideApp.app_id)
+      .first(),
+    outsideBefore,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT COUNT(*) AS n FROM catalog_project_imports WHERE app_id = ?')
+        .bind(outsideApp.app_id)
+        .first()
+    ).n,
+    0,
+  );
   const syncedInventory = await (await request('/v1/apps')).json();
   assert.equal(syncedInventory.apps.length, 2);
   assert.equal(
@@ -982,8 +1030,49 @@ try {
   const snapshotStatus = await (await request('/v1/catalog/sync')).json();
   assert.equal(snapshotStatus.projection_hash, synced.projection_hash);
   assert.equal(snapshotStatus.project_count, 2);
+  const joined = await request('/v1/catalog/import', {
+    schema_version: 1,
+    projects: [
+      {
+        catalog_id: 'runtime-joined',
+        name: 'Joined external metadata',
+        lifecycle: 'active',
+        existing_app_id: outsideApp.app_id,
+      },
+    ],
+  });
+  assert.equal(joined.status, 200, await joined.clone().text());
+  assert.equal((await (await request('/v1/apps')).json()).apps.length, 2);
+  const nextProjection = JSON.parse(JSON.stringify(catalogProjection));
+  nextProjection.expected_previous_hash = synced.projection_hash;
+  nextProjection.preserve_outside_catalog_app_ids = [];
+  nextProjection.projects.push({
+    catalog_id: 'runtime-joined',
+    name: 'Joined external metadata',
+    kind: 'platform',
+    future_form: 'support-tool',
+    auth_model: 'local-only',
+    repository: null,
+    hostname: null,
+  });
+  nextProjection.monitoring.projects.push({
+    catalog_id: 'runtime-joined',
+    name: 'Joined external metadata',
+    scope: 'local',
+    reason: 'Local service.',
+    journeys: [],
+  });
+  const joinedSync = await request('/v1/catalog/sync', nextProjection);
+  assert.equal(joinedSync.status, 200, await joinedSync.clone().text());
+  const joinedInventory = await (await request('/v1/apps')).json();
+  assert.equal(joinedInventory.apps.length, 3);
+  assert.equal(
+    joinedInventory.apps.find((row) => row.catalog.catalog_id === 'runtime-joined').app.id,
+    outsideApp.app_id,
+  );
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
   log(
-    'Catalog runtime: actual workerd/D1 owner sync, canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
+    'Catalog runtime: actual workerd/D1 unlinked-project denial, explicit outside preservation, later identity linking and canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
   );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);

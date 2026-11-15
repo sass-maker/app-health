@@ -2130,7 +2130,7 @@ describe('Google account boundary with real D1 SQL', () => {
           .DB!.prepare('INSERT INTO environments VALUES (?, ?, ?, 1)')
           .bind(`portfolio-env-${index}`, app, 'production'),
       );
-      if (index < 36)
+      if (index < 56)
         statements.push(
           env
             .DB!.prepare(
@@ -2138,7 +2138,7 @@ describe('Google account boundary with real D1 SQL', () => {
             )
             .bind(
               workspace.id,
-              projection.projects[index]!.catalog_id,
+              index < 36 ? projection.projects[index]!.catalog_id : `legacy-${index}`,
               `Old ${index}`,
               app,
               'primary',
@@ -2159,6 +2159,28 @@ describe('Google account boundary with real D1 SQL', () => {
       env,
     );
     expect(foreignOrigin.status).toBe(403);
+    const preview = (await (await request('/v1/catalog/sync', cookie)).json()) as {
+      mapped_catalog_ids: string[];
+      unlinked_apps: { app_id: string; name: string }[];
+    };
+    expect(preview.mapped_catalog_ids).toHaveLength(56);
+    expect(preview.unlinked_apps).toEqual([{ app_id: 'portfolio-app-56', name: 'Old 56' }]);
+    expect((await request('/v1/catalog/sync', cookie, projection)).status).toBe(409);
+    expect(
+      (
+        await request('/v1/catalog/import', cookie, {
+          schema_version: 1,
+          projects: [
+            {
+              catalog_id: 'explicit-legacy-56',
+              name: 'Explicit legacy project',
+              lifecycle: 'retired',
+              existing_app_id: 'portfolio-app-56',
+            },
+          ],
+        })
+      ).status,
+    ).toBe(200);
     expect((await request('/v1/catalog/sync', cookie, projection)).status).toBe(200);
     const listed = (await (await request('/v1/apps', cookie)).json()) as ListAppsResponseV1;
     expect(listed.apps).toHaveLength(40);

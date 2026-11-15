@@ -3725,7 +3725,11 @@ function AppSession(): ReactElement {
       setSelectionError('');
       setCatalogRevision((revision) => revision + 1);
       setInventoryRetry((retry) => retry + 1);
-      changeWorkspaceView('overview');
+      const url = new URL(location.href);
+      url.search = '';
+      url.hash = '#overview';
+      history.replaceState(null, '', url);
+      changeWorkspaceView('overview', false);
     }
     window.addEventListener(CATALOG_SYNC_EVENT, synchronized);
     return () => window.removeEventListener(CATALOG_SYNC_EVENT, synchronized);
@@ -3735,7 +3739,7 @@ function AppSession(): ReactElement {
     if (ownerToken === null) return;
     const token = ownerToken;
     let cancelled = false;
-    setInventoryLoading(strictRequestedProject);
+    setInventoryLoading(true);
     setInventoryError('');
     async function readInventory(): Promise<SavedProject[]> {
       const prefetched = prefetchedInventory.current;
@@ -3777,8 +3781,8 @@ function AppSession(): ReactElement {
           setCreated(null);
         }
       } catch {
-        if (!cancelled && strictRequestedProject) {
-          setProject(null);
+        if (!cancelled) {
+          if (strictRequestedProject) setProject(null);
           setInventoryError('the workspace project list could not load. try again.');
           setInventoryLoading(false);
         }
@@ -3944,7 +3948,16 @@ function AppSession(): ReactElement {
         }}
       />
     );
-  if (strictRequestedProject && inventoryLoading) return <WorkspaceLoading />;
+  const emptyPortfolioView = workspaceView === 'overview' && !projects.length;
+  if ((strictRequestedProject || emptyPortfolioView) && inventoryLoading)
+    return <WorkspaceLoading />;
+  if (!strictRequestedProject && emptyPortfolioView && inventoryError)
+    return (
+      <WorkspaceLoading
+        error={inventoryError}
+        onRetry={() => setInventoryRetry((value) => value + 1)}
+      />
+    );
   if (strictRequestedProject && inventoryError)
     return (
       <div className="mx-auto flex min-h-screen max-w-2xl items-center px-4">

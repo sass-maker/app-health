@@ -1,4 +1,8 @@
-import { CatalogSyncRequestV1, type CatalogSyncRequest } from '@app-health/contracts';
+import {
+  CatalogSyncRequestV1,
+  CatalogSyncStatusV1,
+  type CatalogSyncRequest,
+} from '@app-health/contracts';
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 import { readPublicJson } from './public-body.js';
@@ -29,6 +33,39 @@ export async function catalogSnapshotStatus(db: D1DatabaseLike, workspace: strin
   };
 }
 
+const UNLINKED_MESSAGE =
+  'Review unlinked workspace projects before synchronizing. Link active catalog projects through /v1/catalog/import with existing_app_id, or explicitly acknowledge projects to preserve outside this catalog. Reload the preview after changes.';
+async function unlinkedCatalogApps(db: D1DatabaseLike, workspace: string) {
+  return (
+    await db
+      .prepare(
+        `SELECT a.id AS app_id, a.name FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+    WHERE wa.workspace_id = ? AND a.archived_at IS NULL AND NOT EXISTS (
+      SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id
+    ) ORDER BY a.name, a.id LIMIT 1001`,
+      )
+      .bind(workspace)
+      .all<{ app_id: string; name: string }>()
+  ).results;
+}
+async function catalogSyncStatus(db: D1DatabaseLike, workspace: string) {
+  const [snapshot, mapped, unlinked] = await Promise.all([
+    catalogSnapshotStatus(db, workspace),
+    db
+      .prepare(
+        'SELECT catalog_id FROM catalog_project_imports WHERE workspace_id = ? ORDER BY catalog_id LIMIT 1001',
+      )
+      .bind(workspace)
+      .all<{ catalog_id: string }>(),
+    unlinkedCatalogApps(db, workspace),
+  ]);
+  return CatalogSyncStatusV1.parse({
+    ...snapshot,
+    mapped_catalog_ids: mapped.results.map((row) => row.catalog_id),
+    unlinked_apps: unlinked,
+  });
+}
+
 /** Ownership remains unchanged. A snapshot selects the current portfolio from owned metadata. */
 export async function syncCatalog(
   db: D1DatabaseLike,
@@ -45,6 +82,13 @@ export async function syncCatalog(
     throw new CatalogSyncConflict(
       'Monitoring journeys are missing from the reviewed probe configuration',
     );
+  const unlinked = new Set((await unlinkedCatalogApps(db, workspace)).map((app) => app.app_id));
+  const outside = new Set(input.preserve_outside_catalog_app_ids);
+  if (
+    [...unlinked].some((app) => !outside.has(app)) ||
+    [...outside].some((app) => !unlinked.has(app))
+  )
+    throw new CatalogSyncConflict(UNLINKED_MESSAGE);
   const mapped = (
     await db
       .prepare('SELECT catalog_id, app_id FROM catalog_project_imports WHERE workspace_id = ?')
@@ -71,11 +115,12 @@ export async function syncCatalog(
   try {
     const result = await db.batch([
       statement(
-        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash) VALUES (?, ?, ?, ?)',
+        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash, preserve_outside_catalog_app_ids_json) VALUES (?, ?, ?, ?, ?)',
         workspace,
         payload,
         projectionHash,
         input.expected_previous_hash,
+        JSON.stringify(input.preserve_outside_catalog_app_ids),
       ),
       statement(
         `INSERT INTO apps (id, name, created_at)
@@ -136,6 +181,8 @@ export async function syncCatalog(
     if (result.some((row) => !row.success))
       throw new Error('Catalog synchronization transaction failed');
   } catch (error) {
+    if (error instanceof Error && error.message.includes('portfolio sync unlinked project'))
+      throw new CatalogSyncConflict(UNLINKED_MESSAGE);
     if (
       error instanceof Error &&
       /portfolio sync|UNIQUE constraint failed|catalog import/.test(error.message)
@@ -168,8 +215,7 @@ export async function handleCatalogSyncRoute(
   )
     return json(403, { error: 'Only the workspace account owner can synchronize its catalog' });
   if (!db) return json(503, { error: 'Catalog storage is unavailable' });
-  if (request.method === 'GET')
-    return json(200, await catalogSnapshotStatus(db, owner.workspaceId));
+  if (request.method === 'GET') return json(200, await catalogSyncStatus(db, owner.workspaceId));
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   try {
     const input = CatalogSyncRequestV1.safeParse(await readPublicJson(request, 96 * 1024));
@@ -190,11 +236,7 @@ export async function catalogManualWriteResponse(
   db: D1DatabaseLike | undefined,
   owner: OwnerIdentity,
 ) {
-  if (
-    request.method !== 'POST' ||
-    !['/v1/apps', '/v1/catalog/import'].includes(new URL(request.url).pathname)
-  )
-    return null;
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/v1/apps') return null;
   if (!db || !owner.workspaceId || owner.appId) return null;
   return (await catalogSnapshotStatus(db, owner.workspaceId)).source
     ? json(409, {

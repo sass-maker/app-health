@@ -151,6 +151,18 @@ describe('ProductShell navigation', () => {
     expect(onProject).toHaveBeenCalledWith(appOneProduction);
   });
 
+  it.each([{ inventory: [] }, { inventory: [appOneStaging] }, { inventory: [appTwoProduction] }])(
+    'keeps the selected environment in context without expanding inventory %j',
+    ({ inventory }) => {
+      renderShell({ view: 'settings', project: appOneProduction, projects: inventory });
+      expect(screen.getByRole('combobox', { name: 'Environment' })).toHaveTextContent('production');
+      expect(projectButtons().map((button) => button.getAttribute('title'))).toEqual(
+        inventory.map((entry) => entry.name),
+      );
+      expect(inventory).not.toContain(appOneProduction);
+    },
+  );
+
   it('keeps report tabs local by routing selection through onView', () => {
     const onView = vi.fn();
     renderShell({ view: 'analytics', onView });

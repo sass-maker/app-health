@@ -432,6 +432,33 @@ describe('App Health V0 UI', () => {
     expect(screen.queryByRole('button', { name: 'create project' })).toBeNull();
   });
 
+  it('shows inventory loading and a retryable failure without reporting an empty portfolio', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#overview');
+    const fetch = installFetch();
+    const fallback = fetch.getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    fetch.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), location.origin);
+      if (url.pathname === '/v1/apps')
+        return await new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return fallback(input, init);
+    });
+    render(<App />);
+    expect(await screen.findByLabelText('Loading workspace project')).toBeTruthy();
+    expect(screen.queryByText('no projects yet')).toBeNull();
+    await act(async () => finish(new Response(null, { status: 503 })));
+    expect(
+      await screen.findByText('the workspace project list could not load. try again.'),
+    ).toBeTruthy();
+    expect(screen.queryByText('no projects yet')).toBeNull();
+    fetch.mockImplementation(fallback);
+    fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+    expect(await screen.findByText('no projects yet')).toBeTruthy();
+  });
+
   it('restores the selected project when browser history changes the URL target', async () => {
     const apps = ['alpha', 'beta'].map((name) => ({
       app: { id: `app-${name}`, name, created_at: Date.now() },

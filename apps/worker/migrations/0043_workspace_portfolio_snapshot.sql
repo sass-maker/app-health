@@ -12,12 +12,25 @@ CREATE TABLE IF NOT EXISTS workspace_portfolio_sync_guards (
   workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
   projects_json TEXT NOT NULL CHECK (json_valid(projects_json)),
   projection_hash TEXT NOT NULL,
-  expected_previous_hash TEXT
+  expected_previous_hash TEXT,
+  preserve_outside_catalog_app_ids_json TEXT NOT NULL CHECK (json_valid(preserve_outside_catalog_app_ids_json))
 );
 
 CREATE TRIGGER IF NOT EXISTS portfolio_sync_guard
 BEFORE INSERT ON workspace_portfolio_sync_guards
 BEGIN
+  SELECT RAISE(ABORT, 'portfolio sync unlinked project') WHERE EXISTS (
+    SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+    WHERE wa.workspace_id = NEW.workspace_id AND a.archived_at IS NULL AND NOT EXISTS (
+      SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id
+    ) AND NOT EXISTS (SELECT 1 FROM json_each(NEW.preserve_outside_catalog_app_ids_json) outside_app WHERE outside_app.value = a.id)
+  ) OR EXISTS (
+    SELECT 1 FROM json_each(NEW.preserve_outside_catalog_app_ids_json) outside_app WHERE NOT EXISTS (
+      SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+      WHERE wa.workspace_id = NEW.workspace_id AND a.id = outside_app.value AND a.archived_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id)
+    )
+  );
   SELECT RAISE(ABORT, 'portfolio sync stale snapshot') WHERE
     COALESCE((SELECT projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = NEW.workspace_id), '')
       <> COALESCE(NEW.expected_previous_hash, '')
@@ -67,6 +80,17 @@ BEGIN
       JOIN apps a ON a.id = c.app_id AND a.archived_at IS NULL
       WHERE c.workspace_id = NEW.workspace_id AND c.catalog_id = json_extract(p.value, '$.catalog_id') AND c.app_id = json_extract(p.value, '$.app_id')
     )
+  );
+END;
+
+CREATE TRIGGER IF NOT EXISTS catalog_snapshot_explicit_link
+BEFORE INSERT ON catalog_project_imports
+WHEN EXISTS (SELECT 1 FROM workspace_portfolio_snapshots s WHERE s.workspace_id = NEW.workspace_id)
+  AND NOT EXISTS (SELECT 1 FROM workspace_portfolio_sync_guards g WHERE g.workspace_id = NEW.workspace_id)
+BEGIN
+  SELECT RAISE(ABORT, 'catalog import identity conflict') WHERE EXISTS (
+    SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = NEW.workspace_id
+      AND (c.app_id = NEW.app_id OR c.catalog_id = NEW.catalog_id)
   );
 END;
 

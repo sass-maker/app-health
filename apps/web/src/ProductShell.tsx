@@ -266,6 +266,8 @@ function ProjectPicker({
   view,
 }: Pick<Props, 'project' | 'projects' | 'onProject' | 'view'>): ReactElement {
   const environments = projects.filter((candidate) => candidate.appId === project.appId);
+  if (!environments.some((candidate) => candidate.environmentId === project.environmentId))
+    environments.unshift(project);
   return (
     <div role="group" aria-label="Project context" className="flex min-w-0 items-center gap-3">
       <span

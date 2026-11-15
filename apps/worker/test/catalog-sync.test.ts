@@ -1,3 +1,5 @@
+import { CatalogImportRequestV1 } from '@app-health/contracts';
+import { importCatalogProjects } from '../src/catalog-import.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import { D1WorkspaceHealth } from '../src/workspace-health.js';
 import { currentPortfolioAppIds } from '../src/catalog-inventory.js';
@@ -146,7 +148,7 @@ function canonical() {
 function input() {
   return projectCanonicalCatalog(canonical(), null);
 }
-function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36) {
+function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36, unlinked = 0) {
   const projects = input().projects;
   for (let index = 0; index < count; index += 1) {
     f.sqlite
@@ -156,14 +158,14 @@ function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36) {
     f.sqlite
       .prepare('INSERT INTO environments VALUES (?, ?, ?, 1)')
       .run(`env-${index}`, `app-${index}`, 'production');
-    if (index < mappings)
+    if (index < count - unlinked)
       f.sqlite
         .prepare(
           'INSERT INTO catalog_project_imports (workspace_id, catalog_id, catalog_name, app_id, lifecycle, payload_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, 1)',
         )
         .run(
           'ws',
-          projects[index]!.catalog_id,
+          index < mappings ? projects[index]!.catalog_id : `legacy-${index}`,
           `Old ${index}`,
           `app-${index}`,
           'primary',
@@ -217,7 +219,30 @@ describe('canonical active portfolio synchronization', () => {
 
   it('converges 57 owned records to 40 visible projects, preserving IDs, environments, keys and immutable receipts', async () => {
     const f = fixture();
-    seed(f);
+    seed(f, 57, 36, 1);
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM catalog_project_imports').get()).toEqual({
+      n: 56,
+    });
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM current_workspace_catalog').get()).toEqual({
+      n: 56,
+    });
+    await expect(syncCatalog(f.db, 'ws', input(), 8)).rejects.toThrow('existing_app_id');
+    await importCatalogProjects(
+      f.db,
+      'ws',
+      CatalogImportRequestV1.parse({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: 'legacy-56',
+            name: 'Explicit legacy mapping',
+            lifecycle: 'retired',
+            existing_app_id: 'app-56',
+          },
+        ],
+      }),
+      9,
+    );
     const plane = new D1ControlPlane(f.db, 'ws');
     expect(await plane.listApps()).toHaveLength(57);
     const receipt = f.sqlite
@@ -267,6 +292,202 @@ describe('canonical active portfolio synchronization', () => {
     renamed.monitoring.projects[0]!.name = 'Renamed';
     await syncCatalog(f.db, 'ws', renamed, 12);
     expect((await plane.listApps()).find((row) => row.id === 'app-0')?.name).toBe('Renamed');
+  });
+
+  it('refuses unlinked manual apps without matching names or creating empty duplicates, then accepts an explicit link', async () => {
+    const f = fixture();
+    seed(f, 57, 36, 1);
+    f.sqlite
+      .prepare('UPDATE apps SET name = ? WHERE id = ?')
+      .run(input().projects[36]!.name, 'app-56');
+    const owner = {
+      id: 'owner',
+      label: 'Owner',
+      authKind: 'account' as const,
+      workspaceRole: 'owner' as const,
+      workspaceId: 'ws',
+    };
+    const status = await handleCatalogSyncRoute(
+      new Request('https://dashboard.test/v1/catalog/sync'),
+      f.db,
+      owner,
+    );
+    expect(await status!.json()).toMatchObject({
+      mapped_catalog_ids: expect.arrayContaining([input().projects[0]!.catalog_id]),
+      unlinked_apps: [{ app_id: 'app-56', name: input().projects[36]!.name }],
+    });
+    await expect(syncCatalog(f.db, 'ws', input(), 10)).rejects.toThrow('existing_app_id');
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_snapshots').get(),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_monitoring_projects').get(),
+    ).toEqual({ n: 0 });
+    await importCatalogProjects(
+      f.db,
+      'ws',
+      CatalogImportRequestV1.parse({
+        schema_version: 1,
+        projects: [
+          {
+            catalog_id: input().projects[36]!.catalog_id,
+            name: input().projects[36]!.name,
+            lifecycle: 'active',
+            existing_app_id: 'app-56',
+          },
+        ],
+      }),
+      11,
+    );
+    await syncCatalog(f.db, 'ws', input(), 12);
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 60 });
+    expect(
+      (await new D1ControlPlane(f.db, 'ws').listApps()).find((row) => row.id === 'app-56')?.name,
+    ).toBe(input().projects[36]!.name);
+  });
+
+  it('preserves an explicitly acknowledged outside app, key and history without inventing a catalog identity', async () => {
+    const f = fixture();
+    seed(f, 57, 36, 1);
+    f.sqlite.exec(
+      "INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at) VALUES ('outside-key', 'app-56', 'env-56', 'outside-verifier', 1); INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level) VALUES ('outside-history', 'app-56', 'env-56', 1, 'owner.authored', 'info')",
+    );
+    const acknowledged = input();
+    acknowledged.preserve_outside_catalog_app_ids = ['app-56'];
+    const result = await syncCatalog(f.db, 'ws', acknowledged, 10);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(40);
+    expect(
+      f.sqlite
+        .prepare('SELECT count(*) AS n FROM catalog_project_imports WHERE app_id = ?')
+        .get('app-56'),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT verifier_hash FROM keys WHERE id = ?').get('outside-key'),
+    ).toEqual({ verifier_hash: 'outside-verifier' });
+    expect(
+      f.sqlite.prepare('SELECT event FROM log_events WHERE log_id = ?').get('outside-history'),
+    ).toEqual({ event: 'owner.authored' });
+    expect(await new D1ControlPlane(f.db, 'ws').getApp('app-56')).toMatchObject({ id: 'app-56' });
+    const snapshot = f.sqlite
+      .prepare('SELECT projects_json FROM workspace_portfolio_snapshots')
+      .get()!;
+    expect(String(snapshot.projects_json)).not.toMatch(/app-56|preserve_outside_catalog_app_ids/);
+    expect((await syncCatalog(f.db, 'ws', acknowledged, 11)).projection_hash).toBe(
+      result.projection_hash,
+    );
+    await expect(syncCatalog(f.db, 'ws', input(), 12)).rejects.toThrow('explicitly acknowledge');
+  });
+
+  it('links a preserved outside app after synchronization without changing the roster until the next canonical sync', async () => {
+    const f = fixture();
+    seed(f, 57, 36, 1);
+    f.sqlite.exec(
+      "INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at) VALUES ('outside-key', 'app-56', 'env-56', 'outside-verifier', 1)",
+    );
+    const initial = input();
+    initial.preserve_outside_catalog_app_ids = ['app-56'];
+    const first = await syncCatalog(f.db, 'ws', initial, 10);
+    const link = CatalogImportRequestV1.parse({
+      schema_version: 1,
+      projects: [
+        {
+          catalog_id: 'outside-service',
+          name: 'Outside service joins',
+          lifecycle: 'active',
+          existing_app_id: 'app-56',
+        },
+      ],
+    });
+    await importCatalogProjects(f.db, 'ws', link, 11, true);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(40);
+    expect(
+      (await new D1ControlPlane(f.db, 'ws').listApps()).some((app) => app.id === 'app-56'),
+    ).toBe(false);
+    await expect(importCatalogProjects(f.db, 'ws', link, 12, true)).rejects.toThrow(
+      'without a catalog identity',
+    );
+    const generic = CatalogImportRequestV1.parse({
+      schema_version: 1,
+      projects: [{ catalog_id: 'manual-duplicate', name: 'Manual duplicate', lifecycle: 'active' }],
+    });
+    await expect(importCatalogProjects(f.db, 'ws', generic, 12, true)).rejects.toThrow(
+      'existing_app_id',
+    );
+    const next = input();
+    next.expected_previous_hash = first.projection_hash;
+    next.projects[39] = {
+      ...next.projects[39]!,
+      catalog_id: 'outside-service',
+      name: 'Outside service joins',
+    };
+    next.monitoring.projects[39] = {
+      catalog_id: 'outside-service',
+      name: 'Outside service joins',
+      scope: 'private',
+      reason: 'Private service.',
+      journeys: [],
+    };
+    await syncCatalog(f.db, 'ws', next, 13);
+    expect(
+      (await new D1ControlPlane(f.db, 'ws').listApps()).find((app) => app.id === 'app-56')?.name,
+    ).toBe('Outside service joins');
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(40);
+    expect(
+      f.sqlite.prepare('SELECT verifier_hash FROM keys WHERE id = ?').get('outside-key'),
+    ).toEqual({ verifier_hash: 'outside-verifier' });
+  });
+
+  it('rejects outside acknowledgements for mapped, foreign, unknown or archived apps and closes ownership races', async () => {
+    for (const invalid of ['app-0', 'unknown', 'foreign-app', 'archived-app']) {
+      const f = fixture();
+      seed(f, 57, 36, 1);
+      f.sqlite.exec(
+        "INSERT INTO apps (id, name, created_at, archived_at) VALUES ('foreign-app', 'Foreign', 1, NULL), ('archived-app', 'Archived', 1, 2); INSERT INTO workspace_apps VALUES ('foreign-app', 'foreign'), ('archived-app', 'ws')",
+      );
+      const bad = input();
+      bad.preserve_outside_catalog_app_ids = ['app-56', invalid];
+      await expect(syncCatalog(f.db, 'ws', bad, 10)).rejects.toThrow('existing_app_id');
+      expect(
+        f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_snapshots').get(),
+      ).toEqual({ n: 0 });
+    }
+    const f = fixture();
+    seed(f, 57, 36, 1);
+    const raced = input();
+    raced.preserve_outside_catalog_app_ids = ['app-56'];
+    f.beforeBatch(() =>
+      f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-56'"),
+    );
+    await expect(syncCatalog(f.db, 'ws', raced, 10)).rejects.toThrow('existing_app_id');
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_snapshots').get(),
+    ).toEqual({ n: 0 });
+    const duplicate = input();
+    duplicate.preserve_outside_catalog_app_ids = ['app-56', 'app-56'];
+    expect(CatalogSyncRequestV1.safeParse(duplicate).success).toBe(false);
+  });
+
+  it('rejects an unlinked app appearing after resolution inside the SQL transaction guard', async () => {
+    const f = fixture();
+    seed(f);
+    f.beforeBatch(() =>
+      f.sqlite.exec(
+        "INSERT INTO apps (id, name, created_at) VALUES ('late-manual', 'Late manual project', 1); INSERT INTO workspace_apps VALUES ('late-manual', 'ws')",
+      ),
+    );
+    await expect(syncCatalog(f.db, 'ws', input(), 10)).rejects.toThrow('existing_app_id');
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 58 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_snapshots').get(),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_monitoring_projects').get(),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_sync_guards').get(),
+    ).toEqual({ n: 0 });
   });
 
   it('rejects stale updates and rolls back all metadata and policy changes', async () => {

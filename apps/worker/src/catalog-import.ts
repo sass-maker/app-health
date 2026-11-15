@@ -14,7 +14,9 @@ export async function importCatalogProjects(
   workspace: string,
   input: CatalogImportRequest,
   now: number,
+  existingOnly = false,
 ) {
+  if (existingOnly) await requireUnlinkedExistingApps(db, workspace, input);
   const statements: D1PreparedStatement[] = [];
   const imported: { catalog_id: string; app_id: string; verification_state: 'declared' }[] = [];
   for (const project of input.projects) {
@@ -78,4 +80,28 @@ export async function importCatalogProjects(
     throw error;
   }
   return { schema_version: 1, projects: imported };
+}
+
+async function requireUnlinkedExistingApps(
+  db: D1DatabaseLike,
+  workspace: string,
+  input: CatalogImportRequest,
+) {
+  if (input.projects.some((project) => !project.existing_app_id))
+    throw new CatalogImportConflict(
+      'Synchronized workspaces allow only explicit existing_app_id links; add new projects through the canonical catalog.',
+    );
+  const existing = await db
+    .prepare(
+      `SELECT a.id FROM json_each(?) p
+    JOIN apps a ON a.id = json_extract(p.value, '$.existing_app_id') AND a.archived_at IS NULL
+    JOIN workspace_apps wa ON wa.app_id = a.id AND wa.workspace_id = ?
+    WHERE NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id)`,
+    )
+    .bind(JSON.stringify(input.projects), workspace)
+    .all<{ id: string }>();
+  if (existing.results.length !== input.projects.length)
+    throw new CatalogImportConflict(
+      'Explicit links require owned, unarchived projects without a catalog identity.',
+    );
 }

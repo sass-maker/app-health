@@ -11,6 +11,25 @@ export const CatalogMetadataV1 = z.object({
   auth_model: facet,
 });
 export type CatalogMetadata = z.infer<typeof CatalogMetadataV1>;
+export const CatalogSyncStatusV1 = z
+  .object({
+    source: z.literal('saas-maker').nullable(),
+    projection_hash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+    updated_at: z.number().int().nonnegative().nullable(),
+    project_count: z.number().int().nonnegative().nullable(),
+    mapped_catalog_ids: z.array(slug).max(1000),
+    unlinked_apps: z
+      .array(
+        z.object({ app_id: z.string().min(1).max(100), name: z.string().min(1).max(128) }).strict(),
+      )
+      .max(1000),
+  })
+  .strict();
+export type CatalogSyncStatus = z.infer<typeof CatalogSyncStatusV1>;
+
 const applicability = z.enum(['applicable', 'not_applicable', 'unknown']);
 const project = z
   .object({
@@ -42,6 +61,7 @@ export const CatalogSyncRequestV1 = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
+    preserve_outside_catalog_app_ids: z.array(z.string().min(1).max(100)).max(60).default([]),
     projects: z.array(project).min(1).max(60),
     monitoring: MonitoringPolicyV1,
   })
@@ -49,6 +69,8 @@ export const CatalogSyncRequestV1 = z
   .superRefine((input, context) => {
     const ids = input.projects.map((row) => row.catalog_id);
     if (
+      new Set(input.preserve_outside_catalog_app_ids).size !==
+        input.preserve_outside_catalog_app_ids.length ||
       new Set(ids).size !== ids.length ||
       input.monitoring.projects.length !== ids.length ||
       input.monitoring.projects.some(

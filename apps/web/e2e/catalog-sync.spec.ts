@@ -116,6 +116,13 @@ for (const width of [390, 768, 1440]) {
           projection_hash: synchronized ? 'a'.repeat(64) : null,
           project_count: synchronized ? 40 : null,
           updated_at: synchronized ? now : null,
+          mapped_catalog_ids: synchronized
+            ? active.map((row: { id: string }) => row.id)
+            : [
+                ...active.slice(0, 36).map((row: { id: string }) => row.id),
+                ...Array.from({ length: 20 }, (_, index) => `legacy-${index}`),
+              ],
+          unlinked_apps: [{ app_id: 'app-56', name: 'External project' }],
         },
       });
     });
@@ -141,7 +148,7 @@ for (const width of [390, 768, 1440]) {
         json: { schema_version: 1, generated_at: now, policy_updated_at: now, projects: [] },
       }),
     );
-    await page.goto('/app#overview');
+    await page.goto('/app?project=app-56&environment=env-56#overview');
     const input = page.getByLabel('Canonical catalog JSON');
     await input.setInputFiles({
       name: 'invalid.json',
@@ -157,15 +164,30 @@ for (const width of [390, 768, 1440]) {
     await expect(page.getByText('40 active projects', { exact: true })).toBeVisible();
     await expect(page.getByText('5 support-tool', { exact: false })).toBeVisible();
     await expect(page.getByText('16 personal-tool', { exact: false })).toBeVisible();
+    await expect(
+      page.getByText('36 selected projects already mapped · 4 new metadata projects'),
+    ).toBeVisible();
     mkdirSync(evidence, { recursive: true });
     await page
       .getByLabel('Catalog preview')
       .screenshot({ path: join(evidence, `catalog-preview-${width}.png`) });
+    await expect(page.getByRole('button', { name: 'Synchronize active portfolio' })).toBeDisabled();
+    await page
+      .getByRole('checkbox', { name: /Keep External project outside this catalog/ })
+      .check();
+    await page
+      .getByLabel('Catalog preview')
+      .screenshot({ path: join(evidence, `catalog-outside-${width}.png`) });
     await page.getByRole('button', { name: 'Synchronize active portfolio' }).click();
     await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();
+    expect(new URL(page.url()).search).toBe('');
+    await page.reload();
+    await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();
+    await expect(page.getByText('project unavailable', { exact: true })).toHaveCount(0);
     await expect(page.getByLabel('Monitoring roster file')).toHaveCount(0);
     expect(uploaded).not.toMatch(/PRIVATE_CANARY|localPath|ignored.invalid|ownerNotes/);
     expect(JSON.parse(uploaded).projects).toHaveLength(40);
+    expect(JSON.parse(uploaded).preserve_outside_catalog_app_ids).toEqual(['app-56']);
     await page.getByText('request health and collection details', { exact: false }).click();
     await expect(
       page.getByLabel('Watchtower totals').getByText('40', { exact: true }),

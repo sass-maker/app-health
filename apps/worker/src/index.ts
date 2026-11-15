@@ -1,4 +1,8 @@
-import { catalogManualWriteResponse, handleCatalogSyncRoute } from './catalog-sync.js';
+import {
+  catalogManualWriteResponse,
+  catalogSnapshotStatus,
+  handleCatalogSyncRoute,
+} from './catalog-sync.js';
 import { providerRuntime } from './payment-provider-model.js';
 import { pumpProviderJobs } from './payment-provider-wake.js';
 import { readEndpointBuckets } from './endpoint-read.js';
@@ -1185,7 +1189,13 @@ async function handleCatalogImportRoute(request: Request, owner: OwnerIdentity, 
     if (!parsed.success) return json(400, { error: 'Invalid catalog import' }, true);
     return json(
       200,
-      await importCatalogProjects(env.DB, owner.workspaceId, parsed.data, Date.now()),
+      await importCatalogProjects(
+        env.DB,
+        owner.workspaceId,
+        parsed.data,
+        Date.now(),
+        Boolean((await catalogSnapshotStatus(env.DB, owner.workspaceId)).source),
+      ),
       true,
     );
   } catch (error) {

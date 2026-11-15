@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
   ListAppsResponseV1,
+  CatalogSyncStatusV1,
+  type CatalogSyncStatus,
   projectCanonicalCatalog,
   type CatalogSyncRequest,
 } from '@app-health/contracts';
@@ -20,15 +22,12 @@ function counts(
   return [...result].map(([label, count]) => `${count} ${label}`).join(' · ');
 }
 
-export function CatalogSync({ ownerToken }: { ownerToken: string }) {
+function useCatalogState(ownerToken: string) {
   const scope = useWorkspaceScope();
   const [preview, setPreview] = useState<CatalogSyncRequest | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<{
-    project_count: number | null;
-    updated_at: number | null;
-  } | null>(null);
+  const [status, setStatus] = useState<CatalogSyncStatus | null>(null);
   const generation = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -45,25 +44,39 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       activeRequest.current?.abort();
     };
   }, [scope.epoch, ownerToken]);
-  useEffect(() => {
-    if (scope.role !== 'owner' || ownerToken) return;
-    const controller = new AbortController();
-    let disposed = false;
-    void ownerFetch('/v1/catalog/sync', ownerToken, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const value = (await response.json()) as {
-          project_count: number | null;
-          updated_at: number | null;
-        };
-        if (!disposed && scope.epoch === workspaceScope().epoch) setStatus(value);
-      })
-      .catch(() => {});
-    return () => {
-      disposed = true;
-      controller.abort();
-    };
-  }, [scope.epoch, scope.role, ownerToken]);
+  useCatalogStatus(ownerToken, scope, generation, setStatus);
+  return {
+    scope,
+    preview,
+    setPreview,
+    message,
+    setMessage,
+    busy,
+    setBusy,
+    status,
+    setStatus,
+    generation,
+    activeRequest,
+    fileInput,
+  };
+}
+
+export function CatalogSync({ ownerToken }: { ownerToken: string }) {
+  const {
+    scope,
+    preview,
+    setPreview,
+    message,
+    setMessage,
+    busy,
+    setBusy,
+    status,
+    setStatus,
+    generation,
+    activeRequest,
+    fileInput,
+  } = useCatalogState(ownerToken);
+  const previewGeneration = generation.current;
   if (scope.role !== 'owner' || ownerToken) return null;
 
   async function readFile(file: File | undefined) {
@@ -87,24 +100,21 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
         signal: controller.signal,
       });
       if (!response.ok) throw new Error(`Catalog status returned ${response.status}.`);
-      const status = (await response.json()) as { projection_hash: string | null };
-      if (current()) setPreview({ ...projection, expected_previous_hash: status.projection_hash });
+      const status = CatalogSyncStatusV1.parse(await response.json());
+      if (current()) {
+        setStatus(status);
+        setPreview({ ...projection, expected_previous_hash: status.projection_hash });
+      }
     } catch (error) {
-      if (current())
-        setMessage(
-          error instanceof SyntaxError
-            ? 'Choose a valid canonical catalog JSON file.'
-            : error instanceof Error
-              ? error.message
-              : 'Catalog preview failed.',
-        );
+      if (current()) setMessage(catalogPreviewError(error));
     } finally {
       if (current()) setBusy(false);
       if (fileInput.current) fileInput.current.value = '';
     }
   }
   async function synchronize() {
-    if (!preview || busy) return;
+    if (!preview || busy || unresolvedCatalogLinks(preview, status)) return;
+    if (!catalogSubmissionCurrent(scope.epoch, previewGeneration, generation.current)) return;
     const epoch = scope.epoch;
     const run = ++generation.current;
     const controller = new AbortController();
@@ -187,6 +197,24 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
             {preview ? (
               <div className="space-y-2 rounded-lg border p-3 text-xs" aria-label="Catalog preview">
                 <p className="text-sm font-medium">{preview.projects.length} active projects</p>
+                <CatalogLinkPreview
+                  preview={preview}
+                  status={status}
+                  onOutsideChange={(appId, checked) =>
+                    setPreview((current) =>
+                      current
+                        ? {
+                            ...current,
+                            preserve_outside_catalog_app_ids: checked
+                              ? [...current.preserve_outside_catalog_app_ids, appId]
+                              : current.preserve_outside_catalog_app_ids.filter(
+                                  (id) => id !== appId,
+                                ),
+                          }
+                        : null,
+                    )
+                  }
+                />
                 <p className="break-words">{counts(preview.projects, 'kind')}</p>
                 <p className="break-words">{counts(preview.projects, 'future_form')}</p>
                 <p className="break-words">{counts(preview.projects, 'auth_model')}</p>
@@ -198,7 +226,11 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
                   {preview.monitoring.projects.filter((row) => row.scope !== 'public').length}{' '}
                   explicit local or private limits
                 </p>
-                <Button size="sm" disabled={busy} onClick={() => void synchronize()}>
+                <Button
+                  size="sm"
+                  disabled={busy || unresolvedCatalogLinks(preview, status)}
+                  onClick={() => void synchronize()}
+                >
                   {busy ? 'Synchronizing…' : 'Synchronize active portfolio'}
                 </Button>
               </div>
@@ -218,4 +250,109 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       </CardContent>
     </Card>
   );
+}
+
+function unresolvedCatalogLinks(preview: CatalogSyncRequest, status: CatalogSyncStatus | null) {
+  return (
+    status?.unlinked_apps.some(
+      (app) => !preview.preserve_outside_catalog_app_ids.includes(app.app_id),
+    ) ?? false
+  );
+}
+
+function CatalogLinkPreview({
+  preview,
+  status,
+  onOutsideChange,
+}: {
+  preview: CatalogSyncRequest;
+  status: CatalogSyncStatus | null;
+  onOutsideChange: (appId: string, checked: boolean) => void;
+}) {
+  const mapped = new Set(status?.mapped_catalog_ids);
+  const existing = preview.projects.filter((project) => mapped.has(project.catalog_id)).length;
+  return (
+    <div className="space-y-2">
+      <p>
+        {existing} selected projects already mapped · {preview.projects.length - existing} new
+        metadata projects
+      </p>
+      {status?.unlinked_apps.length ? (
+        <div
+          role={unresolvedCatalogLinks(preview, status) ? 'alert' : 'status'}
+          className="space-y-2 rounded-md border p-3"
+        >
+          <p className="font-medium">
+            Review {status.unlinked_apps.length} unlinked workspace projects before synchronizing.
+          </p>
+          <p>
+            If a project belongs to this active catalog, link it first through the owner catalog
+            import API using existing_app_id. Then reload this preview. Names cannot establish a
+            match.
+          </p>
+          <p>
+            Otherwise, explicitly keep the project outside this catalog. Its keys, history and
+            direct access remain available.
+          </p>
+          <ul className="space-y-2">
+            {status.unlinked_apps.map((app) => (
+              <li key={app.app_id}>
+                <label className="flex items-start gap-2">
+                  <input
+                    className="mt-0.5 shrink-0"
+                    type="checkbox"
+                    checked={preview.preserve_outside_catalog_app_ids.includes(app.app_id)}
+                    onChange={(event) => onOutsideChange(app.app_id, event.target.checked)}
+                  />
+                  <span className="min-w-0 break-words">
+                    Keep {app.name} outside this catalog{' '}
+                    <code className="block break-all text-muted-foreground">{app.app_id}</code>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function useCatalogStatus(
+  ownerToken: string,
+  scope: ReturnType<typeof workspaceScope>,
+  generation: RefObject<number>,
+  setStatus: (status: CatalogSyncStatus) => void,
+) {
+  useEffect(() => {
+    if (scope.role !== 'owner' || ownerToken) return;
+    const controller = new AbortController();
+    let disposed = false;
+    const run = generation.current;
+    void ownerFetch('/v1/catalog/sync', ownerToken, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const value = CatalogSyncStatusV1.parse(await response.json());
+        if (!disposed && scope.epoch === workspaceScope().epoch && run === generation.current)
+          setStatus(value);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [scope.epoch, scope.role, ownerToken]);
+}
+
+function catalogPreviewError(error: unknown) {
+  if (error instanceof SyntaxError) return 'Choose a valid canonical catalog JSON file.';
+  return error instanceof Error ? error.message : 'Catalog preview failed.';
+}
+
+function catalogSubmissionCurrent(
+  epoch: number,
+  expectedGeneration: number,
+  actualGeneration: number,
+) {
+  return epoch === workspaceScope().epoch && expectedGeneration === actualGeneration;
 }
