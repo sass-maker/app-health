@@ -1,3 +1,4 @@
+import { currentPortfolioAppIds } from './catalog-inventory.js';
 import { handleTrafficQuality } from './traffic-quality.js';
 import { browserScopeIndexOwnerRoute } from './browser-scope-index.js';
 import { apiScopeAllows } from './api-scope.js';
@@ -38,7 +39,7 @@ import {
   recordBrowserVisitorScopeActivation,
   sealExactBrowserVisitorDay,
 } from './browser-visitor-daily.js';
-import { cachedAnalytics } from './analytics-cache.js';
+import { snapshotCachedAnalytics } from './analytics-cache.js';
 import type { SharedAnalytics } from '@app-health/contracts';
 import {
   queryPublicBrowserBreakdowns,
@@ -642,8 +643,10 @@ export async function handleBrowserOwner(
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
   const presence = env.WORKSPACE_PRESENCE.getByName(workspace);
-  if (path.endsWith('/live')) return browserLiveRoute(request, presence, owner);
-  return workspaceSummary(workspace, env, presence, owner.appIds ?? []);
+  const selectedIds = await currentPortfolioAppIds(env.DB, workspace, owner.appIds ?? []);
+  if (path.endsWith('/live'))
+    return browserLiveRoute(request, presence, { ...owner, appIds: selectedIds });
+  return workspaceSummary(workspace, env, presence, selectedIds);
 }
 
 async function workspaceSummary(
@@ -654,7 +657,7 @@ async function workspaceSummary(
 ): Promise<Response> {
   try {
     const [metrics, live] = await Promise.all([
-      cachedAnalytics(env.CLOUDFLARE_ACCOUNT_ID ?? '', workspace, 'summary', () =>
+      snapshotCachedAnalytics(env.DB, env.CLOUDFLARE_ACCOUNT_ID ?? '', workspace, 'summary', () =>
         queryBrowserSummary(workspace, {
           accountId: env.CLOUDFLARE_ACCOUNT_ID ?? '',
           token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
@@ -702,17 +705,22 @@ async function browserReport(
   if (!env.BROWSER_ANALYTICS || !accountId || !token)
     return json(503, { error: 'Web analytics is not configured yet.' });
   try {
+    const ownedIds = owner.appIds ?? [];
+    const reportAppIds = filter.data.app_id
+      ? ownedIds
+      : await currentPortfolioAppIds(env.DB, owner.workspaceId!, ownedIds);
     return json(
       200,
-      await cachedAnalytics(
+      await snapshotCachedAnalytics(
+        env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify([filter.data, owner.appIds ?? []]),
+        JSON.stringify([filter.data, reportAppIds]),
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,
             token,
-            appIds: owner.appIds ?? [],
+            appIds: reportAppIds,
             timings,
           }),
         undefined,
@@ -772,7 +780,7 @@ export async function sharedBrowserMetrics(
   const accountId = env.CLOUDFLARE_ACCOUNT_ID ?? '';
   const key = JSON.stringify([scope.app_id, scope.environment_id]);
   const reportPromise = includeBreakdowns
-    ? cachedAnalytics(accountId, scope.workspace, `shared-report:${key}`, () =>
+    ? snapshotCachedAnalytics(env.DB, accountId, scope.workspace, `shared-report:${key}`, () =>
         queryPublicBrowserBreakdowns(scope.workspace, scope.app_id, scope.environment_id, {
           accountId,
           token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
@@ -780,7 +788,8 @@ export async function sharedBrowserMetrics(
       ).catch(() => null)
     : Promise.resolve(null);
   const [live, report] = await Promise.all([
-    cachedAnalytics(
+    snapshotCachedAnalytics(
+      env.DB,
       accountId,
       scope.workspace,
       `shared-live:${key}`,
@@ -796,11 +805,16 @@ export async function sharedBrowserMetrics(
   ]);
   const history = report
     ? { traffic: report.traffic, sampled: report.sampled }
-    : await cachedAnalytics(accountId, scope.workspace, `shared-traffic:${key}`, () =>
-        queryPublicBrowserTraffic(scope.workspace, scope.app_id, scope.environment_id, {
-          accountId,
-          token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
-        }),
+    : await snapshotCachedAnalytics(
+        env.DB,
+        accountId,
+        scope.workspace,
+        `shared-traffic:${key}`,
+        () =>
+          queryPublicBrowserTraffic(scope.workspace, scope.app_id, scope.environment_id, {
+            accountId,
+            token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
+          }),
       ).catch(() => null);
   const traffic = history?.traffic;
   return {

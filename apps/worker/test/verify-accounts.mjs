@@ -909,6 +909,82 @@ try {
   log(
     'Monitoring runtime: explicit owner policy, actual workerd scheduled failure/recovery, persisted check receipts and dashboard API projection verified.',
   );
+  const catalogProjection = {
+    schema_version: 1,
+    source: 'saas-maker',
+    source_catalog_schema_version: 2,
+    expected_previous_hash: null,
+    projects: [
+      {
+        catalog_id: 'app-health',
+        name: 'Canonical App Health',
+        kind: 'platform',
+        future_form: 'support-tool',
+        auth_model: 'public-persistent',
+        repository: null,
+        hostname: null,
+      },
+      {
+        catalog_id: 'runtime-local',
+        name: 'Local runtime metadata',
+        kind: 'experiment',
+        future_form: 'personal-tool',
+        auth_model: 'local-only',
+        repository: null,
+        hostname: null,
+      },
+    ],
+    monitoring: {
+      schema_version: 1,
+      projects: [
+        {
+          catalog_id: 'app-health',
+          name: 'Canonical App Health',
+          scope: 'public',
+          reason: null,
+          journeys: ['api-health'],
+        },
+        {
+          catalog_id: 'runtime-local',
+          name: 'Local runtime metadata',
+          scope: 'local',
+          reason: 'Local project; public monitoring does not apply.',
+          journeys: [],
+        },
+      ],
+    },
+  };
+  const keysBeforeSync = (await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n;
+  const syncResponse = await request('/v1/catalog/sync', catalogProjection);
+  assert.equal(syncResponse.status, 200, await syncResponse.clone().text());
+  const synced = await syncResponse.json();
+  assert.equal(synced.project_count, 2);
+  const syncedInventory = await (await request('/v1/apps')).json();
+  assert.equal(syncedInventory.apps.length, 2);
+  assert.equal(
+    syncedInventory.apps.find((row) => row.app.id === selfAppId).app.name,
+    'Canonical App Health',
+  );
+  assert.equal(
+    syncedInventory.apps.find((row) => row.app.id === selfAppId).catalog.future_form,
+    'support-tool',
+  );
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
+  assert.equal((await request('/v1/catalog/sync', catalogProjection)).status, 200);
+  const stale = JSON.parse(JSON.stringify(catalogProjection));
+  stale.projects[0].name = 'Stale';
+  stale.monitoring.projects[0].name = 'Stale';
+  assert.equal((await request('/v1/catalog/sync', stale)).status, 409);
+  assert.equal(
+    (await request('/v1/apps', { name: 'Manual expansion', environment: 'production' })).status,
+    409,
+  );
+  const snapshotStatus = await (await request('/v1/catalog/sync')).json();
+  assert.equal(snapshotStatus.projection_hash, synced.projection_hash);
+  assert.equal(snapshotStatus.project_count, 2);
+  log(
+    'Catalog runtime: actual workerd/D1 owner sync, canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
+  );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);
   log(

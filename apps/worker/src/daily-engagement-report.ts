@@ -45,6 +45,9 @@ export interface CatalogProductRow {
   catalog_name: string;
   environment_id: string | null;
   analytics_first_received_at: number | null;
+  browser_visitors?: MetricApplicability | null;
+  native_sessions?: MetricApplicability | null;
+  server_requests?: MetricApplicability | null;
 }
 
 interface BrowserVisitorRow {
@@ -719,14 +722,22 @@ function nativeSessionApplicability(
   input: DailyEngagementInputs,
   catalogId: string,
 ): MetricApplicability {
-  return input.captureCounts?.nativeSessionsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+  return (
+    input.catalog.find((row) => row.catalog_id === catalogId)?.native_sessions ??
+    input.captureCounts?.nativeSessionsApplicabilityByCatalogId?.[catalogId] ??
+    'unknown'
+  );
 }
 
 function browserVisitorApplicability(
   input: DailyEngagementInputs,
   catalogId: string,
 ): MetricApplicability {
-  return input.captureCounts?.browserVisitorsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+  return (
+    input.catalog.find((row) => row.catalog_id === catalogId)?.browser_visitors ??
+    input.captureCounts?.browserVisitorsApplicabilityByCatalogId?.[catalogId] ??
+    'unknown'
+  );
 }
 
 function browserVisitorUnknownReason(
@@ -749,7 +760,11 @@ function serverRequestApplicability(
   input: DailyEngagementInputs,
   catalogId: string,
 ): MetricApplicability {
-  return input.captureCounts?.serverRequestsApplicabilityByCatalogId?.[catalogId] ?? 'unknown';
+  return (
+    input.catalog.find((row) => row.catalog_id === catalogId)?.server_requests ??
+    input.captureCounts?.serverRequestsApplicabilityByCatalogId?.[catalogId] ??
+    'unknown'
+  );
 }
 
 function isProductBrowserMeasured(
@@ -938,9 +953,9 @@ async function readDailyEngagementCatalog(
 ): Promise<CatalogProductRow[]> {
   const result = await db
     .prepare(
-      `SELECT c.catalog_id, c.app_id, c.catalog_name, e.id AS environment_id,
+      `SELECT c.catalog_id, c.app_id, c.catalog_name, c.browser_visitors, c.native_sessions, c.server_requests, e.id AS environment_id,
          ac.first_received_at AS analytics_first_received_at
-       FROM catalog_project_imports c
+       FROM current_workspace_catalog c
        LEFT JOIN environments e ON e.app_id = c.app_id AND lower(e.name) = 'production'
        LEFT JOIN environment_capabilities ac ON ac.app_id = c.app_id
          AND ac.environment_id = e.id AND ac.capability = 'analytics'
@@ -984,7 +999,7 @@ function dailyApiActivityHotQuery(
        AND r.bucket_start >= q.range_from AND r.bucket_start < q.range_to
      JOIN environments e ON e.id = r.environment_id AND e.app_id = r.app_id
        AND lower(e.name) = 'production'
-     JOIN catalog_project_imports c ON c.app_id = r.app_id
+     JOIN current_workspace_catalog c ON c.app_id = r.app_id
        AND c.workspace_id = ?${workspaceIndex} AND c.lifecycle IN ('primary', 'active')
      ${scopeFilter}
      GROUP BY r.app_id LIMIT ${MAX_PORTFOLIO_CATALOG_PRODUCTS + 1}`,

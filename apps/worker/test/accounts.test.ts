@@ -1,3 +1,5 @@
+import { projectCanonicalCatalog, type ListAppsResponseV1 } from '@app-health/contracts';
+import reviewedJourneys from '../../probe/journeys.json';
 import { readFile } from 'node:fs/promises';
 import { URL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -88,6 +90,12 @@ describe('Google account boundary with real D1 SQL', () => {
         .filter((s) => s.trim()))
         await db.prepare(statement).run();
     }
+    const snapshotMigration = await readFile(
+      new URL('../migrations/0043_workspace_portfolio_snapshot.sql', import.meta.url),
+      'utf8',
+    );
+    for (const statement of snapshotMigration.trim().split(/\n(?=CREATE )/))
+      await db.prepare(statement).run();
     env = {
       DB: db,
       APP_HEALTH_ACCOUNTS: 'enabled',
@@ -2072,5 +2080,170 @@ describe('Google account boundary with real D1 SQL', () => {
     );
     expect(response.status).toBe(404);
     await expect(personalWorkspace(env.DB!, 'missing-user')).rejects.toThrow();
+  });
+  it('synchronizes the account preload and selected membership while retaining historical authorization and scoped MCP privacy', async () => {
+    const ctx = await createAccountAuth(env)!.$context;
+    const user = await ctx.internalAdapter.createUser(
+      { name: 'Portfolio owner', email: 'portfolio-owner@example.test', emailVerified: true },
+      { method: 'oauth' },
+    );
+    const session = await ctx.internalAdapter.createSession(user.id, false);
+    const signature = await makeSignature(session.token, env.BETTER_AUTH_SECRET!);
+    const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`;
+    const workspace = await personalWorkspace(env.DB!, user.id);
+    const publicIds = [...new Set(reviewedJourneys.journeys.map((row) => row.project))];
+    const projection = projectCanonicalCatalog(
+      {
+        catalogSchemaVersion: 2,
+        projects: [...publicIds, 'portfolio-local', 'portfolio-private'].map((id, index) => ({
+          id,
+          name: `Canonical ${index}`,
+          lifecycle: { portfolioStatus: 'active' },
+          classification: { kind: 'platform', futureForm: 'support-tool' },
+          deployment: { authModel: 'local-only' },
+          systems: {
+            probe:
+              index < publicIds.length
+                ? {
+                    journeys: reviewedJourneys.journeys
+                      .filter((row) => row.project === id)
+                      .map(({ journey }) => ({ journey })),
+                  }
+                : {
+                    scope: index === publicIds.length ? 'local' : 'private',
+                    absent: 'private local detail',
+                  },
+          },
+        })),
+      },
+      null,
+    );
+    const statements: D1PreparedStatement[] = [];
+    for (let index = 0; index < 57; index += 1) {
+      const app = `portfolio-app-${index}`;
+      statements.push(
+        env
+          .DB!.prepare('INSERT INTO apps (id, name, created_at) VALUES (?, ?, 1)')
+          .bind(app, `Old ${index}`),
+        env.DB!.prepare('INSERT INTO workspace_apps VALUES (?, ?)').bind(app, workspace.id),
+        env
+          .DB!.prepare('INSERT INTO environments VALUES (?, ?, ?, 1)')
+          .bind(`portfolio-env-${index}`, app, 'production'),
+      );
+      if (index < 36)
+        statements.push(
+          env
+            .DB!.prepare(
+              'INSERT INTO catalog_project_imports (workspace_id, catalog_id, catalog_name, app_id, lifecycle, payload_sha256, created_at) VALUES (?, ?, ?, ?, ?, ?, 1)',
+            )
+            .bind(
+              workspace.id,
+              projection.projects[index]!.catalog_id,
+              `Old ${index}`,
+              app,
+              'primary',
+              'a'.repeat(64),
+            ),
+        );
+    }
+    await env.DB!.batch(statements);
+    expect(
+      ((await (await request('/v1/apps', cookie)).json()) as ListAppsResponseV1).apps,
+    ).toHaveLength(57);
+    const foreignOrigin = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/catalog/sync', {
+        method: 'POST',
+        headers: { cookie, origin: 'https://foreign.example.com' },
+        body: JSON.stringify(projection),
+      }),
+      env,
+    );
+    expect(foreignOrigin.status).toBe(403);
+    expect((await request('/v1/catalog/sync', cookie, projection)).status).toBe(200);
+    const listed = (await (await request('/v1/apps', cookie)).json()) as ListAppsResponseV1;
+    expect(listed.apps).toHaveLength(40);
+    expect(listed.apps.find((row) => row.app.id === 'portfolio-app-0')).toMatchObject({
+      app: { name: 'Canonical 0' },
+      catalog: { kind: 'platform', future_form: 'support-tool', auth_model: 'local-only' },
+    });
+    const identityRequest = new Request('https://dashboard.example.com/v1/apps', {
+      headers: { cookie },
+    });
+    const personal = await accountIdentity(identityRequest, env, undefined, undefined, true);
+    expect(personal?.owner.appIds).toHaveLength(61);
+    expect(personal?.apps).toHaveLength(40);
+    const selected = await accountIdentity(
+      new Request(identityRequest, { headers: { cookie, 'x-app-health-workspace': workspace.id } }),
+      env,
+      undefined,
+      undefined,
+      true,
+    );
+    expect(selected?.apps).toHaveLength(40);
+    expect(selected?.owner.appIds).toContain('portfolio-app-56');
+    expect(
+      (
+        await request(
+          '/v1/installation/status?app_id=portfolio-app-56&environment_id=portfolio-env-56',
+          cookie,
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (await request('/v1/apps', cookie, { name: 'Manual expansion', environment: 'production' }))
+        .status,
+    ).toBe(409);
+    expect(
+      (
+        await request('/v1/catalog/import', cookie, {
+          schema_version: 1,
+          projects: [{ catalog_id: 'manual-expansion', name: 'Manual', lifecycle: 'active' }],
+        })
+      ).status,
+    ).toBe(409);
+    const standalonePolicy = await worker.fetch(
+      new Request('https://dashboard.example.com/v1/workspace/monitoring/policy', {
+        method: 'PUT',
+        headers: { cookie, origin: 'https://dashboard.example.com' },
+        body: JSON.stringify(projection.monitoring),
+      }),
+      env,
+    );
+    expect(standalonePolicy.status).toBe(409);
+    const minted = await request('/v1/workspace/api-tokens', cookie, {
+      name: 'Portfolio reader',
+      permission: 'read',
+      scopes: [{ app_id: 'portfolio-app-0', environment_id: 'portfolio-env-0' }],
+    });
+    const token = (await minted.json()) as { token: string };
+    const api = (path: string, body?: unknown) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${path}`, {
+          method: body ? 'POST' : 'GET',
+          headers: {
+            authorization: `Bearer ${token.token}`,
+            'content-type': 'application/json',
+            accept: 'application/json, text/event-stream',
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        }),
+        env,
+      );
+    const scoped = (await (await api('/v1/apps')).json()) as ListAppsResponseV1;
+    expect(scoped.apps).toHaveLength(1);
+    expect(scoped.apps[0]?.catalog?.catalog_id).toBe(projection.projects[0]!.catalog_id);
+    expect((await api('/v1/catalog/sync')).status).toBe(403);
+    const mcp = await api('/mcp', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'sites', arguments: {} },
+    });
+    const mcpText = JSON.stringify(await mcp.json());
+    expect(mcpText).toContain('portfolio-app-0');
+    expect(mcpText).toContain('support-tool');
+    expect(mcpText).not.toMatch(
+      /portfolio-app-1|project_count|projection_hash|private local detail/,
+    );
   });
 });

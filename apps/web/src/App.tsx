@@ -1,3 +1,4 @@
+import { CatalogSync, CATALOG_SYNC_EVENT } from './CatalogSync.js';
 import { PaymentConnections } from './PaymentConnections.js';
 import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
 import {
@@ -144,6 +145,7 @@ const WINDOW_LABELS: Record<Window, string> = {
 };
 
 interface SavedProject {
+  catalog?: import('@app-health/contracts').CatalogMetadata;
   appId: string;
   environmentId: string;
   name: string;
@@ -271,8 +273,18 @@ function availableProjects(listed: ListAppsResponseV1): SavedProject[] {
       appId: entry.app.id,
       environmentId: environment.id,
       name: entry.app.name,
+      catalog: entry.catalog,
       environment: environment.name,
     })),
+  );
+}
+
+function selectionNeedsRefresh(current: SavedProject | null, selected: SavedProject) {
+  return (
+    !current ||
+    selected.appId !== current.appId ||
+    selected.environmentId !== current.environmentId ||
+    selected.name !== current.name
   );
 }
 
@@ -3593,6 +3605,9 @@ function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
       ) : null}
       <div className="mx-auto max-w-6xl px-4 py-6">
         <WorkspacePanel ownerToken={props.ownerToken} />
+        <div className="mt-4">
+          <CatalogSync ownerToken={props.ownerToken} />
+        </div>
       </div>
       {workspaceCanManage(workspaceScope().role) ? (
         <Setup ownerToken={props.ownerToken} onCreated={props.handleCreated} />
@@ -3669,6 +3684,8 @@ function SessionErrorNotice({ message }: { message: string }): ReactElement | nu
   ) : null;
 }
 
+type CatalogSyncDetail = { epoch: number; listed: ListAppsResponseV1 };
+
 function AppSession(): ReactElement {
   const [workspaceView, changeWorkspaceView] = useDashboardNavigation();
   const bootstrap = useAccountBootstrap();
@@ -3687,9 +3704,32 @@ function AppSession(): ReactElement {
   const [inventoryError, setInventoryError] = useState('');
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryRetry, setInventoryRetry] = useState(0);
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [created, setCreated] = useState<CreateAppResponseV1 | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
+
+  useEffect(() => {
+    function synchronized(event: Event) {
+      const detail = (event as CustomEvent<CatalogSyncDetail>).detail;
+      if (!detail || detail.epoch !== workspaceScope().epoch) return;
+      const available = availableProjects(detail.listed);
+      prefetchedInventory.current = null;
+      setProjects(available);
+      const selected = authorizedProject(project, available);
+      setProject(selected);
+      if (selected) localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
+      setCreated(null);
+      setRequestedProject(null);
+      setStrictRequestedProject(false);
+      setSelectionError('');
+      setCatalogRevision((revision) => revision + 1);
+      setInventoryRetry((retry) => retry + 1);
+      changeWorkspaceView('overview');
+    }
+    window.addEventListener(CATALOG_SYNC_EVENT, synchronized);
+    return () => window.removeEventListener(CATALOG_SYNC_EVENT, synchronized);
+  }, [project, changeWorkspaceView]);
 
   useEffect(() => {
     if (ownerToken === null) return;
@@ -3731,12 +3771,7 @@ function AppSession(): ReactElement {
         setSelectionError('');
         setInventoryLoading(false);
         const selected = resolution.selected;
-        if (
-          selected &&
-          (!project ||
-            selected.appId !== project.appId ||
-            selected.environmentId !== project.environmentId)
-        ) {
+        if (selected && selectionNeedsRefresh(project, selected)) {
           localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
           setProject(selected);
           setCreated(null);
@@ -3963,15 +3998,11 @@ function AppSession(): ReactElement {
     <>
       <SessionErrorNotice message={sessionError} />
       <Dashboard
-        key={`${project.appId}/${project.environmentId}`}
+        key={`${project.appId}/${project.environmentId}/${catalogRevision}`}
         view={workspaceView}
         onView={changeWorkspaceView}
         project={project}
-        projects={
-          projects.some((candidate) => candidate.environmentId === project.environmentId)
-            ? projects
-            : [project, ...projects]
-        }
+        projects={projects}
         ownerToken={ownerToken}
         handlers={{
           onProjectChange: selectProject,

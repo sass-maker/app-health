@@ -1,3 +1,9 @@
+import {
+  catalogInventoryJoin,
+  catalogInventoryColumns,
+  inventoryCatalog,
+  type CatalogInventoryRow,
+} from './catalog-inventory.js';
 import type {
   AppV1,
   AppEnvironmentV1,
@@ -382,7 +388,7 @@ export class D1ControlPlane
       return (
         await this.db
           .prepare(
-            'SELECT a.id, a.name, a.created_at FROM apps a JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? AND a.archived_at IS NULL ORDER BY a.created_at DESC',
+            `SELECT a.id, COALESCE(portfolio_name, a.name) AS name, a.created_at FROM (SELECT a.*, ${catalogInventoryColumns} FROM apps a JOIN workspace_apps wa ON wa.app_id = a.id JOIN workspaces w ON w.id = wa.workspace_id ${catalogInventoryJoin} WHERE w.id = ? AND a.archived_at IS NULL) a WHERE portfolio_visible = 1 ORDER BY a.created_at DESC`,
           )
           .bind(this.workspaceId)
           .all<AppV1>()
@@ -406,12 +412,13 @@ export class D1ControlPlane
    */
   async listAppsAndEnvironments(): Promise<AppEnvironmentV1[]> {
     const appFilter = this.workspaceId
-      ? 'JOIN workspace_apps w ON w.app_id = a.id WHERE w.workspace_id = ? AND a.archived_at IS NULL'
+      ? `JOIN workspace_apps wa ON wa.app_id = a.id JOIN workspaces w ON w.id = wa.workspace_id ${catalogInventoryJoin} WHERE w.id = ? AND a.archived_at IS NULL AND (portfolio.workspace_id IS NULL OR current_catalog.app_id IS NOT NULL)`
       : this.workspaceId === null
         ? 'WHERE a.archived_at IS NULL AND NOT EXISTS (SELECT 1 FROM workspace_apps w WHERE w.app_id = a.id)'
         : 'WHERE a.archived_at IS NULL';
     const statement = this.db.prepare(
       `SELECT a.id AS app_id, a.name AS app_name, a.created_at AS app_created_at,
+                ${this.workspaceId ? catalogInventoryColumns : '1 AS portfolio_visible, a.name AS portfolio_name, NULL AS catalog_id, NULL AS catalog_kind, NULL AS catalog_future_form, NULL AS catalog_auth_model'},
                 e.id AS env_id, e.app_id AS env_app_id, e.name AS env_name, e.created_at AS env_created_at
          FROM apps a LEFT JOIN environments e ON e.app_id = a.id
          ${appFilter}
@@ -419,22 +426,29 @@ export class D1ControlPlane
     );
     const bound = this.workspaceId ? statement.bind(this.workspaceId) : statement;
     const rows = (
-      await bound.all<{
-        app_id: string;
-        app_name: string;
-        app_created_at: number;
-        env_id: string | null;
-        env_app_id: string | null;
-        env_name: string | null;
-        env_created_at: number | null;
-      }>()
+      await bound.all<
+        CatalogInventoryRow & {
+          app_id: string;
+          app_name: string;
+          app_created_at: number;
+          env_id: string | null;
+          env_app_id: string | null;
+          env_name: string | null;
+          env_created_at: number | null;
+        }
+      >()
     ).results;
     const byApp = new Map<string, AppEnvironmentV1>();
     for (const row of rows) {
       let entry = byApp.get(row.app_id);
       if (!entry) {
         entry = {
-          app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at },
+          app: {
+            id: row.app_id,
+            name: row.portfolio_name ?? row.app_name,
+            created_at: row.app_created_at,
+          },
+          ...inventoryCatalog(row),
           environments: [],
         };
         byApp.set(row.app_id, entry);

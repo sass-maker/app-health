@@ -1,3 +1,4 @@
+import { catalogManualWriteResponse, handleCatalogSyncRoute } from './catalog-sync.js';
 import { providerRuntime } from './payment-provider-model.js';
 import { pumpProviderJobs } from './payment-provider-wake.js';
 import { readEndpointBuckets } from './endpoint-read.js';
@@ -49,7 +50,7 @@ import { readOwnerAlertFeed } from './alert-feed.js';
 import { readPortfolioBriefing } from './portfolio-briefing.js';
 import { readSpeedReport, readSpeedReportParts, summarizeSpeedForDay } from './speed-report.js';
 import { writeBotCounterHeartbeat } from './browser-bot-counters.js';
-import { cachedAnalytics } from './analytics-cache.js';
+import { snapshotCachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
 import {
@@ -768,7 +769,8 @@ async function handleSpeedReportRoute(
   const workspaceId = owner.workspaceId;
   try {
     const report = await measureOwnerRouteRead(timings, () =>
-      cachedAnalytics(
+      snapshotCachedAnalytics(
+        env.DB,
         env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
         workspaceId,
         `speed-report-v1:${JSON.stringify(query.data)}`,
@@ -809,7 +811,8 @@ async function dailySpeedPayload(
 ) {
   try {
     const scopeKey = scope ? `:${JSON.stringify([scope.appId, scope.environmentId])}` : '';
-    const speed = await cachedAnalytics(
+    const speed = await snapshotCachedAnalytics(
+      env.DB,
       env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
       workspaceId,
       `daily-speed-v1:${day.date}:${performanceClass}${scopeKey}`,
@@ -879,7 +882,8 @@ async function handleDailyEngagementRoute(
     if ('error' in day) throw Object.assign(new Error(day.error), { status: 400 });
     const scopeKey = scope ? `:${JSON.stringify([scope.appId, scope.environmentId])}` : '';
     const loadReport = () =>
-      cachedAnalytics(
+      snapshotCachedAnalytics(
+        env.DB,
         env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
         workspaceId,
         `daily-briefing-v2:${day.date}${scopeKey}`,
@@ -901,7 +905,8 @@ async function handleDailyEngagementRoute(
     if (url.pathname === '/v1/reports/portfolio-briefing') {
       const traffic = briefingTraffic(url);
       const briefing = await measureOwnerRouteRead(timings, () =>
-        cachedAnalytics(
+        snapshotCachedAnalytics(
+          env.DB,
           env.CLOUDFLARE_ACCOUNT_ID ?? 'local',
           workspaceId,
           `portfolio-briefing-v2:${day.date}:${traffic}`,
@@ -1079,6 +1084,10 @@ async function handleOwnerRoutes(
     return new Response(integrationSkill(owner, url.origin), {
       headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
     });
+  const manualCatalogResponse = await catalogManualWriteResponse(request, env.DB, owner);
+  if (manualCatalogResponse) return manualCatalogResponse;
+  const catalogSyncResponse = await handleCatalogSyncRoute(request, env.DB, owner);
+  if (catalogSyncResponse) return catalogSyncResponse;
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner, env);
   if (monitoringResponse) return monitoringResponse;

@@ -1,3 +1,4 @@
+import { portfolioInventoryPredicate } from './catalog-inventory.js';
 import {
   LATENCY_HISTOGRAM_BUCKETS,
   WINDOW_MS,
@@ -192,7 +193,7 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
     if (typeof this.workspaceId === 'string')
       return {
         join: `JOIN workspace_apps wa ON wa.app_id = ${joinAlias}.id`,
-        predicate: 'wa.workspace_id = ?',
+        predicate: `wa.workspace_id = ? AND ${portfolioInventoryPredicate('wa.workspace_id', `${joinAlias}.id`)}`,
         values: [this.workspaceId] as unknown[],
       };
     if (this.workspaceId === null)
@@ -208,7 +209,7 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
     const scope = this.scope();
     return this.db
       .prepare(
-        `SELECT a.id AS app_id, a.name AS app_name, e.id AS environment_id,
+        `SELECT a.id AS app_id, ${typeof this.workspaceId === 'string' ? `COALESCE((SELECT catalog_name FROM current_workspace_catalog c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id AND c.kind IS NOT NULL), a.name)` : 'a.name'} AS app_name, e.id AS environment_id,
           e.name AS environment_name, i.runtime,
           CASE WHEN EXISTS (
             SELECT 1 FROM keys k WHERE k.app_id = a.id AND k.environment_id = e.id AND k.revoked_at IS NULL

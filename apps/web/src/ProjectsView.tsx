@@ -1,3 +1,4 @@
+import { CatalogSync } from './CatalogSync.js';
 import { useCallback, useMemo, useState, type ReactElement } from 'react';
 import {
   Activity,
@@ -43,6 +44,7 @@ interface ProjectsViewProject {
   environmentId: string;
   name: string;
   environment: string;
+  catalog?: import('@app-health/contracts').CatalogMetadata;
 }
 
 interface ProjectsViewProps {
@@ -382,6 +384,12 @@ const inventoryBaseColumns: DataColumn<WatchtowerRow>[] = [
         <div className="pl-5">
           <p className="font-medium">{row.project.name}</p>
           <p className="text-xs text-muted-foreground">{row.project.environment}</p>
+          {row.project.catalog ? (
+            <p className="mt-1 text-xs text-muted-foreground break-words">
+              {row.project.catalog.kind} · {row.project.catalog.future_form} ·{' '}
+              {row.project.catalog.auth_model}
+            </p>
+          ) : null}
         </div>
       );
     },
@@ -602,9 +610,10 @@ function Inventory({
   );
 }
 
-function EmptyProjectsView() {
+function EmptyProjectsView({ ownerToken }: { ownerToken: string }) {
   return (
-    <section aria-labelledby="projects-title" className="mx-auto w-full max-w-6xl">
+    <section aria-labelledby="projects-title" className="mx-auto w-full max-w-6xl space-y-6">
+      <CatalogSync ownerToken={ownerToken} />
       <Card className="shadow-none">
         <CardContent className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <h2 id="projects-title" className="text-lg font-semibold tracking-tight">
@@ -764,6 +773,13 @@ function reportHealthScope(report: DailyEngagementReportV1 | null) {
     : null;
 }
 
+function preferredEnvironment(projects: ProjectsViewProject[], appId: string) {
+  return (
+    projects.find((item) => item.appId === appId && item.environment === 'production') ??
+    projects.find((item) => item.appId === appId)
+  );
+}
+
 export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps): ReactElement {
   const analytics = useWorkspaceAnalytics(ownerToken);
   const health = useWorkspaceHealth(ownerToken);
@@ -791,8 +807,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
     () => briefingHealth(rows, reportScope?.appIds ?? null),
     [rows, reportScope],
   );
-
-  if (!projects.length) return <EmptyProjectsView />;
+  if (!projects.length) return <EmptyProjectsView ownerToken={ownerToken} />;
 
   const error = health.error || analytics.error;
   const loading = !health.data && !health.error;
@@ -801,6 +816,7 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
       aria-labelledby="daily-engagement-title"
       className="mx-auto w-full max-w-7xl space-y-6"
     >
+      <CatalogSync ownerToken={ownerToken} />
       {error ? (
         <ErrorState
           title="some Watchtower data could not refresh"
@@ -817,14 +833,15 @@ export function ProjectsView({ projects, ownerToken, onOpen }: ProjectsViewProps
         onReport={onDailyReport}
         {...briefing}
         onOpenProduct={(appId, focus, source, date) => {
-          const project =
-            projects.find((item) => item.appId === appId && item.environment === 'production') ??
-            projects.find((item) => item.appId === appId);
+          const project = preferredEnvironment(projects, appId);
           if (project) onOpen(project, focus, source, date);
         }}
       />
       <OwnerAlertFeed ownerToken={ownerToken} />
-      <MonitoringCoverage ownerToken={ownerToken} />
+      <MonitoringCoverage
+        ownerToken={ownerToken}
+        catalogManaged={projects.some((project) => project.catalog?.source === 'saas-maker')}
+      />
       <details className="group rounded-xl border bg-card/40">
         <summary className="flex min-h-12 cursor-pointer items-center justify-between px-5 py-4 text-sm font-medium">
           request health and collection details

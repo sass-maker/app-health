@@ -200,8 +200,10 @@ function MonitoringHeader({
   ownerToken,
   roster,
   refresh,
+  catalogManaged,
 }: {
   ownerToken: string;
+  catalogManaged: boolean;
   roster: MonitoringImport;
   refresh: () => void;
 }) {
@@ -218,7 +220,7 @@ function MonitoringHeader({
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
-        {scope.role === 'owner' && !ownerToken ? (
+        {scope.role === 'owner' && !ownerToken && !catalogManaged ? (
           <>
             <input
               ref={fileInput}
@@ -319,12 +321,23 @@ function MonitoringBody({
   );
 }
 
-export function MonitoringCoverage({ ownerToken }: { ownerToken: string }) {
+export function MonitoringCoverage({
+  ownerToken,
+  catalogManaged = false,
+}: {
+  ownerToken: string;
+  catalogManaged?: boolean;
+}) {
   const monitor = useMonitoringReport(ownerToken);
   const roster = useMonitoringImport(ownerToken, monitor.refresh);
   return (
     <Card className="gap-0 py-0 shadow-none" aria-labelledby="monitoring-title">
-      <MonitoringHeader ownerToken={ownerToken} roster={roster} refresh={monitor.refresh} />
+      <MonitoringHeader
+        catalogManaged={catalogManaged}
+        ownerToken={ownerToken}
+        roster={roster}
+        refresh={monitor.refresh}
+      />
       <MonitoringBody monitor={monitor} roster={roster} />
     </Card>
   );

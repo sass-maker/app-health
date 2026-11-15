@@ -1,3 +1,4 @@
+import { catalogSnapshotStatus } from './catalog-sync.js';
 import {
   MonitoringPolicyV1,
   MonitoringReportV1,
@@ -171,7 +172,7 @@ function monitoringStatements(
         `SELECT p.catalog_id, p.name, p.scope, p.reason, p.journeys_json, p.updated_at,
         c.app_id, e.id AS environment_id
       FROM workspace_monitoring_projects p
-      LEFT JOIN catalog_project_imports c ON c.workspace_id = p.workspace_id
+      LEFT JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
         AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
         AND EXISTS (SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
           WHERE wa.workspace_id = p.workspace_id AND wa.app_id = c.app_id AND a.archived_at IS NULL)
@@ -193,7 +194,7 @@ function monitoringStatements(
         ROW_NUMBER() OVER (PARTITION BY p.catalog_id, json_extract(l.props, '$.journey'),
           json_extract(l.props, '$.location') ORDER BY l.timestamp DESC, l.log_id DESC) AS rank
       FROM workspace_monitoring_projects p
-      JOIN catalog_project_imports c ON c.workspace_id = p.workspace_id
+      JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
         AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
       JOIN workspace_apps target ON target.app_id = c.app_id AND target.workspace_id = p.workspace_id
       JOIN apps a ON a.id = target.app_id AND a.archived_at IS NULL
@@ -332,6 +333,10 @@ async function writeMonitoringPolicy(
   if (owner.authKind !== 'account' || owner.workspaceRole !== 'owner')
     return json(403, { error: 'Workspace owner access required' });
   if (request.method !== 'PUT') return json(405, { error: 'Use PUT' });
+  if ((await catalogSnapshotStatus(db, workspaceId)).source)
+    return json(409, {
+      error: 'Synchronize the SaaS Maker catalog to update monitoring coverage.',
+    });
   let input: unknown;
   try {
     input = await readPublicJson(request, 65536);

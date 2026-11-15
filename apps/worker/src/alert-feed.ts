@@ -110,7 +110,7 @@ export async function readOwnerAlertFeed(
   const scope = `FROM log_events l
     JOIN environments e ON e.id = l.environment_id AND e.app_id = l.app_id
       AND lower(e.name) = 'production'
-    JOIN catalog_project_imports c
+    JOIN current_workspace_catalog c
       ON c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
     WHERE (l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe',
         'journey.recovered')
@@ -136,10 +136,10 @@ export async function readOwnerAlertFeed(
         WHERE source.workspace_id = ? AND source.app_id = l.app_id
           AND source.lifecycle IN ('primary', 'active'))
       AND c.catalog_id = COALESCE(
-        (SELECT by_id.catalog_id FROM catalog_project_imports by_id
+        (SELECT by_id.catalog_id FROM current_workspace_catalog by_id
           WHERE by_id.workspace_id = ? AND by_id.lifecycle IN ('primary', 'active')
             AND by_id.catalog_id = json_extract(l.props, '$.project_id') LIMIT 1),
-        (SELECT by_slug.catalog_id FROM catalog_project_imports by_slug
+        (SELECT by_slug.catalog_id FROM current_workspace_catalog by_slug
           WHERE by_slug.workspace_id = ? AND by_slug.lifecycle IN ('primary', 'active')
             AND by_slug.catalog_id = json_extract(l.props, '$.project') LIMIT 1),
         CASE WHEN NULLIF(json_extract(l.props, '$.project_id'), '') IS NULL

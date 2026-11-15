@@ -1,0 +1,221 @@
+import { useEffect, useRef, useState } from 'react';
+import {
+  ListAppsResponseV1,
+  projectCanonicalCatalog,
+  type CatalogSyncRequest,
+} from '@app-health/contracts';
+import { Button } from '@saas-maker/ui/components/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
+import { ownerFetch } from './lib/owner-fetch.js';
+import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
+
+export const CATALOG_SYNC_EVENT = 'app-health-catalog-synchronized';
+const MAX_FILE_BYTES = 8 * 1024 * 1024;
+function counts(
+  projects: CatalogSyncRequest['projects'],
+  field: 'kind' | 'future_form' | 'auth_model',
+) {
+  const result = new Map<string, number>();
+  for (const project of projects) result.set(project[field], (result.get(project[field]) ?? 0) + 1);
+  return [...result].map(([label, count]) => `${count} ${label}`).join(' · ');
+}
+
+export function CatalogSync({ ownerToken }: { ownerToken: string }) {
+  const scope = useWorkspaceScope();
+  const [preview, setPreview] = useState<CatalogSyncRequest | null>(null);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{
+    project_count: number | null;
+    updated_at: number | null;
+  } | null>(null);
+  const generation = useRef(0);
+  const activeRequest = useRef<AbortController | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    generation.current += 1;
+    activeRequest.current?.abort();
+    setPreview(null);
+    setStatus(null);
+    setMessage('');
+    setBusy(false);
+    if (fileInput.current) fileInput.current.value = '';
+    return () => {
+      generation.current += 1;
+      activeRequest.current?.abort();
+    };
+  }, [scope.epoch, ownerToken]);
+  useEffect(() => {
+    if (scope.role !== 'owner' || ownerToken) return;
+    const controller = new AbortController();
+    let disposed = false;
+    void ownerFetch('/v1/catalog/sync', ownerToken, { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const value = (await response.json()) as {
+          project_count: number | null;
+          updated_at: number | null;
+        };
+        if (!disposed && scope.epoch === workspaceScope().epoch) setStatus(value);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      controller.abort();
+    };
+  }, [scope.epoch, scope.role, ownerToken]);
+  if (scope.role !== 'owner' || ownerToken) return null;
+
+  async function readFile(file: File | undefined) {
+    const epoch = scope.epoch;
+    const run = ++generation.current;
+    activeRequest.current?.abort();
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const current = () =>
+      run === generation.current && epoch === workspaceScope().epoch && !controller.signal.aborted;
+    setPreview(null);
+    setMessage('');
+    if (!file) return;
+    setBusy(true);
+    try {
+      if (file.size > MAX_FILE_BYTES) throw new Error('Catalog file exceeds 8 MiB.');
+      const text = await file.text();
+      if (!current()) return;
+      const projection = projectCanonicalCatalog(JSON.parse(text), null);
+      const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
+        signal: controller.signal,
+      });
+      if (!response.ok) throw new Error(`Catalog status returned ${response.status}.`);
+      const status = (await response.json()) as { projection_hash: string | null };
+      if (current()) setPreview({ ...projection, expected_previous_hash: status.projection_hash });
+    } catch (error) {
+      if (current())
+        setMessage(
+          error instanceof SyntaxError
+            ? 'Choose a valid canonical catalog JSON file.'
+            : error instanceof Error
+              ? error.message
+              : 'Catalog preview failed.',
+        );
+    } finally {
+      if (current()) setBusy(false);
+      if (fileInput.current) fileInput.current.value = '';
+    }
+  }
+  async function synchronize() {
+    if (!preview || busy) return;
+    const epoch = scope.epoch;
+    const run = ++generation.current;
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const current = () =>
+      run === generation.current && epoch === workspaceScope().epoch && !controller.signal.aborted;
+    setBusy(true);
+    setMessage('');
+    try {
+      const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(preview),
+      });
+      const result = (await response.json()) as { error?: string; project_count?: number };
+      if (!response.ok)
+        throw new Error(result.error ?? `Catalog sync returned ${response.status}.`);
+      if (!current()) return;
+      setPreview(null);
+      const inventory = await ownerFetch('/v1/apps', ownerToken, { signal: controller.signal });
+      if (!inventory.ok)
+        throw new Error('Catalog saved. Reload the workspace to refresh its inventory.');
+      const listed = ListAppsResponseV1.parse(await inventory.json());
+      if (!current()) return;
+      setMessage(
+        `Synchronized ${result.project_count} active projects and their monitoring policy.`,
+      );
+      window.dispatchEvent(new CustomEvent(CATALOG_SYNC_EVENT, { detail: { epoch, listed } }));
+    } catch (error) {
+      if (current())
+        setMessage(error instanceof Error ? error.message : 'Catalog synchronization failed.');
+    } finally {
+      if (current()) setBusy(false);
+    }
+  }
+  return (
+    <Card className="gap-3 py-5 shadow-none">
+      <CardHeader className="px-5 py-0">
+        <CardTitle className="text-sm">SaaS Maker catalog</CardTitle>
+        {status?.project_count != null ? (
+          <p className="text-sm font-medium">SaaS Maker · {status.project_count} active projects</p>
+        ) : null}
+        {status?.updated_at ? (
+          <p className="text-xs text-muted-foreground">
+            Last synchronized{' '}
+            <time dateTime={new Date(status.updated_at).toISOString()}>
+              {new Date(status.updated_at).toLocaleString()}
+            </time>
+          </p>
+        ) : null}
+      </CardHeader>
+      <CardContent className="space-y-3 px-5 py-0">
+        <details open={!status?.project_count || Boolean(preview)}>
+          <summary className="cursor-pointer text-xs font-medium">
+            {status?.project_count ? 'Update from catalog' : 'Import active portfolio'}
+          </summary>
+          <div className="mt-3 space-y-3">
+            <p className="text-xs leading-5 text-muted-foreground">
+              Import the canonical projects.json to select the active portfolio, including internal
+              projects. Names, roles and access labels follow the catalog. Existing telemetry and
+              keys stay attached to their projects.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The file is projected locally. Only active project metadata, explicit metric
+              applicability and monitoring scope are uploaded. Private notes and local paths stay in
+              this browser.
+            </p>
+            <label className="flex flex-wrap items-center gap-3 text-sm">
+              <span>Canonical catalog JSON</span>
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".json,application/json"
+                disabled={busy}
+                className="min-w-0 max-w-full text-xs"
+                onChange={(event) => void readFile(event.target.files?.[0])}
+              />
+            </label>
+            {preview ? (
+              <div className="space-y-2 rounded-lg border p-3 text-xs" aria-label="Catalog preview">
+                <p className="text-sm font-medium">{preview.projects.length} active projects</p>
+                <p className="break-words">{counts(preview.projects, 'kind')}</p>
+                <p className="break-words">{counts(preview.projects, 'future_form')}</p>
+                <p className="break-words">{counts(preview.projects, 'auth_model')}</p>
+                <p>
+                  {preview.monitoring.projects.filter((row) => row.scope === 'public').length}{' '}
+                  public monitoring projects ·{' '}
+                  {preview.monitoring.projects.reduce((sum, row) => sum + row.journeys.length, 0)}{' '}
+                  reviewed journeys ·{' '}
+                  {preview.monitoring.projects.filter((row) => row.scope !== 'public').length}{' '}
+                  explicit local or private limits
+                </p>
+                <Button size="sm" disabled={busy} onClick={() => void synchronize()}>
+                  {busy ? 'Synchronizing…' : 'Synchronize active portfolio'}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        </details>
+        {busy && !preview ? (
+          <p role="status" className="text-xs">
+            Preparing catalog preview…
+          </p>
+        ) : null}
+        {message ? (
+          <p role="status" className="break-words text-xs">
+            {message}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
