@@ -117,7 +117,7 @@ export async function readOwnerAlertFeed(
       OR l.level = 'error'
       OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
       AND (l.event NOT LIKE 'journey.%'
-        OR (NOT (${syntheticJourney}) AND c.app_id = l.app_id)
+        OR (NOT (${probeEvent}) AND NOT (${syntheticJourney}) AND c.app_id = l.app_id)
         OR (${probeEvent} AND json_type(l.props, '$.journey') = 'text'
         AND json_type(l.props, '$.location') = 'text'
         AND l.source = 'server' AND l.app_id = ? AND l.environment_id = ?

@@ -78,6 +78,23 @@ const healthy = {
   'https://anime.test/api/search': json({ filteredList: [1] }),
 };
 
+it('keeps a completed outage while a later journey is skipped by the run budget', async () => {
+  const { deps, sent } = harness({
+    'https://anime.test/': { ...html(), status: 503 },
+    'https://anime.test/api/search': { failure: 'run_deadline', phases: { total_ms: 0 } },
+  });
+  const { state, summary } = await runProbes(spec, emptyState(), options, deps);
+  expect(summary.journeys.map((row) => row.outcome)).toEqual(['failed', 'not_completed']);
+  expect(Object.keys(state.journeys)).toEqual(['anime-list/home']);
+  expect(
+    sent[0]?.filter((log) => log.event === 'journey.failed').map((log) => log.props.journey),
+  ).toEqual(['home']);
+  expect(
+    sent[0]?.find((log) => log.event === 'probe.result' && log.props.journey === 'search')?.props,
+  ).toMatchObject({ status: null, vantage_offline: true, failure: 'run_deadline' });
+  expect(sent[0]?.at(-1)?.props).toMatchObject({ healthy: 0, failing: 1, journeys: 2 });
+});
+
 it.each(['main', 'asset', 'warm'] as const)(
   'preserves incident recovery state when the run deadline interrupts %s',
   async (phase) => {

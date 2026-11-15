@@ -580,6 +580,14 @@ it('rejects another owned app impersonating the designated probe through REST an
       'journey.failed',
       '{"project":"product"}',
     );
+    sqlite
+      .prepare(
+        `INSERT INTO log_events
+      (log_id, app_id, environment_id, timestamp, event, level, props, source)
+      VALUES ('browser-empty-recovery', 'other-app', 'other-env', ?, 'journey.recovered', 'info', '{}', 'browser'),
+      ('own-empty-probe', 'other-app', 'other-env', ?, 'journey.failed', 'error', '{}', 'server')`,
+      )
+      .run(timestamp, timestamp);
     for (const mcp of [false, true]) expect((await read('alerts', mcp)).total_count).toBe(2);
     for (const declared of [
       [policy.projects[2]],
