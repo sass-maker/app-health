@@ -366,7 +366,7 @@ it('starts retention before a paused probe finishes and retains the probe in the
   }
 });
 
-it('commits measured evidence and timeout results after the run deadline', async () => {
+it('commits measured failures and offline evidence for checks skipped after the run deadline', async () => {
   const { db, sqlite } = analysisDatabase();
   const now = 1800000000000;
   const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -409,7 +409,7 @@ it('commits measured evidence and timeout results after the run deadline', async
     );
     const fetcher = vi.fn<typeof fetch>(async () => {
       clock.mockReturnValue(now + 600001);
-      return Response.json({ ok: true });
+      return new Response('down', { status: 503 });
     });
     await runScheduledMonitoring({ DB: db, APP_HEALTH_SELF_BACKEND_KEY: key.rawKey }, fetcher, now);
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -418,10 +418,15 @@ it('commits measured evidence and timeout results after the run deadline', async
       environmentId: 'env',
     });
     expect(
-      report.projects[0].checks.map((c) => [c.journey, c.health, c.observations[0]?.failure]),
+      report.projects[0].checks.map((c) => [
+        c.journey,
+        c.health,
+        c.freshness,
+        c.observations[0]?.failure,
+      ]),
     ).toEqual([
-      ['api-health', 'healthy', null],
-      ['ingest-health', 'failing', 'timeout'],
+      ['api-health', 'failing', 'fresh', 'http'],
+      ['ingest-health', null, 'offline', 'run_deadline'],
     ]);
     expect(
       sqlite.prepare("SELECT COUNT(*) AS n FROM log_events WHERE event='probe.result'").get()?.n,
@@ -432,5 +437,30 @@ it('commits measured evidence and timeout results after the run deadline', async
   } finally {
     clock.mockRestore();
     sqlite.close();
+  }
+});
+
+it('distinguishes an active request cut short by the run budget from its own timeout', async () => {
+  vi.useFakeTimers();
+  try {
+    const fetcher: typeof fetch = async (_url, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+      });
+    const request = {
+      url: 'https://public.test/',
+      method: 'GET' as const,
+      timeoutMs: 100,
+      maxBytes: 100,
+      userAgent: 'test',
+    };
+    const budget = workerMeasure(fetcher, Date.now() + 10)(request);
+    await vi.advanceTimersByTimeAsync(10);
+    expect((await budget).failure).toBe('run_deadline');
+    const timeout = workerMeasure(fetcher, Date.now() + 100)({ ...request, timeoutMs: 10 });
+    await vi.advanceTimersByTimeAsync(10);
+    expect((await timeout).failure).toBe('timeout');
+  } finally {
+    vi.useRealTimers();
   }
 });

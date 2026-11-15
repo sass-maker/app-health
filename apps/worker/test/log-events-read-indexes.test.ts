@@ -105,7 +105,14 @@ describe('owner log_events reads', () => {
 
   it('reach alert-feed rows through the event and level indexes', async () => {
     const captured: Captured[] = [];
-    const feed = await readOwnerAlertFeed(capturingD1(sqlite, captured), 'ws', NOW);
+    const feed = await readOwnerAlertFeed(
+      capturingD1(sqlite, captured),
+      'ws',
+      NOW,
+      undefined,
+      undefined,
+      { appId: 'app-a', environmentId: 'env-a' },
+    );
     expect(feed.total_count).toBe(3);
     expect(feed.entries.map((entry) => entry.id)).toEqual(['feedback', 'error', 'degraded']);
     expect(feed.probes.map((probe) => probe.location)).toEqual(['ams']);

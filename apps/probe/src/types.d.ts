@@ -5,6 +5,7 @@ export type FailureKind =
   | 'connect'
   | 'tls'
   | 'timeout'
+  | 'run_deadline'
   | 'network'
   | 'incomplete'
   | 'body_too_large'

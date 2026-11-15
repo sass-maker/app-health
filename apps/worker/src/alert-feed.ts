@@ -104,6 +104,9 @@ export async function readOwnerAlertFeed(
   source?: MonitoringSource,
 ): Promise<OwnerAlertFeed> {
   const limit = Math.max(1, Math.min(ALERT_FEED_LIMIT, Math.floor(requestedLimit)));
+  const probeEvent = "l.event IN ('journey.failed', 'journey.degraded', 'journey.recovered')";
+  const syntheticJourney = `(${probeEvent} AND (json_type(l.props, '$.journey') IS NOT NULL
+    OR json_type(l.props, '$.location') IS NOT NULL)) OR json_extract(l.props, '$.synthetic') IS 1`;
   const scope = `FROM log_events l
     JOIN environments e ON e.id = l.environment_id AND e.app_id = l.app_id
       AND lower(e.name) = 'production'
@@ -113,16 +116,21 @@ export async function readOwnerAlertFeed(
         'journey.recovered')
       OR l.level = 'error'
       OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
-      AND (l.event NOT LIKE 'journey.%' OR (
-        l.source = 'server' AND l.app_id = ? AND l.environment_id = ?
+      AND (l.event NOT LIKE 'journey.%'
+        OR (NOT (${syntheticJourney}) AND c.app_id = l.app_id)
+        OR (${probeEvent} AND json_type(l.props, '$.journey') = 'text'
+        AND json_type(l.props, '$.location') = 'text'
+        AND l.source = 'server' AND l.app_id = ? AND l.environment_id = ?
         AND EXISTS (SELECT 1 FROM workspace_apps owned
           JOIN apps target ON target.id = owned.app_id AND target.archived_at IS NULL
           JOIN environments target_env ON target_env.app_id = target.id AND lower(target_env.name) = 'production'
           WHERE owned.workspace_id = c.workspace_id AND owned.app_id = c.app_id)
-        AND EXISTS (SELECT 1 FROM workspace_monitoring_projects policy
+        AND (NOT EXISTS (SELECT 1 FROM workspace_monitoring_projects any_policy
+          WHERE any_policy.workspace_id = c.workspace_id)
+        OR EXISTS (SELECT 1 FROM workspace_monitoring_projects policy
           JOIN json_each(policy.journeys_json) expected
           WHERE policy.workspace_id = c.workspace_id AND policy.catalog_id = c.catalog_id
-            AND policy.scope = 'public' AND expected.value = json_extract(l.props, '$.journey'))))
+            AND policy.scope = 'public' AND expected.value = json_extract(l.props, '$.journey')))))
       AND l.timestamp >= ? AND l.timestamp <= ?
       AND EXISTS (SELECT 1 FROM catalog_project_imports source
         WHERE source.workspace_id = ? AND source.app_id = l.app_id

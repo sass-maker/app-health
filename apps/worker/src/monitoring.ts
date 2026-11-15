@@ -25,6 +25,7 @@ const failures = new Set([
   'tls',
   'network',
   'timeout',
+  'run_deadline',
   'incomplete',
   'body_too_large',
   'http',
@@ -78,6 +79,13 @@ function validProbeInterval(seconds: number) {
   return Number.isSafeInteger(seconds) && seconds >= 60 && seconds <= 86400;
 }
 
+function validProbeHealth(row: Record<string, unknown>) {
+  return (
+    ['healthy', 'degraded', 'failing'].includes(String(row.health)) ||
+    (row.health === null && Number(row.vantage_offline) === 1 && row.failure === 'run_deadline')
+  );
+}
+
 function observation(row: Record<string, unknown>, now: number): Observation | null {
   const interval = Number(row.interval_seconds);
   const lastSeen = Number(row.timestamp);
@@ -87,7 +95,7 @@ function observation(row: Record<string, unknown>, now: number): Observation | n
     !/^[a-z0-9][a-z0-9-]{0,99}$/.test(location) ||
     !validProbeInterval(interval) ||
     !validProbeTime(lastSeen, now) ||
-    !['healthy', 'degraded', 'failing'].includes(String(health))
+    !validProbeHealth(row)
   )
     return null;
   const freshness =

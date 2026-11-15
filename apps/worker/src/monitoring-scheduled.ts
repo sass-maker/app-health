@@ -32,12 +32,11 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
   return async (request) => {
     const started = performance.now();
     const remaining = deadline - Date.now();
-    if (remaining <= 0) return { failure: 'timeout', phases: { total_ms: 0 } };
+    if (remaining <= 0) return { failure: 'run_deadline', phases: { total_ms: 0 } };
+    const requestLimit = Math.min(request.timeoutMs, 8000);
+    const runLimited = remaining < requestLimit;
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      Math.min(request.timeoutMs, 8000, remaining),
-    );
+    const timer = setTimeout(() => controller.abort(), Math.min(requestLimit, remaining));
     const phases: HttpResult['phases'] = { total_ms: 0 };
     let response: Response | undefined;
     try {
@@ -72,7 +71,13 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
       };
     } catch {
       return {
-        failure: controller.signal.aborted ? 'timeout' : response ? 'incomplete' : 'network',
+        failure: controller.signal.aborted
+          ? runLimited
+            ? 'run_deadline'
+            : 'timeout'
+          : response
+            ? 'incomplete'
+            : 'network',
         phases: { ...phases, total_ms: performance.now() - started },
       };
     } finally {

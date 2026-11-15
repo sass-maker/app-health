@@ -548,6 +548,65 @@ it('rejects another owned app impersonating the designated probe through REST an
         'other-app',
       ]);
     }
+    sqlite.exec("DELETE FROM workspace_monitoring_projects WHERE workspace_id = 'ws'");
+    for (const mcp of [false, true]) {
+      expect((await read('alerts', mcp)).total_count).toBe(1);
+      expect((await read('monitoring', mcp)).projects).toEqual([]);
+    }
+    const insertError = sqlite.prepare(`INSERT INTO log_events
+      (log_id, app_id, environment_id, timestamp, event, level, props, source)
+      VALUES (?, ?, ?, ?, ?, 'error', ?, 'server')`);
+    insertError.run(
+      'ordinary-journey',
+      'other-app',
+      'other-env',
+      timestamp,
+      'journey.checkout_failed',
+      '{}',
+    );
+    insertError.run(
+      'forged-namespace',
+      'rogue-app',
+      'rogue-env',
+      timestamp,
+      'journey.checkout_failed',
+      '{"project":"product"}',
+    );
+    insertError.run(
+      'forged-malformed',
+      'rogue-app',
+      'rogue-env',
+      timestamp,
+      'journey.failed',
+      '{"project":"product"}',
+    );
+    for (const mcp of [false, true]) expect((await read('alerts', mcp)).total_count).toBe(2);
+    for (const declared of [
+      [policy.projects[2]],
+      [
+        {
+          ...policy.projects[0],
+          scope: 'private' as const,
+          reason: 'Private service.',
+          journeys: [],
+        },
+      ],
+      [{ ...policy.projects[0], journeys: ['different'] }],
+    ]) {
+      await saveMonitoringPolicy(db, 'ws', { schema_version: 1, projects: declared }, timestamp);
+      for (const mcp of [false, true]) {
+        const alerts = await read('alerts', mcp);
+        expect(alerts.total_count).toBe(1);
+        expect(alerts.entries).toMatchObject([{ event: 'journey.checkout_failed' }]);
+      }
+    }
+    await saveMonitoringPolicy(
+      db,
+      'ws',
+      { schema_version: 1, projects: [policy.projects[0]] },
+      timestamp,
+    );
+    sqlite.exec("DELETE FROM log_events WHERE log_id = 'ordinary-journey'");
     sqlite.exec("DELETE FROM workspace_apps WHERE app_id = 'other-app'");
     expect(
       (

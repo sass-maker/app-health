@@ -78,6 +78,37 @@ const healthy = {
   'https://anime.test/api/search': json({ filteredList: [1] }),
 };
 
+it.each(['main', 'asset', 'warm'] as const)(
+  'preserves incident recovery state when the run deadline interrupts %s',
+  async (phase) => {
+    const journey = spec.journeys[phase === 'warm' ? 1 : 0]!;
+    const single = { ...spec, journeys: [journey] };
+    const failing = harness({ [journey.url]: { ...json({}), status: 503 } });
+    const opened = await runProbes(single, emptyState(), options, failing.deps);
+    const good = harness({ ...healthy });
+    const recovering = await runProbes(single, opened.state, options, good.deps);
+    const deadline: HttpResult = { failure: 'run_deadline', phases: { total_ms: 0 } };
+    const responses: Record<string, HttpResult | HttpResult[]> = { ...healthy };
+    if (phase === 'main') responses[journey.url] = deadline;
+    if (phase === 'asset') responses['https://anime.test/assets/app.js'] = deadline;
+    if (phase === 'warm') responses[journey.url] = [json({ filteredList: [1] }), deadline];
+    const skipped = harness(responses);
+    const result = await runProbes(single, recovering.state, options, skipped.deps);
+    expect(result.state.journeys).toEqual(recovering.state.journeys);
+    expect(result.summary.journeys[0]).toMatchObject({
+      outcome: 'not_completed',
+      failure: 'run_deadline',
+      status: null,
+    });
+    expect(skipped.sent[0]?.filter((log) => log.event.startsWith('journey.'))).toEqual([]);
+    expect(skipped.sent[0]?.find((log) => log.event === 'probe.result')?.props).toMatchObject({
+      status: null,
+      vantage_offline: true,
+      failure: 'run_deadline',
+    });
+  },
+);
+
 describe('runProbes', () => {
   it('records each healthy check and a heartbeat', async () => {
     const { deps, sent } = harness(healthy);

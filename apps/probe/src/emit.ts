@@ -21,7 +21,7 @@ export interface ProbeLog {
 
 export interface Observation {
   journey: Journey;
-  outcome: 'ok' | 'slow' | 'failed';
+  outcome: 'ok' | 'slow' | 'failed' | 'not_completed';
   failure?: FailureKind;
   status?: number;
   phases: Phases;
@@ -114,9 +114,9 @@ export function resultLog(
       journey: observation.journey.journey,
       location: options.location,
       interval_seconds: options.intervalSeconds,
-      vantage_offline: options.vantageOffline,
+      vantage_offline: options.vantageOffline || observation.failure === 'run_deadline',
       synthetic: true,
-      status,
+      status: observation.failure === 'run_deadline' ? null : status,
       outcome: observation.outcome,
       failure: observation.failure,
       http_status: observation.status,
