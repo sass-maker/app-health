@@ -1,3 +1,4 @@
+import { portfolioFixture } from './portfolio-fixture.js';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
@@ -151,6 +152,7 @@ function database() {
   ]) {
     sqlite.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
   }
+  portfolioFixture(sqlite);
   return { sqlite, db: new SQLiteD1(sqlite) };
 }
 

@@ -3,6 +3,7 @@
 // verifier is stored; the raw key is shown to the operator exactly once.
 
 import { z } from 'zod';
+import { CatalogMetadataV1 } from './catalog-sync.js';
 import { MAX_ENVIRONMENT_LENGTH } from './constants.js';
 
 export const EnvironmentName = z
@@ -77,6 +78,7 @@ export type CreateAppResponseV1 = z.infer<typeof CreateAppResponseV1>;
 export const AppEnvironmentV1 = z.object({
   app: AppV1,
   environments: z.array(EnvironmentV1),
+  catalog: CatalogMetadataV1.optional(),
 });
 
 export type AppEnvironmentV1 = z.infer<typeof AppEnvironmentV1>;

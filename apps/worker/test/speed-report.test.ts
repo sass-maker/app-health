@@ -1,3 +1,4 @@
+import { portfolioFixture } from './portfolio-fixture.js';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -62,6 +63,7 @@ function fixture() {
       ('env-staging', 'app-staging', 'staging'), ('env-other', 'app-other', 'production'),
       ('env-archived', 'app-archived', 'production');
   `);
+  portfolioFixture(sqlite);
   const queries: { sql: string; values: unknown[] }[] = [];
   const db: D1DatabaseLike = {
     prepare(sql) {
@@ -370,7 +372,9 @@ describe('readSpeedReport', () => {
 
   it('caps products and each event to the busiest 25 routes', async () => {
     const f = fixture();
-    const catalog = f.sqlite.prepare('INSERT INTO catalog_project_imports VALUES (?, ?, ?, ?, ?)');
+    const catalog = f.sqlite.prepare(
+      'INSERT INTO catalog_project_imports (workspace_id, catalog_id, catalog_name, app_id, lifecycle) VALUES (?, ?, ?, ?, ?)',
+    );
     const env = f.sqlite.prepare('INSERT INTO environments VALUES (?, ?, ?)');
     const app = f.sqlite.prepare('INSERT INTO apps VALUES (?, NULL)');
     for (let i = 0; i < 60; i++) {
@@ -470,7 +474,7 @@ describe('GET /v1/reports/speed', () => {
     const f = setup();
     const prepare = f.db.prepare.bind(f.db);
     vi.spyOn(f.db, 'prepare').mockImplementation((sql) => {
-      if (sql.includes('catalog_project_imports')) throw new Error('private query');
+      if (sql.includes('current_workspace_catalog')) throw new Error('private query');
       return prepare(sql);
     });
     const response = await f.request();
@@ -748,10 +752,10 @@ describe('daily engagement speed opt-in', () => {
     const keys = [...entries.keys()].map((key) => new URL(key).searchParams.get('query'));
     expect(keys).toEqual(
       expect.arrayContaining([
-        'daily-speed-v1:2026-10-09:app',
-        'daily-speed-v1:2026-10-09:landing',
-        'daily-speed-v1:2026-10-09:api',
-        'daily-speed-v1:2026-10-08:app',
+        'manual:daily-speed-v1:2026-10-09:app',
+        'manual:daily-speed-v1:2026-10-09:landing',
+        'manual:daily-speed-v1:2026-10-09:api',
+        'manual:daily-speed-v1:2026-10-08:app',
       ]),
     );
     for (const [, cached] of put.mock.calls)

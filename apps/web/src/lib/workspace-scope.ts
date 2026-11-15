@@ -1,7 +1,12 @@
 import { useSyncExternalStore, type ReactNode } from 'react';
 
 const STORAGE = 'app-health-selected-workspace';
-type Scope = { id: string; role: 'owner' | 'editor' | 'viewer' | 'unknown'; epoch: number };
+type Scope = {
+  id: string;
+  role: 'owner' | 'editor' | 'viewer' | 'unknown';
+  epoch: number;
+  sessionEpoch: number;
+};
 function storedWorkspace() {
   try {
     return sessionStorage.getItem(STORAGE) ?? '';
@@ -9,7 +14,7 @@ function storedWorkspace() {
     return '';
   }
 }
-let scope: Scope = { id: storedWorkspace(), role: 'unknown', epoch: 0 };
+let scope: Scope = { id: storedWorkspace(), role: 'unknown', epoch: 0, sessionEpoch: 0 };
 const listeners = new Set<() => void>();
 const requests = new Set<AbortController>();
 export const workspaceScope = () => scope;
@@ -22,7 +27,7 @@ function subscribeWorkspace(listener: () => void) {
 export function selectWorkspace(id: string) {
   for (const request of requests) request.abort();
   requests.clear();
-  scope = { id, role: 'unknown', epoch: scope.epoch + 1 };
+  scope = { id, role: 'unknown', epoch: scope.epoch + 1, sessionEpoch: scope.sessionEpoch + 1 };
   try {
     if (id) sessionStorage.setItem(STORAGE, id);
     else sessionStorage.removeItem(STORAGE);
@@ -33,6 +38,12 @@ export function selectWorkspace(id: string) {
   url.search = '';
   url.hash = '#settings';
   history.replaceState(null, '', url);
+  for (const listener of listeners) listener();
+}
+export function refreshWorkspace() {
+  for (const request of requests) request.abort();
+  requests.clear();
+  scope = { ...scope, epoch: scope.epoch + 1 };
   for (const listener of listeners) listener();
 }
 export function updateWorkspaceRole(role: string | null, epoch: number) {

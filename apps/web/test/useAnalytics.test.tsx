@@ -1,6 +1,11 @@
+import { refreshWorkspace } from '../src/lib/workspace-scope.js';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useBrowserReport, useWorkspaceAnalytics } from '../src/useAnalytics.js';
+import {
+  useBrowserReport,
+  useWorkspaceAnalytics,
+  useWorkspaceHealth,
+} from '../src/useAnalytics.js';
 
 const live = {
   measured_at: 1,
@@ -292,4 +297,64 @@ it('opens live presence before a slow summary and never replaces a newer live re
   await waitFor(() => expect(view.result.current.data).toEqual(summary));
   expect(view.result.current.live).toEqual(fresh);
   view.unmount();
+});
+
+it('restarts mounted overview reads on a catalog data epoch and ignores their aborted old cohort', async () => {
+  const pending: ((response: Response) => void)[] = [];
+  let refreshed = false;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (!refreshed) return await new Promise<Response>((resolve) => pending.push(resolve));
+      return Response.json(
+        path === '/v1/analytics'
+          ? { ...summary, stream: false }
+          : { refreshed_at: 1, window_end: 1, window: '24h', environments: [] },
+      );
+    }),
+  );
+  vi.stubGlobal(
+    'WebSocket',
+    class {
+      close() {}
+    },
+  );
+  const view = renderHook(() => ({
+    analytics: useWorkspaceAnalytics('owner'),
+    health: useWorkspaceHealth('owner'),
+  }));
+  await waitFor(() => expect(pending).toHaveLength(2));
+  refreshed = true;
+  act(() => refreshWorkspace());
+  await waitFor(() => expect(view.result.current.analytics.data).not.toBeNull());
+  await waitFor(() => expect(view.result.current.health.data).not.toBeNull());
+  expect(view.result.current.analytics.error).toBe('');
+  expect(view.result.current.health.error).toBe('');
+  await act(async () => {
+    for (const resolve of pending) resolve(new Response(null, { status: 503 }));
+  });
+  expect(view.result.current.analytics.error).toBe('');
+  expect(view.result.current.health.error).toBe('');
+});
+
+it('never re-exposes seeded old health after an epoch change and failed refresh, but retains same-scope data on retry', async () => {
+  const seeded = { refreshed_at: 57, window_end: 57, window: '24h', environments: [] };
+  let fail = false;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      fail
+        ? Response.json({ error: 'health service unavailable' }, { status: 503 })
+        : Response.json(seeded),
+    ),
+  );
+  const view = renderHook(() => useWorkspaceHealth('health-owner'));
+  await waitFor(() => expect(view.result.current.data?.refreshed_at).toBe(57));
+  fail = true;
+  act(() => view.result.current.reload());
+  await waitFor(() => expect(view.result.current.error).toBe('health service unavailable'));
+  expect(view.result.current.data?.refreshed_at).toBe(57);
+  act(() => refreshWorkspace());
+  await waitFor(() => expect(view.result.current.error).toBe('health service unavailable'));
+  expect(view.result.current.data).toBeNull();
 });

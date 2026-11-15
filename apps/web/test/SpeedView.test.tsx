@@ -1,3 +1,4 @@
+import { refreshWorkspace, selectWorkspace } from '../src/lib/workspace-scope.js';
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { SpeedReportV1 } from '@app-health/contracts';
@@ -316,4 +317,42 @@ it('shows the cached report on revisit while preserving the refresh request', as
   expect(screen.getByRole('table', { name: 'Product speed' })).toBeInTheDocument();
   expect(screen.queryByRole('status', { name: 'Loading speed report' })).toBeNull();
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('fences cached speed and delayed old bodies after a same-workspace catalog refresh', async () => {
+  act(() => selectWorkspace('speed-catalog'));
+  const old = speedFixture();
+  old.products = Array.from({ length: 56 }, (_, index) => ({
+    ...old.products[0]!,
+    catalog_id: `old-${index}`,
+    app_id: `old-app-${index}`,
+    name: `Old cohort ${index}`,
+  }));
+  let finish!: (value: unknown) => void;
+  const body = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const fetch = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json(old))
+    .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: () => body })
+    .mockResolvedValue(new Response(null, { status: 503 }));
+  vi.stubGlobal('fetch', fetch);
+  const view = render(<SpeedView ownerToken={ownerToken} />);
+  await screen.findByRole('button', { name: 'Show routes for Old cohort 0' });
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh speed report' }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  act(() => refreshWorkspace());
+  await screen.findByText(/speed reporting is unavailable/);
+  expect(screen.queryByRole('table', { name: 'Product speed' })).toBeNull();
+  await act(async () => {
+    finish(old);
+    await body;
+  });
+  view.unmount();
+  render(<SpeedView ownerToken={ownerToken} />);
+  await screen.findByText(/speed reporting is unavailable/);
+  expect(screen.queryByRole('button', { name: /Show routes for Old cohort/ })).toBeNull();
 });

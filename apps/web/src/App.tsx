@@ -1,8 +1,10 @@
+import { CatalogSync, CATALOG_SYNC_EVENT, type CatalogSyncCommit } from './CatalogSync.js';
 import { PaymentConnections } from './PaymentConnections.js';
 import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
 import {
   useWorkspaceScope,
   workspaceScope,
+  refreshWorkspace,
   selectWorkspace,
   workspaceCanManage,
 } from './lib/workspace-scope.js';
@@ -144,6 +146,7 @@ const WINDOW_LABELS: Record<Window, string> = {
 };
 
 interface SavedProject {
+  catalog?: import('@app-health/contracts').CatalogMetadata;
   appId: string;
   environmentId: string;
   name: string;
@@ -271,8 +274,30 @@ function availableProjects(listed: ListAppsResponseV1): SavedProject[] {
       appId: entry.app.id,
       environmentId: environment.id,
       name: entry.app.name,
+      catalog: entry.catalog,
       environment: environment.name,
     })),
+  );
+}
+
+function shouldKeepSetupView(
+  project: SavedProject | null,
+  strict: boolean,
+  completingCatalogRead: boolean | undefined,
+) {
+  return !strict && !project && !completingCatalogRead;
+}
+
+function inventoryReadCurrent(cancelled: boolean, epoch: number) {
+  return !cancelled && epoch === workspaceScope().epoch;
+}
+
+function selectionNeedsRefresh(current: SavedProject | null, selected: SavedProject) {
+  return (
+    !current ||
+    selected.appId !== current.appId ||
+    selected.environmentId !== current.environmentId ||
+    selected.name !== current.name
   );
 }
 
@@ -3593,6 +3618,9 @@ function ProjectSetupShell(props: ProjectSetupShellProps): ReactElement {
       ) : null}
       <div className="mx-auto max-w-6xl px-4 py-6">
         <WorkspacePanel ownerToken={props.ownerToken} />
+        <div className="mt-4">
+          <CatalogSync ownerToken={props.ownerToken} />
+        </div>
       </div>
       {workspaceCanManage(workspaceScope().role) ? (
         <Setup ownerToken={props.ownerToken} onCreated={props.handleCreated} />
@@ -3669,6 +3697,46 @@ function SessionErrorNotice({ message }: { message: string }): ReactElement | nu
   ) : null;
 }
 
+function CatalogCommitNotice({
+  count,
+  dismissible = true,
+}: {
+  count?: number;
+  dismissible?: boolean;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  return count === undefined || dismissed ? null : (
+    <div role="status" className="flex items-center gap-3 border-b bg-muted/30 px-4 py-3 text-sm">
+      <span>
+        Catalog synchronized. {count} active projects and their monitoring policy are committed.
+      </span>
+      {dismissible ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto shrink-0"
+          aria-label="Dismiss catalog confirmation"
+          onClick={() => setDismissed(true)}
+        >
+          Dismiss
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+type CatalogCommitState = {
+  count: number;
+  pendingInventory: boolean;
+  selection: SavedProject | null;
+};
+
+function catalogRecoverySelection(commit: CatalogCommitState | null, project: SavedProject | null) {
+  return commit?.pendingInventory ? commit.selection : project;
+}
+
+type CatalogSyncDetail = Omit<CatalogSyncCommit, 'projectCount'> & { projectCount?: number };
+
 function AppSession(): ReactElement {
   const [workspaceView, changeWorkspaceView] = useDashboardNavigation();
   const bootstrap = useAccountBootstrap();
@@ -3687,15 +3755,57 @@ function AppSession(): ReactElement {
   const [inventoryError, setInventoryError] = useState('');
   const [inventoryLoading, setInventoryLoading] = useState(false);
   const [inventoryRetry, setInventoryRetry] = useState(0);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const catalogCommit = useRef<CatalogCommitState | null>(null);
   const [created, setCreated] = useState<CreateAppResponseV1 | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
+  const inventoryLoaded = useRef(false);
   const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
+
+  useEffect(() => {
+    function synchronized(event: Event) {
+      const detail = (event as CustomEvent<CatalogSyncDetail>).detail;
+      if (!detail || detail.epoch !== workspaceScope().epoch) return;
+      const available = detail.listed ? availableProjects(detail.listed) : [];
+      catalogCommit.current = {
+        count: detail.projectCount ?? detail.listed?.apps.length ?? 0,
+        pendingInventory: !detail.listed,
+        selection: project,
+      };
+      prefetchedInventory.current = null;
+      setProjects(available);
+      inventoryLoaded.current = Boolean(detail.listed);
+      setInventoryError(
+        detail.listed
+          ? ''
+          : 'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
+      );
+      const selected = authorizedProject(project, available);
+      setProject(selected);
+      if (selected) localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
+      else if (detail.listed) localStorage.removeItem(projectStorageKey());
+      setCreated(null);
+      setRequestedProject(null);
+      setStrictRequestedProject(false);
+      setSelectionError('');
+      setCatalogRevision((revision) => revision + 1);
+      setInventoryRetry((retry) => retry + 1);
+      const url = new URL(location.href);
+      url.search = '';
+      url.hash = '#overview';
+      history.replaceState(null, '', url);
+      changeWorkspaceView('overview', false);
+      refreshWorkspace();
+    }
+    window.addEventListener(CATALOG_SYNC_EVENT, synchronized);
+    return () => window.removeEventListener(CATALOG_SYNC_EVENT, synchronized);
+  }, [project, changeWorkspaceView]);
 
   useEffect(() => {
     if (ownerToken === null) return;
     const token = ownerToken;
     let cancelled = false;
-    setInventoryLoading(strictRequestedProject);
+    setInventoryLoading(true);
     setInventoryError('');
     async function readInventory(): Promise<SavedProject[]> {
       const prefetched = prefetchedInventory.current;
@@ -3708,16 +3818,22 @@ function AppSession(): ReactElement {
       return availableProjects((await response.json()) as ListAppsResponseV1);
     }
     async function load(): Promise<void> {
+      const epoch = workspaceScope().epoch;
       try {
         const available = await readInventory();
-        if (cancelled) return;
+        if (!inventoryReadCurrent(cancelled, epoch)) return;
+        const selection = catalogRecoverySelection(catalogCommit.current, project);
+        const completingCatalogRead = catalogCommit.current?.pendingInventory;
+        if (catalogCommit.current) catalogCommit.current.pendingInventory = false;
         setProjects(available);
-        if (!strictRequestedProject && !project) {
+        setInventoryError('');
+        inventoryLoaded.current = true;
+        if (shouldKeepSetupView(project, strictRequestedProject, completingCatalogRead)) {
           setInventoryLoading(false);
           return;
         }
         const resolution = resolveInventorySelection(
-          project,
+          selection,
           requestedProject,
           strictRequestedProject,
           available,
@@ -3731,19 +3847,14 @@ function AppSession(): ReactElement {
         setSelectionError('');
         setInventoryLoading(false);
         const selected = resolution.selected;
-        if (
-          selected &&
-          (!project ||
-            selected.appId !== project.appId ||
-            selected.environmentId !== project.environmentId)
-        ) {
+        if (selected && selectionNeedsRefresh(project, selected)) {
           localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
           setProject(selected);
           setCreated(null);
         }
       } catch {
-        if (!cancelled && strictRequestedProject) {
-          setProject(null);
+        if (inventoryReadCurrent(cancelled, epoch)) {
+          if (strictRequestedProject && !inventoryLoaded.current) setProject(null);
           setInventoryError('the workspace project list could not load. try again.');
           setInventoryLoading(false);
         }
@@ -3898,6 +4009,17 @@ function AppSession(): ReactElement {
 
   if (ownerToken === null) return workspaceEntry(bootstrap, bootstrapApplied.current, handleUnlock);
 
+  if (catalogCommit.current?.pendingInventory)
+    return (
+      <>
+        <CatalogCommitNotice count={catalogCommit.current.count} dismissible={false} />
+        <WorkspaceLoading
+          error="The catalog is committed. Inventory refresh is unavailable; retry its refresh."
+          onRetry={() => setInventoryRetry((value) => value + 1)}
+        />
+      </>
+    );
+
   if (created)
     return (
       <KeySetup
@@ -3909,8 +4031,22 @@ function AppSession(): ReactElement {
         }}
       />
     );
-  if (strictRequestedProject && inventoryLoading) return <WorkspaceLoading />;
-  if (strictRequestedProject && inventoryError)
+  const emptyPortfolioView =
+    workspaceView === 'overview' && !projects.length && !inventoryLoaded.current;
+  if (
+    !inventoryLoaded.current &&
+    (strictRequestedProject || emptyPortfolioView) &&
+    inventoryLoading
+  )
+    return <WorkspaceLoading />;
+  if (!strictRequestedProject && emptyPortfolioView && inventoryError)
+    return (
+      <WorkspaceLoading
+        error={inventoryError}
+        onRetry={() => setInventoryRetry((value) => value + 1)}
+      />
+    );
+  if (strictRequestedProject && !inventoryLoaded.current && inventoryError)
     return (
       <div className="mx-auto flex min-h-screen max-w-2xl items-center px-4">
         <Alert variant="destructive">
@@ -3962,16 +4098,13 @@ function AppSession(): ReactElement {
   return (
     <>
       <SessionErrorNotice message={sessionError} />
+      <CatalogCommitNotice key={catalogRevision} count={catalogCommit.current?.count} />
       <Dashboard
-        key={`${project.appId}/${project.environmentId}`}
+        key={`${project.appId}/${project.environmentId}/${catalogRevision}`}
         view={workspaceView}
         onView={changeWorkspaceView}
         project={project}
-        projects={
-          projects.some((candidate) => candidate.environmentId === project.environmentId)
-            ? projects
-            : [project, ...projects]
-        }
+        projects={projects}
         ownerToken={ownerToken}
         handlers={{
           onProjectChange: selectProject,
@@ -3997,7 +4130,7 @@ export function App(): ReactElement {
           </button>
         </div>
       ) : null}
-      <AppSession key={scope.epoch} />
+      <AppSession key={scope.sessionEpoch} />
     </>
   );
 }

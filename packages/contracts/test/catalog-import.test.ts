@@ -45,3 +45,16 @@ describe('bounded catalog declarations', () => {
     expect(parse([{ ...project, token: 'secret' }]).success).toBe(false);
   });
 });
+
+it('rejects duplicate existing app links independently of unique catalog identities', () => {
+  const result = CatalogImportRequestV1.safeParse({
+    schema_version: 1,
+    projects: [
+      { catalog_id: 'one', name: 'One', lifecycle: 'active', existing_app_id: 'owned' },
+      { catalog_id: 'two', name: 'Two', lifecycle: 'active', existing_app_id: 'owned' },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (!result.success)
+    expect(result.error.message).toContain('existing_app_id values must be unique');
+});

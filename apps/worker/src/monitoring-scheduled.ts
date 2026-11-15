@@ -100,7 +100,7 @@ export async function runScheduledMonitoring(
       .prepare(
         `SELECT p.catalog_id, p.journeys_json, p.revision
     FROM workspace_monitoring_projects p
-    JOIN catalog_project_imports c ON c.workspace_id = p.workspace_id
+    JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
       AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
     JOIN workspace_apps wa ON wa.workspace_id = p.workspace_id AND wa.app_id = c.app_id
     JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL

@@ -1,3 +1,4 @@
+import { portfolioFixture } from './portfolio-fixture.js';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it, vi } from 'vitest';
 import { readOwnerAlertFeed } from '../src/alert-feed.js';
@@ -25,6 +26,7 @@ describe('readOwnerAlertFeed', () => {
           ('ws-a', 'saas-maker', 'SaaS Maker', 'saas-maker', 'active'),
           ('ws-a', 'retired', 'Retired', 'app-old', 'retired'),
           ('ws-b', 'other', 'Other', 'app-b', 'active');`);
+      portfolioFixture(sqlite);
       const insert = sqlite.prepare(
         'INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, props) VALUES (?, ?, ?, ?, ?, ?)',
       );
@@ -303,6 +305,7 @@ describe('readOwnerAlertFeed', () => {
           ('ws-a', 'app-health', 'App Health', 'app-health', 'active'),
           ('ws-a', 'anime-list', 'Anime List', 'app-anime', 'active'),
           ('ws-b', 'other', 'Other', 'app-other', 'active');`);
+      portfolioFixture(sqlite);
       const insert = sqlite.prepare('INSERT INTO log_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
       const minute = 60_000;
       const now = 1_700_000_000_000;

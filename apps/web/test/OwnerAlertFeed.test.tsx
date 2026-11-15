@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OwnerAlertFeed } from '../src/OwnerAlertFeed.js';
-import { selectWorkspace } from '../src/lib/workspace-scope.js';
+import { refreshWorkspace, selectWorkspace } from '../src/lib/workspace-scope.js';
 
 afterEach(() => {
   cleanup();
@@ -315,4 +315,32 @@ it('isolates cookie-session workspace caches and rejects an old response body af
   render(<OwnerAlertFeed ownerToken="" />);
   expect(screen.queryByText(/Atlas|Other workspace/)).toBeNull();
   expect(screen.getByRole('status', { name: 'Loading alerts' })).toBeTruthy();
+});
+
+it('does not resurrect an old cohort feed or late response after refreshing the same workspace', async () => {
+  let finish!: (value: unknown) => void;
+  const body = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ ...feed, total_count: 57 }))
+    .mockResolvedValueOnce({ ok: true, headers: new Headers(), json: () => body })
+    .mockResolvedValue(new Response(null, { status: 503 }));
+  vi.stubGlobal('fetch', fetcher);
+  const view = render(<OwnerAlertFeed ownerToken="catalog-feed-owner" />);
+  await screen.findByText(/Atlas/);
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh alerts' }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+  act(() => refreshWorkspace());
+  await screen.findByText('alerts returned 503');
+  expect(screen.queryByText(/Atlas/)).toBeNull();
+  await act(async () => {
+    finish(feed);
+    await body;
+  });
+  view.unmount();
+  render(<OwnerAlertFeed ownerToken="catalog-feed-owner" />);
+  await screen.findByText('alerts returned 503');
+  expect(screen.queryByText(/Atlas/)).toBeNull();
 });

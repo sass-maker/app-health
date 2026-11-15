@@ -36,6 +36,14 @@ describe('workspace health D1 aggregation', () => {
         .filter((candidate) => candidate.trim()))
         await db.prepare(statement).run();
     }
+    for (const file of ['0018_catalog_imports.sql', '0043_workspace_portfolio_snapshot.sql']) {
+      const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
+      for (const statement of sql
+        .replace(/--[^\n]*/g, '')
+        .trim()
+        .split(/\n(?=CREATE )/))
+        await db.prepare(statement).run();
+    }
     for (const id of ['one', 'two']) {
       await db
         .prepare(

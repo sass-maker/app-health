@@ -2,7 +2,13 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { useEffect, useState } from 'react';
 import { ownerFetch } from '../src/lib/owner-fetch.js';
-import { selectWorkspace, useWorkspaceScope, workspaceScope } from '../src/lib/workspace-scope.js';
+import {
+  selectWorkspace,
+  refreshWorkspace,
+  updateWorkspaceRole,
+  useWorkspaceScope,
+  workspaceScope,
+} from '../src/lib/workspace-scope.js';
 import { accountResourceClient } from '../src/lib/account-resource-client.js';
 
 afterEach(() => {
@@ -70,4 +76,33 @@ it('sends neither workspace selectors to invitation acceptance nor browser-store
     'Bearer aha_one_time',
   );
   expect(JSON.stringify({ ...sessionStorage, ...localStorage })).not.toContain('aha_one_time');
+});
+
+it('refreshes the data cohort while preserving session, owner role, workspace and URL', async () => {
+  act(() => selectWorkspace('selected'));
+  act(() => updateWorkspaceRole('owner', workspaceScope().epoch));
+  history.replaceState(null, '', '/app?keep=value#overview');
+  const previous = workspaceScope();
+  const url = location.href;
+  let finish!: (response: Response) => void;
+  let signal!: AbortSignal;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((_path: unknown, init: RequestInit) => {
+      signal = init.signal!;
+      return new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+    }),
+  );
+  const pending = ownerFetch('/v1/apps', '');
+  const rejection = pending.catch((error) => error);
+  const client = accountResourceClient('');
+  act(() => refreshWorkspace());
+  expect(workspaceScope()).toEqual({ ...previous, epoch: previous.epoch + 1 });
+  expect(signal.aborted).toBe(true);
+  expect(location.href).toBe(url);
+  expect(accountResourceClient('')).not.toBe(client);
+  finish(Response.json({ old: true }));
+  expect(await rejection).toMatchObject({ name: 'AbortError' });
 });

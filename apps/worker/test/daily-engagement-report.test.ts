@@ -1,3 +1,4 @@
+import { portfolioFixture } from './portfolio-fixture.js';
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { DailyEngagementProductReportV1, DailyEngagementReportV1 } from '@app-health/contracts';
@@ -735,6 +736,7 @@ describe('readDailyApiActivity', () => {
         ('app-000','ws-1','active'), ('app-001','ws-1','primary'),
         ('app-other-env','ws-1','active'), ('app-other-ws','ws-2','active');
     `);
+    portfolioFixture(sqlite);
     const statement = (sql: string, values: SQLInputValue[] = []) =>
       sqlite.prepare(sql).all(...values);
     const add = sqlite.prepare('INSERT INTO endpoint_rollups VALUES (?, ?, ?, ?, ?, ?)');
@@ -842,7 +844,7 @@ class MockStatement implements D1PreparedStatement {
         }) as T[],
       };
     }
-    if (this.sql.includes('FROM catalog_project_imports')) {
+    if (this.sql.includes('FROM current_workspace_catalog')) {
       return { results: this.db['catalogRows'] as unknown as T[] };
     }
     if (this.sql.includes('FROM log_events')) {
@@ -909,6 +911,7 @@ describe('readDailyEngagementLogs', () => {
       sqlite
         .prepare('INSERT INTO log_events VALUES (?, ?, ?, ?, ?)')
         .run('app-000', 'stage', FROM + 200, 'feedback.submitted', '{}');
+      portfolioFixture(sqlite);
       const db = {
         prepare(sql: string) {
           return {
@@ -1524,6 +1527,7 @@ describe('composeDailyEngagementReport', () => {
         ('ws-1', 'active-product', 'Active', 'app-active', 'active'),
         ('ws-1', 'retired-product', 'Retired', 'app-retired', 'retired'),
         ('ws-2', 'other-product', 'Other', 'app-other', 'active');`);
+      portfolioFixture(sqlite);
       const db = {
         prepare(sql: string) {
           return {

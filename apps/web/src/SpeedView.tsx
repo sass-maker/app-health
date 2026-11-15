@@ -1,3 +1,4 @@
+import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { SpeedReportV1, type SpeedReportV1 as Report } from '@app-health/contracts';
 import { RefreshCw } from 'lucide-react';
@@ -38,17 +39,21 @@ function useSpeedReport(
   range: Report['range'],
   performanceClass: Report['class'],
 ) {
-  const cacheKey = JSON.stringify([ownerToken, range, performanceClass]);
-  const [report, setReport] = useState<Report | null>(() => cachedReport(cacheKey));
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
+  const scope = useWorkspaceScope();
+  const cacheKey = JSON.stringify([ownerToken, scope.id, scope.epoch, range, performanceClass]);
+  const [loaded, setLoaded] = useState(() => ({ key: cacheKey, report: cachedReport(cacheKey) }));
+  const report = loaded.key === cacheKey ? loaded.report : null;
+  const [loadError, setError] = useState('');
+  const error = loaded.key === cacheKey ? loadError : '';
+  const [isLoading, setLoading] = useState(true);
+  const loading = loaded.key === cacheKey ? isLoading : true;
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     let cancelled = false;
     let pending = false;
     let controller: AbortController | undefined;
     const cached = cachedReport(cacheKey);
-    setReport(cached);
+    setLoaded({ key: cacheKey, report: cached });
     setError('');
     setLoading(!cached);
     async function load(): Promise<void> {
@@ -73,9 +78,9 @@ function useSpeedReport(
           parsed.data.class !== performanceClass
         )
           throw new Error('invalid speed report response. please retry.');
-        if (!cancelled) {
+        if (!cancelled && workspaceScope().epoch === scope.epoch) {
           rememberReport(cacheKey, parsed.data);
-          setReport(parsed.data);
+          setLoaded({ key: cacheKey, report: parsed.data });
           setError('');
         }
       } catch (cause) {

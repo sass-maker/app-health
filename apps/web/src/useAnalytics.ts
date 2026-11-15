@@ -1,4 +1,4 @@
-import { workspaceScope } from './lib/workspace-scope.js';
+import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
 import { ownerFetch } from './lib/owner-fetch.js';
 import { useReportCache } from './AnalyticsCache.js';
 import { useEffect, useRef, useState } from 'react';
@@ -123,6 +123,8 @@ function createWorkspaceSocket(
 }
 
 export function useWorkspaceAnalytics(ownerToken: string) {
+  const { scope, scopeKey } = useOverviewScope(ownerToken);
+  const [resultScope, setResultScope] = useState(scopeKey);
   const [data, setData] = useState<BrowserSummaryData | null>(null);
   const [live, setLive] = useState<PresenceSnapshot | null>(null);
   const [error, setError] = useState('');
@@ -134,12 +136,10 @@ export function useWorkspaceAnalytics(ownerToken: string) {
     let loading = false;
     let request: AbortController | undefined;
     let poll: ReturnType<typeof setInterval> | undefined;
-    setData(null);
-    setLive(null);
-    setConnected(false);
-    setError('');
+    clearOverviewReadings(setData, setLive, setConnected, setError);
+    setResultScope(scopeKey);
     const sockets = createWorkspaceSocket(
-      () => cancelled || hidden,
+      () => cancelled || hidden || workspaceScope().epoch !== scope.epoch,
       (value) => setConnected(value),
       (value) => setLive(value),
     );
@@ -155,7 +155,13 @@ export function useWorkspaceAnalytics(ownerToken: string) {
           headers: ownerToken ? { authorization: `Bearer ${ownerToken}` } : {},
         });
         const next = await readSummary(response);
-        if (cancelled || hidden || controller.signal.aborted) return;
+        if (
+          cancelled ||
+          hidden ||
+          controller.signal.aborted ||
+          workspaceScope().epoch !== scope.epoch
+        )
+          return;
         setData(next);
         setLive((current) =>
           current && current.measured_at > next.live.measured_at ? current : next.live,
@@ -163,7 +169,7 @@ export function useWorkspaceAnalytics(ownerToken: string) {
         setError('');
         if (next.stream) sockets.connect();
       } catch (cause) {
-        if (requestCanUpdate(cancelled, hidden, controller, timeout.expired()))
+        if (overviewCanUpdate(scope.epoch, cancelled, hidden, controller, timeout.expired()))
           setError(requestError(cause, timeout.expired(), 'analytics'));
       } finally {
         timeout.clear();
@@ -200,15 +206,19 @@ export function useWorkspaceAnalytics(ownerToken: string) {
       if (poll) clearInterval(poll);
       sockets.close();
     };
-  }, [ownerToken, retry]);
-  return { data, live, error, connected, reload: () => setRetry((value) => value + 1) };
+  }, [ownerToken, retry, scopeKey]);
+  return workspaceAnalyticsResult(resultScope === scopeKey, { data, live, error, connected }, () =>
+    setRetry((value) => value + 1),
+  );
 }
 
 export function useWorkspaceHealth(ownerToken: string) {
-  const [{ data, error }, setResult] = useState<{
+  const { scope, scopeKey } = useOverviewScope(ownerToken);
+  const [{ key, data, error }, setResult] = useState<{
+    key: string;
     data: WorkspaceHealthSummary | null;
     error: string;
-  }>({ data: null, error: '' });
+  }>({ key: scopeKey, data: null, error: '' });
   const [retry, setRetry] = useState(0);
   useEffect(() => {
     let cancelled = false;
@@ -216,7 +226,11 @@ export function useWorkspaceHealth(ownerToken: string) {
     let loading = false;
     let request: AbortController | undefined;
     let poll: ReturnType<typeof setInterval> | undefined;
-    setResult({ data: null, error: '' });
+    setResult((current) =>
+      current.key === scopeKey
+        ? { ...current, error: '' }
+        : { key: scopeKey, data: null, error: '' },
+    );
     async function load() {
       if (cancelled || hidden || loading) return;
       loading = true;
@@ -232,13 +246,21 @@ export function useWorkspaceHealth(ownerToken: string) {
         if (!response.ok) throw new Error(responseError(body, 'workspace health is unavailable.'));
         const parsed = WorkspaceHealthSummaryV1.safeParse(body);
         if (!parsed.success) throw new Error('workspace health is unavailable.');
-        if (!cancelled && !hidden && !timeout.controller.signal.aborted) {
-          setResult({ data: parsed.data, error: '' });
+        if (
+          !cancelled &&
+          !hidden &&
+          !timeout.controller.signal.aborted &&
+          workspaceScope().epoch === scope.epoch
+        ) {
+          setResult({ key: scopeKey, data: parsed.data, error: '' });
         }
       } catch (cause) {
-        if (requestCanUpdate(cancelled, hidden, timeout.controller, timeout.expired()))
+        if (
+          overviewCanUpdate(scope.epoch, cancelled, hidden, timeout.controller, timeout.expired())
+        )
           setResult((current) => ({
-            ...current,
+            key: scopeKey,
+            data: current.key === scopeKey ? current.data : null,
             error: requestError(cause, timeout.expired(), 'workspace health'),
           }));
       } finally {
@@ -272,8 +294,13 @@ export function useWorkspaceHealth(ownerToken: string) {
       request?.abort();
       if (poll) clearInterval(poll);
     };
-  }, [ownerToken, retry]);
-  return { data, error, reload: () => setRetry((value) => value + 1) };
+  }, [ownerToken, retry, scopeKey]);
+  const current = key === scopeKey;
+  return {
+    data: current ? data : null,
+    error: current ? error : '',
+    reload: () => setRetry((value) => value + 1),
+  };
 }
 
 type ReportOptions =
@@ -438,4 +465,47 @@ function reportCacheScope(ownerToken: string, params: URLSearchParams) {
     workspaceScope().epoch,
     params.toString(),
   ]);
+}
+
+function overviewCanUpdate(
+  epoch: number,
+  cancelled: boolean,
+  hidden: boolean,
+  controller: AbortController,
+  expired: boolean,
+) {
+  return (
+    workspaceScope().epoch === epoch && requestCanUpdate(cancelled, hidden, controller, expired)
+  );
+}
+function workspaceAnalyticsResult(
+  current: boolean,
+  state: {
+    data: BrowserSummaryData | null;
+    live: PresenceSnapshot | null;
+    error: string;
+    connected: boolean;
+  },
+  reload: () => void,
+) {
+  return current
+    ? { ...state, reload }
+    : { data: null, live: null, error: '', connected: false, reload };
+}
+
+function useOverviewScope(ownerToken: string) {
+  const scope = useWorkspaceScope();
+  const scopeKey = JSON.stringify([ownerToken, scope.id, scope.epoch]);
+  return { scope, scopeKey };
+}
+function clearOverviewReadings(
+  setData: (value: null) => void,
+  setLive: (value: null) => void,
+  setConnected: (value: boolean) => void,
+  setError: (value: string) => void,
+) {
+  setData(null);
+  setLive(null);
+  setConnected(false);
+  setError('');
 }

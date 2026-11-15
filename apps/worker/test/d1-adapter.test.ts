@@ -1,3 +1,4 @@
+import { portfolioFixture } from './portfolio-fixture.js';
 import { describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { ListAppsResponseV1 } from '@app-health/contracts';
@@ -90,6 +91,10 @@ describe('D1 control plane', () => {
       CREATE TABLE workspace_apps (app_id TEXT, workspace_id TEXT);
       INSERT INTO apps VALUES ('real', 'Real', 1, NULL), ('demo', 'Demo', 2, 100), ('legacy', 'Legacy', 3, NULL), ('canary', 'Canary', 4, 100);
       INSERT INTO workspace_apps VALUES ('real', 'ws'), ('demo', 'ws');`);
+    portfolioFixture(sqlite);
+    sqlite.exec(
+      'INSERT OR IGNORE INTO workspaces SELECT DISTINCT workspace_id FROM workspace_apps',
+    );
     const db = new SQLiteD1(sqlite);
     expect((await new D1ControlPlane(db).listApps()).map((app) => app.id)).toEqual([
       'legacy',
@@ -122,6 +127,10 @@ describe('D1 control plane', () => {
       .prepare('INSERT INTO environments VALUES (?, ?, ?, ?)')
       .run('env-unowned', 'unowned', 'production', 100);
 
+    portfolioFixture(sqlite);
+    sqlite.exec(
+      'INSERT OR IGNORE INTO workspaces SELECT DISTINCT workspace_id FROM workspace_apps',
+    );
     const db = new SQLiteD1(sqlite);
     const controlPlane = new D1ControlPlane(db, 'workspace');
     const buckets: BucketRepository = {

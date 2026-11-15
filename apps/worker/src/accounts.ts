@@ -1,3 +1,9 @@
+import {
+  catalogInventoryJoin,
+  catalogInventoryColumns,
+  inventoryCatalog,
+  type CatalogInventoryRow,
+} from './catalog-inventory.js';
 import { betterAuth, type BetterAuthOptions } from 'better-auth';
 import type { AppEnvironmentV1 } from '@app-health/contracts';
 import { getAccountCapabilitySetup, type D1DatabaseLike } from './d1-adapter.js';
@@ -236,28 +242,31 @@ async function workspaceAndApps(
 ) {
   const { results } = await db
     .prepare(
-      `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id,
+      `SELECT w.id AS workspace_id, w.name AS workspace_name, a.id AS app_id, ${catalogInventoryColumns},
               ${includeEnvironments ? 'a.name AS app_name, a.created_at AS app_created_at,' : ''}
               ${includeEnvironments ? 'e.id AS env_id, e.app_id AS env_app_id, e.name AS env_name, e.created_at AS env_created_at' : 'NULL AS env_id, NULL AS env_app_id, NULL AS env_name, NULL AS env_created_at'}
        FROM workspaces w
        LEFT JOIN workspace_apps wa ON wa.workspace_id = w.id
        LEFT JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
+       ${catalogInventoryJoin}
        ${includeEnvironments ? 'LEFT JOIN environments e ON e.app_id = a.id' : ''}
        WHERE ${workspaceId ? 'w.id = ?' : 'w.owner_id = ?'}
        ORDER BY ${includeEnvironments ? 'a.created_at DESC, e.created_at' : 'a.id'}`,
     )
     .bind(workspaceId ?? userId)
-    .all<{
-      workspace_id: string;
-      workspace_name: string;
-      app_id: string | null;
-      app_name?: string | null;
-      app_created_at?: number | null;
-      env_id: string | null;
-      env_app_id: string | null;
-      env_name: string | null;
-      env_created_at: number | null;
-    }>();
+    .all<
+      CatalogInventoryRow & {
+        workspace_id: string;
+        workspace_name: string;
+        app_id: string | null;
+        app_name?: string | null;
+        app_created_at?: number | null;
+        env_id: string | null;
+        env_app_id: string | null;
+        env_name: string | null;
+        env_created_at: number | null;
+      }
+    >();
   return results;
 }
 
@@ -324,9 +333,14 @@ export async function accountIdentity(
     const rows = await workspaceAndApps(env.DB, session.user.id, true, membership.id);
     const projected = new Map<string, AppEnvironmentV1>();
     for (const row of rows) {
-      if (!row.app_id || !row.app_name) continue;
+      if (!row.app_id || !row.app_name || !row.portfolio_visible) continue;
       const entry = projected.get(row.app_id) ?? {
-        app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at ?? 0 },
+        app: {
+          id: row.app_id,
+          name: row.portfolio_name ?? row.app_name,
+          created_at: row.app_created_at ?? 0,
+        },
+        ...inventoryCatalog(row),
         environments: [],
       };
       if (row.env_id)
@@ -347,7 +361,7 @@ export async function accountIdentity(
         authKind: 'account',
         workspaceRole: membership.role,
         workspaceId: membership.id,
-        appIds: [...projected.keys()],
+        appIds: [...new Set(rows.flatMap((row) => (row.app_id ? [row.app_id] : [])))],
       },
       ...(includeApps ? { apps: [...projected.values()] } : {}),
     };
@@ -412,11 +426,22 @@ export async function accountIdentity(
   const appsById = new Map<string, AppEnvironmentV1>();
   if (includeApps) {
     for (const row of rows) {
-      if (!row.app_id || row.app_name === null || row.app_name === undefined) continue;
+      if (
+        !row.app_id ||
+        row.app_name === null ||
+        row.app_name === undefined ||
+        !row.portfolio_visible
+      )
+        continue;
       let entry = appsById.get(row.app_id);
       if (!entry) {
         entry = {
-          app: { id: row.app_id, name: row.app_name, created_at: row.app_created_at ?? 0 },
+          app: {
+            id: row.app_id,
+            name: row.portfolio_name ?? row.app_name,
+            created_at: row.app_created_at ?? 0,
+          },
+          ...inventoryCatalog(row),
           environments: [],
         };
         appsById.set(row.app_id, entry);

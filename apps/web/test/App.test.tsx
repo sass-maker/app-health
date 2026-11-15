@@ -1,3 +1,4 @@
+import { CATALOG_SYNC_EVENT } from '../src/CatalogSync.js';
 import {
   updateWorkspaceRole,
   workspaceScope,
@@ -430,6 +431,309 @@ describe('App Health V0 UI', () => {
     render(<App />);
     expect(await screen.findByRole('alert')).toHaveTextContent('project list could not load');
     expect(screen.queryByRole('button', { name: 'create project' })).toBeNull();
+  });
+
+  it('shows inventory loading and a retryable failure without reporting an empty portfolio', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    window.history.replaceState({}, '', '/app#overview');
+    const fetch = installFetch();
+    const fallback = fetch.getMockImplementation()!;
+    let finish!: (response: Response) => void;
+    fetch.mockImplementation(async (input, init) => {
+      const url = new URL(String(input), location.origin);
+      if (url.pathname === '/v1/apps')
+        return await new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return fallback(input, init);
+    });
+    render(<App />);
+    expect(await screen.findByLabelText('Loading workspace project')).toBeTruthy();
+    expect(screen.queryByText('no projects yet')).toBeNull();
+    await act(async () => finish(new Response(null, { status: 503 })));
+    expect(
+      await screen.findByText('the workspace project list could not load. try again.'),
+    ).toBeTruthy();
+    expect(screen.queryByText('no projects yet')).toBeNull();
+    fetch.mockImplementation(fallback);
+    fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+    expect(await screen.findByText('no projects yet')).toBeTruthy();
+  });
+
+  it('recovers an empty portfolio after an unavailable first read and a successful visible poll', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    vi.useFakeTimers();
+    const fetch = installFetch({ appsFail: true });
+    const failure = fetch.getMockImplementation()!;
+    let succeeds = false;
+    fetch.mockImplementation(async (input, init) =>
+      new URL(String(input), location.origin).pathname === '/v1/apps' && succeeds
+        ? Response.json({ apps: [] }, { headers: { 'x-app-health-workspace-role': 'owner' } })
+        : failure(input, init),
+    );
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText('the workspace project list could not load. try again.')).toBeTruthy();
+    succeeds = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    expect(screen.queryByText('the workspace project list could not load. try again.')).toBeNull();
+    succeeds = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    succeeds = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('retains imported inventory and authenticated session across a data refresh even when later reads fail', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    const apps = Array.from({ length: 57 }, (_, index) => ({
+      app: {
+        id: index ? `inventory-${index}` : savedProject.appId,
+        name: `Portfolio project ${index}`,
+        created_at: 1,
+      },
+      environments: [
+        {
+          id: index ? `inventory-env-${index}` : savedProject.environmentId,
+          app_id: index ? `inventory-${index}` : savedProject.appId,
+          name: 'production',
+          created_at: 1,
+        },
+      ],
+    }));
+    const fetch = installFetch({ apps, google: true });
+    render(<App />);
+    await screen.findByRole('button', { name: 'Portfolio project 56' });
+    const scope = workspaceScope();
+    const previousConfigReads = fetch.mock.calls.filter(([input]) =>
+      String(input).includes('/v1/account/config'),
+    ).length;
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input, init) =>
+      new URL(String(input), location.origin).pathname === '/v1/apps'
+        ? new Response(null, { status: 503 })
+        : fallback(input, init),
+    );
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(CATALOG_SYNC_EVENT, {
+          detail: { epoch: scope.epoch, listed: { apps: apps.slice(0, 40) } },
+        }),
+      ),
+    );
+    await waitFor(() => expect(workspaceScope().epoch).toBe(scope.epoch + 1));
+    expect(workspaceScope().sessionEpoch).toBe(scope.sessionEpoch);
+    expect(screen.getByRole('button', { name: 'Portfolio project 39' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Portfolio project 40' })).toBeNull();
+    expect(screen.queryByText('could not open the workspace')).toBeNull();
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes('/v1/account/config')),
+    ).toHaveLength(previousConfigReads);
+  });
+
+  it.each([false, true])(
+    'confirms a composed catalog commit and fences pending overview reads with immediate readback failure=%j',
+    async (fails) => {
+      history.replaceState(null, '', '/app#overview');
+      const apps = Array.from({ length: 57 }, (_, index) => ({
+        app: {
+          id: index ? `cohort-${index}` : savedProject.appId,
+          name: `Old portfolio ${index}`,
+          created_at: 1,
+        },
+        environments: [
+          {
+            id: index ? `cohort-env-${index}` : savedProject.environmentId,
+            app_id: index ? `cohort-${index}` : savedProject.appId,
+            name: 'production',
+            created_at: 1,
+          },
+        ],
+      }));
+      const canonical = {
+        catalogSchemaVersion: 2,
+        projects: Array.from({ length: 40 }, (_, index) => ({
+          id: `canonical-${index}`,
+          name: `Current portfolio ${index}`,
+          lifecycle: { portfolioStatus: 'active' },
+          classification: { kind: 'platform', futureForm: 'support-tool' },
+          deployment: { authModel: 'local-only' },
+          systems: { probe: { scope: 'local', absent: 'Local tool.' } },
+        })),
+      };
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...savedProject,
+          appId: 'cohort-12',
+          environmentId: 'cohort-env-12',
+          name: 'Old portfolio 12',
+        }),
+      );
+      const fetch = installFetch({ apps, google: true });
+      const fallback = fetch.getMockImplementation()!;
+      let committed = false;
+      let unavailable = fails;
+      const pending: ((response: Response) => void)[] = [];
+      fetch.mockImplementation(async (input, init) => {
+        const path = new URL(String(input), location.origin).pathname;
+        if (path === '/v1/catalog/sync') {
+          if (init?.method === 'POST') {
+            committed = true;
+            return Response.json({ project_count: 40 });
+          }
+          return Response.json({
+            source: committed ? 'saas-maker' : null,
+            projection_hash: committed ? 'a'.repeat(64) : null,
+            project_count: committed ? 40 : null,
+            updated_at: committed ? 1 : null,
+            mapped_catalog_ids: canonical.projects.map((row) => row.id),
+            unlinked_apps: [],
+          });
+        }
+        if (path === '/v1/apps' && committed)
+          return unavailable
+            ? new Response(null, { status: 503 })
+            : Response.json(
+                {
+                  apps: apps.slice(0, 40).map((entry, index) => ({
+                    ...entry,
+                    app: { ...entry.app, name: `Current portfolio ${index}` },
+                  })),
+                },
+                { headers: { 'x-app-health-workspace-role': 'owner' } },
+              );
+        if (!committed && ['/v1/analytics', '/v1/workspace/health'].includes(path))
+          return await new Promise<Response>((resolve) => pending.push(resolve));
+        return fallback(input, init);
+      });
+      render(<App />);
+      await screen.findByRole('button', { name: 'Old portfolio 56' });
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ appId: 'cohort-12' });
+      await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
+      fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+        target: { files: [{ size: 1000, text: async () => JSON.stringify(canonical) }] },
+      });
+      await screen.findByText('40 active projects');
+      const before = workspaceScope().epoch;
+      fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+      expect(
+        await screen.findByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeTruthy();
+      expect(workspaceScope().epoch).toBe(before + 1);
+      expect(screen.queryByRole('button', { name: 'Old portfolio 56' })).toBeNull();
+      if (fails) {
+        expect(
+          screen.getByText(
+            'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
+          ),
+        ).toBeTruthy();
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+          appId: 'cohort-12',
+          environmentId: 'cohort-env-12',
+        });
+        expect(screen.queryByRole('button', { name: 'Dismiss catalog confirmation' })).toBeNull();
+        unavailable = false;
+        fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+      }
+      await screen.findByRole('button', { name: 'Current portfolio 39' });
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+        appId: 'cohort-12',
+        environmentId: 'cohort-env-12',
+        name: 'Current portfolio 12',
+      });
+      await act(async () => {
+        for (const resolve of pending) resolve(new Response(null, { status: 503 }));
+      });
+      expect(screen.queryByText('Workspace changed')).toBeNull();
+      expect(
+        screen.getByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss catalog confirmation' }));
+      expect(
+        screen.queryByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Current portfolio 12' }));
+      expectSelectedProject('Current portfolio 12');
+    },
+  );
+
+  it('discards an old inventory JSON body released during the catalog commit act before effect cleanup', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    const apps = Array.from({ length: 57 }, (_, index) => ({
+      app: {
+        id: index ? `late-${index}` : savedProject.appId,
+        name: `Old inventory ${index}`,
+        created_at: 1,
+      },
+      environments: [
+        {
+          id: index ? `late-env-${index}` : savedProject.environmentId,
+          app_id: index ? `late-${index}` : savedProject.appId,
+          name: 'production',
+          created_at: 1,
+        },
+      ],
+    }));
+    let finish!: (value: unknown) => void;
+    const oldBody = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const fetch = installFetch();
+    const fallback = fetch.getMockImplementation()!;
+    let first = true;
+    const json = vi.fn(() => oldBody);
+    fetch.mockImplementation(async (input, init) => {
+      if (new URL(String(input), location.origin).pathname !== '/v1/apps')
+        return fallback(input, init);
+      if (first) {
+        first = false;
+        return {
+          ok: true,
+          headers: new Headers({ 'x-app-health-workspace-role': 'owner' }),
+          json,
+        } as unknown as Response;
+      }
+      return await new Promise<Response>(() => {});
+    });
+    render(<App />);
+    await waitFor(() => expect(json).toHaveBeenCalledOnce());
+    const current = apps
+      .slice(0, 40)
+      .map((entry, index) => ({ ...entry, app: { ...entry.app, name: `New inventory ${index}` } }));
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(CATALOG_SYNC_EVENT, {
+          detail: { epoch: workspaceScope().epoch, listed: { apps: current }, projectCount: 40 },
+        }),
+      );
+      finish({ apps });
+      await oldBody;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'New inventory 39' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Old inventory 56' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Old inventory 39' })).toBeNull();
   });
 
   it('restores the selected project when browser history changes the URL target', async () => {

@@ -32,5 +32,14 @@ export const CatalogImportRequestV1 = z
     {
       message: 'catalog identities must be unique within one import',
     },
+  )
+  .refine(
+    (input) => {
+      const ids = input.projects.flatMap((project) =>
+        project.existing_app_id ? [project.existing_app_id] : [],
+      );
+      return new Set(ids).size === ids.length;
+    },
+    { message: 'existing_app_id values must be unique within one import' },
   );
 export type CatalogImportRequest = z.infer<typeof CatalogImportRequestV1>;

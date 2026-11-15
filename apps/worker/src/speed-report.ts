@@ -63,7 +63,7 @@ async function readCatalog(
   const result = await db
     .prepare(
       `SELECT c.catalog_id, c.app_id, c.catalog_name
-       FROM catalog_project_imports c
+       FROM current_workspace_catalog c
        JOIN apps a ON a.id = c.app_id AND a.archived_at IS NULL
        WHERE c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
          AND EXISTS (SELECT 1 FROM environments e

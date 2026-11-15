@@ -80,7 +80,7 @@ async function readBriefingCatalog(db: D1DatabaseLike, workspaceId: string): Pro
     .prepare(
       `SELECT c.catalog_id, c.app_id, c.catalog_name, e.id AS environment_id,
        ac.first_received_at AS analytics_first_received_at
-     FROM catalog_project_imports c
+     FROM current_workspace_catalog c
      LEFT JOIN environments e ON e.app_id = c.app_id AND lower(e.name) = 'production'
      LEFT JOIN environment_capabilities ac ON ac.app_id = c.app_id
        AND ac.environment_id = e.id AND ac.capability = 'analytics'
