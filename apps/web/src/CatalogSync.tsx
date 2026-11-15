@@ -68,11 +68,11 @@ function useCatalogState(ownerToken: string) {
 }
 
 export function CatalogSync({ ownerToken }: { ownerToken: string }) {
+  const state = useCatalogState(ownerToken);
   const {
     scope,
     preview,
     setPreview,
-    message,
     setMessage,
     busy,
     setBusy,
@@ -81,7 +81,7 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
     generation,
     activeRequest,
     fileInput,
-  } = useCatalogState(ownerToken);
+  } = state;
   const previewGeneration = generation.current;
   if (scope.role !== 'owner' || ownerToken) return null;
 
@@ -135,20 +135,12 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(preview),
       });
-      const result = (await response.json()) as { error?: string; project_count?: number };
-      if (!response.ok)
-        throw new Error(result.error ?? `Catalog sync returned ${response.status}.`);
+      const projectCount = await readCatalogAcknowledgement(response, preview.projects.length);
       if (!current()) return;
       setPreview(null);
       const listed = await readCommittedInventory(ownerToken, controller.signal);
       if (!current()) return;
-      publishCatalogCommit(
-        epoch,
-        listed,
-        result.project_count,
-        preview.projects.length,
-        setMessage,
-      );
+      publishCatalogCommit(epoch, listed, projectCount, setMessage);
     } catch (error) {
       if (current())
         setMessage(error instanceof Error ? error.message : 'Catalog synchronization failed.');
@@ -156,6 +148,22 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       if (current()) setBusy(false);
     }
   }
+  return <CatalogSyncCard state={state} readFile={readFile} synchronize={synchronize} />;
+}
+
+type CatalogSyncState = ReturnType<typeof useCatalogState>;
+type CatalogSyncAction = () => Promise<void>;
+
+function CatalogSyncCard({
+  state,
+  readFile,
+  synchronize,
+}: {
+  state: CatalogSyncState;
+  readFile: (file: File | undefined) => Promise<void>;
+  synchronize: CatalogSyncAction;
+}) {
+  const { status, preview, busy, fileInput, message } = state;
   return (
     <Card className="gap-3 py-5 shadow-none">
       <CardHeader className="px-5 py-0">
@@ -199,47 +207,7 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
                 onChange={(event) => void readFile(event.target.files?.[0])}
               />
             </label>
-            {preview ? (
-              <div className="space-y-2 rounded-lg border p-3 text-xs" aria-label="Catalog preview">
-                <p className="text-sm font-medium">{preview.projects.length} active projects</p>
-                <CatalogLinkPreview
-                  preview={preview}
-                  status={status}
-                  onOutsideChange={(appId, checked) =>
-                    setPreview((current) =>
-                      current
-                        ? {
-                            ...current,
-                            preserve_outside_catalog_app_ids: checked
-                              ? [...current.preserve_outside_catalog_app_ids, appId]
-                              : current.preserve_outside_catalog_app_ids.filter(
-                                  (id) => id !== appId,
-                                ),
-                          }
-                        : null,
-                    )
-                  }
-                />
-                <p className="break-words">{counts(preview.projects, 'kind')}</p>
-                <p className="break-words">{counts(preview.projects, 'future_form')}</p>
-                <p className="break-words">{counts(preview.projects, 'auth_model')}</p>
-                <p>
-                  {preview.monitoring.projects.filter((row) => row.scope === 'public').length}{' '}
-                  public monitoring projects ·{' '}
-                  {preview.monitoring.projects.reduce((sum, row) => sum + row.journeys.length, 0)}{' '}
-                  reviewed journeys ·{' '}
-                  {preview.monitoring.projects.filter((row) => row.scope !== 'public').length}{' '}
-                  explicit local or private limits
-                </p>
-                <Button
-                  size="sm"
-                  disabled={busy || unresolvedCatalogLinks(preview, status)}
-                  onClick={() => void synchronize()}
-                >
-                  {busy ? 'Synchronizing…' : 'Synchronize active portfolio'}
-                </Button>
-              </div>
-            ) : null}
+            <CatalogPreview state={state} synchronize={synchronize} />
           </div>
         </details>
         {busy && !preview ? (
@@ -254,6 +222,55 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
         ) : null}
       </CardContent>
     </Card>
+  );
+}
+
+function CatalogPreview({
+  state,
+  synchronize,
+}: {
+  state: CatalogSyncState;
+  synchronize: CatalogSyncAction;
+}) {
+  const { preview, busy, status, setPreview } = state;
+  if (!preview) return null;
+  return (
+    <div className="space-y-2 rounded-lg border p-3 text-xs" aria-label="Catalog preview">
+      <p className="text-sm font-medium">{preview.projects.length} active projects</p>
+      <CatalogLinkPreview
+        preview={preview}
+        status={status}
+        onOutsideChange={(appId, checked) =>
+          setPreview((current) =>
+            current
+              ? {
+                  ...current,
+                  preserve_outside_catalog_app_ids: checked
+                    ? [...current.preserve_outside_catalog_app_ids, appId]
+                    : current.preserve_outside_catalog_app_ids.filter((id) => id !== appId),
+                }
+              : null,
+          )
+        }
+      />
+      <p className="break-words">{counts(preview.projects, 'kind')}</p>
+      <p className="break-words">{counts(preview.projects, 'future_form')}</p>
+      <p className="break-words">{counts(preview.projects, 'auth_model')}</p>
+      <p>
+        {preview.monitoring.projects.filter((row) => row.scope === 'public').length} public
+        monitoring projects ·{' '}
+        {preview.monitoring.projects.reduce((sum, row) => sum + row.journeys.length, 0)} reviewed
+        journeys · {preview.monitoring.projects.filter((row) => row.scope !== 'public').length}{' '}
+        explicit local or private limits
+      </p>
+      <Button
+        size="sm"
+        disabled={busy || unresolvedCatalogLinks(preview, status)}
+        onClick={() => void synchronize()}
+      >
+        {busy ? 'Synchronizing…' : 'Synchronize active portfolio'}
+      </Button>
+    </div>
   );
 }
 
@@ -392,14 +409,29 @@ async function readCommittedInventory(ownerToken: string, signal: AbortSignal) {
   }
 }
 
+type CatalogAcknowledgement = { error?: unknown; project_count?: unknown };
+
+async function readCatalogAcknowledgement(response: Response, expectedCount: number) {
+  const value = (await response.json().catch(() => null)) as CatalogAcknowledgement | null;
+  if (!response.ok)
+    throw new Error(
+      typeof value?.error === 'string'
+        ? value.error
+        : `Catalog synchronization is unavailable (${response.status}). Its outcome is unconfirmed. Refresh catalog status before retrying.`,
+    );
+  if (!value || value.project_count !== expectedCount)
+    throw new Error(
+      'Catalog synchronization returned an invalid acknowledgement. Its outcome is unconfirmed. Refresh catalog status before retrying.',
+    );
+  return expectedCount;
+}
+
 function publishCatalogCommit(
   epoch: number,
   listed: ListAppsResponseV1 | null,
-  reportedCount: number | undefined,
-  expectedCount: number,
+  projectCount: number,
   setMessage: (message: string) => void,
 ) {
-  const projectCount = reportedCount ?? expectedCount;
   setMessage(
     listed
       ? `Synchronized ${projectCount} active projects and their monitoring policy.`

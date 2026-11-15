@@ -547,7 +547,6 @@ describe('App Health V0 UI', () => {
   it.each([false, true])(
     'confirms a composed catalog commit and fences pending overview reads with immediate readback failure=%j',
     async (fails) => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
       history.replaceState(null, '', '/app#overview');
       const apps = Array.from({ length: 57 }, (_, index) => ({
         app: {
@@ -575,6 +574,15 @@ describe('App Health V0 UI', () => {
           systems: { probe: { scope: 'local', absent: 'Local tool.' } },
         })),
       };
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          ...savedProject,
+          appId: 'cohort-12',
+          environmentId: 'cohort-env-12',
+          name: 'Old portfolio 12',
+        }),
+      );
       const fetch = installFetch({ apps, google: true });
       const fallback = fetch.getMockImplementation()!;
       let committed = false;
@@ -614,6 +622,7 @@ describe('App Health V0 UI', () => {
       });
       render(<App />);
       await screen.findByRole('button', { name: 'Old portfolio 56' });
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({ appId: 'cohort-12' });
       await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
       fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
         target: { files: [{ size: 1000, text: async () => JSON.stringify(canonical) }] },
@@ -634,10 +643,20 @@ describe('App Health V0 UI', () => {
             'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
           ),
         ).toBeTruthy();
+        expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+          appId: 'cohort-12',
+          environmentId: 'cohort-env-12',
+        });
+        expect(screen.queryByRole('button', { name: 'Dismiss catalog confirmation' })).toBeNull();
         unavailable = false;
         fireEvent.click(screen.getByRole('button', { name: 'try again' }));
       }
       await screen.findByRole('button', { name: 'Current portfolio 39' });
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toMatchObject({
+        appId: 'cohort-12',
+        environmentId: 'cohort-env-12',
+        name: 'Current portfolio 12',
+      });
       await act(async () => {
         for (const resolve of pending) resolve(new Response(null, { status: 503 }));
       });
@@ -647,6 +666,14 @@ describe('App Health V0 UI', () => {
           'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
         ),
       ).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Dismiss catalog confirmation' }));
+      expect(
+        screen.queryByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Current portfolio 12' }));
+      expectSelectedProject('Current portfolio 12');
     },
   );
 

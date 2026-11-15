@@ -218,6 +218,17 @@ for (const { width, failReadback } of [
     }
 
     await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Dismiss catalog confirmation' })).toBeVisible();
+    await page.screenshot({
+      path: join(evidence, `catalog-confirmed-${width}-${failReadback}.png`),
+      fullPage: true,
+    });
+    await page.getByRole('button', { name: 'Dismiss catalog confirmation' }).click();
+    await expect(
+      page.getByText(
+        'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+      ),
+    ).toHaveCount(0);
     expect(new URL(page.url()).search).toBe('');
     await page.reload();
     await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();

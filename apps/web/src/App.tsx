@@ -3697,15 +3697,43 @@ function SessionErrorNotice({ message }: { message: string }): ReactElement | nu
   ) : null;
 }
 
-function CatalogCommitNotice({ count }: { count?: number }) {
-  return count === undefined ? null : (
-    <div role="status" className="border-b bg-muted/30 px-4 py-3 text-sm">
-      Catalog synchronized. {count} active projects and their monitoring policy are committed.
+function CatalogCommitNotice({
+  count,
+  dismissible = true,
+}: {
+  count?: number;
+  dismissible?: boolean;
+}) {
+  const [dismissed, setDismissed] = useState(false);
+  return count === undefined || dismissed ? null : (
+    <div role="status" className="flex items-center gap-3 border-b bg-muted/30 px-4 py-3 text-sm">
+      <span>
+        Catalog synchronized. {count} active projects and their monitoring policy are committed.
+      </span>
+      {dismissible ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto shrink-0"
+          aria-label="Dismiss catalog confirmation"
+          onClick={() => setDismissed(true)}
+        >
+          Dismiss
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-type CatalogCommitState = { count: number; pendingInventory: boolean };
+type CatalogCommitState = {
+  count: number;
+  pendingInventory: boolean;
+  selection: SavedProject | null;
+};
+
+function catalogRecoverySelection(commit: CatalogCommitState | null, project: SavedProject | null) {
+  return commit?.pendingInventory ? commit.selection : project;
+}
 
 type CatalogSyncDetail = Omit<CatalogSyncCommit, 'projectCount'> & { projectCount?: number };
 
@@ -3742,6 +3770,7 @@ function AppSession(): ReactElement {
       catalogCommit.current = {
         count: detail.projectCount ?? detail.listed?.apps.length ?? 0,
         pendingInventory: !detail.listed,
+        selection: project,
       };
       prefetchedInventory.current = null;
       setProjects(available);
@@ -3754,7 +3783,7 @@ function AppSession(): ReactElement {
       const selected = authorizedProject(project, available);
       setProject(selected);
       if (selected) localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
-      else localStorage.removeItem(projectStorageKey());
+      else if (detail.listed) localStorage.removeItem(projectStorageKey());
       setCreated(null);
       setRequestedProject(null);
       setStrictRequestedProject(false);
@@ -3793,6 +3822,7 @@ function AppSession(): ReactElement {
       try {
         const available = await readInventory();
         if (!inventoryReadCurrent(cancelled, epoch)) return;
+        const selection = catalogRecoverySelection(catalogCommit.current, project);
         const completingCatalogRead = catalogCommit.current?.pendingInventory;
         if (catalogCommit.current) catalogCommit.current.pendingInventory = false;
         setProjects(available);
@@ -3803,7 +3833,7 @@ function AppSession(): ReactElement {
           return;
         }
         const resolution = resolveInventorySelection(
-          project,
+          selection,
           requestedProject,
           strictRequestedProject,
           available,
@@ -3982,7 +4012,7 @@ function AppSession(): ReactElement {
   if (catalogCommit.current?.pendingInventory)
     return (
       <>
-        <CatalogCommitNotice count={catalogCommit.current.count} />
+        <CatalogCommitNotice count={catalogCommit.current.count} dismissible={false} />
         <WorkspaceLoading
           error="The catalog is committed. Inventory refresh is unavailable; retry its refresh."
           onRetry={() => setInventoryRetry((value) => value + 1)}
@@ -4068,7 +4098,7 @@ function AppSession(): ReactElement {
   return (
     <>
       <SessionErrorNotice message={sessionError} />
-      <CatalogCommitNotice count={catalogCommit.current?.count} />
+      <CatalogCommitNotice key={catalogRevision} count={catalogCommit.current?.count} />
       <Dashboard
         key={`${project.appId}/${project.environmentId}/${catalogRevision}`}
         view={workspaceView}

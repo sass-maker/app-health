@@ -355,3 +355,56 @@ it('dispatches a known commit and count when immediate inventory readback fails'
   ).toBeTruthy();
   window.removeEventListener(CATALOG_SYNC_EVENT, listener);
 });
+
+it.each([502, 503])('reports an HTML POST %i as an unconfirmed service outcome', async (status) => {
+  owner();
+  const listener = vi.fn();
+  window.addEventListener(CATALOG_SYNC_EVENT, listener);
+  const fetch = vi.fn(async (_path: string, init?: RequestInit) =>
+    init?.method === 'POST'
+      ? new Response('<html>upstream unavailable</html>', { status })
+      : Response.json(catalogStatus),
+  );
+  vi.stubGlobal('fetch', fetch);
+  render(<CatalogSync ownerToken="" />);
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(source)] },
+  });
+  await screen.findByText('1 active projects');
+  fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+  await screen.findByText(
+    `Catalog synchronization is unavailable (${status}). Its outcome is unconfirmed. Refresh catalog status before retrying.`,
+  );
+  expect(listener).not.toHaveBeenCalled();
+  expect(fetch.mock.calls.some(([path]) => path === '/v1/apps')).toBe(false);
+  window.removeEventListener(CATALOG_SYNC_EVENT, listener);
+});
+
+it.each([
+  '<html>invalid acknowledgement</html>',
+  '{}',
+  '{"project_count":"1"}',
+  '{"project_count":2}',
+])('does not claim a commit from an invalid successful acknowledgement %s', async (body) => {
+  owner();
+  const listener = vi.fn();
+  window.addEventListener(CATALOG_SYNC_EVENT, listener);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (_path: string, init?: RequestInit) =>
+      init?.method === 'POST' ? new Response(body, { status: 200 }) : Response.json(catalogStatus),
+    ),
+  );
+  render(<CatalogSync ownerToken="" />);
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(source)] },
+  });
+  await screen.findByText('1 active projects');
+  fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+  await screen.findByText(
+    'Catalog synchronization returned an invalid acknowledgement. Its outcome is unconfirmed. Refresh catalog status before retrying.',
+  );
+  expect(listener).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', { name: 'Synchronize active portfolio' })).toBeTruthy();
+  window.removeEventListener(CATALOG_SYNC_EVENT, listener);
+});
