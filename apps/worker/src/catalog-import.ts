@@ -17,7 +17,13 @@ export async function importCatalogProjects(
   existingOnly = false,
 ) {
   if (existingOnly) await requireUnlinkedExistingApps(db, workspace, input);
-  const statements: D1PreparedStatement[] = [];
+  const statements: D1PreparedStatement[] = [
+    db
+      .prepare(
+        'INSERT INTO workspace_catalog_import_guards (workspace_id, projects_json) VALUES (?, ?)',
+      )
+      .bind(workspace, JSON.stringify(input.projects)),
+  ];
   const imported: { catalog_id: string; app_id: string; verification_state: 'declared' }[] = [];
   for (const project of input.projects) {
     const identity = await hash(JSON.stringify([workspace, project.catalog_id]));
@@ -65,11 +71,24 @@ export async function importCatalogProjects(
     );
     imported.push({ catalog_id: project.catalog_id, app_id: app, verification_state: 'declared' });
   }
+  statements.push(
+    db
+      .prepare('DELETE FROM workspace_catalog_import_guards WHERE workspace_id = ?')
+      .bind(workspace),
+  );
   try {
     const results = await db.batch(statements);
     if (results.some((result) => !result.success))
       throw new Error('Catalog import transaction failed');
   } catch (error) {
+    if (error instanceof Error && error.message.includes('catalog import identity already linked'))
+      throw new CatalogImportConflict(
+        'This catalog identity is already linked. Existing identities cannot be rebound; review the identity mismatch before synchronizing.',
+      );
+    if (error instanceof Error && error.message.includes('catalog import existing link required'))
+      throw new CatalogImportConflict(
+        'Synchronized workspaces require existing_app_id links to owned, unarchived, unlinked projects. No projects were added.',
+      );
     if (
       error instanceof Error &&
       /catalog import (project scope mismatch|identity conflict)|UNIQUE constraint failed: catalog_project_imports/.test(
@@ -90,6 +109,17 @@ async function requireUnlinkedExistingApps(
   if (input.projects.some((project) => !project.existing_app_id))
     throw new CatalogImportConflict(
       'Synchronized workspaces allow only explicit existing_app_id links; add new projects through the canonical catalog.',
+    );
+  const bound = await db
+    .prepare(
+      `SELECT c.catalog_id FROM catalog_project_imports c JOIN json_each(?) p
+    ON c.catalog_id = json_extract(p.value, '$.catalog_id') WHERE c.workspace_id = ? LIMIT 1`,
+    )
+    .bind(JSON.stringify(input.projects), workspace)
+    .first<{ catalog_id: string }>();
+  if (bound)
+    throw new CatalogImportConflict(
+      `Catalog identity ${bound.catalog_id} is already linked. Existing identities cannot be rebound; review the mismatch before synchronizing.`,
     );
   const existing = await db
     .prepare(

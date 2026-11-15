@@ -264,3 +264,26 @@ it('rejects a retained submit handler immediately after workspace selection chan
   expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   expect(screen.queryByLabelText('Catalog preview')).toBeNull();
 });
+
+it('shows an actionable capacity failure from the owner preview endpoint', async () => {
+  owner();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json(
+        {
+          error:
+            'Catalog synchronization supports at most 60 outside projects. Link matching identities first.',
+        },
+        { status: 422 },
+      ),
+    ),
+  );
+  render(<CatalogSync ownerToken="" />);
+  expect(await screen.findByText(/supports at most 60 outside projects/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(source)] },
+  });
+  await screen.findByText(/supports at most 60 outside projects/);
+  expect(screen.queryByLabelText('Catalog preview')).toBeNull();
+});

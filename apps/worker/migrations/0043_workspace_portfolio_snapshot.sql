@@ -83,12 +83,34 @@ BEGIN
   );
 END;
 
+CREATE TABLE IF NOT EXISTS workspace_catalog_import_guards (
+  workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id),
+  projects_json TEXT NOT NULL CHECK (json_valid(projects_json))
+);
+
+CREATE TRIGGER IF NOT EXISTS catalog_import_transaction_guard
+BEFORE INSERT ON workspace_catalog_import_guards
+WHEN EXISTS (SELECT 1 FROM workspace_portfolio_snapshots s WHERE s.workspace_id = NEW.workspace_id)
+BEGIN
+  SELECT RAISE(ABORT, 'catalog import existing link required') WHERE EXISTS (
+    SELECT 1 FROM json_each(NEW.projects_json) p WHERE NOT EXISTS (
+      SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id AND a.archived_at IS NULL
+      WHERE wa.workspace_id = NEW.workspace_id AND a.id = json_extract(p.value, '$.existing_app_id')
+        AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id)
+    )
+  );
+  SELECT RAISE(ABORT, 'catalog import identity already linked') WHERE EXISTS (
+    SELECT 1 FROM json_each(NEW.projects_json) p JOIN catalog_project_imports c
+      ON c.workspace_id = NEW.workspace_id AND c.catalog_id = json_extract(p.value, '$.catalog_id')
+  );
+END;
+
 CREATE TRIGGER IF NOT EXISTS catalog_snapshot_explicit_link
 BEFORE INSERT ON catalog_project_imports
 WHEN EXISTS (SELECT 1 FROM workspace_portfolio_snapshots s WHERE s.workspace_id = NEW.workspace_id)
   AND NOT EXISTS (SELECT 1 FROM workspace_portfolio_sync_guards g WHERE g.workspace_id = NEW.workspace_id)
 BEGIN
-  SELECT RAISE(ABORT, 'catalog import identity conflict') WHERE EXISTS (
+  SELECT RAISE(ABORT, 'catalog import identity already linked') WHERE EXISTS (
     SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = NEW.workspace_id
       AND (c.app_id = NEW.app_id OR c.catalog_id = NEW.catalog_id)
   );

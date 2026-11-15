@@ -1,3 +1,4 @@
+import { CATALOG_SYNC_EVENT } from '../src/CatalogSync.js';
 import {
   updateWorkspaceRole,
   workspaceScope,
@@ -457,6 +458,90 @@ describe('App Health V0 UI', () => {
     fetch.mockImplementation(fallback);
     fireEvent.click(screen.getByRole('button', { name: 'try again' }));
     expect(await screen.findByText('no projects yet')).toBeTruthy();
+  });
+
+  it('recovers an empty portfolio after an unavailable first read and a successful visible poll', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    vi.useFakeTimers();
+    const fetch = installFetch({ appsFail: true });
+    const failure = fetch.getMockImplementation()!;
+    let succeeds = false;
+    fetch.mockImplementation(async (input, init) =>
+      new URL(String(input), location.origin).pathname === '/v1/apps' && succeeds
+        ? Response.json({ apps: [] }, { headers: { 'x-app-health-workspace-role': 'owner' } })
+        : failure(input, init),
+    );
+    render(<App />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByText('the workspace project list could not load. try again.')).toBeTruthy();
+    succeeds = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    expect(screen.queryByText('the workspace project list could not load. try again.')).toBeNull();
+    succeeds = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    succeeds = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getByText('no projects yet')).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it('retains imported inventory and authenticated session across a data refresh even when later reads fail', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    const apps = Array.from({ length: 57 }, (_, index) => ({
+      app: {
+        id: index ? `inventory-${index}` : savedProject.appId,
+        name: `Portfolio project ${index}`,
+        created_at: 1,
+      },
+      environments: [
+        {
+          id: index ? `inventory-env-${index}` : savedProject.environmentId,
+          app_id: index ? `inventory-${index}` : savedProject.appId,
+          name: 'production',
+          created_at: 1,
+        },
+      ],
+    }));
+    const fetch = installFetch({ apps, google: true });
+    render(<App />);
+    await screen.findByRole('button', { name: 'Portfolio project 56' });
+    const scope = workspaceScope();
+    const previousConfigReads = fetch.mock.calls.filter(([input]) =>
+      String(input).includes('/v1/account/config'),
+    ).length;
+    const fallback = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input, init) =>
+      new URL(String(input), location.origin).pathname === '/v1/apps'
+        ? new Response(null, { status: 503 })
+        : fallback(input, init),
+    );
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent(CATALOG_SYNC_EVENT, {
+          detail: { epoch: scope.epoch, listed: { apps: apps.slice(0, 40) } },
+        }),
+      ),
+    );
+    await waitFor(() => expect(workspaceScope().epoch).toBe(scope.epoch + 1));
+    expect(workspaceScope().sessionEpoch).toBe(scope.sessionEpoch);
+    expect(screen.getByRole('button', { name: 'Portfolio project 39' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Portfolio project 40' })).toBeNull();
+    expect(screen.queryByText('could not open the workspace')).toBeNull();
+    expect(
+      fetch.mock.calls.filter(([input]) => String(input).includes('/v1/account/config')),
+    ).toHaveLength(previousConfigReads);
   });
 
   it('restores the selected project when browser history changes the URL target', async () => {

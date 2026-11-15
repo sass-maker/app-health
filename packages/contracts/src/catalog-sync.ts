@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { MonitoringPolicyV1 } from './monitoring.js';
 
+export const MAX_CATALOG_OUTSIDE_APPS = 60;
+export const MAX_CATALOG_LINKED_IDENTITIES = 1000;
+
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/);
 const facet = z.string().regex(/^[a-z][a-z0-9-]{0,59}$/);
 export const CatalogMetadataV1 = z.object({
@@ -20,12 +23,12 @@ export const CatalogSyncStatusV1 = z
       .nullable(),
     updated_at: z.number().int().nonnegative().nullable(),
     project_count: z.number().int().nonnegative().nullable(),
-    mapped_catalog_ids: z.array(slug).max(1000),
+    mapped_catalog_ids: z.array(slug).max(MAX_CATALOG_LINKED_IDENTITIES),
     unlinked_apps: z
       .array(
         z.object({ app_id: z.string().min(1).max(100), name: z.string().min(1).max(128) }).strict(),
       )
-      .max(1000),
+      .max(MAX_CATALOG_OUTSIDE_APPS),
   })
   .strict();
 export type CatalogSyncStatus = z.infer<typeof CatalogSyncStatusV1>;
@@ -61,7 +64,10 @@ export const CatalogSyncRequestV1 = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
-    preserve_outside_catalog_app_ids: z.array(z.string().min(1).max(100)).max(60).default([]),
+    preserve_outside_catalog_app_ids: z
+      .array(z.string().min(1).max(100))
+      .max(MAX_CATALOG_OUTSIDE_APPS)
+      .default([]),
     projects: z.array(project).min(1).max(60),
     monitoring: MonitoringPolicyV1,
   })

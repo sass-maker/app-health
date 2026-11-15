@@ -34,7 +34,7 @@ function fixture() {
   sqlite.exec(`INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('owner', 'Owner', 'owner@example.test', 1, 1, 1), ('other', 'Other', 'other@example.test', 1, 1, 1);
     INSERT INTO workspaces VALUES ('ws', 'owner', 'Workspace', 1), ('foreign', 'other', 'Other', 1);`);
   const statements = new WeakMap<D1PreparedStatement, { sql: string; values: unknown[] }>();
-  let beforeBatch: (() => void) | undefined;
+  let beforeBatch: (() => void | Promise<void>) | undefined;
   const db: D1DatabaseLike = {
     prepare(sql) {
       const state = { sql, values: [] as unknown[] };
@@ -59,7 +59,7 @@ function fixture() {
       return statement;
     },
     async batch(batch) {
-      beforeBatch?.();
+      await beforeBatch?.();
       sqlite.exec('BEGIN');
       try {
         const results = batch.map((statement) => {
@@ -84,7 +84,7 @@ function fixture() {
   return {
     db,
     sqlite,
-    beforeBatch: (callback: () => void) => {
+    beforeBatch: (callback: () => void | Promise<void>) => {
       beforeBatch = callback;
     },
   };
@@ -405,7 +405,7 @@ describe('canonical active portfolio synchronization', () => {
       (await new D1ControlPlane(f.db, 'ws').listApps()).some((app) => app.id === 'app-56'),
     ).toBe(false);
     await expect(importCatalogProjects(f.db, 'ws', link, 12, true)).rejects.toThrow(
-      'without a catalog identity',
+      'already linked',
     );
     const generic = CatalogImportRequestV1.parse({
       schema_version: 1,
@@ -488,6 +488,79 @@ describe('canonical active portfolio synchronization', () => {
     expect(
       f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_sync_guards').get(),
     ).toEqual({ n: 0 });
+  });
+
+  it('guards V1 creation atomically when a snapshot commits after its preflight', async () => {
+    const f = fixture();
+    seed(f);
+    const counts = () =>
+      f.sqlite
+        .prepare(
+          `SELECT (SELECT count(*) FROM apps) AS apps, (SELECT count(*) FROM environments) AS environments, (SELECT count(*) FROM keys) AS keys, (SELECT count(*) FROM catalog_project_imports) AS links`,
+        )
+        .get();
+    let committed: ReturnType<typeof counts>;
+    f.beforeBatch(async () => {
+      f.beforeBatch(() => {});
+      await syncCatalog(f.db, 'ws', input(), 20);
+      committed = counts();
+    });
+    const stale = CatalogImportRequestV1.parse({
+      schema_version: 1,
+      projects: [{ catalog_id: 'stale-manual', name: 'Stale manual', lifecycle: 'active' }],
+    });
+    await expect(importCatalogProjects(f.db, 'ws', stale, 10, false)).rejects.toThrow(
+      'existing_app_id',
+    );
+    expect(counts()).toEqual(committed!);
+    expect(
+      f.sqlite
+        .prepare(
+          "SELECT count(*) AS n FROM catalog_project_imports WHERE catalog_id = 'stale-manual'",
+        )
+        .get(),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_catalog_import_guards').get(),
+    ).toEqual({ n: 0 });
+  });
+
+  it('returns actionable capacity errors for owner previews and oversized acknowledgements', async () => {
+    const f = fixture();
+    seed(f, 61, 0, 61);
+    const owner = {
+      id: 'owner',
+      label: 'Owner',
+      authKind: 'account' as const,
+      workspaceRole: 'owner' as const,
+      workspaceId: 'ws',
+    };
+    const get = await handleCatalogSyncRoute(
+      new Request('https://dashboard.test/v1/catalog/sync'),
+      f.db,
+      owner,
+    );
+    expect(get?.status).toBe(422);
+    expect(await get!.json()).toMatchObject({
+      error: expect.stringContaining('at most 60 outside projects'),
+    });
+    const oversized = input();
+    oversized.preserve_outside_catalog_app_ids = Array.from(
+      { length: 61 },
+      (_, index) => `app-${index}`,
+    );
+    const post = await handleCatalogSyncRoute(
+      new Request('https://dashboard.test/v1/catalog/sync', {
+        method: 'POST',
+        body: JSON.stringify(oversized),
+      }),
+      f.db,
+      owner,
+    );
+    expect(post?.status).toBe(422);
+    expect(await post!.json()).toMatchObject({
+      error: expect.stringContaining('at most 60 unique'),
+    });
   });
 
   it('rejects stale updates and rolls back all metadata and policy changes', async () => {

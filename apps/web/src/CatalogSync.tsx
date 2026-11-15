@@ -44,7 +44,7 @@ function useCatalogState(ownerToken: string) {
       activeRequest.current?.abort();
     };
   }, [scope.epoch, ownerToken]);
-  useCatalogStatus(ownerToken, scope, generation, setStatus);
+  useCatalogStatus(ownerToken, scope, generation, setStatus, setMessage);
   return {
     scope,
     preview,
@@ -99,8 +99,7 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
         signal: controller.signal,
       });
-      if (!response.ok) throw new Error(`Catalog status returned ${response.status}.`);
-      const status = CatalogSyncStatusV1.parse(await response.json());
+      const status = await readCatalogStatus(response);
       if (current()) {
         setStatus(status);
         setPreview({ ...projection, expected_previous_hash: status.projection_hash });
@@ -323,6 +322,7 @@ function useCatalogStatus(
   scope: ReturnType<typeof workspaceScope>,
   generation: RefObject<number>,
   setStatus: (status: CatalogSyncStatus) => void,
+  setMessage: (message: string) => void,
 ) {
   useEffect(() => {
     if (scope.role !== 'owner' || ownerToken) return;
@@ -331,12 +331,14 @@ function useCatalogStatus(
     const run = generation.current;
     void ownerFetch('/v1/catalog/sync', ownerToken, { signal: controller.signal })
       .then(async (response) => {
-        if (!response.ok) return;
-        const value = CatalogSyncStatusV1.parse(await response.json());
+        const value = await readCatalogStatus(response);
         if (!disposed && scope.epoch === workspaceScope().epoch && run === generation.current)
           setStatus(value);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (!disposed && scope.epoch === workspaceScope().epoch && run === generation.current)
+          setMessage(catalogPreviewError(error));
+      });
     return () => {
       disposed = true;
       controller.abort();
@@ -355,4 +357,10 @@ function catalogSubmissionCurrent(
   actualGeneration: number,
 ) {
   return epoch === workspaceScope().epoch && expectedGeneration === actualGeneration;
+}
+
+async function readCatalogStatus(response: Response) {
+  const value = (await response.json()) as { error?: string };
+  if (!response.ok) throw new Error(value.error ?? `Catalog status returned ${response.status}.`);
+  return CatalogSyncStatusV1.parse(value);
 }

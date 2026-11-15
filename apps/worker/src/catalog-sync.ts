@@ -1,5 +1,7 @@
 import {
   CatalogSyncRequestV1,
+  MAX_CATALOG_OUTSIDE_APPS,
+  MAX_CATALOG_LINKED_IDENTITIES,
   CatalogSyncStatusV1,
   type CatalogSyncRequest,
 } from '@app-health/contracts';
@@ -9,6 +11,8 @@ import { readPublicJson } from './public-body.js';
 import generated from '../../probe/journeys.json';
 
 export class CatalogSyncConflict extends Error {}
+class CatalogSyncLimit extends Error {}
+const OUTSIDE_LIMIT_MESSAGE = `Catalog synchronization supports at most ${MAX_CATALOG_OUTSIDE_APPS} outside projects. Link projects that belong to unused canonical catalog identities first; no projects were changed.`;
 const json = (status: number, value: unknown) =>
   Response.json(value, { status, headers: { 'cache-control': 'no-store' } });
 async function digest(value: unknown) {
@@ -42,7 +46,7 @@ async function unlinkedCatalogApps(db: D1DatabaseLike, workspace: string) {
         `SELECT a.id AS app_id, a.name FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
     WHERE wa.workspace_id = ? AND a.archived_at IS NULL AND NOT EXISTS (
       SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = a.id
-    ) ORDER BY a.name, a.id LIMIT 1001`,
+    ) ORDER BY a.name, a.id LIMIT ${MAX_CATALOG_OUTSIDE_APPS + 1}`,
       )
       .bind(workspace)
       .all<{ app_id: string; name: string }>()
@@ -59,6 +63,11 @@ async function catalogSyncStatus(db: D1DatabaseLike, workspace: string) {
       .all<{ catalog_id: string }>(),
     unlinkedCatalogApps(db, workspace),
   ]);
+  if (unlinked.length > MAX_CATALOG_OUTSIDE_APPS) throw new CatalogSyncLimit(OUTSIDE_LIMIT_MESSAGE);
+  if (mapped.results.length > MAX_CATALOG_LINKED_IDENTITIES)
+    throw new CatalogSyncLimit(
+      `Catalog status supports at most ${MAX_CATALOG_LINKED_IDENTITIES} linked identities. Review the workspace inventory before synchronizing; no projects were changed.`,
+    );
   return CatalogSyncStatusV1.parse({
     ...snapshot,
     mapped_catalog_ids: mapped.results.map((row) => row.catalog_id),
@@ -82,7 +91,10 @@ export async function syncCatalog(
     throw new CatalogSyncConflict(
       'Monitoring journeys are missing from the reviewed probe configuration',
     );
-  const unlinked = new Set((await unlinkedCatalogApps(db, workspace)).map((app) => app.app_id));
+  const unlinkedApps = await unlinkedCatalogApps(db, workspace);
+  if (unlinkedApps.length > MAX_CATALOG_OUTSIDE_APPS)
+    throw new CatalogSyncLimit(OUTSIDE_LIMIT_MESSAGE);
+  const unlinked = new Set(unlinkedApps.map((app) => app.app_id));
   const outside = new Set(input.preserve_outside_catalog_app_ids);
   if (
     [...unlinked].some((app) => !outside.has(app)) ||
@@ -207,22 +219,17 @@ export async function handleCatalogSyncRoute(
   owner: OwnerIdentity,
 ) {
   if (new URL(request.url).pathname !== '/v1/catalog/sync') return null;
-  if (
-    owner.authKind !== 'account' ||
-    owner.workspaceRole !== 'owner' ||
-    !owner.workspaceId ||
-    owner.appId
-  )
+  if (!catalogSyncOwner(owner))
     return json(403, { error: 'Only the workspace account owner can synchronize its catalog' });
   if (!db) return json(503, { error: 'Catalog storage is unavailable' });
-  if (request.method === 'GET') return json(200, await catalogSyncStatus(db, owner.workspaceId));
-  if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   try {
+    if (request.method === 'GET') return json(200, await catalogSyncStatus(db, owner.workspaceId));
+    if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
     const input = CatalogSyncRequestV1.safeParse(await readPublicJson(request, 96 * 1024));
-    if (!input.success)
-      return json(400, { error: 'Invalid catalog projection or incomplete monitoring policy' });
+    if (!input.success) return catalogSyncInputError(input.error.issues);
     return json(200, await syncCatalog(db, owner.workspaceId, input.data, Date.now()));
   } catch (error) {
+    if (error instanceof CatalogSyncLimit) return json(422, { error: error.message });
     if (error instanceof CatalogSyncConflict) return json(409, { error: error.message });
     if (error instanceof SyntaxError) return json(400, { error: 'Invalid JSON' });
     if (error instanceof Error && error.message === 'payload too large')
@@ -244,4 +251,21 @@ export async function catalogManualWriteResponse(
           'This workspace uses the SaaS Maker catalog. Add projects there and synchronize the canonical catalog.',
       })
     : null;
+}
+
+function catalogSyncInputError(issues: readonly { path: PropertyKey[] }[]) {
+  return issues.some((issue) => issue.path[0] === 'preserve_outside_catalog_app_ids')
+    ? json(422, {
+        error: `Acknowledge at most ${MAX_CATALOG_OUTSIDE_APPS} unique outside project IDs from the current preview.`,
+      })
+    : json(400, { error: 'Invalid catalog projection or incomplete monitoring policy' });
+}
+
+function catalogSyncOwner(owner: OwnerIdentity): owner is OwnerIdentity & { workspaceId: string } {
+  return (
+    owner.authKind === 'account' &&
+    owner.workspaceRole === 'owner' &&
+    Boolean(owner.workspaceId) &&
+    !owner.appId
+  );
 }

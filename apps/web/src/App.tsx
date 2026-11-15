@@ -4,6 +4,7 @@ import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
 import {
   useWorkspaceScope,
   workspaceScope,
+  refreshWorkspace,
   selectWorkspace,
   workspaceCanManage,
 } from './lib/workspace-scope.js';
@@ -3707,6 +3708,7 @@ function AppSession(): ReactElement {
   const [catalogRevision, setCatalogRevision] = useState(0);
   const [created, setCreated] = useState<CreateAppResponseV1 | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
+  const inventoryLoaded = useRef(false);
   const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
 
   useEffect(() => {
@@ -3716,6 +3718,8 @@ function AppSession(): ReactElement {
       const available = availableProjects(detail.listed);
       prefetchedInventory.current = null;
       setProjects(available);
+      inventoryLoaded.current = true;
+      setInventoryError('');
       const selected = authorizedProject(project, available);
       setProject(selected);
       if (selected) localStorage.setItem(projectStorageKey(), JSON.stringify(selected));
@@ -3730,6 +3734,7 @@ function AppSession(): ReactElement {
       url.hash = '#overview';
       history.replaceState(null, '', url);
       changeWorkspaceView('overview', false);
+      refreshWorkspace();
     }
     window.addEventListener(CATALOG_SYNC_EVENT, synchronized);
     return () => window.removeEventListener(CATALOG_SYNC_EVENT, synchronized);
@@ -3756,6 +3761,8 @@ function AppSession(): ReactElement {
         const available = await readInventory();
         if (cancelled) return;
         setProjects(available);
+        setInventoryError('');
+        inventoryLoaded.current = true;
         if (!strictRequestedProject && !project) {
           setInventoryLoading(false);
           return;
@@ -3782,7 +3789,7 @@ function AppSession(): ReactElement {
         }
       } catch {
         if (!cancelled) {
-          if (strictRequestedProject) setProject(null);
+          if (strictRequestedProject && !inventoryLoaded.current) setProject(null);
           setInventoryError('the workspace project list could not load. try again.');
           setInventoryLoading(false);
         }
@@ -3948,8 +3955,13 @@ function AppSession(): ReactElement {
         }}
       />
     );
-  const emptyPortfolioView = workspaceView === 'overview' && !projects.length;
-  if ((strictRequestedProject || emptyPortfolioView) && inventoryLoading)
+  const emptyPortfolioView =
+    workspaceView === 'overview' && !projects.length && !inventoryLoaded.current;
+  if (
+    !inventoryLoaded.current &&
+    (strictRequestedProject || emptyPortfolioView) &&
+    inventoryLoading
+  )
     return <WorkspaceLoading />;
   if (!strictRequestedProject && emptyPortfolioView && inventoryError)
     return (
@@ -3958,7 +3970,7 @@ function AppSession(): ReactElement {
         onRetry={() => setInventoryRetry((value) => value + 1)}
       />
     );
-  if (strictRequestedProject && inventoryError)
+  if (strictRequestedProject && !inventoryLoaded.current && inventoryError)
     return (
       <div className="mx-auto flex min-h-screen max-w-2xl items-center px-4">
         <Alert variant="destructive">
@@ -4041,7 +4053,7 @@ export function App(): ReactElement {
           </button>
         </div>
       ) : null}
-      <AppSession key={scope.epoch} />
+      <AppSession key={scope.sessionEpoch} />
     </>
   );
 }
