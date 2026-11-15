@@ -59,10 +59,19 @@ const canonical = process.env.APP_HEALTH_OWNER_CATALOG
         },
       })),
     };
-for (const width of [390, 768, 1440]) {
-  test(`canonical portfolio import replaces57 with40 at ${width}px`, async ({ page }) => {
+for (const { width, failReadback } of [
+  { width: 390, failReadback: false },
+  { width: 768, failReadback: false },
+  { width: 1440, failReadback: false },
+  { width: 390, failReadback: true },
+  { width: 1440, failReadback: true },
+]) {
+  test(`canonical portfolio import replaces57 with40 at ${width}px, readback failure=${failReadback}`, async ({
+    page,
+  }) => {
     await page.setViewportSize({ width, height: 1000 });
     let synchronized = false;
+    let inventoryUnavailable = failReadback;
     let uploaded = '';
     const active = canonical.projects.filter(
       (row: { lifecycle: { portfolioStatus: string } }) =>
@@ -75,35 +84,42 @@ for (const width of [390, 768, 1440]) {
       }),
     );
     await page.route('**/v1/apps', (route) =>
-      route.fulfill({
-        headers: { 'x-app-health-workspace-role': 'owner' },
-        json: {
-          apps: Array.from({ length: synchronized ? 40 : 57 }, (_, index) => ({
-            app: {
-              id: `app-${index}`,
-              name: synchronized ? active[index].name : `Old project ${index + 1}`,
-              created_at: now,
-            },
-            environments: [
-              { id: `env-${index}`, app_id: `app-${index}`, name: 'production', created_at: now },
-              ...(index === 0
-                ? [{ id: 'env-stage', app_id: 'app-0', name: 'staging', created_at: now }]
-                : []),
-            ],
-            ...(synchronized
-              ? {
-                  catalog: {
-                    source: 'saas-maker',
-                    catalog_id: active[index].id,
-                    kind: active[index].classification.kind,
-                    future_form: active[index].classification.futureForm,
-                    auth_model: active[index].deployment.authModel,
+      synchronized && inventoryUnavailable
+        ? route.fulfill({ status: 503, body: 'temporarily unavailable' })
+        : route.fulfill({
+            headers: { 'x-app-health-workspace-role': 'owner' },
+            json: {
+              apps: Array.from({ length: synchronized ? 40 : 57 }, (_, index) => ({
+                app: {
+                  id: `app-${index}`,
+                  name: synchronized ? active[index].name : `Old project ${index + 1}`,
+                  created_at: now,
+                },
+                environments: [
+                  {
+                    id: `env-${index}`,
+                    app_id: `app-${index}`,
+                    name: 'production',
+                    created_at: now,
                   },
-                }
-              : {}),
-          })),
-        },
-      }),
+                  ...(index === 0
+                    ? [{ id: 'env-stage', app_id: 'app-0', name: 'staging', created_at: now }]
+                    : []),
+                ],
+                ...(synchronized
+                  ? {
+                      catalog: {
+                        source: 'saas-maker',
+                        catalog_id: active[index].id,
+                        kind: active[index].classification.kind,
+                        future_form: active[index].classification.futureForm,
+                        auth_model: active[index].deployment.authModel,
+                      },
+                    }
+                  : {}),
+              })),
+            },
+          }),
     );
     await page.route('**/v1/catalog/sync', async (route) => {
       if (route.request().method() === 'POST') {
@@ -179,6 +195,28 @@ for (const width of [390, 768, 1440]) {
       .getByLabel('Catalog preview')
       .screenshot({ path: join(evidence, `catalog-outside-${width}.png`) });
     await page.getByRole('button', { name: 'Synchronize active portfolio' }).click();
+    await expect(
+      page.getByText(
+        'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+      ),
+    ).toBeVisible();
+    if (failReadback) {
+      await expect(
+        page.getByText(
+          'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
+        ),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Old project 57', exact: true })).toHaveCount(
+        0,
+      );
+      await page.screenshot({
+        path: join(evidence, `catalog-committed-unavailable-${width}.png`),
+        fullPage: true,
+      });
+      inventoryUnavailable = false;
+      await page.getByRole('button', { name: 'try again', exact: true }).click();
+    }
+
     await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();
     expect(new URL(page.url()).search).toBe('');
     await page.reload();

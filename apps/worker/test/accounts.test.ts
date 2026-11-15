@@ -1354,6 +1354,27 @@ describe('Google account boundary with real D1 SQL', () => {
       env,
     );
     expect(owner.status).toBe(403);
+    const duplicateLinks = await request(path, aliceCookie, {
+      schema_version: 1,
+      projects: [
+        {
+          catalog_id: 'duplicate-link-one',
+          name: 'One',
+          lifecycle: 'active',
+          existing_app_id: aliceApp.app.id,
+        },
+        {
+          catalog_id: 'duplicate-link-two',
+          name: 'Two',
+          lifecycle: 'active',
+          existing_app_id: aliceApp.app.id,
+        },
+      ],
+    });
+    expect(duplicateLinks.status).toBe(400);
+    expect(await duplicateLinks.json()).toMatchObject({
+      error: 'Duplicate existing_app_id links are not allowed within one import.',
+    });
   });
 
   it('requires a valid owning account for capability ledger reads', async () => {

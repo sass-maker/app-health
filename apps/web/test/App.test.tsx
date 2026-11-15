@@ -544,6 +544,171 @@ describe('App Health V0 UI', () => {
     ).toHaveLength(previousConfigReads);
   });
 
+  it.each([false, true])(
+    'confirms a composed catalog commit and fences pending overview reads with immediate readback failure=%j',
+    async (fails) => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+      history.replaceState(null, '', '/app#overview');
+      const apps = Array.from({ length: 57 }, (_, index) => ({
+        app: {
+          id: index ? `cohort-${index}` : savedProject.appId,
+          name: `Old portfolio ${index}`,
+          created_at: 1,
+        },
+        environments: [
+          {
+            id: index ? `cohort-env-${index}` : savedProject.environmentId,
+            app_id: index ? `cohort-${index}` : savedProject.appId,
+            name: 'production',
+            created_at: 1,
+          },
+        ],
+      }));
+      const canonical = {
+        catalogSchemaVersion: 2,
+        projects: Array.from({ length: 40 }, (_, index) => ({
+          id: `canonical-${index}`,
+          name: `Current portfolio ${index}`,
+          lifecycle: { portfolioStatus: 'active' },
+          classification: { kind: 'platform', futureForm: 'support-tool' },
+          deployment: { authModel: 'local-only' },
+          systems: { probe: { scope: 'local', absent: 'Local tool.' } },
+        })),
+      };
+      const fetch = installFetch({ apps, google: true });
+      const fallback = fetch.getMockImplementation()!;
+      let committed = false;
+      let unavailable = fails;
+      const pending: ((response: Response) => void)[] = [];
+      fetch.mockImplementation(async (input, init) => {
+        const path = new URL(String(input), location.origin).pathname;
+        if (path === '/v1/catalog/sync') {
+          if (init?.method === 'POST') {
+            committed = true;
+            return Response.json({ project_count: 40 });
+          }
+          return Response.json({
+            source: committed ? 'saas-maker' : null,
+            projection_hash: committed ? 'a'.repeat(64) : null,
+            project_count: committed ? 40 : null,
+            updated_at: committed ? 1 : null,
+            mapped_catalog_ids: canonical.projects.map((row) => row.id),
+            unlinked_apps: [],
+          });
+        }
+        if (path === '/v1/apps' && committed)
+          return unavailable
+            ? new Response(null, { status: 503 })
+            : Response.json(
+                {
+                  apps: apps.slice(0, 40).map((entry, index) => ({
+                    ...entry,
+                    app: { ...entry.app, name: `Current portfolio ${index}` },
+                  })),
+                },
+                { headers: { 'x-app-health-workspace-role': 'owner' } },
+              );
+        if (!committed && ['/v1/analytics', '/v1/workspace/health'].includes(path))
+          return await new Promise<Response>((resolve) => pending.push(resolve));
+        return fallback(input, init);
+      });
+      render(<App />);
+      await screen.findByRole('button', { name: 'Old portfolio 56' });
+      await waitFor(() => expect(pending.length).toBeGreaterThanOrEqual(2));
+      fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+        target: { files: [{ size: 1000, text: async () => JSON.stringify(canonical) }] },
+      });
+      await screen.findByText('40 active projects');
+      const before = workspaceScope().epoch;
+      fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+      expect(
+        await screen.findByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeTruthy();
+      expect(workspaceScope().epoch).toBe(before + 1);
+      expect(screen.queryByRole('button', { name: 'Old portfolio 56' })).toBeNull();
+      if (fails) {
+        expect(
+          screen.getByText(
+            'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
+          ),
+        ).toBeTruthy();
+        unavailable = false;
+        fireEvent.click(screen.getByRole('button', { name: 'try again' }));
+      }
+      await screen.findByRole('button', { name: 'Current portfolio 39' });
+      await act(async () => {
+        for (const resolve of pending) resolve(new Response(null, { status: 503 }));
+      });
+      expect(screen.queryByText('Workspace changed')).toBeNull();
+      expect(
+        screen.getByText(
+          'Catalog synchronized. 40 active projects and their monitoring policy are committed.',
+        ),
+      ).toBeTruthy();
+    },
+  );
+
+  it('discards an old inventory JSON body released during the catalog commit act before effect cleanup', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(savedProject));
+    history.replaceState(null, '', '/app#overview');
+    const apps = Array.from({ length: 57 }, (_, index) => ({
+      app: {
+        id: index ? `late-${index}` : savedProject.appId,
+        name: `Old inventory ${index}`,
+        created_at: 1,
+      },
+      environments: [
+        {
+          id: index ? `late-env-${index}` : savedProject.environmentId,
+          app_id: index ? `late-${index}` : savedProject.appId,
+          name: 'production',
+          created_at: 1,
+        },
+      ],
+    }));
+    let finish!: (value: unknown) => void;
+    const oldBody = new Promise((resolve) => {
+      finish = resolve;
+    });
+    const fetch = installFetch();
+    const fallback = fetch.getMockImplementation()!;
+    let first = true;
+    const json = vi.fn(() => oldBody);
+    fetch.mockImplementation(async (input, init) => {
+      if (new URL(String(input), location.origin).pathname !== '/v1/apps')
+        return fallback(input, init);
+      if (first) {
+        first = false;
+        return {
+          ok: true,
+          headers: new Headers({ 'x-app-health-workspace-role': 'owner' }),
+          json,
+        } as unknown as Response;
+      }
+      return await new Promise<Response>(() => {});
+    });
+    render(<App />);
+    await waitFor(() => expect(json).toHaveBeenCalledOnce());
+    const current = apps
+      .slice(0, 40)
+      .map((entry, index) => ({ ...entry, app: { ...entry.app, name: `New inventory ${index}` } }));
+    await act(async () => {
+      window.dispatchEvent(
+        new CustomEvent(CATALOG_SYNC_EVENT, {
+          detail: { epoch: workspaceScope().epoch, listed: { apps: current }, projectCount: 40 },
+        }),
+      );
+      finish({ apps });
+      await oldBody;
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: 'New inventory 39' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Old inventory 56' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Old inventory 39' })).toBeNull();
+  });
+
   it('restores the selected project when browser history changes the URL target', async () => {
     const apps = ['alpha', 'beta'].map((name) => ({
       app: { id: `app-${name}`, name, created_at: Date.now() },

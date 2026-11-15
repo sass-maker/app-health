@@ -11,6 +11,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/compone
 import { ownerFetch } from './lib/owner-fetch.js';
 import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
 
+export interface CatalogSyncCommit {
+  epoch: number;
+  listed: ListAppsResponseV1 | null;
+  projectCount: number;
+}
+
 export const CATALOG_SYNC_EVENT = 'app-health-catalog-synchronized';
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 function counts(
@@ -134,15 +140,15 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
         throw new Error(result.error ?? `Catalog sync returned ${response.status}.`);
       if (!current()) return;
       setPreview(null);
-      const inventory = await ownerFetch('/v1/apps', ownerToken, { signal: controller.signal });
-      if (!inventory.ok)
-        throw new Error('Catalog saved. Reload the workspace to refresh its inventory.');
-      const listed = ListAppsResponseV1.parse(await inventory.json());
+      const listed = await readCommittedInventory(ownerToken, controller.signal);
       if (!current()) return;
-      setMessage(
-        `Synchronized ${result.project_count} active projects and their monitoring policy.`,
+      publishCatalogCommit(
+        epoch,
+        listed,
+        result.project_count,
+        preview.projects.length,
+        setMessage,
       );
-      window.dispatchEvent(new CustomEvent(CATALOG_SYNC_EVENT, { detail: { epoch, listed } }));
     } catch (error) {
       if (current())
         setMessage(error instanceof Error ? error.message : 'Catalog synchronization failed.');
@@ -360,7 +366,48 @@ function catalogSubmissionCurrent(
 }
 
 async function readCatalogStatus(response: Response) {
-  const value = (await response.json()) as { error?: string };
-  if (!response.ok) throw new Error(value.error ?? `Catalog status returned ${response.status}.`);
-  return CatalogSyncStatusV1.parse(value);
+  if (!response.ok) {
+    const value = (await response.json().catch(() => null)) as { error?: unknown } | null;
+    throw new Error(
+      typeof value?.error === 'string'
+        ? value.error
+        : `Catalog status is unavailable (${response.status}). Retry the service request.`,
+    );
+  }
+  try {
+    return CatalogSyncStatusV1.parse(await response.json());
+  } catch {
+    throw new Error(
+      'Catalog status returned an invalid service response. Retry the service request.',
+    );
+  }
+}
+
+async function readCommittedInventory(ownerToken: string, signal: AbortSignal) {
+  try {
+    const inventory = await ownerFetch('/v1/apps', ownerToken, { signal });
+    return inventory.ok ? ListAppsResponseV1.parse(await inventory.json()) : null;
+  } catch {
+    return null;
+  }
+}
+
+function publishCatalogCommit(
+  epoch: number,
+  listed: ListAppsResponseV1 | null,
+  reportedCount: number | undefined,
+  expectedCount: number,
+  setMessage: (message: string) => void,
+) {
+  const projectCount = reportedCount ?? expectedCount;
+  setMessage(
+    listed
+      ? `Synchronized ${projectCount} active projects and their monitoring policy.`
+      : `Catalog synchronized: ${projectCount} active projects. Inventory refresh is unavailable; retry its refresh.`,
+  );
+  window.dispatchEvent(
+    new CustomEvent<CatalogSyncCommit>(CATALOG_SYNC_EVENT, {
+      detail: { epoch, listed, projectCount },
+    }),
+  );
 }

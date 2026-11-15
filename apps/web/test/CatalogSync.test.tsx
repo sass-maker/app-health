@@ -287,3 +287,71 @@ it('shows an actionable capacity failure from the owner preview endpoint', async
   await screen.findByText(/supports at most 60 outside projects/);
   expect(screen.queryByLabelText('Catalog preview')).toBeNull();
 });
+
+it.each([502, 503])(
+  'reports a non-JSON catalog status %i as a service failure on mount and preview',
+  async (status) => {
+    owner();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('<html>upstream unavailable</html>', { status })),
+    );
+    render(<CatalogSync ownerToken="" />);
+    expect(
+      await screen.findByText(
+        `Catalog status is unavailable (${status}). Retry the service request.`,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Choose a valid canonical catalog JSON file.')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+      target: { files: [file(source)] },
+    });
+    await screen.findByText(
+      `Catalog status is unavailable (${status}). Retry the service request.`,
+    );
+    expect(screen.queryByLabelText('Catalog preview')).toBeNull();
+  },
+);
+it('distinguishes an invalid successful service response from an invalid local file', async () => {
+  owner();
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => new Response('<html>invalid status</html>', { status: 200 })),
+  );
+  render(<CatalogSync ownerToken="" />);
+  expect(
+    await screen.findByText(
+      'Catalog status returned an invalid service response. Retry the service request.',
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText('Choose a valid canonical catalog JSON file.')).toBeNull();
+});
+it('dispatches a known commit and count when immediate inventory readback fails', async () => {
+  owner();
+  const listener = vi.fn();
+  window.addEventListener(CATALOG_SYNC_EVENT, listener);
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string, init?: RequestInit) =>
+      init?.method === 'POST'
+        ? Response.json({ project_count: 1 })
+        : path === '/v1/apps'
+          ? new Response(null, { status: 503 })
+          : Response.json(catalogStatus),
+    ),
+  );
+  render(<CatalogSync ownerToken="" />);
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(source)] },
+  });
+  await screen.findByText('1 active projects');
+  fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+  await waitFor(() => expect(listener).toHaveBeenCalledOnce());
+  expect(listener.mock.calls[0][0].detail).toMatchObject({ listed: null, projectCount: 1 });
+  expect(
+    screen.getByText(
+      'Catalog synchronized: 1 active projects. Inventory refresh is unavailable; retry its refresh.',
+    ),
+  ).toBeTruthy();
+  window.removeEventListener(CATALOG_SYNC_EVENT, listener);
+});

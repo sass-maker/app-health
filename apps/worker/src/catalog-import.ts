@@ -16,6 +16,13 @@ export async function importCatalogProjects(
   now: number,
   existingOnly = false,
 ) {
+  const existingIds = input.projects.flatMap((project) =>
+    project.existing_app_id ? [project.existing_app_id] : [],
+  );
+  if (new Set(existingIds).size !== existingIds.length)
+    throw new CatalogImportConflict(
+      'Duplicate existing_app_id links are not allowed within one import.',
+    );
   if (existingOnly) await requireUnlinkedExistingApps(db, workspace, input);
   const statements: D1PreparedStatement[] = [
     db
@@ -81,22 +88,7 @@ export async function importCatalogProjects(
     if (results.some((result) => !result.success))
       throw new Error('Catalog import transaction failed');
   } catch (error) {
-    if (error instanceof Error && error.message.includes('catalog import identity already linked'))
-      throw new CatalogImportConflict(
-        'This catalog identity is already linked. Existing identities cannot be rebound; review the identity mismatch before synchronizing.',
-      );
-    if (error instanceof Error && error.message.includes('catalog import existing link required'))
-      throw new CatalogImportConflict(
-        'Synchronized workspaces require existing_app_id links to owned, unarchived, unlinked projects. No projects were added.',
-      );
-    if (
-      error instanceof Error &&
-      /catalog import (project scope mismatch|identity conflict)|UNIQUE constraint failed: catalog_project_imports/.test(
-        error.message,
-      )
-    )
-      throw new CatalogImportConflict('Catalog identity conflict or project access denied');
-    throw error;
+    throw catalogImportError(error);
   }
   return { schema_version: 1, projects: imported };
 }
@@ -134,4 +126,23 @@ async function requireUnlinkedExistingApps(
     throw new CatalogImportConflict(
       'Explicit links require owned, unarchived projects without a catalog identity.',
     );
+}
+
+function catalogImportError(error: unknown) {
+  if (error instanceof Error && error.message.includes('catalog import identity already linked'))
+    return new CatalogImportConflict(
+      'This catalog identity is already linked. Existing identities cannot be rebound; review the identity mismatch before synchronizing.',
+    );
+  if (error instanceof Error && error.message.includes('catalog import existing link required'))
+    return new CatalogImportConflict(
+      'Synchronized workspaces require existing_app_id links to owned, unarchived, unlinked projects. No projects were added.',
+    );
+  if (
+    error instanceof Error &&
+    /catalog import (project scope mismatch|identity conflict)|UNIQUE constraint failed: catalog_project_imports/.test(
+      error.message,
+    )
+  )
+    return new CatalogImportConflict('Catalog identity conflict or project access denied');
+  return error;
 }

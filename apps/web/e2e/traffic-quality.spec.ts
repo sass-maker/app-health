@@ -100,9 +100,13 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.getByText('estimated · partial coverage')).toBeVisible();
   await expect(card.getByText('Current reading.')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Refresh traffic quality' })).toBeEnabled();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+  });
   const readyHeights = new Map<number, number>();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
+    await page.clock.runFor(50);
     await expect(card).toBeVisible();
     readyHeights.set(width, (await card.boundingBox())!.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
@@ -126,6 +130,7 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.locator('[aria-live]')).toHaveCount(0);
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
+    await page.clock.runFor(50);
     expect(
       Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
     ).toBeLessThanOrEqual(1);
@@ -139,6 +144,7 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.getByText('7', { exact: true })).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
+    await page.clock.runFor(50);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -171,6 +177,7 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.getByText('7', { exact: true })).toHaveCount(0);
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
+    await page.clock.runFor(50);
     await card.screenshot({
       path: resolve(evidence, `unavailable-${width}.png`),
       animations: 'disabled',

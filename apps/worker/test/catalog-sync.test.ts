@@ -13,7 +13,13 @@ import {
   type D1DatabaseLike,
   type D1PreparedStatement,
 } from '../src/d1-adapter.js';
-import { CatalogSyncConflict, handleCatalogSyncRoute, syncCatalog } from '../src/catalog-sync.js';
+import {
+  CatalogSyncConflict,
+  catalogManualWriteResponse,
+  handleCatalogSyncRoute,
+  syncCatalog,
+} from '../src/catalog-sync.js';
+import { handleMonitoringRoute } from '../src/monitoring.js';
 import { snapshotCachedAnalytics } from '../src/analytics-cache.js';
 import generated from '../../probe/journeys.json';
 
@@ -490,6 +496,30 @@ describe('canonical active portfolio synchronization', () => {
     ).toEqual({ n: 0 });
   });
 
+  it('rejects repeated existing app links before any V1 SQL write', async () => {
+    const f = fixture();
+    seed(f);
+    const one = CatalogImportRequestV1.parse({
+      schema_version: 1,
+      projects: [
+        {
+          catalog_id: 'unique-catalog-id',
+          name: 'One',
+          lifecycle: 'active',
+          existing_app_id: 'app-56',
+        },
+      ],
+    });
+    one.projects.push({ ...one.projects[0]!, catalog_id: 'another-catalog-id' });
+    await expect(importCatalogProjects(f.db, 'ws', one, 10)).rejects.toThrow(
+      'Duplicate existing_app_id',
+    );
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
+    expect(
+      f.sqlite.prepare('SELECT count(*) AS n FROM workspace_catalog_import_guards').get(),
+    ).toEqual({ n: 0 });
+  });
+
   it('guards V1 creation atomically when a snapshot commits after its preflight', async () => {
     const f = fixture();
     seed(f);
@@ -560,6 +590,70 @@ describe('canonical active portfolio synchronization', () => {
     expect(post?.status).toBe(422);
     expect(await post!.json()).toMatchObject({
       error: expect.stringContaining('at most 60 unique'),
+    });
+  });
+
+  it('preserves unsynchronized manual flows beyond the catalog preview capacity', async () => {
+    const f = fixture();
+    seed(f, 61, 0, 61);
+    const owner = {
+      id: 'owner',
+      label: 'Owner',
+      authKind: 'account' as const,
+      workspaceRole: 'owner' as const,
+      workspaceId: 'ws',
+    };
+    expect(
+      await catalogManualWriteResponse(
+        new Request('https://dashboard.test/v1/apps', { method: 'POST' }),
+        f.db,
+        owner,
+      ),
+    ).toBeNull();
+    const created = await new D1ControlPlane(f.db, 'ws').createAppEnvironmentKey(
+      'Manual allowed',
+      'production',
+      10,
+    );
+    expect(created.rawKey).toBeTruthy();
+    await importCatalogProjects(
+      f.db,
+      'ws',
+      CatalogImportRequestV1.parse({
+        schema_version: 1,
+        projects: [{ catalog_id: 'legacy-extra', name: 'Legacy extra', lifecycle: 'active' }],
+      }),
+      10,
+    );
+    const policy = await handleMonitoringRoute(
+      new Request('https://dashboard.test/v1/workspace/monitoring/policy', {
+        method: 'PUT',
+        body: JSON.stringify({
+          schema_version: 1,
+          projects: [
+            {
+              catalog_id: 'legacy-extra',
+              name: 'Legacy extra',
+              scope: 'local',
+              reason: 'Local service only.',
+              journeys: [],
+            },
+          ],
+        }),
+      }),
+      f.db,
+      owner,
+    );
+    expect(policy?.status).toBe(200);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(63);
+    const preview = await handleCatalogSyncRoute(
+      new Request('https://dashboard.test/v1/catalog/sync'),
+      f.db,
+      owner,
+    );
+    expect(preview?.status).toBe(422);
+    expect(await preview!.json()).toMatchObject({
+      error: expect.stringContaining('at most 60 outside projects'),
     });
   });
 

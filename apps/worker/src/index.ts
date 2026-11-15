@@ -1186,7 +1186,18 @@ async function handleCatalogImportRoute(request: Request, owner: OwnerIdentity, 
   try {
     const bytes = await readStreamBounded(request.body, 32 * 1024);
     const parsed = CatalogImportRequestV1.safeParse(JSON.parse(new TextDecoder().decode(bytes)));
-    if (!parsed.success) return json(400, { error: 'Invalid catalog import' }, true);
+    if (!parsed.success)
+      return json(
+        400,
+        {
+          error: parsed.error.issues.some((issue) =>
+            issue.message.includes('existing_app_id values must be unique'),
+          )
+            ? 'Duplicate existing_app_id links are not allowed within one import.'
+            : 'Invalid catalog import',
+        },
+        true,
+      );
     return json(
       200,
       await importCatalogProjects(
