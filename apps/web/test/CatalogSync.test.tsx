@@ -305,6 +305,7 @@ it.each([502, 503])(
       ),
     ).toBeTruthy();
     expect(screen.queryByText('Choose a valid canonical catalog JSON file.')).toBeNull();
+    expect(screen.getByText('Catalog status unavailable')).toBeTruthy();
     fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
       target: { files: [file(source)] },
     });
@@ -409,4 +410,85 @@ it.each([
   expect(listener).not.toHaveBeenCalled();
   expect(screen.getByRole('button', { name: 'Synchronize active portfolio' })).toBeTruthy();
   window.removeEventListener(CATALOG_SYNC_EVENT, listener);
+});
+
+it('keeps a healthy initial status request alive when a malformed local file is selected', async () => {
+  owner();
+  let finish!: (response: Response) => void;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) =>
+      path === '/v1/catalog/sync'
+        ? new Promise<Response>((resolve) => {
+            finish = resolve;
+          })
+        : Response.json({ publishers: [] }),
+    ),
+  );
+  render(<CatalogSync ownerToken="" />);
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(null, async () => '{')] },
+  });
+  await screen.findByText('Choose a valid canonical catalog JSON file.');
+  expect(screen.getByText('Loading catalog status…')).toBeTruthy();
+  expect(screen.queryByText('Catalog status unavailable')).toBeNull();
+  await act(async () =>
+    finish(
+      Response.json({
+        ...catalogStatus,
+        source: 'saas-maker',
+        project_count: 39,
+        projection_hash: 'a'.repeat(64),
+        updated_at: Date.now(),
+      }),
+    ),
+  );
+  expect(await screen.findByText('SaaS Maker · 39 active projects')).toBeTruthy();
+  expect(screen.getByText('Choose a valid canonical catalog JSON file.')).toBeTruthy();
+});
+
+it('fences an old initial status after a valid preview and committed synchronization', async () => {
+  owner();
+  let finish!: (response: Response) => void;
+  let reads = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/apps') return Response.json({ apps: [] });
+      if (path !== '/v1/catalog/sync') return Response.json({ publishers: [] });
+      if (init?.method === 'POST') return Response.json({ project_count: 1 });
+      if (++reads === 1)
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return Response.json({
+        ...catalogStatus,
+        source: 'saas-maker',
+        project_count: 39,
+        projection_hash: 'b'.repeat(64),
+        updated_at: Date.now(),
+      });
+    }),
+  );
+  render(<CatalogSync ownerToken="" />);
+  fireEvent.change(screen.getByLabelText('Canonical catalog JSON'), {
+    target: { files: [file(source)] },
+  });
+  await screen.findByText('1 active projects');
+  await screen.findByText('SaaS Maker · 39 active projects');
+  fireEvent.click(screen.getByRole('button', { name: 'Synchronize active portfolio' }));
+  await screen.findByText('Synchronized 1 active projects and their monitoring policy.');
+  await act(async () =>
+    finish(
+      Response.json({
+        ...catalogStatus,
+        source: 'saas-maker',
+        project_count: 57,
+        projection_hash: 'a'.repeat(64),
+        updated_at: Date.now(),
+      }),
+    ),
+  );
+  expect(screen.getByText('SaaS Maker · 39 active projects')).toBeTruthy();
+  expect(screen.queryByText('SaaS Maker · 57 active projects')).toBeNull();
 });

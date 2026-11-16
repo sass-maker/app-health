@@ -34,36 +34,44 @@ function useCatalogState(ownerToken: string) {
   const scope = useWorkspaceScope();
   const [preview, setPreview] = useState<CatalogSyncRequest | null>(null);
   const [message, setMessage] = useState('');
+  const [statusError, setStatusError] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<CatalogSyncStatus | null>(null);
   const generation = useRef(0);
+  const statusGeneration = useRef(0);
   const activeRequest = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     generation.current += 1;
+    statusGeneration.current += 1;
     activeRequest.current?.abort();
     setPreview(null);
     setStatus(null);
     setMessage('');
+    setStatusError('');
     setBusy(false);
     if (fileInput.current) fileInput.current.value = '';
     return () => {
       generation.current += 1;
+      statusGeneration.current += 1;
       activeRequest.current?.abort();
     };
-  }, [scope.epoch, ownerToken]);
-  useCatalogStatus(ownerToken, scope, generation, setStatus, setMessage);
+  }, [scope.epoch, scope.role, ownerToken]);
+  useCatalogStatus(ownerToken, scope, statusGeneration, setStatus, setStatusError);
   return {
     scope,
     preview,
     setPreview,
     message,
     setMessage,
+    statusError,
+    setStatusError,
     busy,
     setBusy,
     status,
     setStatus,
     generation,
+    statusGeneration,
     activeRequest,
     fileInput,
   };
@@ -76,11 +84,13 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
     preview,
     setPreview,
     setMessage,
+    setStatusError,
     busy,
     setBusy,
     status,
     setStatus,
     generation,
+    statusGeneration,
     activeRequest,
     fileInput,
   } = state;
@@ -99,21 +109,30 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
     setMessage('');
     if (!file) return;
     setBusy(true);
+    let statusRun: number | undefined;
     try {
       if (file.size > MAX_FILE_BYTES) throw new Error('Catalog file exceeds 8 MiB.');
       const text = await file.text();
       if (!current()) return;
       const projection = await projectCanonicalCatalogWithRevisions(JSON.parse(text), null);
+      if (!current()) return;
+      statusRun = ++statusGeneration.current;
+      setStatusError('');
       const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
         signal: controller.signal,
       });
       const status = await readCatalogStatus(response);
-      if (current()) {
+      if (current() && statusRun === statusGeneration.current) {
         setStatus(status);
+        setStatusError('');
         setPreview({ ...projection, expected_previous_hash: status.projection_hash });
       }
     } catch (error) {
-      if (current()) setMessage(catalogPreviewError(error));
+      if (current()) {
+        const message = catalogPreviewError(error);
+        setMessage(message);
+        if (statusRun === statusGeneration.current) setStatusError(message);
+      }
     } finally {
       if (current()) setBusy(false);
       if (fileInput.current) fileInput.current.value = '';
@@ -124,6 +143,7 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
     if (!catalogSubmissionCurrent(scope.epoch, previewGeneration, generation.current)) return;
     const epoch = scope.epoch;
     const run = ++generation.current;
+    statusGeneration.current += 1;
     const controller = new AbortController();
     activeRequest.current = controller;
     const current = () =>
@@ -165,7 +185,7 @@ function CatalogSyncCard({
   readFile: (file: File | undefined) => Promise<void>;
   synchronize: CatalogSyncAction;
 }) {
-  const { status, preview, busy, fileInput, message } = state;
+  const { status, preview, busy, fileInput, message, statusError } = state;
   return (
     <Card className="gap-3 py-5 shadow-none">
       <CardHeader className="px-5 py-0">
@@ -175,7 +195,7 @@ function CatalogSyncCard({
             ? `SaaS Maker · ${status.project_count} active projects`
             : status
               ? 'No catalog imported yet'
-              : message
+              : statusError
                 ? 'Catalog status unavailable'
                 : 'Loading catalog status…'}
         </p>
@@ -228,9 +248,9 @@ function CatalogSyncCard({
             Preparing catalog preview…
           </p>
         ) : null}
-        {message ? (
+        {message || statusError ? (
           <p role="status" className="break-words text-xs">
-            {message}
+            {message || statusError}
           </p>
         ) : null}
       </CardContent>
@@ -356,24 +376,30 @@ function CatalogLinkPreview({
 function useCatalogStatus(
   ownerToken: string,
   scope: ReturnType<typeof workspaceScope>,
-  generation: RefObject<number>,
+  statusGeneration: RefObject<number>,
   setStatus: (status: CatalogSyncStatus) => void,
-  setMessage: (message: string) => void,
+  setStatusError: (message: string) => void,
 ) {
   useEffect(() => {
     if (scope.role !== 'owner' || ownerToken) return;
     const controller = new AbortController();
     let disposed = false;
-    const run = generation.current;
+    const run = statusGeneration.current;
     void ownerFetch('/v1/catalog/sync', ownerToken, { signal: controller.signal })
       .then(async (response) => {
         const value = await readCatalogStatus(response);
-        if (!disposed && scope.epoch === workspaceScope().epoch && run === generation.current)
+        if (
+          !disposed &&
+          scope.epoch === workspaceScope().epoch &&
+          run === statusGeneration.current
+        ) {
           setStatus(value);
+          setStatusError('');
+        }
       })
       .catch((error: unknown) => {
-        if (!disposed && scope.epoch === workspaceScope().epoch && run === generation.current)
-          setMessage(catalogPreviewError(error));
+        if (!disposed && scope.epoch === workspaceScope().epoch && run === statusGeneration.current)
+          setStatusError(catalogPreviewError(error));
       });
     return () => {
       disposed = true;

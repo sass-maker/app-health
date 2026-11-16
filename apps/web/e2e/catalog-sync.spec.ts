@@ -78,7 +78,10 @@ for (const { width, failReadback } of [
     let needsReview = true;
     let inventoryUnavailable = failReadback;
     let uploaded = '';
-    let pendingStatus: Promise<void> | undefined;
+    let releaseInitialStatus!: () => void;
+    let pendingStatus: Promise<void> | undefined = new Promise((resolve) => {
+      releaseInitialStatus = resolve;
+    });
     const active = canonical.projects.filter(
       (row: { lifecycle: { portfolioStatus: string } }) =>
         row.lifecycle.portfolioStatus === 'active',
@@ -223,6 +226,15 @@ for (const { width, failReadback } of [
       buffer: Buffer.from('{'),
     });
     await expect(page.getByText('Choose a valid canonical catalog JSON file.')).toBeVisible();
+    await expect(page.getByText('Loading catalog status…')).toBeVisible();
+    await expect(page.getByText('Catalog status unavailable', { exact: true })).toHaveCount(0);
+    await page.screenshot({
+      path: join(evidence, `catalog-invalid-file-pending-${width}-${failReadback}.png`),
+      animations: 'disabled',
+    });
+    releaseInitialStatus();
+    pendingStatus = undefined;
+    await expect(page.getByText('No catalog imported yet', { exact: true })).toBeVisible();
     await input.setInputFiles({
       name: 'projects.json',
       mimeType: 'application/json',
