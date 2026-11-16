@@ -35,6 +35,15 @@ it('normalizes defaults, strips extras and includes every public request and exp
     await probeDefinitionRevision({ ...raw, expect: { json: 'invalid', content_type: 1 } }),
   ).toBe(digest);
 });
+it.each([30000, 30001, 40000, 60000])(
+  'accepts the parser-normalized capped deadline for budget %d',
+  async (budget) => {
+    const definition = { ...raw, budget_ms: budget };
+    expect(await probeDefinitionRevision({ ...definition, timeout_ms: 30000 })).toBe(
+      await probeDefinitionRevision(definition),
+    );
+  },
+);
 it.each([
   null,
   [],
@@ -42,6 +51,8 @@ it.each([
   { ...raw, budget_ms: 60001 },
   { ...raw, budget_ms: 2.5 },
   { ...raw, timeout_ms: 1 },
+  { ...raw, budget_ms: 40000, timeout_ms: 29999 },
+  { ...raw, budget_ms: 40000, timeout_ms: 35000 },
   { ...raw, timeout_ms: 60001 },
   { ...raw, timeout_ms: 2000.5 },
   { ...raw, url: 'https://user:pass@example.test' },
