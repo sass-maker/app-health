@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { URL } from 'node:url';
 import { scopeFooterCss } from './build-footer-css.mjs';
 
 test('the committed footer is reproducible and keeps existing host selectors usable', () => {

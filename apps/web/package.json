@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rimraf dist *.tsbuildinfo",
     "test:browser": "playwright test",
-    "pretest": "node scripts/build-tracker.mjs --check && node scripts/build-footer-css.mjs --check && node --test scripts/footer-css.test.mjs",
+    "pretest": "node scripts/build-tracker.mjs --check && node scripts/build-footer-css.mjs --check && node --test scripts/footer-css.node-test.mjs",
     "predev": "node scripts/build-tracker.mjs"
   },
   "dependencies": {

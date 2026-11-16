@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import process from 'node:process';
+import { pathToFileURL, URL } from 'node:url';
 import postcss from 'postcss';
 
 const host = ':where(studio-footer)';
