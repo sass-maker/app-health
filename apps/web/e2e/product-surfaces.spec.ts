@@ -3,6 +3,58 @@ import { checkReadability } from './readability';
 import { receivedFixture } from './received-fixture';
 
 for (const theme of ['dark', 'light']) {
+  test(`late footer styles preserve tablet geometry ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1000 });
+    await page.addInitScript((value) => localStorage.setItem('app-health-theme', value), theme);
+    let releaseFooter!: () => void;
+    const footerReady = new Promise<void>((resolve) => {
+      releaseFooter = resolve;
+    });
+    await page.route('**/footer.css', async (route) => {
+      await footerReady;
+      await route.continue();
+    });
+    const loaded = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === '/footer.css' && response.ok(),
+    );
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const heading = page.getByRole('heading', { level: 1 });
+    await expect(heading).toBeVisible();
+    await expect
+      .poll(() =>
+        heading.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize)),
+      )
+      .toBeGreaterThan(32);
+    await heading.evaluate(async (element) => {
+      const style = getComputedStyle(element);
+      await document.fonts.load(`${style.fontWeight} ${style.fontSize} ${style.fontFamily}`);
+    });
+    const before = await heading.boundingBox();
+    releaseFooter();
+    await loaded;
+    await expect
+      .poll(() =>
+        page
+          .locator('link[href="/footer.css"]')
+          .evaluate((link) => Boolean((link as HTMLLinkElement).sheet)),
+      )
+      .toBe(true);
+    await expect.poll(() => heading.boundingBox()).toEqual(before);
+    const subscribe = page.getByRole('button', { name: /^subscribe$/i });
+    await expect(subscribe).toBeVisible();
+    await expect
+      .poll(() =>
+        subscribe.evaluate(
+          (button) =>
+            button.getBoundingClientRect().right -
+            button.closest('form')!.getBoundingClientRect().right,
+        ),
+      )
+      .toBeLessThanOrEqual(1);
+  });
+}
+
+for (const theme of ['dark', 'light']) {
   for (const width of [390, 1440]) {
     for (const surface of ['landing', 'changelog', 'analytics', 'events']) {
       test(`${surface} rendered ${theme} ${width}px`, async ({ page }, testInfo) => {
