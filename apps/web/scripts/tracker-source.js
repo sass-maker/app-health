@@ -81,6 +81,14 @@
       return false;
     }
   }
+  function readLegacy(key) {
+    const value = storage.getItem(key);
+    try {
+      return JSON.parse(value || 'null');
+    } catch {
+      return null;
+    }
+  }
   function attribution(path) {
     const url = new URL(path || location.href, location.href);
     const value = (name) =>
@@ -191,6 +199,7 @@
           const transaction = db.transaction('scopes', 'readwrite');
           const timeout = setTimeout(cancel, 2000);
           let candidate;
+          let retireLegacy = false;
           const finish = () => {
             clearTimeout(timeout);
             transactions.delete(transaction);
@@ -212,6 +221,15 @@
             finish();
             if (!enabled() || generation !== version)
               return reject(new Error('Identity cancelled'));
+            if (retireLegacy && candidate) {
+              try {
+                storage.setItem(migratedKey, '1');
+                storage.removeItem(visitorKey);
+                storage.removeItem(visitKey);
+              } catch {
+                /* The canonical record committed; retry legacy retirement on the next operation. */
+              }
+            }
             resolve(candidate);
           };
           const store = transaction.objectStore('scopes');
@@ -221,17 +239,11 @@
               if (!enabled() || generation !== version) return cancel();
               const now = Date.now();
               let saved = reading.result;
-              if (!saved) {
-                saved =
-                  storage.getItem(migratedKey) === '1'
-                    ? {}
-                    : { visitor: readStored(visitorKey), visit: readStored(visitKey) };
-                if (!storage) throw new Error('Identity storage unavailable');
-                // Retire the legacy authority once, including after an IndexedDB-only reset.
-                storage.setItem(migratedKey, '1');
-                storage.removeItem(visitorKey);
-                storage.removeItem(visitKey);
-              }
+              retireLegacy = storage.getItem(migratedKey) !== '1';
+              if (!saved)
+                saved = retireLegacy
+                  ? { visitor: readLegacy(visitorKey), visit: readLegacy(visitKey) }
+                  : {};
               const previousVisitor = saved.visitor;
               const known =
                 previousVisitor &&
@@ -289,7 +301,9 @@
   function forgetPersistentIdentity() {
     if (!storage) return;
     storage = undefined;
-    visit = undefined;
+    visit = validVisit(visit)
+      ? { id: visit.id, last: visit.last, attribution: visit.attribution }
+      : undefined;
     cancelOpen?.();
     for (const cancel of transactions.values()) cancel();
     connection?.close();

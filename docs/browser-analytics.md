@@ -92,10 +92,13 @@ observers and listeners too.
   prolong inactivity or create historical events; expired visits stop sending
   idle heartbeats. Scrolls and pointer movement alone do not extend a visit.
 - The first upgraded visit imports valid legacy localStorage identity once and
-  retires those keys. Existing tabs using the old tracker remain separate until
+  retires those keys after commit. An aborted migration leaves the legacy IDs
+  available for a later attempt. Existing tabs using the old tracker remain separate until
   reloaded. Clear the site's data to reset all identity state: clearing only
   localStorage retains the canonical IndexedDB identity, while clearing only
-  IndexedDB leaves a migration marker that prevents legacy ID resurrection.
+  IndexedDB after completed migration leaves a marker that prevents legacy ID
+  resurrection. If legacy cleanup is interrupted or blocked, clear all site data
+  to reset recognition; cleanup is retried on later operations.
 - `data-identity="session"` omits persistent visitor IDs. Blocked storage falls
   back to an in-memory session. Raw session and visitor IDs are hashed with the
   app/environment scope before queueing or archival. Legacy identity remains

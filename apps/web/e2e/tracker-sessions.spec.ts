@@ -430,19 +430,39 @@ test('transactional identity aborts before commit on consent revocation and neve
   baseURL,
 }) => {
   const project = await fixture(request, baseURL!);
-  await context.addInitScript(() => {
-    const put = IDBObjectStore.prototype.put;
-    let revoke = true;
-    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args) {
-      const request = put.apply(this, args);
-      if (revoke && this.name === 'scopes') {
-        revoke = false;
-        window.appHealth!.consent(false);
-        (window as unknown as { revokedInTransaction: boolean }).revokedInTransaction = true;
-      }
-      return request;
-    };
-  });
+  const visitor = { id: crypto.randomUUID(), expires: Date.now() + 86400000 };
+  const visit = {
+    id: crypto.randomUUID(),
+    last: Date.now(),
+    visitor_id: visitor.id,
+    type: 'returning',
+    attribution: {
+      source: 'launch',
+      medium: '',
+      campaign: '',
+      content: '',
+      term: '',
+      entry_path: '/original',
+    },
+  };
+  await context.addInitScript(
+    ({ key, visitor, visit }) => {
+      localStorage.setItem(`h:${key}:v`, JSON.stringify(visitor));
+      localStorage.setItem(`h:${key}:w`, JSON.stringify(visit));
+      const put = IDBObjectStore.prototype.put;
+      let revoke = true;
+      IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args) {
+        const request = put.apply(this, args);
+        if (revoke && this.name === 'scopes') {
+          revoke = false;
+          window.appHealth!.consent(false);
+          (window as unknown as { revokedInTransaction: boolean }).revokedInTransaction = true;
+        }
+        return request;
+      };
+    },
+    { key: project.key, visitor, visit },
+  );
   const batches = receipts(page);
   await page.goto(`${project.origin}/fixture/landing`);
   await page.waitForFunction(
@@ -469,7 +489,35 @@ test('transactional identity aborts before commit on consent revocation and neve
   await flush(page);
   expect(batches).toHaveLength(1);
   expect(batches[0].events.map((event) => event.name)).toEqual([undefined]);
-  expect(batches[0].visitor_id).toBeTruthy();
+  expect(batches[0]).toMatchObject({
+    visitor_id: visitor.id,
+    session_id: visit.id,
+    visit_type: 'returning',
+  });
+});
+
+test('persistent identity keeps its committed session when a later transaction fails', async ({
+  page,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(request, baseURL!);
+  const batches = receipts(page);
+  await page.goto(`${project.origin}/fixture/landing`);
+  await flush(page);
+  await page.evaluate(() => {
+    IDBDatabase.prototype.transaction = function () {
+      throw new DOMException('Denied', 'SecurityError');
+    };
+    window.appHealth!.track('after_failure');
+  });
+  await flush(page);
+  await page.evaluate(() => window.appHealth!.track('still_unidentified'));
+  await flush(page);
+  expect(batches).toHaveLength(3);
+  expect(batches.every((batch) => batch.session_id === batches[0].session_id)).toBe(true);
+  expect(batches.slice(1).every((batch) => !batch.visitor_id && !batch.visit_type)).toBe(true);
+  await expect.poll(async () => (await report(request, project)).sessions).toBe(1);
 });
 
 test('persistent identity falls back to unidentified memory when IndexedDB is denied', async ({

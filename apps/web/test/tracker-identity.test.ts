@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { Blob as NodeBlob } from 'node:buffer';
-import { IDBObjectStore } from 'fake-indexeddb';
+import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BrowserBatchV1 } from '@app-health/contracts';
 import {
@@ -50,6 +51,7 @@ async function install(consent = false) {
   await import('../public/tracker.js');
 }
 beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
   vi.useFakeTimers({
     toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
   });
@@ -193,6 +195,91 @@ it('aborts a pending identity write before publishing when consent is revoked', 
   expect(await identityRecord(scope)).toBeUndefined();
   expect(fetch).not.toHaveBeenCalled();
   expect(client.diagnostics().queued).toBe(0);
+});
+
+it('retains the committed session as unidentified memory after a later transaction failure', async () => {
+  await install();
+  await api().flush();
+  const initial = batches()[0];
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementationOnce(() => {
+    throw new Error('Storage unavailable');
+  });
+  api().track('after_failure');
+  await api().flush();
+  api().track('still_unidentified');
+  await api().flush();
+  const following = batches().slice(1);
+  expect(following).toHaveLength(2);
+  expect(following.every((batch) => batch.session_id === initial.session_id)).toBe(true);
+  expect(following.every((batch) => !batch.visitor_id && !batch.visit_type)).toBe(true);
+  expect(following[0].attribution).toEqual(initial.attribution);
+});
+
+it('keeps legacy identity available when its first migration aborts before commit', async () => {
+  const original = legacy();
+  seedLegacy(original);
+  const put = IDBObjectStore.prototype.put;
+  const write = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+    this: IDBObjectStore,
+    ...args
+  ) {
+    const request = put.apply(this, args);
+    api().consent(false);
+    return request;
+  });
+  await install();
+  await api().flush();
+  write.mockRestore();
+  expect(await identityRecord(scope)).toBeUndefined();
+  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
+  api().stop();
+  await install();
+  await api().flush();
+  expect(batches()[0]).toMatchObject({
+    visitor_id: original.visitor.id,
+    session_id: original.visit.id,
+  });
+});
+
+it.each(['v', 'w'] as const)(
+  'discards malformed legacy JSON in :%s without disabling the canonical store',
+  async (key) => {
+    const original = legacy();
+    seedLegacy(original);
+    localStorage.setItem(`h:${scope}:${key}`, '{malformed');
+    await install();
+    await api().flush();
+    expect(batches()[0].visitor_id).toBeTruthy();
+    expect(await identityRecord(scope)).toBeDefined();
+    if (key === 'w') expect(batches()[0].visitor_id).toBe(original.visitor.id);
+    expect(localStorage.getItem(`h:${scope}:v`)).toBeNull();
+    expect(localStorage.getItem(`h:${scope}:w`)).toBeNull();
+  },
+);
+
+it('retries interrupted legacy retirement without discarding the committed authority', async () => {
+  const original = legacy();
+  seedLegacy(original);
+  const set = Storage.prototype.setItem;
+  let interrupted = false;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (!interrupted && key === `h:${scope}:m` && value === '1') {
+      interrupted = true;
+      throw new Error('Retirement interrupted');
+    }
+    set.call(this, key, value);
+  });
+  await install();
+  await api().flush();
+  expect(batches()[0].visitor_id).toBe(original.visitor.id);
+  expect((await identityRecord(scope))?.visitor).toEqual(original.visitor);
+  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  await api().flush();
+  expect(localStorage.getItem(`h:${scope}:m`)).toBe('1');
+  expect(localStorage.getItem(`h:${scope}:v`)).toBeNull();
+  expect(localStorage.getItem(`h:${scope}:w`)).toBeNull();
+  expect(batches().every((batch) => batch.session_id === original.visit.id)).toBe(true);
 });
 
 it('drops callbacks from a stopped generation instead of creating or sending its identity', async () => {
