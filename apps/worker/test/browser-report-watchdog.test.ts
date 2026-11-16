@@ -470,3 +470,26 @@ it('fails a late original-pages rejection after the joint decision without unhan
   await rejected;
   expect(provider.queries).toHaveLength(6);
 });
+
+it('canonicalizes only unspecified within-tie order and exposes incorrect count ordering', () => {
+  expect(
+    observable([
+      { name: 'b', count: 2 },
+      { name: 'a', count: 2 },
+      { name: 'z', count: 1 },
+    ]),
+  ).toEqual([
+    { name: 'a', count: 2 },
+    { name: 'b', count: 2 },
+    { name: 'z', count: 1 },
+  ]);
+  expect(
+    observable([
+      { name: 'low', count: 1 },
+      { name: 'high', count: 2 },
+    ]),
+  ).toEqual([
+    { name: 'low', count: 1 },
+    { name: 'high', count: 2 },
+  ]);
+});

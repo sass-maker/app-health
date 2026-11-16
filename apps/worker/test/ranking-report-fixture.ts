@@ -115,9 +115,21 @@ export function rankingFixture() {
 export function observable(value: unknown): unknown {
   if (Array.isArray(value)) {
     const entries = value.map(observable);
-    return entries.every((row) => row && typeof row === 'object' && 'name' in row && 'count' in row)
-      ? entries.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
-      : entries;
+    if (!entries.every((row) => row && typeof row === 'object' && 'name' in row && 'count' in row))
+      return entries;
+    const ranked = entries as Array<{ name: unknown; count: unknown }>;
+    const result: unknown[] = [];
+    for (let index = 0; index < ranked.length;) {
+      let end = index + 1;
+      while (end < ranked.length && ranked[end].count === ranked[index].count) end++;
+      result.push(
+        ...ranked
+          .slice(index, end)
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+      );
+      index = end;
+    }
+    return result;
   }
   if (value && typeof value === 'object')
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, observable(item)]));
