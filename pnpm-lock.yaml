@@ -151,6 +151,9 @@ importers:
       jsdom:
         specifier: ^25.0.0
         version: 25.0.1
+      postcss:
+        specifier: 8.5.26
+        version: 8.5.26
       tailwindcss:
         specifier: ^4.3.3
         version: 4.3.3
