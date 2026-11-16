@@ -148,6 +148,31 @@ describe('runProbes', () => {
     expect(state.pending).toEqual([]);
   });
 
+  it('delivers results and state for an accepted budget above the default timeout cap', async () => {
+    const definition = {
+      project: 'anime-list',
+      journey: 'long-budget',
+      url: 'https://anime.test/',
+      budget_ms: 40000,
+    };
+    const parsed = parseSpec({ schema_version: 1, journeys: [definition] });
+    expect(parsed.journeys[0]?.timeout_ms).toBe(30000);
+    const { deps, sent } = harness({ 'https://anime.test/': json({ ok: true }) });
+    const measure = vi.fn(deps.measure);
+    const { summary, state } = await runProbes(parsed, emptyState(), options, { ...deps, measure });
+    expect(measure.mock.calls[0]?.[0].timeoutMs).toBe(30000);
+    expect(summary.journeys[0]).toMatchObject({ outcome: 'ok', status: 'healthy' });
+    const revision = await probeDefinitionRevision(definition);
+    expect(sent[0]?.find((log) => log.event === 'probe.result')?.props).toMatchObject({
+      project: 'anime-list',
+      journey: 'long-budget',
+      status: 'healthy',
+      revision,
+    });
+    expect(state.revisions?.['anime-list/long-budget']).toBe(revision);
+    expect(state.pending).toEqual([]);
+  });
+
   it('opens an incident for a semantic failure and a missing asset', async () => {
     const { deps, sent } = harness({
       'https://anime.test/': { ...html(), body: Buffer.from('<div id="root"></div>') },

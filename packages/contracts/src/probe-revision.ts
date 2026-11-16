@@ -16,13 +16,14 @@ function stable(value: unknown): unknown {
 }
 function budgetFields(raw: Record<string, unknown>) {
   const budget = raw.budget_ms;
-  const timeout = raw.timeout_ms ?? Math.min(30000, Math.max(8000, Number(budget) * 4));
+  const defaultTimeout = Math.min(30000, Math.max(8000, Number(budget) * 4));
+  const timeout = raw.timeout_ms ?? defaultTimeout;
   if (
     !Number.isInteger(budget) ||
     Number(budget) < 100 ||
     Number(budget) > 60000 ||
     !Number.isInteger(timeout) ||
-    Number(timeout) < Number(budget) ||
+    (Number(timeout) < Number(budget) && timeout !== defaultTimeout) ||
     Number(timeout) > 60000
   )
     throw new Error('Invalid public check budget');
