@@ -46,8 +46,10 @@ import {
   queryPublicBrowserTraffic,
 } from './public-browser-report.js';
 import {
+  advanceBrowserArchiveAuditJob,
   readBrowserArchiveAuditJob,
   startBrowserArchiveAuditJob,
+  type BrowserArchiveAuditJobBindings,
 } from './browser-archive-audit-jobs.js';
 
 export interface BrowserEnvironment extends BrowserBindings {
@@ -506,6 +508,96 @@ function browserAuditOwnerAllowed(owner: OwnerIdentity, local: boolean) {
   return !local && Boolean(owner.workspaceId) && !owner.appId;
 }
 
+function fullAuditAccountOwner(
+  owner: OwnerIdentity,
+  local: boolean,
+): owner is OwnerIdentity & { workspaceId: string } {
+  return (
+    !local &&
+    owner.authKind === 'account' &&
+    owner.workspaceRole === 'owner' &&
+    Boolean(owner.workspaceId) &&
+    owner.appId === undefined &&
+    owner.apiScopes === undefined &&
+    owner.apiPermission === undefined
+  );
+}
+
+async function auditAdvanceInputError(request: Request, jobId: string): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.headers.get('origin') !== url.origin)
+    return json(403, { error: 'Same-origin operator request required.' });
+  if (url.search || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(jobId))
+    return json(400, { error: 'Invalid audit advance request.' });
+  try {
+    const input = await readPublicJson(request, 64);
+    return isRecord(input) && Object.keys(input).length === 0
+      ? null
+      : json(400, { error: 'Provide an empty JSON object.' });
+  } catch {
+    return json(400, { error: 'Provide a bounded empty JSON object.' });
+  }
+}
+
+function auditAdvanceBindings(
+  env: BrowserEnvironment,
+  workspace: string,
+): BrowserArchiveAuditJobBindings | null {
+  const archive = env.BROWSER_ARCHIVE;
+  const history = env.BROWSER_HISTORY;
+  const probe = archive?.getByName(`${workspace}:browser-archive-v1:0`);
+  if (
+    !env.DB ||
+    !probe?.archiveSegmentsForEventDay ||
+    !probe.archiveSegmentForBatch ||
+    !history?.get
+  )
+    return null;
+  return {
+    db: env.DB,
+    archive: archive as BrowserArchiveAuditJobBindings['archive'],
+    history: history as Pick<R2Bucket, 'get'>,
+  };
+}
+
+async function advanceBrowserAuditRoute(
+  request: Request,
+  env: BrowserEnvironment,
+  owner: OwnerIdentity,
+  local: boolean,
+  jobId: string,
+) {
+  if (!fullAuditAccountOwner(owner, local))
+    return json(403, { error: 'Full account workspace owner access is required.' });
+  const invalid = await auditAdvanceInputError(request, jobId);
+  if (invalid) return invalid;
+  if (!env.DB) return json(503, { error: 'Archive audit storage is unavailable.' });
+  try {
+    const owned = await readBrowserArchiveAuditJob(env.DB, owner.workspaceId, jobId);
+    if (!owned) return json(404, { error: 'Archive audit not found.' });
+    if (owned.status === 'finished' || owned.status === 'incomplete')
+      return json(200, {
+        ...owned,
+        outcome: 'terminal',
+        attempted_slices: 0,
+        lease_acquired: false,
+      });
+    const bindings = auditAdvanceBindings(env, owner.workspaceId);
+    if (!bindings) return json(503, { error: 'Archive audit bindings are unavailable.' });
+    const result = await advanceBrowserArchiveAuditJob(bindings, owner.workspaceId, jobId);
+    if (result.outcome === 'not_found') return json(404, { error: 'Archive audit not found.' });
+    if (result.outcome === 'not_admitted' || result.outcome === 'busy')
+      return json(409, { error: 'Archive audit cannot advance now.', ...result });
+    const state = await readBrowserArchiveAuditJob(env.DB, owner.workspaceId, jobId);
+    if (!state) return json(404, { error: 'Archive audit not found.' });
+    return json(200, { ...state, ...result });
+  } catch {
+    return json(503, {
+      error: 'Audit outcome is unknown. Read job status before another advance.',
+    });
+  }
+}
+
 async function startBrowserAuditRoute(
   request: Request,
   env: BrowserEnvironment,
@@ -567,6 +659,14 @@ async function handleBrowserArchiveAuditOwner(
   path: string,
 ): Promise<Response | null> {
   if (!isBrowserAuditPath(path)) return null;
+  if (path.endsWith('/advance') && request.method === 'POST')
+    return advanceBrowserAuditRoute(
+      request,
+      env,
+      owner,
+      local,
+      path.slice(`${BROWSER_AUDIT_PATH}/`.length, -'/advance'.length),
+    );
   if (!browserAuditOwnerAllowed(owner, local))
     return json(403, { error: 'Full workspace owner access is required.' });
   if (!env.DB) return json(503, { error: 'Archive audit storage is unavailable.' });
@@ -646,7 +746,9 @@ export async function handleBrowserOwner(
   const selectedIds = await currentPortfolioAppIds(env.DB, workspace, owner.appIds ?? []);
   if (path.endsWith('/live'))
     return browserLiveRoute(request, presence, { ...owner, appIds: selectedIds });
-  return workspaceSummary(workspace, env, presence, selectedIds);
+  return measureOwnerRouteRead(timings, () =>
+    workspaceSummary(workspace, env, presence, selectedIds, timings),
+  );
 }
 
 async function workspaceSummary(
@@ -654,16 +756,41 @@ async function workspaceSummary(
   env: BrowserEnvironment,
   presence: BrowserPresence,
   appIds: readonly string[],
+  timings?: OwnerRequestTimings,
 ): Promise<Response> {
+  const measure = async <T>(
+    name: 'analyticsSummaryMs' | 'analyticsSummaryProviderMs' | 'analyticsPresenceMs',
+    read: () => Promise<T>,
+  ) => {
+    if (!timings) return read();
+    const started = performance.now();
+    try {
+      return await read();
+    } finally {
+      if (timings) timings[name] = performance.now() - started;
+    }
+  };
   try {
     const [metrics, live] = await Promise.all([
-      snapshotCachedAnalytics(env.DB, env.CLOUDFLARE_ACCOUNT_ID ?? '', workspace, 'summary', () =>
-        queryBrowserSummary(workspace, {
-          accountId: env.CLOUDFLARE_ACCOUNT_ID ?? '',
-          token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
-        }),
+      measure('analyticsSummaryMs', () =>
+        snapshotCachedAnalytics(
+          env.DB,
+          env.CLOUDFLARE_ACCOUNT_ID ?? '',
+          workspace,
+          'summary',
+          () =>
+            measure('analyticsSummaryProviderMs', () =>
+              queryBrowserSummary(workspace, {
+                accountId: env.CLOUDFLARE_ACCOUNT_ID ?? '',
+                token: env.ANALYTICS_ENGINE_QUERY_TOKEN ?? '',
+              }),
+            ),
+          undefined,
+          60,
+          timings,
+        ),
       ),
-      presence.snapshot(),
+      measure('analyticsPresenceMs', () => presence.snapshot()),
     ]);
     const active = new Set(appIds);
     const liveProjects = live.projects.filter((project) => active.has(project.app_id));

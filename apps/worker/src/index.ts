@@ -1,3 +1,4 @@
+import { withOwnerBuildAttestation } from './build-attestation.js';
 import {
   catalogManualWriteResponse,
   catalogSnapshotStatus,
@@ -1300,7 +1301,11 @@ async function handleAccountOwner(
     timings.ownerHandlerTotalMs = performance.now() - ownerHandlerStarted;
   if (path === '/v1/apps')
     response.headers.set('x-app-health-workspace-role', account.owner.workspaceRole ?? 'owner');
-  return withOwnerServerTiming(response, timings);
+  return withOwnerBuildAttestation(
+    withOwnerServerTiming(response, timings),
+    request,
+    account.owner,
+  );
 }
 
 function accountReadTimings(request: Request, path: string): OwnerRequestTimings | undefined {
@@ -1310,6 +1315,7 @@ function accountReadTimings(request: Request, path: string): OwnerRequestTimings
       '/v1/capabilities',
       '/v1/endpoints',
       '/v1/installation/status',
+      '/v1/analytics',
       '/v1/analytics/report',
       '/v1/reports/daily-engagement',
       '/v1/reports/portfolio-briefing',

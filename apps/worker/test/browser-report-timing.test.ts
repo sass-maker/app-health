@@ -89,3 +89,91 @@ it('reports private fixed-name report stages and preserves cached report behavio
   expect(unfilteredHeader).toContain('analytics_engagement;dur=');
   expect(unfilteredHeader).toContain('analytics_exits;dur=');
 });
+
+it('separates private summary provider, cache and presence work on cold and warm reads', async () => {
+  const values = new Map<string, Response>();
+  vi.stubGlobal('caches', {
+    default: {
+      match: async (request: Request) => values.get(request.url)?.clone(),
+      put: async (request: Request, response: Response) => {
+        values.set(request.url, response.clone());
+      },
+    },
+  });
+  const provider = vi.fn(async () => Response.json({ data: [] }));
+  vi.stubGlobal('fetch', provider);
+  const snapshot = vi.fn(async () => ({
+    measured_at: Date.now(),
+    ttl_ms: 45000,
+    total: 0,
+    projects: [],
+  }));
+  const env = {
+    BROWSER_EVENTS: { send: async () => {} },
+    WORKSPACE_PRESENCE: { getByName: () => ({ snapshot }) },
+    CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32),
+    ANALYTICS_ENGINE_QUERY_TOKEN: 'private-query-token',
+  };
+  const owner = { id: 'owner', label: 'Owner', workspaceId: 'workspace', appIds: [] };
+  for (const cold of [true, false]) {
+    const timings: OwnerRequestTimings = {};
+    const response = await handleBrowserOwner(
+      new Request('https://dashboard.example/v1/analytics'),
+      env as never,
+      owner,
+      false,
+      timings,
+    );
+    expect(response?.status).toBe(200);
+    const header = withOwnerServerTiming(response!, timings).headers.get('server-timing')!;
+    for (const name of [
+      'analytics_cache_lookup',
+      'analytics_summary',
+      'analytics_presence',
+      'route_read',
+    ])
+      expect(header).toContain(`${name};dur=`);
+    expect(header.includes('analytics_summary_provider;dur=')).toBe(cold);
+    expect(header).not.toMatch(/private-query-token|workspace/);
+  }
+  expect(provider).toHaveBeenCalledOnce();
+  expect(snapshot).toHaveBeenCalledTimes(2);
+});
+
+it.each(['provider', 'presence'])(
+  'retains summary failure behavior while measuring the failed %s boundary',
+  async (failure) => {
+    vi.stubGlobal('caches', { default: { match: async () => undefined, put: async () => {} } });
+    vi.stubGlobal('fetch', async () =>
+      failure === 'provider' ? new Response(null, { status: 503 }) : Response.json({ data: [] }),
+    );
+    const env = {
+      BROWSER_EVENTS: { send: async () => {} },
+      WORKSPACE_PRESENCE: {
+        getByName: () => ({
+          snapshot: async () => {
+            if (failure === 'presence') throw new Error('unavailable');
+            return { measured_at: Date.now(), ttl_ms: 45000, total: 0, projects: [] };
+          },
+        }),
+      },
+      CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32),
+      ANALYTICS_ENGINE_QUERY_TOKEN: 'private-query-token',
+    };
+    const timings: OwnerRequestTimings = {};
+    const response = await handleBrowserOwner(
+      new Request('https://dashboard.example/v1/analytics'),
+      env as never,
+      { id: 'owner', label: 'Owner', workspaceId: 'workspace', appIds: [] },
+      false,
+      timings,
+    );
+    expect(response?.status).toBe(503);
+    expect(await response!.json()).toEqual({
+      error: 'Browser analytics is temporarily unavailable.',
+    });
+    expect(
+      timings[failure === 'provider' ? 'analyticsSummaryProviderMs' : 'analyticsPresenceMs'],
+    ).toBeTypeOf('number');
+  },
+);

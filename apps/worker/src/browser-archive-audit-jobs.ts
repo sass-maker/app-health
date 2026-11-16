@@ -240,8 +240,15 @@ async function countsForJob(db: D1DatabaseLike, jobId: string): Promise<AuditCou
   const result = await db
     .prepare(
       `SELECT identity_hash, has_receipt, queue_stage_observed,
-              receipt_digest_version, receipt_digest,
-              archive_count, archive_digest_version, archive_digest, archive_in_day
+              receipt_digest_version,
+              CASE WHEN receipt_digest IS NULL THEN NULL
+                WHEN length(CAST(receipt_digest AS BLOB)) = 64 THEN receipt_digest
+                ELSE '' END AS receipt_digest,
+              archive_count, archive_digest_version,
+              CASE WHEN archive_digest IS NULL THEN NULL
+                WHEN length(CAST(archive_digest AS BLOB)) = 64 THEN archive_digest
+                ELSE '' END AS archive_digest,
+              archive_in_day
        FROM browser_archive_audit_facts WHERE job_id = ? LIMIT ?`,
     )
     .bind(jobId, MAX_FACT_ROWS + 1)
@@ -1054,20 +1061,24 @@ export async function processBrowserArchiveAuditJob(
 ) {
   const { db } = bindings;
   const job = await getJob(db, workspace, jobId);
-  if (!job || job.expires_at <= now || ['finished', 'incomplete'].includes(job.status)) return;
+  if (!job || job.expires_at <= now || ['finished', 'incomplete'].includes(job.status))
+    return false;
   const leaseToken = crypto.randomUUID();
   const claimed = await db
     .prepare(
       `UPDATE browser_archive_audit_jobs SET lease_token = ?, lease_until = ?
        WHERE job_id = ? AND workspace_id = ? AND expires_at > ?
          AND status IN ('queued', 'running')
-         AND (lease_token IS NULL OR lease_until <= ?)`,
+         AND (lease_token IS NULL OR lease_until <= ?)
+         AND job_id = (SELECT job_id FROM browser_archive_audit_jobs
+           WHERE status IN ('queued', 'running') AND expires_at > ?
+           ORDER BY created_at, job_id LIMIT 1)`,
     )
-    .bind(leaseToken, now + SLICE_LEASE_MS, jobId, workspace, now, now)
+    .bind(leaseToken, now + SLICE_LEASE_MS, jobId, workspace, now, now, now)
     .run();
-  if ((claimed.meta.changes ?? 0) !== 1) return;
+  if ((claimed.meta.changes ?? 0) !== 1) return false;
   const claimedJob = await getJob(db, workspace, jobId);
-  if (!claimedJob || claimedJob.lease_token !== leaseToken) return;
+  if (!claimedJob || claimedJob.lease_token !== leaseToken) return false;
   try {
     if (claimedJob.phase === 'receipts')
       await processReceiptSlice(db, claimedJob, bindings, now, leaseToken);
@@ -1075,6 +1086,7 @@ export async function processBrowserArchiveAuditJob(
       await processArchiveIndexSlice(db, claimedJob, bindings, now, leaseToken);
     else if (claimedJob.phase === 'finalize')
       await finalizeAuditJob(db, claimedJob, now, leaseToken);
+    return true;
   } catch (error) {
     throw new AuditLeaseError(
       error instanceof Error ? error.message : 'audit slice failed',
@@ -1130,6 +1142,87 @@ export async function cleanupExpiredBrowserArchiveAuditJobs(db: D1DatabaseLike, 
     .run();
 }
 
+export type BrowserArchiveAuditSliceOutcome =
+  | {
+      outcome: 'not_found' | 'not_admitted' | 'terminal';
+      attempted_slices: 0;
+      lease_acquired: false;
+    }
+  | { outcome: 'busy'; attempted_slices: 1; lease_acquired: false }
+  | { outcome: 'advanced' | 'failed'; attempted_slices: 1; lease_acquired: true };
+
+async function recordAuditSliceFailure(
+  bindings: BrowserArchiveAuditJobBindings,
+  job: JobRow,
+  error: AuditLeaseError,
+  now: number,
+) {
+  const message = error.message;
+  const terminalReason = [
+    'audit fact row cap',
+    'audit segment cap',
+    'audit receipt cap',
+    'audit fact slice cap',
+    'audit archive fact cap',
+  ].includes(message)
+    ? message.replaceAll(' ', '_')
+    : message === 'archive segment snapshot changed'
+      ? 'archive_segment_snapshot_changed'
+      : message.includes('snapshot changed')
+        ? 'archive_index_snapshot_changed'
+        : message.includes('receipt snapshot')
+          ? 'receipt_snapshot_changed'
+          : null;
+  if (terminalReason) await markIncomplete(bindings.db, job, terminalReason, now, error.leaseToken);
+  else if (job.slice_failures + 1 >= 3)
+    await markIncomplete(bindings.db, job, 'audit_slice_retries_exhausted', now, error.leaseToken);
+  else
+    await bindings.db
+      .prepare(
+        `UPDATE browser_archive_audit_jobs
+      SET slice_failures = slice_failures + 1, lease_token = NULL, lease_until = NULL, updated_at = ?
+      WHERE job_id = ? AND lease_token = ?`,
+      )
+      .bind(now, job.job_id, error.leaseToken)
+      .run();
+}
+
+/** The scheduler and operator share global admission, lease claims and failure handling. */
+export async function advanceBrowserArchiveAuditJob(
+  bindings: BrowserArchiveAuditJobBindings,
+  workspace: string,
+  jobId: string,
+  now = Date.now(),
+): Promise<BrowserArchiveAuditSliceOutcome> {
+  const job = await getJob(bindings.db, workspace, jobId);
+  if (!job || job.expires_at <= now)
+    return { outcome: 'not_found', attempted_slices: 0, lease_acquired: false };
+  if (['finished', 'incomplete'].includes(job.status))
+    return { outcome: 'terminal', attempted_slices: 0, lease_acquired: false };
+  const admitted = await bindings.db
+    .prepare(
+      `SELECT job_id, workspace_id FROM browser_archive_audit_jobs
+    WHERE status IN ('queued', 'running') AND expires_at > ?
+    ORDER BY created_at, job_id LIMIT 1`,
+    )
+    .bind(now)
+    .first<{ job_id: string; workspace_id: string }>();
+  if (admitted?.job_id !== jobId || admitted.workspace_id !== workspace)
+    return { outcome: 'not_admitted', attempted_slices: 0, lease_acquired: false };
+  try {
+    const acquired = await processBrowserArchiveAuditJob(bindings, workspace, jobId, now);
+    return acquired
+      ? { outcome: 'advanced', attempted_slices: 1, lease_acquired: true }
+      : { outcome: 'busy', attempted_slices: 1, lease_acquired: false };
+  } catch (error) {
+    if (!(error instanceof AuditLeaseError)) throw error;
+    const current = await getJob(bindings.db, workspace, jobId);
+    if (current?.lease_token === error.leaseToken)
+      await recordAuditSliceFailure(bindings, current, error, now);
+    return { outcome: 'failed', attempted_slices: 1, lease_acquired: true };
+  }
+}
+
 /** Scheduled driver: one globally admitted job, with three fixed-work slices per hourly trigger. */
 export async function processPendingBrowserArchiveAuditJobs(
   bindings: BrowserArchiveAuditJobBindings,
@@ -1137,59 +1230,21 @@ export async function processPendingBrowserArchiveAuditJobs(
 ) {
   const jobs = await bindings.db
     .prepare(
-      "SELECT job_id, workspace_id FROM browser_archive_audit_jobs WHERE status IN ('queued', 'running') AND expires_at > ? ORDER BY created_at LIMIT 1",
+      `SELECT job_id, workspace_id FROM browser_archive_audit_jobs
+    WHERE status IN ('queued', 'running') AND expires_at > ?
+    ORDER BY created_at, job_id LIMIT 1`,
     )
     .bind(now)
     .all<{ job_id: string; workspace_id: string }>();
   const job = jobs.results[0];
   if (!job) return;
   for (let slice = 0; slice < 3; slice++) {
-    const current = await getJob(bindings.db, job.workspace_id, job.job_id);
-    if (!current || ['finished', 'incomplete'].includes(current.status)) break;
-    try {
-      await processBrowserArchiveAuditJob(bindings, job.workspace_id, job.job_id, now + slice);
-    } catch (error) {
-      const leaseToken = error instanceof AuditLeaseError ? error.leaseToken : null;
-      if (!leaseToken) break;
-      const message = error instanceof AuditLeaseError ? error.message : '';
-      const terminalReason =
-        message &&
-        [
-          'audit fact row cap',
-          'audit segment cap',
-          'audit receipt cap',
-          'audit fact slice cap',
-          'audit archive fact cap',
-        ].includes(message)
-          ? message.replaceAll(' ', '_')
-          : message === 'archive segment snapshot changed'
-            ? 'archive_segment_snapshot_changed'
-            : message.includes('snapshot changed')
-              ? 'archive_index_snapshot_changed'
-              : message.includes('receipt snapshot')
-                ? 'receipt_snapshot_changed'
-                : null;
-      if (terminalReason) {
-        await markIncomplete(bindings.db, current, terminalReason, now + slice, leaseToken);
-      } else if (current.slice_failures + 1 >= 3) {
-        await markIncomplete(
-          bindings.db,
-          current,
-          'audit_slice_retries_exhausted',
-          now + slice,
-          leaseToken,
-        );
-      } else {
-        await bindings.db
-          .prepare(
-            `UPDATE browser_archive_audit_jobs SET slice_failures = slice_failures + 1,
-             lease_token = NULL, lease_until = NULL, updated_at = ?
-             WHERE job_id = ? AND lease_token = ?`,
-          )
-          .bind(now + slice, current.job_id, leaseToken)
-          .run();
-      }
-      break;
-    }
+    const result = await advanceBrowserArchiveAuditJob(
+      bindings,
+      job.workspace_id,
+      job.job_id,
+      now + slice,
+    );
+    if (result.outcome !== 'advanced') break;
   }
 }
