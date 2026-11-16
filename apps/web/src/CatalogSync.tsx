@@ -170,21 +170,31 @@ function CatalogSyncCard({
     <Card className="gap-3 py-5 shadow-none">
       <CardHeader className="px-5 py-0">
         <CardTitle className="text-sm">SaaS Maker catalog</CardTitle>
-        {status?.project_count != null ? (
-          <p className="text-sm font-medium">SaaS Maker · {status.project_count} active projects</p>
-        ) : null}
-        {status?.updated_at ? (
-          <p className="text-xs text-muted-foreground">
-            Last synchronized{' '}
-            <time dateTime={new Date(status.updated_at).toISOString()}>
-              {new Date(status.updated_at).toLocaleString()}
-            </time>
-          </p>
-        ) : null}
+        <p className="text-sm font-medium">
+          {status?.project_count != null
+            ? `SaaS Maker · ${status.project_count} active projects`
+            : status
+              ? 'No catalog imported yet'
+              : message
+                ? 'Catalog status unavailable'
+                : 'Loading catalog status…'}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {status?.updated_at ? (
+            <>
+              Last synchronized{' '}
+              <time dateTime={new Date(status.updated_at).toISOString()}>
+                {new Date(status.updated_at).toLocaleString()}
+              </time>
+            </>
+          ) : (
+            'Review the active portfolio below.'
+          )}
+        </p>
       </CardHeader>
       <CardContent className="space-y-3 px-5 py-0">
         <CatalogPublishers />
-        <details open={!status?.project_count || Boolean(preview)}>
+        <details open={Boolean(preview)}>
           <summary className="cursor-pointer text-xs font-medium">
             {status?.project_count ? 'Update from catalog' : 'Import active portfolio'}
           </summary>
