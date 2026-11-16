@@ -558,19 +558,6 @@
       }
     },
     {
-      "project": "agent-inbox",
-      "journey": "home",
-      "url": "https://agentinbox.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "Agent Inbox"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
       "project": "techdata",
       "journey": "home",
       "url": "https://data.highsignal.app/",
