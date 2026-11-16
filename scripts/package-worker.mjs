@@ -40,9 +40,17 @@ export function workerPackageArguments(mode, sha, args = []) {
 
 function sourceState(root) {
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-  const changed = execFileSync('git', ['diff', '--name-only', '-z', 'HEAD'], { cwd: root, encoding: 'utf8' });
-  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8' });
-  const dirtySource = `${changed}${untracked}`.split('\0').some((file) => file && !file.startsWith('.fleet/evidence/'));
+  const changed = execFileSync('git', ['diff', '--name-only', '-z', 'HEAD'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], {
+    cwd: root,
+    encoding: 'utf8',
+  });
+  const dirtySource = `${changed}${untracked}`
+    .split('\0')
+    .some((file) => file && !file.startsWith('.fleet/evidence/'));
   if (!/^[a-f0-9]{40}$/.test(sha) || dirtySource)
     throw new Error('Worker packaging requires clean committed source inputs');
   return sha;

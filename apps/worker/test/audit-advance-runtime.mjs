@@ -161,14 +161,25 @@ export async function verifyAuditAdvanceRuntime({ runtime, db, secret }) {
         .update(`${scope.app_id}\0${scope.environment_id}\0${session}`)
         .digest('hex'),
       events: [event],
-      attribution: {source:'',medium:'',campaign:'',content:'',term:'',entry_path:'/native-audit'},
+      attribution: {
+        source: '',
+        medium: '',
+        campaign: '',
+        content: '',
+        term: '',
+        entry_path: '/native-audit',
+      },
       facts_digest_version: receipt.expanded_facts_digest ? 2 : receipt.facts_digest_version,
       facts_digest: receipt.expanded_facts_digest ?? receipt.facts_digest,
     };
-    const staged = await runtime.dispatchFetch('https://dashboard.example.com/__native__/archive-stage', {
-      method:'POST',body:JSON.stringify({name:shardFor(workspace,collected),batches:[collected]}),
-    });
-    assert.equal(staged.status,200,await staged.clone().text());
+    const staged = await runtime.dispatchFetch(
+      'https://dashboard.example.com/__native__/archive-stage',
+      {
+        method: 'POST',
+        body: JSON.stringify({ name: shardFor(workspace, collected), batches: [collected] }),
+      },
+    );
+    assert.equal(staged.status, 200, await staged.clone().text());
   }
   const startedResponse = await request(`/v1/browser/archive-audits?day=${day}`, {});
   assert.equal(startedResponse.status, 202, await startedResponse.clone().text());
@@ -243,11 +254,29 @@ export async function verifyAuditAdvanceRuntime({ runtime, db, secret }) {
     403,
   );
   const otherToken = randomUUID();
-  await db.prepare('INSERT INTO session(id,token,userId,expiresAt,createdAt,updatedAt)VALUES(?,?,?,?,?,?)')
-    .bind('audit-native-other-session',otherToken,otherUser,new Date(Date.now()+300_000).toISOString(),new Date().toISOString(),new Date().toISOString()).run();
-  const otherSignature = await makeSignature(otherToken,secret);
+  await db
+    .prepare(
+      'INSERT INTO session(id,token,userId,expiresAt,createdAt,updatedAt)VALUES(?,?,?,?,?,?)',
+    )
+    .bind(
+      'audit-native-other-session',
+      otherToken,
+      otherUser,
+      new Date(Date.now() + 300_000).toISOString(),
+      new Date().toISOString(),
+      new Date().toISOString(),
+    )
+    .run();
+  const otherSignature = await makeSignature(otherToken, secret);
   const otherCookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${otherToken}.${otherSignature}`)}`;
-  assert.equal((await dispatch(path,{headers:{cookie:otherCookie,'x-app-health-workspace':otherWorkspace}})).status,404);
+  assert.equal(
+    (
+      await dispatch(path, {
+        headers: { cookie: otherCookie, 'x-app-health-workspace': otherWorkspace },
+      })
+    ).status,
+    404,
+  );
   await db
     .prepare('UPDATE browser_archive_audit_jobs SET lease_token=?,lease_until=? WHERE job_id=?')
     .bind('held-native', Date.now() + 300_000, started.job_id)
