@@ -36,7 +36,7 @@ function localFailureHint(code: string) {
   if (code === 'install_required')
     return 'Run the publisher install command first, then pair this Mac.';
   if (['connection_inactive', 'credential_unavailable', 'configuration_unavailable'].includes(code))
-    return 'Run pair again, then approve the new connection in App Health.';
+    return 'Run pair, then approve the connection in App Health.';
   return undefined;
 }
 function command(program: string, args: string[], input?: string) {

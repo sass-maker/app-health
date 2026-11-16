@@ -251,7 +251,7 @@ it('replaces successful local status when current configuration or Keychain retr
   expect(status).toMatchObject({
     state: 'error',
     error: 'credential_unavailable',
-    hint: expect.stringContaining('pair again'),
+    hint: expect.stringContaining('Run pair, then approve'),
   });
   expect(JSON.stringify(status)).not.toContain('PRIVATE_KEYCHAIN_CANARY');
   await writeFile(join(f.directory, 'connection.json'), 'INVALID_PRIVATE_CANARY');

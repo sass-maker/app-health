@@ -375,7 +375,10 @@ async function approve(request: Request, db: D1DatabaseLike, workspace: string, 
     .first<{ id: string }>();
   return approved
     ? json(200, { publisher_id: approved.id })
-    : json(409, { error: 'Connection expired, already approved, or connection limit reached' });
+    : json(409, {
+        error:
+          'Connection or outside projects changed, or the connection limit was reached. Review and retry; pair again if the code expired.',
+      });
 }
 
 async function reviewOutside(request: Request, db: D1DatabaseLike, workspace: string, now: number) {
