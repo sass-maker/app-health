@@ -51,6 +51,51 @@ for (const theme of ['dark', 'light']) {
         ),
       )
       .toBeLessThanOrEqual(1);
+    const footer = page.locator('studio-footer');
+    const styles = await footer.evaluate((element) => {
+      const mode = element.getAttribute('data-mode');
+      const parent = element.parentElement!;
+      const font = parent.style.getPropertyValue('font-family');
+      const priority = parent.style.getPropertyPriority('font-family');
+      const pageStyle = () => {
+        const style = getComputedStyle(document.documentElement);
+        return { color: style.color, background: style.backgroundColor, font: style.fontFamily };
+      };
+      const reading = () => {
+        const style = getComputedStyle(element);
+        return { background: style.getPropertyValue('--background'), color: style.color };
+      };
+      const beforePage = pageStyle();
+      const beforeFont = getComputedStyle(element).fontFamily;
+      try {
+        element.setAttribute('data-mode', 'light');
+        const light = reading();
+        element.setAttribute('data-mode', 'dark');
+        const dark = reading();
+        parent.style.setProperty('font-family', '"Courier New", monospace', 'important');
+        return {
+          light,
+          dark,
+          beforePage,
+          afterPage: pageStyle(),
+          beforeFont,
+          isolatedFont: getComputedStyle(element).fontFamily,
+          parentFont: getComputedStyle(parent).fontFamily,
+        };
+      } finally {
+        if (mode === null) element.removeAttribute('data-mode');
+        else element.setAttribute('data-mode', mode);
+        if (font) parent.style.setProperty('font-family', font, priority);
+        else parent.style.removeProperty('font-family');
+      }
+    });
+    expect(styles.dark.background).not.toBe(styles.light.background);
+    expect(styles.dark.color).not.toBe(styles.light.color);
+    expect(styles.afterPage).toEqual(styles.beforePage);
+    expect(styles.beforeFont).toContain('Inter');
+    expect(styles.parentFont).toContain('Courier New');
+    expect(styles.isolatedFont).toBe(styles.beforeFont);
+    await expect.poll(() => heading.boundingBox()).toEqual(before);
   });
 }
 
