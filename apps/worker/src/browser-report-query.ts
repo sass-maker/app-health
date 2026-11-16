@@ -36,6 +36,7 @@ type QueryOptions = {
   appIds?: readonly string[];
   timings?: AnalyticsReportTimings;
   signal?: AbortSignal;
+  deadlineAt?: number;
 };
 
 interface QueryResponse {
@@ -67,11 +68,17 @@ const number = (value: unknown): number => {
   return n;
 };
 const sampleInterval = (value: unknown): number => (value == null ? 0 : number(value));
-async function query(sql: string, options: QueryOptions): Promise<QueryRow[]> {
+function assertProviderDeadline(options: QueryOptions) {
   options.signal?.throwIfAborted();
+  if (options.deadlineAt !== undefined && performance.now() >= options.deadlineAt)
+    throw new DOMException('Analytics deadline elapsed', 'TimeoutError');
+}
+async function query(sql: string, options: QueryOptions): Promise<QueryRow[]> {
+  assertProviderDeadline(options);
   const response = await browserQuery(sql, options);
   if (!response.ok) throw new Error('event reports unavailable');
   const body = (await response.json()) as QueryResponse;
+  assertProviderDeadline(options);
   if (!Array.isArray(body.data) || body.data.length > 100)
     throw new Error('invalid analytical response');
   return body.data;
@@ -244,6 +251,7 @@ async function loadReport(
   step: number,
   options: QueryOptions,
 ) {
+  const deadlineAt = performance.now() + 10_000;
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new DOMException('Analytics deadline elapsed', 'TimeoutError')),
@@ -253,6 +261,7 @@ async function loadReport(
     return await loadReportRows(workspace, filter, from, to, step, {
       ...options,
       signal: controller.signal,
+      deadlineAt,
     });
   } catch (error) {
     controller.abort(error);
@@ -421,7 +430,7 @@ async function chooseRankings(args: {
   if (args.options.timings) args.options.timings.analyticsJointFallbacks = 1;
   const fallbackStarted = performance.now();
   try {
-    args.options.signal?.throwIfAborted();
+    assertProviderDeadline(args.options);
     return await original();
   } finally {
     if (args.options.timings)
@@ -433,16 +442,18 @@ async function queryJoint(sql: string, options: QueryOptions): Promise<unknown> 
   const started = performance.now();
   if (options.timings) options.timings.analyticsJointAttempts = 1;
   try {
-    options.signal?.throwIfAborted();
+    assertProviderDeadline(options);
     const response = await browserQuery(sql, options);
     if (!response.ok) throw new Error('event reports unavailable');
     let body: unknown;
     try {
       body = await response.json();
     } catch (error) {
+      assertProviderDeadline(options);
       if (error instanceof SyntaxError) return undefined;
       throw error;
     }
+    assertProviderDeadline(options);
     return body && typeof body === 'object' && 'data' in body ? body.data : undefined;
   } finally {
     if (options.timings) options.timings.analyticsJointMs = performance.now() - started;

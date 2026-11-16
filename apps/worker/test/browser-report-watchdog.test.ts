@@ -394,3 +394,20 @@ it('cancels all started requests on mandatory failure without unhandled page rej
   expect(signals.length).toBeGreaterThanOrEqual(5);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
 });
+
+it('enforces the absolute deadline even before its abort timer can be dispatched', async () => {
+  fixture.seed();
+  let clock = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  const provider = fixture.provider({
+    transform: (sql, rows) => {
+      if (isJoint(sql)) clock = 10_001;
+      return rows;
+    },
+  });
+  await expect(
+    queryBrowserReport('workspace', reportScope, { ...options, fetchImpl: provider.fetchImpl }),
+  ).rejects.toThrow('Analytics deadline elapsed');
+  expect(provider.queries).toHaveLength(6);
+  expect(provider.queries.filter(isPages)).toHaveLength(1);
+});
