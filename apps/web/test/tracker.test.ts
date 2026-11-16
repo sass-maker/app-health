@@ -28,9 +28,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('ships under 4.4KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
+it('ships under 4.5KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
   // The bundled transactional identity authority adds no extra script request or CSP permission.
-  expect(gzipSync(source).length).toBeLessThanOrEqual(4400);
+  expect(gzipSync(source).length).toBeLessThanOrEqual(4500);
   api().page('/users/123?email=private@example.com#token');
   api().track('signup.completed');
   await api().flush();

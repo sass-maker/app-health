@@ -199,7 +199,6 @@
           const transaction = db.transaction('scopes', 'readwrite');
           const timeout = setTimeout(cancel, 2000);
           let candidate;
-          let retireLegacy = false;
           const finish = () => {
             clearTimeout(timeout);
             transactions.delete(transaction);
@@ -221,13 +220,13 @@
             finish();
             if (!enabled() || generation !== version)
               return reject(new Error('Identity cancelled'));
-            if (retireLegacy && candidate) {
+            if (meaningful && candidate) {
               try {
                 storage.setItem(migratedKey, '1');
-                storage.removeItem(visitorKey);
-                storage.removeItem(visitKey);
+                storage.setItem(visitorKey, JSON.stringify(candidate.visitor));
+                storage.setItem(visitKey, JSON.stringify(candidate.visit));
               } catch {
-                /* The canonical record committed; retry legacy retirement on the next operation. */
+                /* The canonical record committed; retry the old-tab mirror on the next action. */
               }
             }
             resolve(candidate);
@@ -240,11 +239,11 @@
               const now = Date.now();
               let saved = reading.result;
               if (!saved && !meaningful) return;
-              retireLegacy = storage.getItem(migratedKey) !== '1';
               if (!saved)
-                saved = retireLegacy
-                  ? { visitor: readLegacy(visitorKey), visit: readLegacy(visitKey) }
-                  : {};
+                saved =
+                  storage.getItem(migratedKey) !== '1'
+                    ? { visitor: readLegacy(visitorKey), visit: readLegacy(visitKey) }
+                    : {};
               const previousVisitor = saved.visitor;
               const known =
                 previousVisitor &&
@@ -255,6 +254,18 @@
                 ? { id: previousVisitor.id, expires: previousVisitor.expires }
                 : { id: crypto.randomUUID(), expires: now + 90 * 86400000 };
               let current = saved.visit;
+              if (meaningful && known && validVisit(current)) {
+                const legacy = readLegacy(visitKey);
+                if (
+                  legacy?.id === current.id &&
+                  legacy.visitor_id === visitor.id &&
+                  Number.isFinite(legacy.last) &&
+                  legacy.last > current.last &&
+                  legacy.last <= now &&
+                  now - legacy.last < 1800000
+                )
+                  current = { ...current, last: legacy.last };
+              }
               if (
                 !validVisit(current) ||
                 !['new', 'returning'].includes(current.type) ||

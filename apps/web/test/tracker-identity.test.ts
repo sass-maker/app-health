@@ -79,8 +79,8 @@ it('imports a matching legacy identity once and preserves its original attributi
     attribution: original.visit.attribution,
   });
   expect(await identityRecord(scope)).toEqual(original);
-  expect(localStorage.getItem(`h:${scope}:v`)).toBeNull();
-  expect(localStorage.getItem(`h:${scope}:w`)).toBeNull();
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(original.visit);
   expect(localStorage.getItem(`h:${scope}:m`)).toBe('1');
   seedLegacy(legacy());
   api().stop();
@@ -253,12 +253,13 @@ it.each(['v', 'w'] as const)(
     expect(batches()[0].visitor_id).toBeTruthy();
     expect(await identityRecord(scope)).toBeDefined();
     if (key === 'w') expect(batches()[0].visitor_id).toBe(original.visitor.id);
-    expect(localStorage.getItem(`h:${scope}:v`)).toBeNull();
-    expect(localStorage.getItem(`h:${scope}:w`)).toBeNull();
+    const committed = await committedIdentity(scope);
+    expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(committed.visitor);
+    expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(committed.visit);
   },
 );
 
-it('retries interrupted legacy retirement without discarding the committed authority', async () => {
+it('retries an interrupted compatibility mirror on the next action without discarding authority', async () => {
   const original = legacy();
   seedLegacy(original);
   const set = Storage.prototype.setItem;
@@ -266,7 +267,7 @@ it('retries interrupted legacy retirement without discarding the committed autho
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
     if (!interrupted && key === `h:${scope}:m` && value === '1') {
       interrupted = true;
-      throw new Error('Retirement interrupted');
+      throw new Error('Mirror interrupted');
     }
     set.call(this, key, value);
   });
@@ -276,13 +277,16 @@ it('retries interrupted legacy retirement without discarding the committed autho
   expect((await identityRecord(scope))?.visitor).toEqual(original.visitor);
   expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
   await api().flush();
+  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  api().track('retry_mirror');
+  await api().flush();
   expect(localStorage.getItem(`h:${scope}:m`)).toBe('1');
-  expect(localStorage.getItem(`h:${scope}:v`)).toBeNull();
-  expect(localStorage.getItem(`h:${scope}:w`)).toBeNull();
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(original.visit);
   expect(batches().every((batch) => batch.session_id === original.visit.id)).toBe(true);
 });
 
-it('does not migrate or retire legacy IDs during a read-only refresh with no canonical record', async () => {
+it('does not migrate or mirror legacy IDs during a read-only refresh with no canonical record', async () => {
   const original = legacy();
   seedLegacy(original);
   const set = Storage.prototype.setItem;
@@ -290,7 +294,7 @@ it('does not migrate or retire legacy IDs during a read-only refresh with no can
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
     if (!interrupted && key === `h:${scope}:m` && value === '1') {
       interrupted = true;
-      throw new Error('Retirement interrupted');
+      throw new Error('Mirror interrupted');
     }
     set.call(this, key, value);
   });
@@ -385,3 +389,134 @@ it.each(['absent', 'throws', 'blocked'] as const)(
     expect(second.visit_type).toBeUndefined();
   },
 );
+
+it.each([
+  'matching',
+  'different-visitor',
+  'different-session',
+  'future',
+  'nonfinite',
+  'expired-visitor',
+  'inactive',
+] as const)('reconciles only bounded matching old-tab activity: %s', async (kind) => {
+  const original = legacy();
+  original.visit.last = Date.now() - 1800001;
+  if (kind === 'expired-visitor') original.visitor.expires = Date.now();
+  await identityRecord(scope, () => original);
+  const mirror = structuredClone(original);
+  mirror.visit.last = Date.now() - 1000;
+  mirror.visit.type = 'new';
+  mirror.visit.attribution.source = 'must-not-import';
+  mirror.visitor.expires = Date.now() + 90 * 86400000;
+  if (kind === 'different-visitor') mirror.visit.visitor_id = crypto.randomUUID();
+  if (kind === 'different-session') mirror.visit.id = crypto.randomUUID();
+  if (kind === 'future') mirror.visit.last = Date.now() + 1;
+  if (kind === 'nonfinite') mirror.visit.last = Number.NaN;
+  if (kind === 'inactive') mirror.visit.last = Date.now() - 1800000;
+  seedLegacy(mirror);
+  localStorage.setItem(`h:${scope}:m`, '1');
+  await install();
+  await api().flush();
+  const committedAt = Date.now();
+  const current = (await identityRecord(scope))!;
+  expect(current.visit.id === original.visit.id).toBe(kind === 'matching');
+  expect(current.visitor.id === original.visitor.id).toBe(kind !== 'expired-visitor');
+  expect(current.visitor.expires).toBe(
+    kind === 'expired-visitor' ? committedAt + 90 * 86400000 : original.visitor.expires,
+  );
+  if (kind === 'matching') {
+    expect(current.visit.type).toBe(original.visit.type);
+    expect(current.visit.attribution).toEqual(original.visit.attribution);
+  }
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(current.visitor);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(current.visit);
+});
+
+it('does not reconcile or mirror matching legacy activity during a read-only refresh', async () => {
+  await install();
+  await api().flush();
+  const original = await committedIdentity(scope);
+  const current = structuredClone(original);
+  current.visit.last = Date.now() - 1800001;
+  await identityRecord(scope, () => current);
+  const mirror = structuredClone(original);
+  mirror.visit.last = Date.now() - 1000;
+  seedLegacy(mirror);
+  const set = vi.spyOn(Storage.prototype, 'setItem');
+  await api().flush();
+  expect(set).not.toHaveBeenCalled();
+  expect(await identityRecord(scope)).toEqual(current);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(mirror.visit);
+});
+
+it.each(['consent', 'ignore', 'stop'] as const)(
+  'never mirrors an aborted transaction after %s',
+  async (gate) => {
+    const original = legacy();
+    seedLegacy(original);
+    const set = vi.spyOn(Storage.prototype, 'setItem');
+    const put = IDBObjectStore.prototype.put;
+    vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+      this: IDBObjectStore,
+      ...args
+    ) {
+      const request = put.apply(this, args);
+      if (gate === 'consent') api().consent(false);
+      else if (gate === 'ignore') api().ignore();
+      else api().stop();
+      return request;
+    });
+    await install();
+    const client = api();
+    await client?.flush();
+    await vi.waitFor(async () => expect(await identityRecord(scope)).toBeUndefined());
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      set.mock.calls.filter(([key]) => [`h:${scope}:v`, `h:${scope}:w`].includes(key)),
+    ).toEqual([]);
+    expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
+    expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(original.visit);
+  },
+);
+
+it.each(['m', 'v', 'w'] as const)(
+  'keeps committed identity when the postcommit :%s compatibility write fails',
+  async (suffix) => {
+    const original = legacy();
+    seedLegacy(original);
+    const set = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key === `h:${scope}:${suffix}` && (suffix !== 'm' || value === '1'))
+        throw new Error('Mirror denied');
+      set.call(this, key, value);
+    });
+    await install();
+    await api().flush();
+    api().track('next');
+    await api().flush();
+    expect(batches()).toHaveLength(2);
+    expect(
+      batches().every(
+        (batch) =>
+          batch.visitor_id === original.visitor.id && batch.session_id === original.visit.id,
+      ),
+    ).toBe(true);
+    expect((await committedIdentity(scope)).visitor).toEqual(original.visitor);
+  },
+);
+
+it('resets both stores only when all site identity data is cleared', async () => {
+  await install();
+  await api().flush();
+  const original = batches()[0];
+  api().stop();
+  localStorage.clear();
+  await identityRecord(scope, () => undefined);
+  await install();
+  await api().flush();
+  const current = await committedIdentity(scope);
+  expect(current.visitor.id).not.toBe(original.visitor_id);
+  expect(current.visit.id).not.toBe(original.session_id);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(current.visitor);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(current.visit);
+});

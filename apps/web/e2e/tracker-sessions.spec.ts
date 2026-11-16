@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
+import { readFileSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { BrowserBatchV1 } from '@app-health/contracts';
 
@@ -17,13 +18,21 @@ async function fixture(
 ) {
   let key = '';
   server = createServer((req, res) => {
+    if (req.url === '/tracker-legacy.js') {
+      res.setHeader('content-type', 'text/javascript');
+      res.end(readFileSync(new URL('./fixtures/tracker-d3be57c.txt', import.meta.url)));
+      return;
+    }
+    const tracker = req.url?.includes('version=legacy')
+      ? '/tracker-legacy.js'
+      : `${baseURL}/tracker.js`;
     if (req.url === '/fixture/redirect') {
       res.writeHead(302, { location: '/fixture/landing' }).end();
       return;
     }
     res.setHeader('content-type', 'text/html');
     res.end(
-      `<!doctype html><title>Tracker fixture</title><a href="/fixture/next">Next</a>${req.url?.startsWith('/fixture/') ? `<script src="${baseURL}/tracker.js" data-key="${key}" data-endpoint="${baseURL}/v1/browser" ${attributes}></script>` : ''}`,
+      `<!doctype html><title>Tracker fixture</title><a href="/fixture/next">Next</a>${req.url?.startsWith('/fixture/') ? `<script src="${tracker}" data-key="${key}" data-endpoint="${baseURL}/v1/browser" ${attributes}></script>` : ''}`,
     );
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -578,4 +587,86 @@ test('cookieless identity stays in memory and checkout metadata contains only sa
   await flush(page);
   expect(batches[2].session_id).not.toBe(first.session_id);
   expect(JSON.stringify(batches)).not.toContain('private');
+});
+
+test('old and new tracker tabs plus an old-script rollback share one collector identity', async ({
+  context,
+  request,
+  baseURL,
+}) => {
+  // Byte-for-byte pre-IDB tracker fixture from d3be57c; no synthetic legacy writer.
+  const project = await fixture(request, baseURL!);
+  const oldTab = await context.newPage();
+  const newTab = await context.newPage();
+  const oldBatches = receipts(oldTab);
+  const newBatches = receipts(newTab);
+  await oldTab.goto(`${project.origin}/fixture/landing?version=legacy`);
+  await flush(oldTab);
+  const original = oldBatches[0];
+  expect(original.visitor_id).toBeTruthy();
+  await newTab.goto(`${project.origin}/fixture/landing`);
+  await flush(newTab);
+  await oldTab.evaluate(() => window.appHealth!.track('old_after_migration'));
+  await flush(oldTab);
+  await newTab.evaluate(() => window.appHealth!.track('new_after_old'));
+  await flush(newTab);
+  await oldTab.reload();
+  await flush(oldTab);
+  for (const batch of [...oldBatches, ...newBatches]) {
+    expect(batch.visitor_id).toBe(original.visitor_id);
+    expect(batch.session_id).toBe(original.session_id);
+  }
+  const mirror = await newTab.evaluate(
+    (key) => ({
+      visitor: JSON.parse(localStorage.getItem(`h:${key}:v`)!),
+      visit: JSON.parse(localStorage.getItem(`h:${key}:w`)!),
+      marker: localStorage.getItem(`h:${key}:m`),
+    }),
+    project.key,
+  );
+  expect(mirror.visitor.id).toBe(original.visitor_id);
+  expect(mirror.visit.id).toBe(original.session_id);
+  expect(mirror.marker).toBe('1');
+  await expect
+    .poll(async () => (await report(request, project)).audience)
+    .toMatchObject({
+      visitors: 1,
+      new_sessions: 1,
+      returning_sessions: 0,
+      unidentified_sessions: 0,
+    });
+  expect((await report(request, project)).sessions).toBe(1);
+  expect(oldBatches).toHaveLength(3);
+  expect(newBatches).toHaveLength(2);
+
+  // The old tab stayed active while the canonical record aged past the inactivity limit.
+  await newTab.evaluate(async (key) => {
+    const opening = indexedDB.open('app-health-identity', 1);
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      opening.onsuccess = () => resolve(opening.result);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('scopes', 'readwrite');
+      const store = tx.objectStore('scopes');
+      const get = store.get(key);
+      get.onsuccess = () =>
+        store.put(
+          { ...get.result, visit: { ...get.result.visit, last: Date.now() - 1800001 } },
+          key,
+        );
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+  }, project.key);
+  await oldTab.evaluate(() => window.appHealth!.track('old_still_active'));
+  await flush(oldTab);
+  await newTab.evaluate(() => window.appHealth!.track('new_reconciles_old_activity'));
+  await flush(newTab);
+  expect(oldBatches.at(-1)!.session_id).toBe(original.session_id);
+  expect(newBatches.at(-1)!.session_id).toBe(original.session_id);
+  expect(newBatches.at(-1)!.visitor_id).toBe(original.visitor_id);
+  expect((await report(request, project)).sessions).toBe(1);
+  expect((await report(request, project)).audience.visitors).toBe(1);
+  await Promise.all([oldTab.close(), newTab.close()]);
 });
