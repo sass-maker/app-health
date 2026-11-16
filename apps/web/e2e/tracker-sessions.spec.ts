@@ -600,7 +600,7 @@ test('old and new tracker tabs plus an old-script rollback share one collector i
   const newTab = await context.newPage();
   const oldBatches = receipts(oldTab);
   const newBatches = receipts(newTab);
-  await oldTab.goto(`${project.origin}/fixture/landing?version=legacy`);
+  await oldTab.goto(`${project.origin}/fixture/landing?version=legacy&utm_source=launch`);
   await flush(oldTab);
   const original = oldBatches[0];
   expect(original.visitor_id).toBeTruthy();
@@ -661,6 +661,13 @@ test('old and new tracker tabs plus an old-script rollback share one collector i
   }, project.key);
   await oldTab.evaluate(() => window.appHealth!.track('old_still_active'));
   await flush(oldTab);
+  await flush(newTab);
+  expect(newBatches.at(-1)!.events).toEqual([]);
+  expect(newBatches.at(-1)!.session_id).toBe(original.session_id);
+  expect(await newTab.evaluate(() => window.appHealth!.checkoutMetadata())).toMatchObject({
+    app_health_source: 'launch',
+    app_health_page: '/fixture/landing',
+  });
   await newTab.evaluate(() => window.appHealth!.track('new_reconciles_old_activity'));
   await flush(newTab);
   expect(oldBatches.at(-1)!.session_id).toBe(original.session_id);

@@ -52,7 +52,8 @@
       storage = sessionOnly ? globalThis.sessionStorage : globalThis.localStorage;
       if (!sessionOnly) {
         storage?.getItem(visitorKey);
-        storage?.setItem(migratedKey, storage.getItem(migratedKey) === '1' ? '1' : '0');
+        storage?.setItem(`${migratedKey}:probe`, '1');
+        storage?.removeItem(`${migratedKey}:probe`);
       }
     } catch {
       storage = undefined;
@@ -254,7 +255,7 @@
                 ? { id: previousVisitor.id, expires: previousVisitor.expires }
                 : { id: crypto.randomUUID(), expires: now + 90 * 86400000 };
               let current = saved.visit;
-              if (meaningful && known && validVisit(current)) {
+              if (known && validVisit(current)) {
                 const legacy = readLegacy(visitKey);
                 if (
                   legacy?.id === current.id &&

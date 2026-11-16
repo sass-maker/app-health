@@ -231,7 +231,7 @@ it('keeps legacy identity available when its first migration aborts before commi
   await api().flush();
   write.mockRestore();
   expect(await identityRecord(scope)).toBeUndefined();
-  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(localStorage.getItem(`h:${scope}:m`)).toBeNull();
   expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
   api().stop();
   await install();
@@ -275,9 +275,9 @@ it('retries an interrupted compatibility mirror on the next action without disca
   await api().flush();
   expect(batches()[0].visitor_id).toBe(original.visitor.id);
   expect((await identityRecord(scope))?.visitor).toEqual(original.visitor);
-  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(localStorage.getItem(`h:${scope}:m`)).toBeNull();
   await api().flush();
-  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(localStorage.getItem(`h:${scope}:m`)).toBeNull();
   api().track('retry_mirror');
   await api().flush();
   expect(localStorage.getItem(`h:${scope}:m`)).toBe('1');
@@ -303,7 +303,7 @@ it('does not migrate or mirror legacy IDs during a read-only refresh with no can
   await identityRecord(scope, () => undefined);
   await api().flush();
   expect(await identityRecord(scope)).toBeUndefined();
-  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(localStorage.getItem(`h:${scope}:m`)).toBeNull();
   expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
   expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(original.visit);
   api().track('after_reset');
@@ -351,7 +351,7 @@ it('does not access either identity store before required consent', async () => 
   expect(batches()[0].events.map((event) => event.name)).toEqual([undefined]);
 });
 
-it.each(['getItem', 'setItem'] as const)(
+it.each(['getItem', 'setItem', 'removeItem'] as const)(
   'does not try IndexedDB to evade a blocked localStorage %s',
   async (method) => {
     const open = vi.spyOn(indexedDB, 'open');
@@ -432,7 +432,8 @@ it.each([
   expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(current.visit);
 });
 
-it('does not reconcile or mirror matching legacy activity during a read-only refresh', async () => {
+it('reconciles matching old-tab activity only in memory during read-only refresh', async () => {
+  seedLegacy(legacy());
   await install();
   await api().flush();
   const original = await committedIdentity(scope);
@@ -444,9 +445,41 @@ it('does not reconcile or mirror matching legacy activity during a read-only ref
   seedLegacy(mirror);
   const set = vi.spyOn(Storage.prototype, 'setItem');
   await api().flush();
+  expect(batches().at(-1)?.events).toEqual([]);
+  expect(batches().at(-1)?.session_id).toBe(original.visit.id);
+  expect(api().checkoutMetadata()).toEqual({
+    app_health_page: '/landing',
+    app_health_source: 'launch',
+  });
   expect(set).not.toHaveBeenCalled();
   expect(await identityRecord(scope)).toEqual(current);
   expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(mirror.visit);
+});
+
+it('does not overwrite a completed migration marker from a stale startup read', async () => {
+  const original = legacy();
+  seedLegacy(original);
+  localStorage.setItem(`h:${scope}:m`, '1');
+  const get = Storage.prototype.getItem;
+  let opened = false;
+  let markerBeforeOpen: string | null = null;
+  vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key) {
+    // Another tab committed marker1 while startup still sees its older snapshot.
+    if (key === `h:${scope}:m` && !opened) return '0';
+    return get.call(this, key);
+  });
+  const open = indexedDB.open.bind(indexedDB);
+  vi.spyOn(indexedDB, 'open').mockImplementation((...args) => {
+    markerBeforeOpen = get.call(localStorage, `h:${scope}:m`);
+    opened = true;
+    return open(...args);
+  });
+  // The canonical row is absent after an IDB-only reset; the completed marker must survive startup.
+  await install();
+  await api().flush();
+  expect(markerBeforeOpen).toBe('1');
+  expect(batches()[0].visitor_id).not.toBe(original.visitor.id);
+  expect(batches()[0].session_id).not.toBe(original.visit.id);
 });
 
 it.each(['consent', 'ignore', 'stop'] as const)(

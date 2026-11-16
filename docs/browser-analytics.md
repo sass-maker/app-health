@@ -95,8 +95,9 @@ observers and listeners too.
   Meaningful commits mirror sanitized canonical IDs so open old tabs and an
   old-script rollback can retain them. Only newer activity from the exact same
   visitor/session can extend inactivity; mirror IDs, expiry, type and attribution
-  never override the canonical record. Read-only refreshes and aborted transactions
-  do not mirror. Older code retains its original concurrency limitations.
+  never override the canonical record. Read-only refreshes reconcile matching activity
+  in memory for heartbeats and checkout context without writing either store.
+  Aborted transactions do not mirror. Startup never rewrites a completed marker. Older code retains its original concurrency limitations.
   Clear all site data to reset recognition: clearing only localStorage retains the
   canonical identity, while clearing only IndexedDB after completed migration
   leaves a marker that prevents mirror ID resurrection. If marker writes are
