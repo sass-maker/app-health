@@ -10,7 +10,14 @@ import type { OwnerIdentity } from './identity.js';
 import { readPublicJson } from './public-body.js';
 import { reviewedMonitoringJourney } from './monitoring-configuration.js';
 
-export class CatalogSyncConflict extends Error {}
+export class CatalogSyncConflict extends Error {
+  readonly code: 'conflict' | 'review_required';
+  constructor(message: string, code: 'conflict' | 'review_required' = 'conflict') {
+    super(message);
+    this.code = code;
+  }
+}
+class CatalogRevisionRequired extends Error {}
 class CatalogSyncLimit extends Error {}
 const OUTSIDE_LIMIT_MESSAGE = `Catalog synchronization supports at most ${MAX_CATALOG_OUTSIDE_APPS} outside projects. Link projects that belong to unused canonical catalog identities first; no projects were changed.`;
 const json = (status: number, value: unknown) =>
@@ -101,7 +108,7 @@ export async function syncCatalog(
     [...unlinked].some((app) => !outside.has(app)) ||
     [...outside].some((app) => !unlinked.has(app))
   )
-    throw new CatalogSyncConflict(UNLINKED_MESSAGE);
+    throw new CatalogSyncConflict(UNLINKED_MESSAGE, 'review_required');
   const mapped = (
     await db
       .prepare('SELECT catalog_id, app_id FROM catalog_project_imports WHERE workspace_id = ?')
@@ -128,7 +135,7 @@ export async function syncCatalog(
   try {
     const result = await db.batch([
       statement(
-        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash, preserve_outside_catalog_app_ids_json, publisher_id, publisher_verifier_hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash, preserve_outside_catalog_app_ids_json, publisher_id, publisher_verifier_hash, monitoring_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         workspace,
         payload,
         projectionHash,
@@ -136,6 +143,7 @@ export async function syncCatalog(
         JSON.stringify(input.preserve_outside_catalog_app_ids),
         publisher?.id ?? null,
         publisher?.verifierHash ?? null,
+        monitoring,
       ),
       statement(
         `INSERT INTO apps (id, name, created_at)
@@ -196,8 +204,16 @@ export async function syncCatalog(
     if (result.some((row) => !row.success))
       throw new Error('Catalog synchronization transaction failed');
   } catch (error) {
+    if (error instanceof Error && error.message.includes('catalog revisions required'))
+      throw new CatalogRevisionRequired(
+        'Complete public check revisions are required for this workspace. Refresh the catalog importer.',
+      );
+    if (error instanceof Error && error.message.includes('catalog publisher outside changed'))
+      throw new CatalogSyncConflict(
+        'Outside-project decisions changed during synchronization. Retry.',
+      );
     if (error instanceof Error && error.message.includes('portfolio sync unlinked project'))
-      throw new CatalogSyncConflict(UNLINKED_MESSAGE);
+      throw new CatalogSyncConflict(UNLINKED_MESSAGE, 'review_required');
     if (
       error instanceof Error &&
       /portfolio sync|UNIQUE constraint failed|catalog import/.test(error.message)
@@ -232,6 +248,8 @@ export async function handleCatalogSyncRoute(
     if (!input.success) return catalogSyncInputError(input.error.issues);
     return json(200, await syncCatalog(db, owner.workspaceId, input.data, Date.now()));
   } catch (error) {
+    if (error instanceof CatalogRevisionRequired)
+      return json(400, { error: error.message, code: 'revisions_required' });
     if (error instanceof CatalogSyncLimit) return json(422, { error: error.message });
     if (error instanceof CatalogSyncConflict) return json(409, { error: error.message });
     if (error instanceof SyntaxError) return json(400, { error: 'Invalid JSON' });

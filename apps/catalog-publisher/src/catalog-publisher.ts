@@ -8,6 +8,9 @@ import {
 } from '@app-health/contracts';
 
 type FailureCode =
+  | 'configuration_unavailable'
+  | 'credential_unavailable'
+  | 'connection_inactive'
   | 'install_required'
   | 'invalid_catalog'
   | 'source_unavailable'
@@ -66,6 +69,19 @@ async function readResponseJson(response: Response) {
     throw new PublisherFailure('service_unavailable');
   }
 }
+async function responseFailure(response: Response): Promise<never> {
+  if (response.status === 401) throw new PublisherFailure('connection_inactive', 401);
+  if (
+    response.status === 409 &&
+    response.headers.get('content-type')?.toLowerCase().startsWith('application/json')
+  ) {
+    const value = (await readResponseJson(response)) as { code?: unknown } | null;
+    if (value?.code === 'conflict' || value?.code === 'review_required')
+      throw new PublisherFailure(value.code, 409);
+  }
+  throw new PublisherFailure('service_unavailable', response.status);
+}
+
 export async function publisherRequest(
   origin: string,
   path: string,
@@ -90,11 +106,7 @@ export async function publisherRequest(
   }
   if (response.url && new URL(response.url).origin !== origin)
     throw new PublisherFailure('service_unavailable');
-  if (!response.ok)
-    throw new PublisherFailure(
-      response.status === 409 ? 'review_required' : 'service_unavailable',
-      response.status,
-    );
+  if (!response.ok) return responseFailure(response);
   if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/json'))
     throw new PublisherFailure('service_unavailable');
   return readResponseJson(response);
@@ -184,7 +196,7 @@ export async function publishOnce(config: PublisherConfig, secret: string, stabl
       await commitProjection(config, secret, projection, status.projection_hash, projectedHash);
       return { state: 'synchronized' as const, count: projection.projects.length };
     } catch (error) {
-      if (!(error instanceof PublisherFailure) || error.status !== 409 || retry) throw error;
+      if (!(error instanceof PublisherFailure) || error.code !== 'conflict' || retry) throw error;
       projection = await sourceProjection(config.catalog, stableDelay);
     }
   }

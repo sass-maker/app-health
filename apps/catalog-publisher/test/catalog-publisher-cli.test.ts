@@ -150,7 +150,7 @@ it('locks both manual and background publication and stores a safe local failure
   expect(JSON.stringify(f.output)).not.toContain('PRIVATE_CANARY');
   await expect(
     runCatalogPublisher(['run'], { ...f.host, execute: () => 'invalid' }),
-  ).rejects.toThrow('Local connection unavailable');
+  ).rejects.toMatchObject({ code: 'credential_unavailable' });
 });
 
 it('validates paths, arguments, HTTPS and platform before enrollment or installation', async () => {
@@ -181,7 +181,9 @@ it('validates paths, arguments, HTTPS and platform before enrollment or installa
       code,
     }),
   );
-  await expect(runCatalogPublisher(['run'], f.host)).rejects.toThrow('Invalid local connection');
+  await expect(runCatalogPublisher(['run'], f.host)).rejects.toMatchObject({
+    code: 'configuration_unavailable',
+  });
 });
 
 it.skipIf(process.platform === 'win32')(
@@ -204,6 +206,19 @@ it.skipIf(process.platform === 'win32')(
     await expect(
       runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined }),
     ).rejects.toMatchObject({ code: 'invalid_catalog' });
+    for (const code of [
+      'credential_unavailable',
+      'configuration_unavailable',
+      'connection_inactive',
+    ]) {
+      await writeFile(
+        helper,
+        `#!/bin/sh\nprintf '{"state":"error","error":"${code}"}\\n'\nexit 1\n`,
+      );
+      await expect(
+        runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined }),
+      ).rejects.toMatchObject({ code });
+    }
     await writeFile(helper, '#!/bin/sh\nexit 1\n');
     await expect(
       runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined }),
@@ -217,4 +232,32 @@ it('explains missing installation before launching or enrolling a fresh Mac', as
     runCatalogPublisher(['pair', '--catalog', f.catalog], { ...f.host, locked: false }),
   ).rejects.toMatchObject({ code: 'install_required' });
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it('replaces successful local status when current configuration or Keychain retrieval fails', async () => {
+  const f = await fixture();
+  await runCatalogPublisher(['pair', '--catalog', f.catalog], f.host);
+  await runCatalogPublisher(['run'], f.host);
+  await expect(
+    runCatalogPublisher(['run'], {
+      ...f.host,
+      execute: (program, args, input) => {
+        if (args[0] === 'get') throw new Error('PRIVATE_KEYCHAIN_CANARY');
+        return f.host.execute(program, args, input);
+      },
+    }),
+  ).rejects.toMatchObject({ code: 'credential_unavailable' });
+  let status = JSON.parse(await readFile(join(f.directory, 'status.json'), 'utf8'));
+  expect(status).toMatchObject({
+    state: 'error',
+    error: 'credential_unavailable',
+    hint: expect.stringContaining('pair again'),
+  });
+  expect(JSON.stringify(status)).not.toContain('PRIVATE_KEYCHAIN_CANARY');
+  await writeFile(join(f.directory, 'connection.json'), 'INVALID_PRIVATE_CANARY');
+  await expect(runCatalogPublisher(['run'], f.host)).rejects.toMatchObject({
+    code: 'configuration_unavailable',
+  });
+  status = JSON.parse(await readFile(join(f.directory, 'status.json'), 'utf8'));
+  expect(status).toMatchObject({ state: 'error', error: 'configuration_unavailable' });
 });

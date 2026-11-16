@@ -336,7 +336,11 @@ export async function handleMonitoringRoute(
         source?.workspaceId === owner.workspaceId ? source : undefined,
       ),
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('catalog monitoring transaction required'))
+      return json(409, {
+        error: 'Synchronize the SaaS Maker catalog to update monitoring coverage.',
+      });
     return json(503, { error: 'Monitoring is unavailable' });
   }
 }

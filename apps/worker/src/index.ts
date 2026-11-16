@@ -1504,7 +1504,7 @@ async function handleCredentialRoutes(
   bundle: AdapterBundle,
   ctx?: WorkerContext,
 ) {
-  const publisher = await handleCatalogPublisher(request, env.DB);
+  const publisher = await handleCatalogPublisher(request, env.DB, Date.now(), env.OWNER_AUTH_TOKEN);
   if (publisher) return publisher;
   if (['/mcp', '/v1/mcp'].includes(new URL(request.url).pathname))
     return handleMcpRequest(request, env, bundle, ctx);

@@ -32,6 +32,13 @@ type PublisherHost = {
   execute: (program: string, args: string[], input?: string) => string;
   output: (value: unknown) => void;
 };
+function localFailureHint(code: string) {
+  if (code === 'install_required')
+    return 'Run the publisher install command first, then pair this Mac.';
+  if (['connection_inactive', 'credential_unavailable', 'configuration_unavailable'].includes(code))
+    return 'Run pair again, then approve the new connection in App Health.';
+  return undefined;
+}
 function command(program: string, args: string[], input?: string) {
   const result = spawnSync(program, args, {
     input,
@@ -54,6 +61,9 @@ function command(program: string, args: string[], input?: string) {
             'review_required',
             'conflict',
             'install_required',
+            'configuration_unavailable',
+            'credential_unavailable',
+            'connection_inactive',
           ].includes(failure.error)
         )
           throw new PublisherFailure(
@@ -249,19 +259,34 @@ class LocalPublisher {
       expires_at: enrollment.expires_at,
     });
   }
-  private async run() {
-    const connection = await this.config();
-    const secret = this.host.execute(this.helper, ['get', connection.publisherId]);
-    if (!/^ahcp_[a-f0-9]{64}$/.test(secret)) throw new Error('Local connection unavailable');
+  private async connectionCredential() {
+    let connection: PublisherConfig;
     try {
+      connection = await this.config();
+    } catch {
+      throw new PublisherFailure('configuration_unavailable');
+    }
+    try {
+      const secret = this.host.execute(this.helper, ['get', connection.publisherId]);
+      if (!/^ahcp_[a-f0-9]{64}$/.test(secret)) throw new Error('Unavailable');
+      return { connection, secret };
+    } catch {
+      throw new PublisherFailure('credential_unavailable');
+    }
+  }
+  private async run() {
+    try {
+      const { connection, secret } = await this.connectionCredential();
       const result = await publishOnce(connection, secret);
       await atomicJson(join(this.directory, 'status.json'), { ...result, checked_at: Date.now() });
       this.host.output(result);
     } catch (error) {
       const code = error instanceof PublisherFailure ? error.code : 'service_unavailable';
+      const hint = localFailureHint(code);
       await atomicJson(join(this.directory, 'status.json'), {
         state: 'error',
         error: code,
+        hint,
         checked_at: Date.now(),
       });
       throw error;
@@ -286,7 +311,7 @@ export async function runCatalogPublisher(argv: string[], overrides: Partial<Pub
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runCatalogPublisher(process.argv.slice(2)).catch((error: unknown) => {
     process.stdout.write(
-      `${JSON.stringify({ state: 'error', error: error instanceof PublisherFailure ? error.code : 'local_service_unavailable', ...(error instanceof PublisherFailure && error.code === 'install_required' ? { message: 'Run the publisher install command first, then pair this Mac.' } : {}) })}\n`,
+      `${JSON.stringify({ state: 'error', error: error instanceof PublisherFailure ? error.code : 'local_service_unavailable', message: error instanceof PublisherFailure ? localFailureHint(error.code) : undefined })}\n`,
     );
     process.exitCode = 1;
   });

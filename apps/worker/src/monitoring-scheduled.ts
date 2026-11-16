@@ -87,6 +87,18 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
   };
 }
 
+function suspendedProbeState(previous: ProbeState, declared: Set<string>, active: Set<string>) {
+  const suspended = (key: string) => declared.has(key) && !active.has(key);
+  return {
+    journeys: Object.fromEntries(
+      Object.entries(previous.journeys).filter(([key]) => suspended(key)),
+    ),
+    revisions: Object.fromEntries(
+      Object.entries(previous.revisions ?? {}).filter(([key]) => suspended(key)),
+    ),
+  };
+}
+
 export async function runScheduledMonitoring(
   env: MonitoringBindings,
   fetcher: typeof fetch = fetch,
@@ -117,6 +129,11 @@ export async function runScheduledMonitoring(
   ).results;
   if (!policy.length) return;
   if (policy.length > 60) throw new Error('Monitoring policy capacity exceeded');
+  const declared = new Set(
+    policy.flatMap((row) =>
+      (JSON.parse(row.journeys_json) as string[]).map((id) => `${row.catalog_id}/${id}`),
+    ),
+  );
   const reviewed = await reviewedMonitoringRevisions();
   const allowed = new Set(
     policy.flatMap((row) =>
@@ -132,7 +149,6 @@ export async function runScheduledMonitoring(
   );
   const spec = parseSpec(generated);
   spec.journeys = spec.journeys.filter((journey) => allowed.has(journeyKey(journey)));
-  if (!spec.journeys.length) return;
   if (
     spec.journeys.length > 48 ||
     spec.journeys.some(
@@ -158,26 +174,31 @@ export async function runScheduledMonitoring(
   previous.journeys = Object.fromEntries(
     Object.entries(previous.journeys).filter(([key]) => keys.has(key)),
   );
+  const suspended = suspendedProbeState(JSON.parse(lease.state_json) as ProbeState, declared, keys);
   previous.pending = [];
   let logs: ProbeLog[] = [];
-  const result = await runProbes(
-    spec,
-    previous,
-    {
-      location: 'cloudflare-hourly',
-      intervalSeconds: INTERVAL_SECONDS,
-      userAgent: 'AppHealthJourneyProbe/1 (+https://health.sassmaker.com)',
-    },
-    {
-      measure: workerMeasure(fetcher, Date.now() + RUN_DEADLINE_MS),
-      deliver: async (batch) => {
-        logs = batch;
-        return true;
-      },
-      now: () => now,
-      uuid: () => crypto.randomUUID(),
-    },
-  );
+  const result = spec.journeys.length
+    ? await runProbes(
+        spec,
+        previous,
+        {
+          location: 'cloudflare-hourly',
+          intervalSeconds: INTERVAL_SECONDS,
+          userAgent: 'AppHealthJourneyProbe/1 (+https://health.sassmaker.com)',
+        },
+        {
+          measure: workerMeasure(fetcher, Date.now() + RUN_DEADLINE_MS),
+          deliver: async (batch) => {
+            logs = batch;
+            return true;
+          },
+          now: () => now,
+          uuid: () => crypto.randomUUID(),
+        },
+      )
+    : { state: emptyState() };
+  result.state.journeys = { ...suspended.journeys, ...result.state.journeys };
+  result.state.revisions = { ...suspended.revisions, ...result.state.revisions };
   const statements = logs.map((log) =>
     db
       .prepare(

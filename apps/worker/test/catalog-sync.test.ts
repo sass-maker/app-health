@@ -27,7 +27,17 @@ import { handleMonitoringRoute, readMonitoringReport } from '../src/monitoring.j
 import { runScheduledMonitoring } from '../src/monitoring-scheduled.js';
 import { snapshotCachedAnalytics } from '../src/analytics-cache.js';
 import generated from '../../probe/journeys.json';
-import { handleCatalogPublisher, handleCatalogPublisherOwner } from '../src/catalog-publishers.js';
+import {
+  handleCatalogPublisher as handleCatalogPublisherRuntime,
+  handleCatalogPublisherOwner,
+} from '../src/catalog-publishers.js';
+
+const enrollmentTestSecret = 'synthetic-enrollment-hmac-secret';
+const handleCatalogPublisher = (
+  request: Request,
+  db: Parameters<typeof handleCatalogPublisherRuntime>[1],
+  now = Date.now(),
+) => handleCatalogPublisherRuntime(request, db, now, enrollmentTestSecret);
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -657,6 +667,313 @@ describe('automatic catalog publisher authority', () => {
       );
     },
   );
+  it('keeps the revision requirement monotonic through owner syncs, private-only policies and a concurrent upgrade', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    const baseline = await syncCatalog(f.db, 'ws', input(), 1000);
+    expect(f.sqlite.prepare('SELECT * FROM workspace_catalog_revision_fences').all()).toHaveLength(
+      0,
+    );
+    const versioned = CatalogSyncRequestV1.parse(
+      completePublisherProjection({ ...input(), expected_previous_hash: baseline.projection_hash }),
+    );
+    const upgraded = await syncCatalog(f.db, 'ws', versioned, 2000);
+    const legacy = { ...input(), expected_previous_hash: upgraded.projection_hash };
+    const ownerSync = (body: unknown) =>
+      handleCatalogSyncRoute(
+        new Request('https://dashboard.example.com/v1/catalog/sync', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+        f.db,
+        publisherOwner,
+      );
+    expect((await ownerSync(legacy))?.status).toBe(400);
+    const localOnly = {
+      ...legacy,
+      monitoring: {
+        schema_version: 1 as const,
+        projects: legacy.monitoring.projects.map((row) => ({
+          ...row,
+          scope: 'local' as const,
+          reason: 'Local fixture.',
+          journeys: [],
+        })),
+      },
+    };
+    const local = await syncCatalog(f.db, 'ws', localOnly, 3000);
+    expect(
+      (await ownerSync({ ...input(), expected_previous_hash: local.projection_hash }))?.status,
+    ).toBe(400);
+    expect(
+      f.sqlite.prepare('SELECT workspace_id FROM workspace_catalog_revision_fences').all(),
+    ).toEqual([{ workspace_id: 'ws' }]);
+    const staleGuard = f.db
+      .prepare(
+        'INSERT INTO workspace_portfolio_sync_guards (workspace_id,projects_json,projection_hash,expected_previous_hash,preserve_outside_catalog_app_ids_json) VALUES (?, ?, ?, ?, ?)',
+      )
+      .bind('ws', '[]', local.projection_hash, local.projection_hash, '[]');
+    await expect(staleGuard.run()).rejects.toThrow('catalog revisions required');
+    const concurrent = fixture();
+    seed(concurrent, 39, 39);
+    const old = await syncCatalog(concurrent.db, 'ws', input(), 1000);
+    let raced = false;
+    concurrent.beforeBatch(async () => {
+      if (raced) return;
+      raced = true;
+      await syncCatalog(
+        concurrent.db,
+        'ws',
+        CatalogSyncRequestV1.parse(
+          completePublisherProjection({ ...input(), expected_previous_hash: old.projection_hash }),
+        ),
+        2000,
+      );
+    });
+    const response = await handleCatalogSyncRoute(
+      new Request('https://dashboard.example.com/v1/catalog/sync', {
+        method: 'POST',
+        body: JSON.stringify({ ...input(), expected_previous_hash: old.projection_hash }),
+      }),
+      concurrent.db,
+      publisherOwner,
+    );
+    expect(response?.status).toBe(400);
+    expect(await response!.json()).toMatchObject({ code: 'revisions_required' });
+  });
+  it('rejects a delayed legacy policy PUT after a concurrent catalog upgrade without disturbing the new policy', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    let upgraded = false;
+    f.beforeBatch(async () => {
+      if (upgraded) return;
+      upgraded = true;
+      await syncCatalog(
+        f.db,
+        'ws',
+        CatalogSyncRequestV1.parse(completePublisherProjection(input())),
+        1000,
+      );
+    });
+    const response = await handleMonitoringRoute(
+      new Request('https://dashboard.example.com/v1/workspace/monitoring/policy', {
+        method: 'PUT',
+        body: JSON.stringify(input().monitoring),
+      }),
+      f.db,
+      publisherOwner,
+    );
+    expect(response?.status).toBe(409);
+    const legacyOther = await handleMonitoringRoute(
+      new Request('https://dashboard.example.com/v1/workspace/monitoring/policy', {
+        method: 'PUT',
+        body: JSON.stringify(input().monitoring),
+      }),
+      f.db,
+      { ...publisherOwner, id: 'other', workspaceId: 'foreign' },
+    );
+    expect(legacyOther?.status).toBe(200);
+
+    expect(
+      f.sqlite
+        .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
+        .get('ws'),
+    ).toEqual({ n: 39 });
+    expect(
+      f.sqlite
+        .prepare(
+          'SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ? AND journey_revisions_json IS NULL',
+        )
+        .get('ws'),
+    ).toEqual({ n: 0 });
+    expect(
+      f.sqlite.prepare('SELECT workspace_id FROM workspace_catalog_revision_fences').all(),
+    ).toEqual([{ workspace_id: 'ws' }]);
+  });
+  it('HMACs enrollment by IPv6 /64 with an existing runtime secret and fails closed without that secret', async () => {
+    const f = fixture();
+    const request = (ip: string) => {
+      const req = publisherRequest('publisher/enroll', { label: 'Mac' });
+      req.headers.set('cf-connecting-ip', ip);
+      return req;
+    };
+    expect((await handleCatalogPublisherRuntime(request('192.0.2.1'), f.db, 1000))?.status).toBe(
+      503,
+    );
+    for (const ip of [
+      '2001:db8:1234:5678::1',
+      '2001:db8:1234:5678:1::2',
+      '2001:0db8:1234:5678:ffff::3',
+      '2001:db8:1234:5678::ffff',
+    ])
+      expect((await handleCatalogPublisher(request(ip), f.db, 1000))?.status).toBe(201);
+    expect(
+      (await handleCatalogPublisher(request('2001:db8:1234:5678:abcd::4'), f.db, 1000))?.status,
+    ).toBe(429);
+    expect(
+      (await handleCatalogPublisher(request('2001:db8:1234:5679::1'), f.db, 1000))?.status,
+    ).toBe(201);
+    const first = (
+      f.sqlite.prepare('SELECT enrollment_key FROM catalog_publishers LIMIT 1').get() as {
+        enrollment_key: string;
+      }
+    ).enrollment_key;
+    const digest = await crypto.subtle.digest(
+      'SHA-256',
+      new TextEncoder().encode('0:v6:2001:db8:1234:5678/64'),
+    );
+    const unkeyed = [...new Uint8Array(digest)]
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('');
+    expect(first).not.toBe(unkeyed);
+    expect(first).toMatch(/^[a-f0-9]{64}$/);
+  });
+  it.each(['new-outside', 'archive-outside'] as const)(
+    'fences initial owner approval against a live %s race',
+    async (race) => {
+      const f = fixture();
+      seed(f, 40, 39, 1);
+      await syncCatalog(
+        f.db,
+        'ws',
+        { ...input(), preserve_outside_catalog_app_ids: ['app-39'] },
+        1000,
+      );
+      const paired = await enrolledPublisher(f);
+      const prepare = f.db.prepare.bind(f.db);
+      f.db.prepare = (sql) => {
+        const stmt = prepare(sql);
+        if (sql.includes('UPDATE catalog_publishers SET workspace_id')) {
+          const first = stmt.first.bind(stmt);
+          stmt.first = async <T>() => {
+            if (race === 'new-outside')
+              f.sqlite.exec(
+                "INSERT INTO apps(id,name,created_at) VALUES('late-outside','Late',1); INSERT INTO workspace_apps VALUES('late-outside','ws');",
+              );
+            else f.sqlite.prepare("UPDATE apps SET archived_at=2000 WHERE id='app-39'").run();
+            return first<T>();
+          };
+        }
+        return stmt;
+      };
+      expect((await approvePublisher(f, paired.code, ['app-39']))?.status).toBe(409);
+      expect(f.sqlite.prepare('SELECT workspace_id FROM catalog_publishers').get()).toEqual({
+        workspace_id: null,
+      });
+    },
+  );
+  it('returns a transient conflict rather than revocation when owner decisions change between publisher resolution and commit', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    const baseline = await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    f.beforeBatch(() => {
+      f.sqlite
+        .prepare('UPDATE catalog_publishers SET outside_app_ids_json=\'["already-reviewed"]\'')
+        .run();
+    });
+    const response = await handleCatalogPublisher(
+      publisherRequest(
+        'publisher',
+        { ...input(), expected_previous_hash: baseline.projection_hash },
+        paired.secret,
+      ),
+      f.db,
+      3000,
+    );
+    expect(response?.status).toBe(409);
+    expect(await response!.json()).toMatchObject({ code: 'conflict' });
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', undefined, paired.secret),
+          f.db,
+          4000,
+        )
+      )?.status,
+    ).toBe(200);
+  });
+  it('retains only declared suspended incident state without executing or counting it, then supersedes it on re-admission', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    const definition = generated.journeys[0]!;
+    const policy = input();
+    policy.monitoring.projects = policy.monitoring.projects.map((row) => ({
+      ...row,
+      scope: 'local' as const,
+      reason: 'Local fixture.',
+      journeys: [],
+      journey_revisions: {},
+    }));
+    const row = policy.monitoring.projects.find((item) => item.catalog_id === definition.project)!;
+    row.scope = 'public';
+    row.reason = null;
+    row.journeys = [definition.journey];
+    row.journey_revisions = { [definition.journey]: '0'.repeat(64) };
+    const baseline = await syncCatalog(f.db, 'ws', policy, 1000);
+    const key = await new D1ControlPlane(f.db).createKey('app-0', 'env-0', 2000);
+    const id = `${definition.project}/${definition.journey}`;
+    const prior = {
+      status: 'failing',
+      bad_streak: 1,
+      good_streak: 0,
+      incident_id: 'prior-open',
+      opened_at: 1000,
+    };
+    const state = {
+      schema_version: 1,
+      journeys: { [id]: prior, 'removed/check': prior },
+      revisions: { [id]: 'b'.repeat(64), 'removed/check': 'b'.repeat(64) },
+      pending: [
+        {
+          log_id: 'removed-pending',
+          event: 'journey.failed',
+          props: { project: 'removed', journey: 'check' },
+        },
+      ],
+    };
+    f.sqlite
+      .prepare(
+        'INSERT INTO workspace_monitoring_runs (workspace_id,lease_id,lease_started_at,state_json) VALUES (?,?,?,?)',
+      )
+      .run('ws', 'old', 0, JSON.stringify(state));
+    const env = {
+      DB: f.db,
+      APP_HEALTH_SELF_BACKEND_KEY: key.rawKey,
+      APP_HEALTH_SELF_APP_ID: 'app-0',
+      APP_HEALTH_SELF_ENVIRONMENT_ID: 'env-0',
+    };
+    const fetcher = vi.fn<typeof fetch>(async () => new Response('Failed', { status: 503 }));
+    await runScheduledMonitoring(env, fetcher, 10000000);
+    expect(fetcher).not.toHaveBeenCalled();
+    const suspended = JSON.parse(
+      (
+        f.sqlite.prepare('SELECT state_json FROM workspace_monitoring_runs').get() as {
+          state_json: string;
+        }
+      ).state_json,
+    );
+    expect(suspended.journeys).toEqual({ [id]: prior });
+    expect(suspended.revisions).toEqual({ [id]: 'b'.repeat(64) });
+    expect(suspended.pending).toEqual([]);
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM log_events').get()).toEqual({ n: 0 });
+    row.journey_revisions = { [definition.journey]: await probeDefinitionRevision(definition) };
+    policy.expected_previous_hash = baseline.projection_hash;
+    await syncCatalog(f.db, 'ws', policy, 11000000);
+    await runScheduledMonitoring(env, fetcher, 13600000);
+    expect(fetcher).toHaveBeenCalledOnce();
+    const superseded = f.sqlite
+      .prepare("SELECT props FROM log_events WHERE event='journey.superseded'")
+      .get() as { props: string };
+    expect(JSON.parse(superseded.props)).toMatchObject({
+      incident_id: 'prior-open',
+      reason: 'definition_changed',
+    });
+    expect(
+      f.sqlite.prepare("SELECT count(*) AS n FROM log_events WHERE log_id='removed-pending'").get(),
+    ).toEqual({ n: 0 });
+  });
   it('pairs once, removes an active project atomically and retains excluded identity, keys and history', async () => {
     const f = fixture();
     seed(f, 41, 40, 1);

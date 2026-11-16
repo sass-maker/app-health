@@ -1120,6 +1120,45 @@ try {
     ).status,
     403,
   );
+  for (const address of [
+    '2001:db8:1234:5678::1',
+    '2001:db8:1234:5678::2',
+    '2001:db8:1234:5678:abcd::3',
+    '2001:db8:1234:5678:ffff::4',
+  ])
+    assert.equal(
+      (
+        await publisherRequest(
+          '/v1/catalog/publisher/enroll',
+          { label: 'IPv6 bounded' },
+          undefined,
+          address,
+        )
+      ).status,
+      201,
+    );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Same IPv6 network' },
+        undefined,
+        '2001:db8:1234:5678::5',
+      )
+    ).status,
+    429,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Another IPv6 network' },
+        undefined,
+        '2001:db8:1234:5679::1',
+      )
+    ).status,
+    201,
+  );
   assert.equal((await publisherRequest('/v1/catalog/publisher', {}, paired.secret)).status, 403);
   assert.ok(
     [401, 403].includes((await publisherRequest('/v1/apps', undefined, paired.secret)).status),
@@ -1179,9 +1218,139 @@ try {
     paired.secret,
   );
   assert.equal(automatic.status, 200, await automatic.clone().text());
-  assert.equal((await automatic.json()).project_count, 2);
+  const automaticAck = await automatic.json();
+  assert.equal(automaticAck.project_count, 2);
   assert.equal((await (await request('/v1/apps')).json()).apps.length, 2);
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
+  const revisionWorkspace = await db
+    .prepare('SELECT workspace_id FROM catalog_publishers WHERE id = ?')
+    .bind(paired.publisher_id)
+    .first();
+  const oldRun = await db
+    .prepare('SELECT state_json FROM workspace_monitoring_runs WHERE workspace_id = ?')
+    .bind(revisionWorkspace.workspace_id)
+    .first();
+  const suspendedState = oldRun
+    ? JSON.parse(oldRun.state_json)
+    : { schema_version: 1, journeys: {}, revisions: {}, pending: [] };
+  suspendedState.journeys['app-health/api-health'] = {
+    status: 'failing',
+    bad_streak: 1,
+    good_streak: 0,
+    incident_id: 'runtime-prior-open',
+    opened_at: Date.now() - 1000,
+  };
+  suspendedState.journeys['removed/check'] = suspendedState.journeys['app-health/api-health'];
+  suspendedState.revisions = { ...suspendedState.revisions, 'removed/check': 'b'.repeat(64) };
+  suspendedState.pending = [
+    {
+      log_id: 'runtime-removed-pending',
+      event: 'journey.failed',
+      props: { project: 'removed', journey: 'check' },
+    },
+  ];
+  await db
+    .prepare(
+      'INSERT INTO workspace_monitoring_runs (workspace_id,lease_id,lease_started_at,state_json) VALUES (?, ?, 0, ?) ON CONFLICT(workspace_id) DO UPDATE SET lease_started_at=0,state_json=excluded.state_json',
+    )
+    .bind(revisionWorkspace.workspace_id, 'retention-fixture', JSON.stringify(suspendedState))
+    .run();
+  const resultsBeforeSuspension = (
+    await db.prepare("SELECT count(*) AS n FROM log_events WHERE event='probe.result'").first()
+  ).n;
+  monitoringProbeStarted = false;
+  assert.equal((await mf.dispatchFetch('http://localhost/cdn-cgi/handler/scheduled')).status, 200);
+  let retainedSuspension;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    retainedSuspension = JSON.parse(
+      (
+        await db
+          .prepare('SELECT state_json FROM workspace_monitoring_runs WHERE workspace_id = ?')
+          .bind(revisionWorkspace.workspace_id)
+          .first()
+      ).state_json,
+    );
+    if (!retainedSuspension.journeys['removed/check']) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(
+    retainedSuspension.journeys['app-health/api-health'].incident_id,
+    'runtime-prior-open',
+  );
+  assert.equal(retainedSuspension.journeys['removed/check'], undefined);
+  assert.deepEqual(retainedSuspension.pending, []);
+  assert.equal(monitoringProbeStarted, false);
+  assert.equal(
+    (await db.prepare("SELECT count(*) AS n FROM log_events WHERE event='probe.result'").first()).n,
+    resultsBeforeSuspension,
+  );
+  const oldOwnerProjection = JSON.parse(JSON.stringify(automaticProjection));
+  oldOwnerProjection.expected_previous_hash = automaticAck.projection_hash;
+  oldOwnerProjection.monitoring.projects.forEach((row) => delete row.journey_revisions);
+  const downgraded = await request('/v1/catalog/sync', oldOwnerProjection);
+  assert.equal(downgraded.status, 400);
+  assert.equal((await downgraded.json()).code, 'revisions_required');
+  const privateOnly = JSON.parse(JSON.stringify(oldOwnerProjection));
+  privateOnly.monitoring.projects.forEach((row) => {
+    row.scope = 'local';
+    row.reason = 'Private fixture.';
+    row.journeys = [];
+  });
+  const privateResponse = await request('/v1/catalog/sync', privateOnly);
+  assert.equal(privateResponse.status, 200);
+  const privateAck = await privateResponse.json();
+  oldOwnerProjection.expected_previous_hash = privateAck.projection_hash;
+  assert.equal((await request('/v1/catalog/sync', oldOwnerProjection)).status, 400);
+  assert.equal(
+    (
+      await db
+        .prepare(
+          'SELECT count(*) AS n FROM workspace_catalog_revision_fences WHERE workspace_id = ?',
+        )
+        .bind(revisionWorkspace.workspace_id)
+        .first()
+    ).n,
+    1,
+  );
+  await assert.rejects(
+    db
+      .prepare(
+        "INSERT INTO workspace_portfolio_sync_guards (workspace_id,projects_json,projection_hash,expected_previous_hash,preserve_outside_catalog_app_ids_json) SELECT workspace_id,projects_json,projection_hash,projection_hash,'[]' FROM workspace_portfolio_snapshots WHERE workspace_id = ?",
+      )
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog revisions required/,
+  );
+  await assert.rejects(
+    db
+      .prepare('DELETE FROM workspace_monitoring_projects WHERE workspace_id = ?')
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog monitoring transaction required/,
+  );
+  await assert.rejects(
+    db
+      .prepare(
+        'UPDATE workspace_monitoring_projects SET journey_revisions_json=NULL WHERE workspace_id = ?',
+      )
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog monitoring transaction required/,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
+        .bind(revisionWorkspace.workspace_id)
+        .first()
+    ).n,
+    2,
+  );
+  automaticProjection.expected_previous_hash = privateAck.projection_hash;
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    200,
+  );
   const publisherWorkspace = await db
     .prepare('SELECT workspace_id FROM catalog_publishers WHERE id = ?')
     .bind(paired.publisher_id)

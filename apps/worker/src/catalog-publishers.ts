@@ -41,6 +41,7 @@ export async function handleCatalogPublisher(
   request: Request,
   db: D1DatabaseLike | undefined,
   now = Date.now(),
+  enrollmentSecret?: string,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (![publisherPath, `${publisherPath}/enroll`, `${publisherPath}/error`].includes(url.pathname))
@@ -49,9 +50,14 @@ export async function handleCatalogPublisher(
     return json(403, { error: 'Publisher requests require the local service' });
   if (!db) return json(503, { error: 'Catalog storage is unavailable' });
   try {
-    if (url.pathname === `${publisherPath}/enroll`) return await enroll(request, db, now);
+    if (url.pathname === `${publisherPath}/enroll`)
+      return await enroll(request, db, now, enrollmentSecret);
     const token = request.headers.get('authorization')?.match(/^Bearer (ahcp_[a-f0-9]{64})$/)?.[1];
-    if (!token) return json(401, { error: 'Catalog publisher connection required' });
+    if (!token)
+      return json(401, {
+        code: 'connection_inactive',
+        error: 'Catalog publisher connection required',
+      });
     const publisher = await db
       .prepare('SELECT * FROM catalog_publishers WHERE verifier_hash = ?')
       .bind(await hash(token))
@@ -61,7 +67,10 @@ export async function handleCatalogPublisher(
       publisher.revoked_at !== null ||
       (publisher.approved_at === null && publisher.expires_at <= now)
     )
-      return json(401, { error: 'Catalog publisher connection expired or revoked' });
+      return json(401, {
+        code: 'connection_inactive',
+        error: 'Catalog publisher connection expired or revoked',
+      });
     if (url.pathname === publisherPath && request.method === 'GET') {
       const snapshot = publisher.workspace_id
         ? await catalogSnapshotStatus(db, publisher.workspace_id)
@@ -95,21 +104,54 @@ function enrollmentCaller(request: Request): string | null {
   if (!address || address.length > 45) return null;
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) {
     const parts = address.split('.').map(Number);
-    return parts.every((part) => part <= 255) ? parts.join('.') : null;
+    return parts.every((part) => part <= 255) ? `v4:${parts.join('.')}` : null;
   }
   if (!/^[a-f0-9:]+$/i.test(address) || !address.includes(':')) return null;
   try {
-    return new URL(`https://[${address}]`).hostname.toLowerCase();
+    const normalized = new URL(`https://[${address}]`).hostname.slice(1, -1).toLowerCase();
+    const [left, right] = normalized.split('::');
+    const leading = left ? left.split(':') : [];
+    const trailing = right ? right.split(':') : [];
+    const parts = normalized.includes('::')
+      ? [...leading, ...Array(8 - leading.length - trailing.length).fill('0'), ...trailing]
+      : leading;
+    return `v6:${parts
+      .slice(0, 4)
+      .map((part) => Number.parseInt(part, 16).toString(16))
+      .join(':')}/64`;
   } catch {
     return null;
   }
 }
 
-async function enroll(request: Request, db: D1DatabaseLike, now: number) {
+async function enrollmentKey(secret: string, caller: string, now: number) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const digest = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(
+      `app-health.catalog-enrollment.v1:${Math.floor(now / PAIRING_TTL)}:${caller}`,
+    ),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+async function enroll(
+  request: Request,
+  db: D1DatabaseLike,
+  now: number,
+  enrollmentSecret?: string,
+) {
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
   const caller = enrollmentCaller(request);
   if (!caller) return json(403, { error: 'Pairing requires a recognized network caller' });
-  const enrollmentKey = await hash(`${Math.floor(now / PAIRING_TTL)}:${caller}`);
+  if (!enrollmentSecret) return json(503, { error: 'Catalog pairing is unavailable' });
+  const callerKey = await enrollmentKey(enrollmentSecret, caller, now);
   const input = CatalogPublisherEnrollmentV1.safeParse(await readPublicJson(request, 512));
   if (!input.success) return json(400, { error: 'Provide a connection name' });
   const secret = `ahcp_${[...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -133,8 +175,8 @@ async function enroll(request: Request, db: D1DatabaseLike, now: number) {
       input.data.label,
       now,
       now + PAIRING_TTL,
-      enrollmentKey,
-      enrollmentKey,
+      callerKey,
+      callerKey,
     )
     .first<{ id: string }>();
   return created
@@ -183,7 +225,7 @@ async function publish(request: Request, db: D1DatabaseLike, publisher: Publishe
     await attempt(db, publisher, now, null, true);
     return json(200, response);
   } catch (error) {
-    const review = error instanceof CatalogSyncConflict && /reviewed|unlinked/.test(error.message);
+    const review = error instanceof CatalogSyncConflict && error.code === 'review_required';
     await attempt(
       db,
       publisher,
@@ -195,13 +237,17 @@ async function publish(request: Request, db: D1DatabaseLike, publisher: Publishe
           : 'service_unavailable',
     );
     if (error instanceof Error && error.message.includes('catalog publisher revoked'))
-      return json(401, { error: 'Catalog publisher connection revoked' });
+      return json(401, {
+        code: 'connection_inactive',
+        error: 'Catalog publisher connection revoked',
+      });
     return publisherFailure(error);
   }
 }
 
 function publisherFailure(error: unknown) {
-  if (error instanceof CatalogSyncConflict) return json(409, { error: error.message });
+  if (error instanceof CatalogSyncConflict)
+    return json(409, { code: error.code, error: error.message });
   if (error instanceof SyntaxError) return json(400, { error: 'Invalid catalog JSON' });
   if (error instanceof Error && error.message === 'payload too large')
     return json(413, { error: 'Catalog projection exceeds its size limit' });
@@ -285,6 +331,15 @@ export async function handleCatalogPublisherOwner(
   }
 }
 
+const outsideSetFence = `AND NOT EXISTS (SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+      WHERE wa.workspace_id = ? AND a.archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id)
+      AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE ack.value = wa.app_id))
+    AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE NOT EXISTS (
+      SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+      WHERE wa.workspace_id = ? AND a.archived_at IS NULL AND wa.app_id = ack.value
+      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id)))`;
+
 async function approve(request: Request, db: D1DatabaseLike, workspace: string, now: number) {
   const input = CatalogPublisherApprovalV1.safeParse(await readPublicJson(request, 8 * 1024));
   if (!input.success)
@@ -303,9 +358,20 @@ async function approve(request: Request, db: D1DatabaseLike, workspace: string, 
     .prepare(
       `UPDATE catalog_publishers SET workspace_id = ?, approved_at = ?, outside_app_ids_json = ?, enrollment_key = NULL
     WHERE pairing_code = ? AND workspace_id IS NULL AND revoked_at IS NULL AND expires_at > ?
-    AND (SELECT count(*) FROM catalog_publishers WHERE workspace_id = ? AND revoked_at IS NULL) < 10 RETURNING id`,
+    AND (SELECT count(*) FROM catalog_publishers WHERE workspace_id = ? AND revoked_at IS NULL) < 10 ${outsideSetFence} RETURNING id`,
     )
-    .bind(workspace, now, JSON.stringify(outside), input.data.code, now, workspace)
+    .bind(
+      workspace,
+      now,
+      JSON.stringify(outside),
+      input.data.code,
+      now,
+      workspace,
+      workspace,
+      JSON.stringify(outside),
+      JSON.stringify(outside),
+      workspace,
+    )
     .first<{ id: string }>();
   return approved
     ? json(200, { publisher_id: approved.id })
@@ -328,14 +394,7 @@ async function reviewOutside(request: Request, db: D1DatabaseLike, workspace: st
     .prepare(
       `UPDATE catalog_publishers SET outside_app_ids_json = ?, last_error = NULL, last_attempt_at = ?
     WHERE id = ? AND workspace_id = ? AND approved_at IS NOT NULL AND revoked_at IS NULL
-    AND NOT EXISTS (SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
-      WHERE wa.workspace_id = ? AND a.archived_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id)
-      AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE ack.value = wa.app_id))
-    AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE NOT EXISTS (
-      SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
-      WHERE wa.workspace_id = ? AND a.archived_at IS NULL AND wa.app_id = ack.value
-      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id))) RETURNING id`,
+    ${outsideSetFence} RETURNING id`,
     )
     .bind(
       JSON.stringify(outside),

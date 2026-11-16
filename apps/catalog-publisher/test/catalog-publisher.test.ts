@@ -51,7 +51,13 @@ async function fixture() {
       if (fail) {
         const status = fail;
         fail = 0;
-        return Response.json({ error: 'PRIVATE_SERVER_CANARY' }, { status });
+        return Response.json(
+          {
+            code: status === 409 ? 'conflict' : 'service_unavailable',
+            error: 'PRIVATE_SERVER_CANARY',
+          },
+          { status },
+        );
       }
       writes.push(body);
       hash = createHash('sha256')
@@ -214,3 +220,24 @@ it.skipIf(process.platform !== 'darwin')(
   },
   30_000,
 );
+
+it('distinguishes inactive credentials and owner review from transient conflicts without echoing response text', async () => {
+  const f = await fixture();
+  for (const [status, code] of [
+    [401, 'connection_inactive'],
+    [409, 'review_required'],
+    [409, 'conflict'],
+  ] as const) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ code, error: 'PRIVATE_SERVER_CANARY' }, { status })),
+    );
+    await expect(
+      publisherRequest(f.config.origin, '/v1/catalog/publisher', secret),
+    ).rejects.toMatchObject({ code, status });
+  }
+  const get = vi.fn(async () => Response.json({ code: 'review_required' }, { status: 409 }));
+  vi.stubGlobal('fetch', get);
+  await expect(publishOnce(f.config, secret, 0)).rejects.toMatchObject({ code: 'review_required' });
+  expect(get).toHaveBeenCalledOnce();
+});
