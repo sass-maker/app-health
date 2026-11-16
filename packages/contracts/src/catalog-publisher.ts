@@ -55,3 +55,8 @@ export const CatalogPublisherStatusV1 = z
     project_count: z.number().int().nonnegative().nullable(),
   })
   .strict();
+
+export const CatalogPublisherReviewV1 = CatalogPublisherIdentityV1.extend({
+  allow_automatic_updates: z.literal(true),
+  preserve_outside_catalog_app_ids: z.array(z.string().min(1).max(100)).max(60),
+}).strict();

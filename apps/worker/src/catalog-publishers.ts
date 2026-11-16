@@ -1,5 +1,6 @@
 import {
   CatalogPublisherApprovalV1,
+  CatalogPublisherReviewV1,
   CatalogPublisherError,
   CatalogPublisherEnrollmentV1,
   CatalogPublisherReportV1,
@@ -89,8 +90,26 @@ export async function handleCatalogPublisher(
   }
 }
 
+function enrollmentCaller(request: Request): string | null {
+  const address = request.headers.get('cf-connecting-ip');
+  if (!address || address.length > 45) return null;
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) {
+    const parts = address.split('.').map(Number);
+    return parts.every((part) => part <= 255) ? parts.join('.') : null;
+  }
+  if (!/^[a-f0-9:]+$/i.test(address) || !address.includes(':')) return null;
+  try {
+    return new URL(`https://[${address}]`).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 async function enroll(request: Request, db: D1DatabaseLike, now: number) {
   if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
+  const caller = enrollmentCaller(request);
+  if (!caller) return json(403, { error: 'Pairing requires a recognized network caller' });
+  const enrollmentKey = await hash(`${Math.floor(now / PAIRING_TTL)}:${caller}`);
   const input = CatalogPublisherEnrollmentV1.safeParse(await readPublicJson(request, 512));
   if (!input.success) return json(400, { error: 'Provide a connection name' });
   const secret = `ahcp_${[...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
@@ -103,10 +122,20 @@ async function enroll(request: Request, db: D1DatabaseLike, now: number) {
   const created = await db
     .prepare(
       `INSERT INTO catalog_publishers
-    (id, verifier_hash, pairing_code, label, created_at, expires_at)
-    SELECT ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM catalog_publishers WHERE workspace_id IS NULL) < 128 RETURNING id`,
+    (id, verifier_hash, pairing_code, label, created_at, expires_at, enrollment_key)
+    SELECT ?, ?, ?, ?, ?, ?, ? WHERE (SELECT count(*) FROM catalog_publishers WHERE workspace_id IS NULL) < 128
+    AND (SELECT count(*) FROM catalog_publishers WHERE workspace_id IS NULL AND enrollment_key = ?) < 4 RETURNING id`,
     )
-    .bind(id, await hash(secret), code, input.data.label, now, now + PAIRING_TTL)
+    .bind(
+      id,
+      await hash(secret),
+      code,
+      input.data.label,
+      now,
+      now + PAIRING_TTL,
+      enrollmentKey,
+      enrollmentKey,
+    )
     .first<{ id: string }>();
   return created
     ? json(201, { publisher_id: id, code, secret, expires_at: now + PAIRING_TTL })
@@ -131,9 +160,14 @@ async function attempt(
 
 async function publish(request: Request, db: D1DatabaseLike, publisher: Publisher, now: number) {
   const input = CatalogSyncRequestV1.safeParse(await readPublicJson(request, 96 * 1024));
-  if (!input.success || input.data.preserve_outside_catalog_app_ids.length)
+  if (
+    !input.success ||
+    input.data.preserve_outside_catalog_app_ids.length ||
+    input.data.monitoring.projects.some((row) => row.scope === 'public' && !row.journey_revisions)
+  )
     return json(400, {
-      error: 'Invalid catalog projection; outside-project decisions belong to the owner',
+      error:
+        'A complete catalog projection with check revisions is required; outside-project decisions belong to the owner',
     });
   try {
     const response = await syncCatalog(
@@ -184,9 +218,13 @@ export async function handleCatalogPublisherOwner(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (
-    ![ownerPath, `${ownerPath}/pairing`, `${ownerPath}/approve`, `${ownerPath}/revoke`].includes(
-      url.pathname,
-    )
+    ![
+      ownerPath,
+      `${ownerPath}/pairing`,
+      `${ownerPath}/approve`,
+      `${ownerPath}/revoke`,
+      `${ownerPath}/review`,
+    ].includes(url.pathname)
   )
     return null;
   if (
@@ -226,6 +264,8 @@ export async function handleCatalogPublisherOwner(
         : json(404, { error: 'Connection code expired or unavailable. Start pairing again.' });
     }
     if (request.method !== 'POST') return json(405, { error: 'method not allowed' });
+    if (url.pathname === `${ownerPath}/review`)
+      return await reviewOutside(request, db, owner.workspaceId, now);
     if (url.pathname === `${ownerPath}/approve`)
       return await approve(request, db, owner.workspaceId, now);
     if (url.pathname === `${ownerPath}/revoke`) {
@@ -261,7 +301,7 @@ async function approve(request: Request, db: D1DatabaseLike, workspace: string, 
     return json(409, { error: 'Review the current outside projects and retry the connection' });
   const approved = await db
     .prepare(
-      `UPDATE catalog_publishers SET workspace_id = ?, approved_at = ?, outside_app_ids_json = ?
+      `UPDATE catalog_publishers SET workspace_id = ?, approved_at = ?, outside_app_ids_json = ?, enrollment_key = NULL
     WHERE pairing_code = ? AND workspace_id IS NULL AND revoked_at IS NULL AND expires_at > ?
     AND (SELECT count(*) FROM catalog_publishers WHERE workspace_id = ? AND revoked_at IS NULL) < 10 RETURNING id`,
     )
@@ -270,4 +310,45 @@ async function approve(request: Request, db: D1DatabaseLike, workspace: string, 
   return approved
     ? json(200, { publisher_id: approved.id })
     : json(409, { error: 'Connection expired, already approved, or connection limit reached' });
+}
+
+async function reviewOutside(request: Request, db: D1DatabaseLike, workspace: string, now: number) {
+  const input = CatalogPublisherReviewV1.safeParse(await readPublicJson(request, 8 * 1024));
+  if (!input.success)
+    return json(400, { error: 'Confirm automatic access and all current outside projects' });
+  const unlinked = await unlinkedCatalogApps(db, workspace);
+  const outside = [...input.data.preserve_outside_catalog_app_ids].sort();
+  if (
+    new Set(outside).size !== outside.length ||
+    JSON.stringify(outside) !== JSON.stringify(unlinked.map((app) => app.app_id).sort())
+  )
+    return json(409, { error: 'Outside projects changed. Review the current list and retry.' });
+  // The live unlinked-set comparison and active grant fence execute in the same SQL statement.
+  const reviewed = await db
+    .prepare(
+      `UPDATE catalog_publishers SET outside_app_ids_json = ?, last_error = NULL, last_attempt_at = ?
+    WHERE id = ? AND workspace_id = ? AND approved_at IS NOT NULL AND revoked_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+      WHERE wa.workspace_id = ? AND a.archived_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id)
+      AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE ack.value = wa.app_id))
+    AND NOT EXISTS (SELECT 1 FROM json_each(?) ack WHERE NOT EXISTS (
+      SELECT 1 FROM workspace_apps wa JOIN apps a ON a.id = wa.app_id
+      WHERE wa.workspace_id = ? AND a.archived_at IS NULL AND wa.app_id = ack.value
+      AND NOT EXISTS (SELECT 1 FROM catalog_project_imports c WHERE c.workspace_id = wa.workspace_id AND c.app_id = wa.app_id))) RETURNING id`,
+    )
+    .bind(
+      JSON.stringify(outside),
+      now,
+      input.data.publisher_id,
+      workspace,
+      workspace,
+      JSON.stringify(outside),
+      JSON.stringify(outside),
+      workspace,
+    )
+    .first<{ id: string }>();
+  return reviewed
+    ? json(200, { publisher_id: reviewed.id })
+    : json(409, { error: 'Connection or outside projects changed. Review again.' });
 }

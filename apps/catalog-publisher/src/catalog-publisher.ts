@@ -8,7 +8,12 @@ import {
 } from '@app-health/contracts';
 
 type FailureCode =
-  'invalid_catalog' | 'source_unavailable' | 'service_unavailable' | 'review_required' | 'conflict';
+  | 'install_required'
+  | 'invalid_catalog'
+  | 'source_unavailable'
+  | 'service_unavailable'
+  | 'review_required'
+  | 'conflict';
 export class PublisherFailure extends Error {
   readonly code: FailureCode;
   readonly status?: number;

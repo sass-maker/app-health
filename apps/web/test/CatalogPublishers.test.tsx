@@ -94,7 +94,9 @@ it('shows an inactive publisher and safe actionable errors without claiming sync
   );
   render(<CatalogPublishers />);
   open();
-  expect(await screen.findByText(/New checks or outside projects need owner review/)).toBeTruthy();
+  expect(
+    await screen.findByText(/Outside-project decisions changed and need owner review/),
+  ).toBeTruthy();
   expect(screen.getByText('Waiting for the first check-in.')).toBeTruthy();
   expect(screen.getByText(/Publisher has not checked in recently/)).toBeTruthy();
 });
@@ -121,4 +123,55 @@ it('discards a connection review that completes after a workspace switch', async
   act(() => selectWorkspace('other'));
   await act(async () => finish(Response.json({ label: 'Old private connection' })));
   expect(screen.queryByText('Connect Old private connection')).toBeNull();
+});
+
+it('reviews the live outside list and resumes an approved connection without terminal re-pairing', async () => {
+  owner();
+  let reviewed: unknown;
+  const id = '11111111-1111-4111-8111-111111111111';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/catalog/sync') return Response.json(status);
+      if (path.endsWith('/review')) {
+        reviewed = JSON.parse(String(init?.body));
+        return Response.json({ publisher_id: id });
+      }
+      return Response.json({
+        publishers: [
+          {
+            id,
+            label: 'Fleet Mac',
+            approved_at: 1,
+            revoked_at: null,
+            last_attempt_at: Date.now(),
+            last_success_at: 1,
+            last_error: 'review_required',
+          },
+        ],
+      });
+    }),
+  );
+  render(<CatalogPublishers />);
+  open();
+  fireEvent.click(await screen.findByRole('button', { name: 'Review outside projects' }));
+  expect(await screen.findByText('Review Fleet Mac')).toBeTruthy();
+  const resume = screen.getByRole('button', { name: 'Resume automatic updates' });
+  expect(resume).toBeDisabled();
+  fireEvent.click(
+    screen.getByLabelText(
+      'Keep External project outside this catalog. Its history and keys remain available.',
+    ),
+  );
+  fireEvent.click(
+    screen.getByLabelText('Allow automatic updates to this workspace from this connection.'),
+  );
+  fireEvent.click(resume);
+  await waitFor(() =>
+    expect(reviewed).toEqual({
+      publisher_id: id,
+      allow_automatic_updates: true,
+      preserve_outside_catalog_app_ids: ['outside'],
+    }),
+  );
 });

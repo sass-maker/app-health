@@ -1,4 +1,13 @@
-import { chmod, copyFile, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  copyFile,
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +40,32 @@ function command(program: string, args: string[], input?: string) {
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   if (result.status === 75 && args[0] === 'lock') return JSON.stringify({ state: 'busy' });
-  if (result.status !== 0) throw new Error('Local service operation failed');
+  if (result.status !== 0) {
+    if (args[0] === 'lock') {
+      try {
+        const failure = JSON.parse(result.stdout) as { state?: unknown; error?: unknown };
+        if (
+          failure.state === 'error' &&
+          typeof failure.error === 'string' &&
+          [
+            'invalid_catalog',
+            'source_unavailable',
+            'service_unavailable',
+            'review_required',
+            'conflict',
+            'install_required',
+          ].includes(failure.error)
+        )
+          throw new PublisherFailure(
+            failure.error as ConstructorParameters<typeof PublisherFailure>[0],
+          );
+      } catch (error) {
+        if (error instanceof PublisherFailure)
+          throw error; /* Other child output is never echoed. */
+      }
+    }
+    throw new Error('Local service operation failed');
+  }
   return result.stdout;
 }
 function options(args: string[]) {
@@ -92,6 +126,7 @@ class LocalPublisher {
     if (this.host.platform !== 'darwin')
       throw new Error('The background publisher currently supports macOS');
     if ((action === 'pair' || action === 'run') && !this.host.locked) {
+      await this.requireInstalled();
       this.host.output(
         JSON.parse(
           this.host.execute(this.helper, [
@@ -133,6 +168,13 @@ class LocalPublisher {
       return;
     }
     throw new Error('Use install, pair --catalog /absolute/projects.json, run, status, or stop');
+  }
+  private async requireInstalled() {
+    try {
+      await access(this.helper);
+    } catch {
+      throw new PublisherFailure('install_required');
+    }
   }
   private async config() {
     const value = JSON.parse(await readFile(this.configPath, 'utf8')) as PublisherConfig;
@@ -244,7 +286,7 @@ export async function runCatalogPublisher(argv: string[], overrides: Partial<Pub
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   runCatalogPublisher(process.argv.slice(2)).catch((error: unknown) => {
     process.stdout.write(
-      `${JSON.stringify({ state: 'error', error: error instanceof PublisherFailure ? error.code : 'local_service_unavailable' })}\n`,
+      `${JSON.stringify({ state: 'error', error: error instanceof PublisherFailure ? error.code : 'local_service_unavailable', ...(error instanceof PublisherFailure && error.code === 'install_required' ? { message: 'Run the publisher install command first, then pair this Mac.' } : {}) })}\n`,
     );
     process.exitCode = 1;
   });

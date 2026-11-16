@@ -28,7 +28,7 @@ const errorText = {
   source_unavailable: 'The local source file is unavailable. The last good portfolio is retained.',
   service_unavailable: 'The publisher could not reach App Health. It will retry automatically.',
   review_required:
-    'New checks or outside projects need owner review. The last good portfolio is retained.',
+    'Outside-project decisions changed and need owner review. The last good portfolio is retained.',
   conflict: 'The catalog changed during synchronization. The publisher will retry.',
 };
 
@@ -38,7 +38,8 @@ function usePublisherState() {
   const [publishers, setPublishers] = useState<CatalogPublisher[]>([]);
   const [code, setCode] = useState('');
   const [reviewed, setReviewed] = useState<{
-    code: string;
+    code?: string;
+    publisherId?: string;
     label: string;
     status: CatalogSyncStatus;
   } | null>(null);
@@ -114,33 +115,49 @@ async function publisherAction(state: PublisherState, action: () => Promise<void
 }
 function publisherActions(state: PublisherState) {
   const { reviewed, consent, outside, current, code } = state;
-  const review = () =>
+  const review = (publisher?: CatalogPublisher) =>
     publisherAction(state, async () => {
       state.setReviewed(null);
       state.setConsent(false);
       state.setOutside([]);
-      const pairing = CatalogPublisherPairingV1.parse(
-        await responseValue(await ownerFetch(`/v1/catalog/publishers/pairing?code=${code}`, '')),
-      );
+      const pairing =
+        publisher ??
+        CatalogPublisherPairingV1.parse(
+          await responseValue(await ownerFetch(`/v1/catalog/publishers/pairing?code=${code}`, '')),
+        );
       const status = CatalogSyncStatusV1.parse(
         await responseValue(await ownerFetch('/v1/catalog/sync', '')),
       );
-      if (current()) state.setReviewed({ code, label: pairing.label, status });
+      if (current())
+        state.setReviewed({
+          code: publisher ? undefined : code,
+          publisherId: publisher?.id,
+          label: pairing.label,
+          status,
+        });
     });
   const approve = async () => {
     if (!reviewed || !consent || outside.length !== reviewed.status.unlinked_apps.length) return;
     await publisherAction(state, async () => {
       CatalogPublisherIdentityV1.parse(
         await responseValue(
-          await ownerFetch('/v1/catalog/publishers/approve', '', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              code: reviewed.code,
-              allow_automatic_updates: true,
-              preserve_outside_catalog_app_ids: outside,
-            }),
-          }),
+          await ownerFetch(
+            reviewed.publisherId
+              ? '/v1/catalog/publishers/review'
+              : '/v1/catalog/publishers/approve',
+            '',
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                ...(reviewed.publisherId
+                  ? { publisher_id: reviewed.publisherId }
+                  : { code: reviewed.code }),
+                allow_automatic_updates: true,
+                preserve_outside_catalog_app_ids: outside,
+              }),
+            },
+          ),
         ),
       );
       if (!current()) return;
@@ -149,7 +166,9 @@ function publisherActions(state: PublisherState) {
       state.setConsent(false);
       state.setOutside([]);
       state.setMessage(
-        'Connected. This Mac checks the canonical catalog every minute while it is running.',
+        reviewed.publisherId
+          ? 'Outside-project decisions updated. The publisher will retry automatically.'
+          : 'Connected. This Mac checks the canonical catalog every minute while it is running.',
       );
       await state.load();
     });
@@ -171,9 +190,11 @@ function publisherActions(state: PublisherState) {
 function PublisherConnections({
   state,
   revoke,
+  review,
 }: {
   state: PublisherState;
   revoke: (id: string) => Promise<void>;
+  review: (publisher?: CatalogPublisher) => Promise<void>;
 }) {
   const { publishers, busy } = state;
   return (
@@ -198,6 +219,16 @@ function PublisherConnections({
               Publisher has not checked in recently. Open the Mac and check that its background
               service is running.
             </p>
+          ) : null}
+          {!publisher.revoked_at && publisher.last_error === 'review_required' ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => void review(publisher)}
+            >
+              Review outside projects
+            </Button>
           ) : null}
           {!publisher.revoked_at ? (
             <Button
@@ -267,7 +298,9 @@ function PublisherGrant({
           className="space-y-3 rounded-md border p-3"
           aria-label="Confirm automatic catalog connection"
         >
-          <p className="font-medium">Connect {reviewed.label}</p>
+          <p className="font-medium">
+            {reviewed.publisherId ? 'Review' : 'Connect'} {reviewed.label}
+          </p>
           <p>
             This connection can update this workspace’s catalog metadata and monitoring policy. It
             cannot read telemetry, create ingest keys, or manage members. You can disconnect it here
@@ -304,7 +337,7 @@ function PublisherGrant({
             disabled={busy || !consent || outside.length !== reviewed.status.unlinked_apps.length}
             onClick={() => void approve()}
           >
-            Connect automatic updates
+            {reviewed.publisherId ? 'Resume automatic updates' : 'Connect automatic updates'}
           </Button>
         </div>
       ) : null}
@@ -324,7 +357,7 @@ export function CatalogPublishers() {
           project removals. Private notes stay on the Mac. Updates pause while the Mac is asleep or
           offline.
         </p>
-        <PublisherConnections state={state} revoke={actions.revoke} />
+        <PublisherConnections state={state} revoke={actions.revoke} review={actions.review} />
         <PublisherCodeForm state={state} review={actions.review} />
         <PublisherGrant state={state} approve={actions.approve} />
         {message ? (

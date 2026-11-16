@@ -11,6 +11,7 @@ import {
   heartbeatLog,
   resultLog,
   transitionLog,
+  supersededLog,
   type Deliver,
   type Observation,
   type ProbeLog,
@@ -169,6 +170,39 @@ function currentPending(logs: ProbeLog[], revisions: Record<string, string>) {
   });
 }
 
+function migrateProbeState(
+  previous: ProbeState,
+  measured: Measured[],
+  location: string,
+  context: { now: number; uuid: () => string },
+) {
+  const currentKeys = new Set(measured.map(({ observation }) => journeyKey(observation.journey)));
+  const journeys = Object.fromEntries(
+    Object.entries(previous.journeys).filter(([key]) => currentKeys.has(key)),
+  );
+  const revisions: Record<string, string> = {};
+  const logs: ProbeLog[] = [];
+  for (const { observation } of measured) {
+    const key = journeyKey(observation.journey);
+    if (previous.revisions?.[key] !== observation.revision) {
+      if (journeys[key]?.incident_id)
+        logs.push(
+          supersededLog(
+            observation.journey,
+            journeys[key],
+            observation.revision!,
+            previous.revisions?.[key],
+            location,
+            context,
+          ),
+        );
+      delete journeys[key];
+    }
+    revisions[key] = observation.revision!;
+  }
+  return { journeys, revisions, logs };
+}
+
 /** Execute one run. Returns the next state to persist and a printable summary. */
 export async function runProbes(
   spec: ProbeSpec,
@@ -181,18 +215,13 @@ export async function runProbes(
   for (const journey of spec.journeys)
     measured.push(await measureJourney(journey, deps, options.userAgent));
   const vantageOffline = measured.every((item) => VANTAGE_FAILURES.has(item.observation.failure));
-  const currentKeys = new Set(spec.journeys.map(journeyKey));
-  const journeys = Object.fromEntries(
-    Object.entries(previous.journeys).filter(([key]) => currentKeys.has(key)),
-  );
-  const revisions: Record<string, string> = {};
-  for (const { observation } of measured) {
-    const key = journeyKey(observation.journey);
-    if (previous.revisions?.[key] !== observation.revision) delete journeys[key];
-    revisions[key] = observation.revision!;
-  }
-  const logs: ProbeLog[] = [];
   const context = { now: startedAt, uuid: deps.uuid };
+  const { journeys, revisions, logs } = migrateProbeState(
+    previous,
+    measured,
+    options.location,
+    context,
+  );
   for (const { observation } of vantageOffline ? [] : measured) {
     if (observation.outcome === 'not_completed') continue;
     const key = journeyKey(observation.journey);

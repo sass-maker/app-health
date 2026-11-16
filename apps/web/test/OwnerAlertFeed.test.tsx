@@ -207,19 +207,22 @@ it('labels synthetic journey incidents and shows probe freshness or missing cove
   const now = Date.UTC(2026, 9, 9, 6);
   const journeyFeed = {
     generated_at: now,
-    total_count: 3,
-    entries: ['journey.recovered', 'journey.degraded', 'journey.failed'].map((event, index) => ({
-      id: `journey-${index}`,
-      app_id: 'app-health',
-      catalog_id: 'anime-list',
-      project_name: 'Anime List',
-      event,
-      level: event === 'journey.failed' ? 'error' : event === 'journey.degraded' ? 'warn' : 'info',
-      source: 'server',
-      timestamp: now - (index + 1) * 600_000,
-      journey: 'anime-search',
-      location: 'india-home',
-    })),
+    total_count: 4,
+    entries: ['journey.recovered', 'journey.degraded', 'journey.failed', 'journey.superseded'].map(
+      (event, index) => ({
+        id: `journey-${index}`,
+        app_id: 'app-health',
+        catalog_id: 'anime-list',
+        project_name: 'Anime List',
+        event,
+        level:
+          event === 'journey.failed' ? 'error' : event === 'journey.degraded' ? 'warn' : 'info',
+        source: 'server',
+        timestamp: now - (index + 1) * 600_000,
+        journey: 'anime-search',
+        location: 'india-home',
+      }),
+    ),
     probes: [
       {
         location: 'india-home',
@@ -250,7 +253,8 @@ it('labels synthetic journey incidents and shows probe freshness or missing cove
   expect(await screen.findByText('journey recovered')).toBeTruthy();
   expect(screen.getByText('journey slow')).toBeTruthy();
   expect(screen.getByText('journey failing')).toBeTruthy();
-  expect(screen.getAllByText(/anime-search from india-home \(synthetic\)/)).toHaveLength(3);
+  expect(screen.getByText('previous check superseded')).toBeTruthy();
+  expect(screen.getAllByText(/anime-search from india-home \(synthetic\)/)).toHaveLength(4);
   const probes = screen.getByLabelText('Synthetic journey probes');
   expect(probes).toHaveTextContent('india-home');
   expect(probes).toHaveTextContent('reporting');

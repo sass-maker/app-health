@@ -134,6 +134,7 @@ it('installs an independent background runtime, pairs without persisting its tok
 
 it('locks both manual and background publication and stores a safe local failure without claiming success', async () => {
   const f = await fixture();
+  await runCatalogPublisher(['install'], f.host);
   await runCatalogPublisher(['pair', '--catalog', f.catalog], f.host);
   await runCatalogPublisher(['run'], { ...f.host, locked: false });
   expect(f.output.at(-1)).toEqual({ state: 'busy' });
@@ -196,9 +197,24 @@ it.skipIf(process.platform === 'win32')(
     await writeFile(helper, '#!/bin/sh\nexit 75\n');
     await runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined });
     expect(f.output.at(-1)).toEqual({ state: 'busy' });
+    await writeFile(
+      helper,
+      '#!/bin/sh\nprintf \'{"state":"error","error":"invalid_catalog","private":"PRIVATE_CANARY"}\\n\'\nexit 1\n',
+    );
+    await expect(
+      runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined }),
+    ).rejects.toMatchObject({ code: 'invalid_catalog' });
     await writeFile(helper, '#!/bin/sh\nexit 1\n');
     await expect(
       runCatalogPublisher(['run'], { ...f.host, locked: false, execute: undefined }),
     ).rejects.toThrow('Local service operation failed');
   },
 );
+
+it('explains missing installation before launching or enrolling a fresh Mac', async () => {
+  const f = await fixture();
+  await expect(
+    runCatalogPublisher(['pair', '--catalog', f.catalog], { ...f.host, locked: false }),
+  ).rejects.toMatchObject({ code: 'install_required' });
+  expect(fetch).not.toHaveBeenCalled();
+});

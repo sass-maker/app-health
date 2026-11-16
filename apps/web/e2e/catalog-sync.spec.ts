@@ -75,6 +75,7 @@ for (const { width, failReadback } of [
     let synchronized = false;
     let automaticRemoval = false;
     let connected = false;
+    let needsReview = true;
     let inventoryUnavailable = failReadback;
     let uploaded = '';
     const active = canonical.projects.filter(
@@ -161,7 +162,7 @@ for (const { width, failReadback } of [
                   revoked_at: null,
                   last_attempt_at: null,
                   last_success_at: null,
-                  last_error: null,
+                  last_error: needsReview ? 'review_required' : null,
                 },
               ]
             : [],
@@ -178,6 +179,15 @@ for (const { width, failReadback } of [
         preserve_outside_catalog_app_ids: ['app-56'],
       });
       connected = true;
+      await route.fulfill({ json: { publisher_id: '11111111-1111-4111-8111-111111111111' } });
+    });
+    await page.route('**/v1/catalog/publishers/review', async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        publisher_id: '11111111-1111-4111-8111-111111111111',
+        allow_automatic_updates: true,
+        preserve_outside_catalog_app_ids: ['app-56'],
+      });
+      needsReview = false;
       await route.fulfill({ json: { publisher_id: '11111111-1111-4111-8111-111111111111' } });
     });
     const live = { measured_at: now, ttl_ms: 45000, total: 0, projects: [] };
@@ -306,6 +316,28 @@ for (const { width, failReadback } of [
         .screenshot({ path: join(evidence, `catalog-publisher-review-${width}.png`) });
       await page.getByRole('button', { name: 'Connect automatic updates', exact: true }).click();
       await expect(page.getByText('Fleet Mac · connected', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Review outside projects', exact: true }).click();
+      await expect(page.getByText('Review Fleet Mac', { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Resume automatic updates', exact: true }),
+      ).toBeDisabled();
+      await page
+        .getByRole('checkbox', { name: /Keep External project outside this catalog/ })
+        .check();
+      await page
+        .getByRole('checkbox', {
+          name: 'Allow automatic updates to this workspace from this connection.',
+        })
+        .check();
+      await page
+        .getByLabel('Confirm automatic catalog connection')
+        .screenshot({ path: join(evidence, `catalog-publisher-outside-review-${width}.png`) });
+      await page.getByRole('button', { name: 'Resume automatic updates', exact: true }).click();
+      await expect(
+        page.getByText(
+          'Outside-project decisions updated. The publisher will retry automatically.',
+        ),
+      ).toBeVisible();
       automaticRemoval = true;
       await page.evaluate(() => window.dispatchEvent(new Event('focus')));
       await expect(

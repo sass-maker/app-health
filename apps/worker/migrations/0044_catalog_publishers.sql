@@ -1,6 +1,7 @@
 CREATE TABLE catalog_publishers (
   id TEXT PRIMARY KEY,
   verifier_hash TEXT NOT NULL UNIQUE,
+  enrollment_key TEXT,
   pairing_code TEXT NOT NULL UNIQUE,
   label TEXT NOT NULL,
   created_at INTEGER NOT NULL,
@@ -36,3 +37,5 @@ BEGIN
 END;
 
 ALTER TABLE workspace_monitoring_projects ADD COLUMN journey_revisions_json TEXT CHECK(journey_revisions_json IS NULL OR json_valid(journey_revisions_json));
+
+CREATE INDEX catalog_publishers_enrollment ON catalog_publishers(enrollment_key) WHERE workspace_id IS NULL;

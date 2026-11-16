@@ -1074,10 +1074,11 @@ try {
   log(
     'Catalog runtime: actual workerd/D1 unlinked-project denial, explicit outside preservation, later identity linking and canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
   );
-  const publisherRequest = (path, body, token) =>
+  const publisherRequest = (path, body, token, caller = '192.0.2.2') =>
     mf.dispatchFetch(`https://dashboard.example.com${path}`, {
       method: body === undefined ? 'GET' : 'POST',
       headers: {
+        ...(caller ? { 'cf-connecting-ip': caller } : {}),
         ...(token ? { authorization: `Bearer ${token}` } : {}),
         'content-type': 'application/json',
       },
@@ -1088,6 +1089,37 @@ try {
   });
   assert.equal(enrollment.status, 201);
   const paired = await enrollment.json();
+  for (let i = 0; i < 3; i += 1)
+    assert.equal(
+      (await publisherRequest('/v1/catalog/publisher/enroll', { label: 'Bounded pending' })).status,
+      201,
+    );
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher/enroll', { label: 'Over caller bound' })).status,
+    429,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Independent caller' },
+        undefined,
+        '192.0.2.3',
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Unknown caller' },
+        undefined,
+        'invalid-caller',
+      )
+    ).status,
+    403,
+  );
   assert.equal((await publisherRequest('/v1/catalog/publisher', {}, paired.secret)).status, 403);
   assert.ok(
     [401, 403].includes((await publisherRequest('/v1/apps', undefined, paired.secret)).status),
@@ -1125,6 +1157,22 @@ try {
   automaticProjection.expected_previous_hash = publisherStatus.projection_hash;
   automaticProjection.projects.pop();
   automaticProjection.monitoring.projects.pop();
+  const omittedRevisions = JSON.parse(JSON.stringify(automaticProjection));
+  omittedRevisions.monitoring.projects[0] = {
+    ...omittedRevisions.monitoring.projects[0],
+    scope: 'public',
+    reason: null,
+    journeys: ['fixture'],
+  };
+  delete omittedRevisions.monitoring.projects[0].journey_revisions;
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', omittedRevisions, paired.secret)).status,
+    400,
+  );
+  automaticProjection.monitoring.projects = automaticProjection.monitoring.projects.map((row) => ({
+    ...row,
+    journey_revisions: Object.fromEntries(row.journeys.map((id) => [id, 'a'.repeat(64)])),
+  }));
   const automatic = await publisherRequest(
     '/v1/catalog/publisher',
     automaticProjection,
@@ -1134,6 +1182,40 @@ try {
   assert.equal((await automatic.json()).project_count, 2);
   assert.equal((await (await request('/v1/apps')).json()).apps.length, 2);
   assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
+  const publisherWorkspace = await db
+    .prepare('SELECT workspace_id FROM catalog_publishers WHERE id = ?')
+    .bind(paired.publisher_id)
+    .first();
+  await db
+    .prepare("INSERT INTO apps (id, name, created_at) VALUES ('runtime-new-outside', 'Outside', 1)")
+    .run();
+  await db
+    .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+    .bind('runtime-new-outside', publisherWorkspace.workspace_id)
+    .run();
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    409,
+  );
+  const outsideReview = {
+    publisher_id: paired.publisher_id,
+    allow_automatic_updates: true,
+    preserve_outside_catalog_app_ids: ['runtime-new-outside'],
+  };
+  assert.equal(
+    (
+      await request('/v1/catalog/publishers/review', {
+        ...outsideReview,
+        preserve_outside_catalog_app_ids: [],
+      })
+    ).status,
+    409,
+  );
+  assert.equal((await request('/v1/catalog/publishers/review', outsideReview)).status, 200);
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    200,
+  );
   assert.equal(
     (await request('/v1/catalog/publishers/revoke', { publisher_id: paired.publisher_id })).status,
     200,

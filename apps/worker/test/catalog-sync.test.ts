@@ -172,11 +172,32 @@ function publisherRequest(path: string, body?: unknown, secret?: string) {
   return new Request(`https://dashboard.example.com/v1/catalog/${path}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: {
+      'cf-connecting-ip': '192.0.2.1',
       ...(secret ? { authorization: `Bearer ${secret}` } : {}),
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? undefined : JSON.stringify(completePublisherProjection(body)),
   });
+}
+function completePublisherProjection(body: unknown) {
+  const value = body as {
+    monitoring?: {
+      projects: Array<{ journeys: string[]; journey_revisions?: Record<string, string> }>;
+    };
+  };
+  if (!value?.monitoring) return body;
+  return {
+    ...value,
+    monitoring: {
+      ...value.monitoring,
+      projects: value.monitoring.projects.map((row) => ({
+        ...row,
+        journey_revisions:
+          row.journey_revisions ??
+          Object.fromEntries(row.journeys.map((id) => [id, 'a'.repeat(64)])),
+      })),
+    },
+  };
 }
 function publisherOwnerRequest(path: string, body?: unknown) {
   const request = publisherRequest(`publishers${path}`, body);
@@ -264,7 +285,9 @@ describe('automatic catalog publisher authority', () => {
       3000,
     );
     expect(response?.status).toBe(200);
-    expect(await response!.json()).toMatchObject({ project_count: 41 });
+    expect(await response!.json()).toMatchObject({
+      project_count: baselineInput.projects.length + 1,
+    });
     f.sqlite
       .prepare(
         "INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level, props, source) VALUES ('unreviewed-receipt', 'app-0', 'env-0', 3000, 'probe.result', 'debug', ?, 'server')",
@@ -447,10 +470,211 @@ describe('automatic catalog publisher authority', () => {
     expect(body.publishers).toHaveLength(10);
     expect(body.publishers[0]).toMatchObject({ id: paired.publisher_id, revoked_at: null });
   });
+  it('requires complete server-side revisions even when a publisher omits the client guard', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    const previous = f.sqlite
+      .prepare('SELECT projection_hash FROM workspace_portfolio_snapshots')
+      .get();
+    const raw = publisherRequest('publisher', undefined, paired.secret);
+    const request = new Request(raw.url, {
+      method: 'POST',
+      headers: raw.headers,
+      body: JSON.stringify(input()),
+    });
+    expect((await handleCatalogPublisher(request, f.db, 3000))?.status).toBe(400);
+    expect(
+      f.sqlite.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots').get(),
+    ).toEqual(previous);
+  });
+  it('bounds pending enrollment per normalized caller and bucket and rejects unknown callers', async () => {
+    const f = fixture();
+    const request = (ip?: string) => {
+      const value = publisherRequest('publisher/enroll', { label: 'Mac' });
+      if (ip === undefined) {
+        value.headers.delete('cf-connecting-ip');
+        value.headers.set('x-forwarded-for', '192.0.2.1');
+      } else value.headers.set('cf-connecting-ip', ip);
+      return value;
+    };
+    for (const ip of [
+      undefined,
+      'not-an-address',
+      '256.0.0.1',
+      '2001:::bad',
+      '192.0.2.1, 192.0.2.2',
+    ])
+      expect((await handleCatalogPublisher(request(ip), f.db, 1000))?.status).toBe(403);
+    for (let i = 0; i < 4; i += 1)
+      expect((await handleCatalogPublisher(request('192.000.2.1'), f.db, 1000))?.status).toBe(201);
+    expect((await handleCatalogPublisher(request('192.0.2.1'), f.db, 1000))?.status).toBe(429);
+    expect((await handleCatalogPublisher(request('192.0.2.2'), f.db, 1000))?.status).toBe(201);
+    expect((await handleCatalogPublisher(request('2001:db8::1'), f.db, 1000))?.status).toBe(201);
+    expect(
+      JSON.stringify(f.sqlite.prepare('SELECT enrollment_key FROM catalog_publishers').all()),
+    ).not.toMatch(/192\.|2001:/);
+    expect((await handleCatalogPublisher(request('192.0.2.1'), f.db, 900000))?.status).toBe(201);
+    expect((await handleCatalogPublisher(request('192.0.2.1'), f.db, 1800001))?.status).toBe(201);
+    expect(
+      (f.sqlite.prepare('SELECT count(*) AS n FROM catalog_publishers').get() as { n: number }).n,
+    ).toBe(1);
+  });
+  it('recovers reviewed outside decisions with owner consent while fencing revocation and roster races', async () => {
+    const f = fixture();
+    seed(f, 39, 39);
+    const baseline = await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    expect(f.sqlite.prepare('SELECT enrollment_key FROM catalog_publishers').get()).toEqual({
+      enrollment_key: null,
+    });
+    f.sqlite.exec(
+      "INSERT INTO apps (id,name,created_at) VALUES ('outside-new','Outside',1); INSERT INTO workspace_apps VALUES ('outside-new','ws');",
+    );
+    const next = { ...input(), expected_previous_hash: baseline.projection_hash };
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 3000))
+        ?.status,
+    ).toBe(409);
+    const body = {
+      publisher_id: paired.publisher_id,
+      allow_automatic_updates: true,
+      preserve_outside_catalog_app_ids: ['outside-new'],
+    };
+    for (const owner of [
+      { ...publisherOwner, workspaceId: 'foreign' },
+      { ...publisherOwner, authKind: 'api-token' as const },
+      { ...publisherOwner, workspaceRole: 'editor' as const },
+    ])
+      expect(
+        (
+          await handleCatalogPublisherOwner(
+            publisherOwnerRequest('/review', body),
+            f.db,
+            owner,
+            3000,
+          )
+        )?.status,
+      ).not.toBe(200);
+    const cross = publisherOwnerRequest('/review', body);
+    cross.headers.set('origin', 'https://other.test');
+    expect((await handleCatalogPublisherOwner(cross, f.db, publisherOwner))?.status).toBe(403);
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/review', { ...body, preserve_outside_catalog_app_ids: [] }),
+          f.db,
+          publisherOwner,
+        )
+      )?.status,
+    ).toBe(409);
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/review', body),
+          f.db,
+          publisherOwner,
+          4000,
+        )
+      )?.status,
+    ).toBe(200);
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 5000))
+        ?.status,
+    ).toBe(200);
+    f.sqlite.prepare("UPDATE apps SET archived_at = 5500 WHERE id = 'outside-new'").run();
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 5600))
+        ?.status,
+    ).toBe(409);
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/review', { ...body, preserve_outside_catalog_app_ids: [] }),
+          f.db,
+          publisherOwner,
+          5700,
+        )
+      )?.status,
+    ).toBe(200);
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 5800))
+        ?.status,
+    ).toBe(200);
+    f.sqlite.prepare('UPDATE catalog_publishers SET revoked_at = 6000').run();
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/review', body),
+          f.db,
+          publisherOwner,
+          7000,
+        )
+      )?.status,
+    ).toBe(409);
+  });
+  it.each(['revoke', 'new-outside'] as const)(
+    'fences a concurrent %s inside the outside-review SQL statement',
+    async (race) => {
+      const f = fixture();
+      seed(f, 39, 39);
+      await syncCatalog(f.db, 'ws', input(), 1000);
+      const paired = await enrolledPublisher(f);
+      await approvePublisher(f, paired.code);
+      const prepare = f.db.prepare.bind(f.db);
+      f.db.prepare = (sql) => {
+        const statement = prepare(sql);
+        if (sql.includes('UPDATE catalog_publishers SET outside_app_ids_json')) {
+          const first = statement.first.bind(statement);
+          statement.first = async <T>() => {
+            if (race === 'revoke')
+              f.sqlite.prepare('UPDATE catalog_publishers SET revoked_at = 3000').run();
+            else
+              f.sqlite.exec(
+                "INSERT INTO apps (id,name,created_at) VALUES ('race-outside','Outside',1); INSERT INTO workspace_apps VALUES ('race-outside','ws');",
+              );
+            return first<T>();
+          };
+        }
+        return statement;
+      };
+      const response = await handleCatalogPublisherOwner(
+        publisherOwnerRequest('/review', {
+          publisher_id: paired.publisher_id,
+          allow_automatic_updates: true,
+          preserve_outside_catalog_app_ids: [],
+        }),
+        f.db,
+        publisherOwner,
+        4000,
+      );
+      expect(response?.status).toBe(409);
+      expect(f.sqlite.prepare('SELECT outside_app_ids_json FROM catalog_publishers').get()).toEqual(
+        { outside_app_ids_json: '[]' },
+      );
+    },
+  );
   it('pairs once, removes an active project atomically and retains excluded identity, keys and history', async () => {
     const f = fixture();
     seed(f, 41, 40, 1);
-    const initial = { ...input(), preserve_outside_catalog_app_ids: ['app-40'] };
+    const historical = input();
+    historical.projects.push({
+      ...historical.projects.at(-1)!,
+      catalog_id: 'legacy-39',
+      name: 'Historical fixture',
+    });
+    historical.monitoring.projects.push({
+      catalog_id: 'legacy-39',
+      name: 'Historical fixture',
+      scope: 'local',
+      reason: 'Historical fixture.',
+      journeys: [],
+    });
+    const initial = { ...historical, preserve_outside_catalog_app_ids: ['app-40'] };
+    expect(initial.projects).toHaveLength(40);
     const baseline = await syncCatalog(f.db, 'ws', initial, 1000);
     const paired = await enrolledPublisher(f);
     expect(
@@ -465,7 +689,7 @@ describe('automatic catalog publisher authority', () => {
     expect((await approvePublisher(f, paired.code, ['app-40']))?.status).toBe(200);
     const tokenRows = f.sqlite.prepare('SELECT verifier_hash FROM catalog_publishers').all();
     expect(JSON.stringify(tokenRows)).not.toContain(paired.secret);
-    const next = { ...input(), expected_previous_hash: baseline.projection_hash };
+    const next = { ...historical, expected_previous_hash: baseline.projection_hash };
     next.projects = next.projects.slice(1);
     next.monitoring.projects = next.monitoring.projects.slice(1);
     const response = await handleCatalogPublisher(
@@ -750,7 +974,9 @@ function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36, unlinked
         )
         .run(
           'ws',
-          index < mappings ? projects[index]!.catalog_id : `legacy-${index}`,
+          index < Math.min(mappings, projects.length)
+            ? projects[index]!.catalog_id
+            : `legacy-${index}`,
           `Old ${index}`,
           `app-${index}`,
           'primary',
@@ -1449,14 +1675,14 @@ it.runIf(Boolean(process.env.APP_HEALTH_OWNER_CATALOG))(
       projected.projects.filter((row) =>
         ['local-only', 'private-authenticated'].includes(row.auth_model),
       ),
-    ).toHaveLength(9);
+    ).toHaveLength(8);
     expect(projected.projects.filter((row) => row.future_form === 'support-tool')).toHaveLength(5);
     expect(projected.projects.filter((row) => row.future_form === 'personal-tool')).toHaveLength(
-      16,
+      15,
     );
     expect(projected.monitoring.projects.filter((row) => row.scope === 'public')).toHaveLength(37);
     expect(projected.monitoring.projects.reduce((sum, row) => sum + row.journeys.length, 0)).toBe(
-      44,
+      43,
     );
     expect(
       projected.projects.find((row) => row.catalog_id === 'site-health')?.browser_visitors,

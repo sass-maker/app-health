@@ -406,3 +406,44 @@ it('drops removed check state and queued incidents without resurrecting deleted 
     good.sent[0]!.some((log) => log.event === 'journey.failed' && log.props.journey === 'home'),
   ).toBe(true);
 });
+
+it.each(['failed', 'ok'] as const)(
+  'supersedes legacy unversioned open incidents without trusting old results or forwarding old queued failures: %s',
+  async (outcome) => {
+    const single = { ...spec, journeys: [spec.journeys[0]!] };
+    const legacy: ProbeState = {
+      schema_version: 1,
+      journeys: {
+        'anime-list/home': {
+          status: 'failing',
+          incident_id: 'legacy-incident',
+          opened_at: 10,
+          bad_streak: 2,
+          good_streak: 0,
+        },
+      },
+      pending: [
+        {
+          log_id: 'legacy-pending',
+          timestamp: 10,
+          event: 'journey.failed',
+          level: 'error',
+          title: 'old',
+          props: { project: 'anime-list', journey: 'home' },
+        },
+      ],
+    };
+    const run = harness(
+      outcome === 'ok' ? healthy : { 'https://anime.test/': { ...html(), status: 503 } },
+    );
+    const result = await runProbes(single, legacy, options, run.deps);
+    expect(run.sent[0]!.some((log) => log.log_id === 'legacy-pending')).toBe(false);
+    expect(run.sent[0]!.find((log) => log.event === 'journey.superseded')!.props).toMatchObject({
+      incident_id: 'legacy-incident',
+      reason: 'definition_unverified',
+      transition: 'superseded',
+    });
+    expect(run.sent[0]!.some((log) => log.event === 'journey.recovered')).toBe(false);
+    expect(result.state.journeys['anime-list/home']!.incident_id).not.toBe('legacy-incident');
+  },
+);

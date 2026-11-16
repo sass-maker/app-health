@@ -237,6 +237,15 @@ const publicDefinition = z.object({
     .optional(),
 });
 
+// Unsupported public checks remain declared but cannot match a compiled execution revision.
+async function canonicalDefinitionRevision(value: unknown) {
+  try {
+    return await probeDefinitionRevision(publicDefinition.parse(value));
+  } catch {
+    return '0'.repeat(64);
+  }
+}
+
 /** Compute revisions locally; URLs and expectations never leave the source host. */
 export async function projectCanonicalCatalogWithRevisions(
   value: unknown,
@@ -253,7 +262,7 @@ export async function projectCanonicalCatalogWithRevisions(
       await Promise.all(
         journeys.map(async (row, index) => [
           policy.journeys[index],
-          await probeDefinitionRevision(publicDefinition.parse(row)),
+          await canonicalDefinitionRevision(row),
         ]),
       ),
     );

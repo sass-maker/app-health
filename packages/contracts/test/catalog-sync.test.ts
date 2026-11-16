@@ -258,8 +258,29 @@ it.each([
   { budget_ms: undefined },
   { method: 'POST' },
   { expect: { json: 'invalid' } },
-])('retains the previous catalog on malformed public definition %j', async (change) => {
-  const entry = project();
-  Object.assign(entry.systems.probe.journeys[0]!, change);
-  await expect(projectCanonicalCatalogWithRevisions(catalog(entry), null)).rejects.toThrow();
+])(
+  'keeps unsupported public definitions pending without blocking the remaining catalog %j',
+  async (change) => {
+    const entry = project();
+    Object.assign(entry.systems.probe.journeys[0]!, change);
+    const projection = await projectCanonicalCatalogWithRevisions(catalog(entry), null);
+    expect(projection.monitoring.projects[0]!.journey_revisions!.home).toBe('0'.repeat(64));
+  },
+);
+
+it('keeps one unsupported POST/private definition pending while projecting other valid projects', async () => {
+  const unsupported = project();
+  Object.assign(unsupported.systems.probe.journeys[0]!, {
+    method: 'POST',
+    url: 'http://localhost/private',
+    body: { privateNote: 'UNSUPPORTED_PRIVATE_CANARY' },
+  });
+  const valid = project({ id: 'beta', name: 'Beta' });
+  const result = await projectCanonicalCatalogWithRevisions(catalog(unsupported, valid), null);
+  expect(result.projects).toHaveLength(2);
+  expect(result.monitoring.projects[0]!.journey_revisions!.home).toBe('0'.repeat(64));
+  expect(result.monitoring.projects[1]!.journey_revisions!.home).not.toBe('0'.repeat(64));
+  expect(JSON.stringify(result)).not.toMatch(
+    /UNSUPPORTED_PRIVATE_CANARY|localhost|POST|privateNote/,
+  );
 });
