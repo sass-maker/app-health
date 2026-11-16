@@ -33,7 +33,9 @@ const source = {
           nativeSessions: 'unknown',
           serverRequests: 'applicable',
         },
-        probe: { journeys: [{ journey: 'home', url: 'https://ignored.invalid/' }] },
+        probe: {
+          journeys: [{ journey: 'home', budget_ms: 2000, url: 'https://ignored.invalid/' }],
+        },
       },
     },
   ],

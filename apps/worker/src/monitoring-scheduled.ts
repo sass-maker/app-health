@@ -4,6 +4,7 @@ import { emptyState, runProbes, type ProbeState } from '../../probe/src/run.ts';
 import { journeyKey, parseSpec } from '../../probe/src/spec.ts';
 import type { HttpResult, Measure } from '../../probe/src/types.d.ts';
 import type { ProbeLog } from '../../probe/src/emit.ts';
+import { reviewedMonitoringRevisions } from './monitoring-configuration.js';
 import generated from '../../probe/journeys.json';
 
 const INTERVAL_SECONDS = 3600;
@@ -86,6 +87,18 @@ export function workerMeasure(fetcher: typeof fetch, deadline: number): Measure 
   };
 }
 
+function suspendedProbeState(previous: ProbeState, declared: Set<string>, active: Set<string>) {
+  const suspended = (key: string) => declared.has(key) && !active.has(key);
+  return {
+    journeys: Object.fromEntries(
+      Object.entries(previous.journeys).filter(([key]) => suspended(key)),
+    ),
+    revisions: Object.fromEntries(
+      Object.entries(previous.revisions ?? {}).filter(([key]) => suspended(key)),
+    ),
+  };
+}
+
 export async function runScheduledMonitoring(
   env: MonitoringBindings,
   fetcher: typeof fetch = fetch,
@@ -98,7 +111,7 @@ export async function runScheduledMonitoring(
   const policy = (
     await db
       .prepare(
-        `SELECT p.catalog_id, p.journeys_json, p.revision
+        `SELECT p.catalog_id, p.journeys_json, p.journey_revisions_json, p.revision
     FROM workspace_monitoring_projects p
     JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
       AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
@@ -107,18 +120,35 @@ export async function runScheduledMonitoring(
     WHERE p.workspace_id = ? AND p.scope = 'public' LIMIT 61`,
       )
       .bind(target.workspaceId)
-      .all<{ catalog_id: string; journeys_json: string; revision: string }>()
+      .all<{
+        catalog_id: string;
+        journeys_json: string;
+        journey_revisions_json: string | null;
+        revision: string;
+      }>()
   ).results;
   if (!policy.length) return;
   if (policy.length > 60) throw new Error('Monitoring policy capacity exceeded');
+  const declared = new Set(
+    policy.flatMap((row) =>
+      (JSON.parse(row.journeys_json) as string[]).map((id) => `${row.catalog_id}/${id}`),
+    ),
+  );
+  const reviewed = await reviewedMonitoringRevisions();
   const allowed = new Set(
     policy.flatMap((row) =>
-      (JSON.parse(row.journeys_json) as string[]).map((journey) => `${row.catalog_id}/${journey}`),
+      (JSON.parse(row.journeys_json) as string[])
+        .filter(
+          (journey) =>
+            !row.journey_revisions_json ||
+            JSON.parse(row.journey_revisions_json)[journey] ===
+              reviewed.get(`${row.catalog_id}/${journey}`),
+        )
+        .map((journey) => `${row.catalog_id}/${journey}`),
     ),
   );
   const spec = parseSpec(generated);
   spec.journeys = spec.journeys.filter((journey) => allowed.has(journeyKey(journey)));
-  if (!spec.journeys.length) return;
   if (
     spec.journeys.length > 48 ||
     spec.journeys.some(
@@ -144,26 +174,31 @@ export async function runScheduledMonitoring(
   previous.journeys = Object.fromEntries(
     Object.entries(previous.journeys).filter(([key]) => keys.has(key)),
   );
+  const suspended = suspendedProbeState(JSON.parse(lease.state_json) as ProbeState, declared, keys);
   previous.pending = [];
   let logs: ProbeLog[] = [];
-  const result = await runProbes(
-    spec,
-    previous,
-    {
-      location: 'cloudflare-hourly',
-      intervalSeconds: INTERVAL_SECONDS,
-      userAgent: 'AppHealthJourneyProbe/1 (+https://health.sassmaker.com)',
-    },
-    {
-      measure: workerMeasure(fetcher, Date.now() + RUN_DEADLINE_MS),
-      deliver: async (batch) => {
-        logs = batch;
-        return true;
-      },
-      now: () => now,
-      uuid: () => crypto.randomUUID(),
-    },
-  );
+  const result = spec.journeys.length
+    ? await runProbes(
+        spec,
+        previous,
+        {
+          location: 'cloudflare-hourly',
+          intervalSeconds: INTERVAL_SECONDS,
+          userAgent: 'AppHealthJourneyProbe/1 (+https://health.sassmaker.com)',
+        },
+        {
+          measure: workerMeasure(fetcher, Date.now() + RUN_DEADLINE_MS),
+          deliver: async (batch) => {
+            logs = batch;
+            return true;
+          },
+          now: () => now,
+          uuid: () => crypto.randomUUID(),
+        },
+      )
+    : { state: emptyState() };
+  result.state.journeys = { ...suspended.journeys, ...result.state.journeys };
+  result.state.revisions = { ...suspended.revisions, ...result.state.revisions };
   const statements = logs.map((log) =>
     db
       .prepare(

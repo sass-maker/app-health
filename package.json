@@ -42,7 +42,8 @@
     "verify:public-viewer": "node scripts/verify-public-viewer.mjs",
     "verify:swift-packages": "swift test && swift test --package-path packages/swift",
     "verify:swift-runtime": "node scripts/verify-swift-runtime.mjs",
-    "build:production": "VITE_APP_HEALTH_INGEST_ORIGIN=https://ingest.sassmaker.com pnpm run build"
+    "build:production": "VITE_APP_HEALTH_INGEST_ORIGIN=https://ingest.sassmaker.com pnpm run build",
+    "catalog:publisher:build": "node scripts/build-catalog-publisher.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

@@ -66,6 +66,7 @@ const JOURNEY_LABELS: Record<string, string> = {
   'journey.failed': 'journey failing',
   'journey.degraded': 'journey slow',
   'journey.recovered': 'journey recovered',
+  'journey.superseded': 'previous check superseded',
 };
 
 function eventLabel(entry: AlertEntry): string {
@@ -82,6 +83,7 @@ function EventIcon({ event }: { event: AlertEntry['event'] }) {
     return <MessageSquareText aria-hidden="true" className="size-4" />;
   if (event === 'waitlist.join') return <UserRoundPlus aria-hidden="true" className="size-4" />;
   if (event === 'newsletter.subscribe') return <Mail aria-hidden="true" className="size-4" />;
+  if (event === 'journey.superseded') return <RefreshCw aria-hidden="true" className="size-4" />;
   if (event === 'journey.recovered') return <CheckCircle2 aria-hidden="true" className="size-4" />;
   return <AlertTriangle aria-hidden="true" className="size-4" />;
 }

@@ -341,6 +341,16 @@ describe('readOwnerAlertFeed', () => {
           'server',
         ],
         [
+          'superseded',
+          'app-health',
+          'prod-health',
+          now - 8 * minute,
+          'journey.superseded',
+          '{"project":"anime-list","journey":"anime-search","location":"india-home","incident_id":"legacy-incident","reason":"definition_unverified"}',
+          'info',
+          'server',
+        ],
+        [
           'info-other',
           'app-health',
           'prod-health',
@@ -457,6 +467,7 @@ describe('readOwnerAlertFeed', () => {
       expect(
         feed.entries.map((entry) => [entry.id, entry.catalog_id, entry.journey, entry.location]),
       ).toEqual([
+        ['superseded', 'anime-list', 'anime-search', 'india-home'],
         ['recovered', 'anime-list', 'anime-search', 'india-home'],
         ['slow', 'anime-list', 'manga-search', 'india-home'],
         ['failed', 'anime-list', 'anime-search', 'india-home'],

@@ -1,4 +1,5 @@
 import { CatalogSync, CATALOG_SYNC_EVENT, type CatalogSyncCommit } from './CatalogSync.js';
+import { useCatalogRevision } from './useCatalogRevision.js';
 import { PaymentConnections } from './PaymentConnections.js';
 import { WorkspacePanel, PendingInvitation } from './WorkspacePanel.js';
 import {
@@ -3726,6 +3727,8 @@ function CatalogCommitNotice({
 }
 
 type CatalogCommitState = {
+  automatic?: boolean;
+  confirmationCount?: number;
   count: number;
   pendingInventory: boolean;
   selection: SavedProject | null;
@@ -3761,14 +3764,27 @@ function AppSession(): ReactElement {
   const [projects, setProjects] = useState<SavedProject[]>([]);
   const inventoryLoaded = useRef(false);
   const prefetchedInventory = useRef<{ token: string; available: SavedProject[] } | null>(null);
+  useCatalogRevision(
+    accountSession && ownerToken === '',
+    new Set(projects.map((row) => row.appId)).size,
+    inventoryLoaded.current,
+  );
 
   useEffect(() => {
     function synchronized(event: Event) {
       const detail = (event as CustomEvent<CatalogSyncDetail>).detail;
       if (!detail || detail.epoch !== workspaceScope().epoch) return;
       const available = detail.listed ? availableProjects(detail.listed) : [];
+      const count = detail.projectCount ?? detail.listed?.apps.length ?? 0;
+      const confirmationCount = detail.automatic
+        ? catalogCommit.current?.count === count
+          ? catalogCommit.current.confirmationCount
+          : undefined
+        : count;
       catalogCommit.current = {
-        count: detail.projectCount ?? detail.listed?.apps.length ?? 0,
+        confirmationCount,
+        automatic: detail.automatic,
+        count,
         pendingInventory: !detail.listed,
         selection: project,
       };
@@ -3776,7 +3792,7 @@ function AppSession(): ReactElement {
       setProjects(available);
       inventoryLoaded.current = Boolean(detail.listed);
       setInventoryError(
-        detail.listed
+        detail.listed || detail.automatic
           ? ''
           : 'The catalog is committed. Inventory refresh is unavailable; retry its refresh.',
       );
@@ -3790,11 +3806,13 @@ function AppSession(): ReactElement {
       setSelectionError('');
       setCatalogRevision((revision) => revision + 1);
       setInventoryRetry((retry) => retry + 1);
-      const url = new URL(location.href);
-      url.search = '';
-      url.hash = '#overview';
-      history.replaceState(null, '', url);
-      changeWorkspaceView('overview', false);
+      if (!detail.automatic) {
+        const url = new URL(location.href);
+        url.search = '';
+        url.hash = '#overview';
+        history.replaceState(null, '', url);
+        changeWorkspaceView('overview', false);
+      }
       refreshWorkspace();
     }
     window.addEventListener(CATALOG_SYNC_EVENT, synchronized);
@@ -3905,6 +3923,10 @@ function AppSession(): ReactElement {
     const listed = bootstrap.result?.listed;
     if (!listed) return;
     bootstrapApplied.current = true;
+    if (catalogCommit.current) {
+      setAccountSession(true);
+      return;
+    }
     prefetchedInventory.current = { token: '', available: availableProjects(listed) };
     handleUnlock('', listed);
     setAccountSession(true);
@@ -4012,9 +4034,15 @@ function AppSession(): ReactElement {
   if (catalogCommit.current?.pendingInventory)
     return (
       <>
-        <CatalogCommitNotice count={catalogCommit.current.count} dismissible={false} />
+        <CatalogCommitNotice count={catalogCommit.current.confirmationCount} dismissible={false} />
         <WorkspaceLoading
-          error="The catalog is committed. Inventory refresh is unavailable; retry its refresh."
+          error={
+            catalogCommit.current.automatic
+              ? inventoryLoading
+                ? ''
+                : inventoryError
+              : 'The catalog is committed. Inventory refresh is unavailable; retry its refresh.'
+          }
           onRetry={() => setInventoryRetry((value) => value + 1)}
         />
       </>
@@ -4098,7 +4126,7 @@ function AppSession(): ReactElement {
   return (
     <>
       <SessionErrorNotice message={sessionError} />
-      <CatalogCommitNotice key={catalogRevision} count={catalogCommit.current?.count} />
+      <CatalogCommitNotice key={catalogRevision} count={catalogCommit.current?.confirmationCount} />
       <Dashboard
         key={`${project.appId}/${project.environmentId}/${catalogRevision}`}
         view={workspaceView}

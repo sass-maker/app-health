@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { probeDefinitionRevision } from './probe-revision.js';
 import { MonitoringPolicyV1 } from './monitoring.js';
 
 export const MAX_CATALOG_OUTSIDE_APPS = 60;
@@ -208,4 +209,63 @@ export function projectCanonicalCatalog(
     projects,
     monitoring,
   });
+}
+
+const publicDefinition = z.object({
+  url: z.string().url().startsWith('https://'),
+  method: z.literal('GET').optional(),
+  body: z.never().optional(),
+  budget_ms: z.number().int().min(100).max(60000),
+  timeout_ms: z.number().int().max(60000).optional(),
+  warm_check: z.boolean().optional(),
+  expect: z
+    .object({
+      status: z.number().int().min(100).max(599).optional(),
+      content_type: z.string().optional(),
+      body_includes: z.array(z.string().min(1)).optional(),
+      json: z
+        .array(
+          z.object({
+            path: z.string().regex(/^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$/),
+            min_items: z.number().int().min(0).max(10000).optional(),
+            equals: z.union([z.string(), z.number(), z.boolean()]).optional(),
+          }),
+        )
+        .optional(),
+      first_party_asset: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+// Unsupported public checks remain declared but cannot match a compiled execution revision.
+async function canonicalDefinitionRevision(value: unknown) {
+  try {
+    return await probeDefinitionRevision(publicDefinition.parse(value));
+  } catch {
+    return '0'.repeat(64);
+  }
+}
+
+/** Compute revisions locally; URLs and expectations never leave the source host. */
+export async function projectCanonicalCatalogWithRevisions(
+  value: unknown,
+  previousHash: string | null,
+): Promise<CatalogSyncRequest> {
+  const projection = projectCanonicalCatalog(value, previousHash);
+  const source = value as {
+    projects: Array<{ id: string; systems?: { probe?: { journeys?: unknown[] } } }>;
+  };
+  for (const policy of projection.monitoring.projects) {
+    const journeys =
+      source.projects.find((row) => row.id === policy.catalog_id)?.systems?.probe?.journeys ?? [];
+    policy.journey_revisions = Object.fromEntries(
+      await Promise.all(
+        journeys.map(async (row, index) => [
+          policy.journeys[index],
+          await canonicalDefinitionRevision(row),
+        ]),
+      ),
+    );
+  }
+  return CatalogSyncRequestV1.parse(projection);
 }

@@ -3,6 +3,7 @@ import {
   catalogSnapshotStatus,
   handleCatalogSyncRoute,
 } from './catalog-sync.js';
+import { handleCatalogPublisher, handleCatalogPublisherOwner } from './catalog-publishers.js';
 import { providerRuntime } from './payment-provider-model.js';
 import { pumpProviderJobs } from './payment-provider-wake.js';
 import { readEndpointBuckets } from './endpoint-read.js';
@@ -1092,6 +1093,8 @@ async function handleOwnerRoutes(
   if (manualCatalogResponse) return manualCatalogResponse;
   const catalogSyncResponse = await handleCatalogSyncRoute(request, env.DB, owner);
   if (catalogSyncResponse) return catalogSyncResponse;
+  const catalogPublisherResponse = await handleCatalogPublisherOwner(request, env.DB, owner);
+  if (catalogPublisherResponse) return catalogPublisherResponse;
   if (url.pathname === '/v1/catalog/import') return handleCatalogImportRoute(request, owner, env);
   const monitoringResponse = await handleMonitoringRoute(request, env.DB, owner, env);
   if (monitoringResponse) return monitoringResponse;
@@ -1495,6 +1498,19 @@ async function maintainProductArchiveSafely(env: Env) {
   }
 }
 
+async function handleCredentialRoutes(
+  request: Request,
+  env: Env,
+  bundle: AdapterBundle,
+  ctx?: WorkerContext,
+) {
+  const publisher = await handleCatalogPublisher(request, env.DB, Date.now(), env.OWNER_AUTH_TOKEN);
+  if (publisher) return publisher;
+  if (['/mcp', '/v1/mcp'].includes(new URL(request.url).pathname))
+    return handleMcpRequest(request, env, bundle, ctx);
+  return handlePublicAnalytics(request, env, bundle.repos, bundle.local);
+}
+
 const unmonitoredWorker = {
   async fetch(request: Request, env: Env, ctx?: WorkerContext): Promise<Response> {
     const url = new URL(request.url);
@@ -1512,10 +1528,8 @@ const unmonitoredWorker = {
     if (ingestHostResponse) return ingestHostResponse;
 
     if (!hostAllowed(url, bundle, env, 'owner')) return json(404, { error: 'not found' });
-    if (['/mcp', '/v1/mcp'].includes(url.pathname))
-      return handleMcpRequest(request, env, bundle, ctx);
-    const sharedResponse = await handlePublicAnalytics(request, env, bundle.repos, bundle.local);
-    if (sharedResponse) return sharedResponse;
+    const credentialResponse = await handleCredentialRoutes(request, env, bundle, ctx);
+    if (credentialResponse) return credentialResponse;
     if (!url.pathname.startsWith('/v1/')) {
       if (request.method === 'GET' && env.ASSETS) {
         if (url.pathname === '/live') return publicAnalyticsPage(request, env.ASSETS);

@@ -7,11 +7,19 @@ const policyFields = {
   scope: z.enum(['public', 'local', 'private']),
   reason: z.string().trim().min(1).max(500).nullable(),
   journeys: z.array(id).max(10),
+  journey_revisions: z.record(id, z.string().regex(/^[a-f0-9]{64}$/)).optional(),
 };
 const policyProject = z
   .object(policyFields)
   .strict()
   .refine((row) => new Set(row.journeys).size === row.journeys.length, 'Duplicate journey')
+  .refine(
+    (row) =>
+      !row.journey_revisions ||
+      (Object.keys(row.journey_revisions).length === row.journeys.length &&
+        row.journeys.every((id) => row.journey_revisions?.[id])),
+    'Check revisions must cover exactly the declared journeys',
+  )
   .refine(
     (row) =>
       row.scope === 'public'

@@ -12,7 +12,8 @@
         "public/tracker.d.ts",
         "public/tracker-extras.d.ts",
         "public/footer.{js,css}",
-        "src/public-main.tsx"
+        "src/public-main.tsx",
+        "catalog-publisher.config.ts"
       ],
       "ignoreIssues": {
         "src/components/ui/button.tsx": ["exports", "types"],
@@ -45,6 +46,9 @@
       "ignoreIssues": {
         "src/express.ts": ["types"]
       }
+    },
+    "apps/catalog-publisher": {
+      "entry": ["src/catalog-publisher-cli.ts"]
     }
   }
 }

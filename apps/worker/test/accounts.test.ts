@@ -90,12 +90,11 @@ describe('Google account boundary with real D1 SQL', () => {
         .filter((s) => s.trim()))
         await db.prepare(statement).run();
     }
-    const snapshotMigration = await readFile(
-      new URL('../migrations/0043_workspace_portfolio_snapshot.sql', import.meta.url),
-      'utf8',
-    );
-    for (const statement of snapshotMigration.trim().split(/\n(?=CREATE )/))
-      await db.prepare(statement).run();
+    for (const file of ['0043_workspace_portfolio_snapshot.sql', '0044_catalog_publishers.sql']) {
+      const migration = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
+      for (const statement of migration.trim().split(/\n(?=CREATE |ALTER )/))
+        await db.prepare(statement).run();
+    }
     env = {
       DB: db,
       APP_HEALTH_ACCOUNTS: 'enabled',

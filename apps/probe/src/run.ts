@@ -5,11 +5,13 @@
 // transitions stay queued (bounded) and retry with the same log ids, which the
 // collector deduplicates.
 
+import { probeDefinitionRevision } from '../../../packages/contracts/src/probe-revision.ts';
 import { advance, type JourneyState } from './incident.ts';
 import {
   heartbeatLog,
   resultLog,
   transitionLog,
+  supersededLog,
   type Deliver,
   type Observation,
   type ProbeLog,
@@ -22,6 +24,7 @@ export interface ProbeState {
   schema_version: 1;
   journeys: Record<string, JourneyState>;
   pending: ProbeLog[];
+  revisions?: Record<string, string>;
 }
 
 export interface RunOptions {
@@ -133,6 +136,7 @@ async function measureJourney(
     detail: verdict.detail,
     observation: {
       journey,
+      revision: await probeDefinitionRevision(journey),
       outcome: judge(journey, totals, verdict.failure),
       failure: verdict.failure,
       status: main.status,
@@ -154,6 +158,51 @@ function countStatuses(journeys: Record<string, JourneyState>, keys: string[]) {
   };
 }
 
+function currentPending(logs: ProbeLog[], revisions: Record<string, string>) {
+  return logs.filter((log) => {
+    const revision = revisions[`${log.props.project}/${log.props.journey}`];
+    return (
+      (log.event === 'probe.heartbeat' &&
+        log.props.project === undefined &&
+        log.props.journey === undefined) ||
+      Boolean(revision && log.props.revision === revision)
+    );
+  });
+}
+
+function migrateProbeState(
+  previous: ProbeState,
+  measured: Measured[],
+  location: string,
+  context: { now: number; uuid: () => string },
+) {
+  const currentKeys = new Set(measured.map(({ observation }) => journeyKey(observation.journey)));
+  const journeys = Object.fromEntries(
+    Object.entries(previous.journeys).filter(([key]) => currentKeys.has(key)),
+  );
+  const revisions: Record<string, string> = {};
+  const logs: ProbeLog[] = [];
+  for (const { observation } of measured) {
+    const key = journeyKey(observation.journey);
+    if (previous.revisions?.[key] !== observation.revision) {
+      if (journeys[key]?.incident_id)
+        logs.push(
+          supersededLog(
+            observation.journey,
+            journeys[key],
+            observation.revision!,
+            previous.revisions?.[key],
+            location,
+            context,
+          ),
+        );
+      delete journeys[key];
+    }
+    revisions[key] = observation.revision!;
+  }
+  return { journeys, revisions, logs };
+}
+
 /** Execute one run. Returns the next state to persist and a printable summary. */
 export async function runProbes(
   spec: ProbeSpec,
@@ -166,9 +215,13 @@ export async function runProbes(
   for (const journey of spec.journeys)
     measured.push(await measureJourney(journey, deps, options.userAgent));
   const vantageOffline = measured.every((item) => VANTAGE_FAILURES.has(item.observation.failure));
-  const journeys = { ...previous.journeys };
-  const logs: ProbeLog[] = [];
   const context = { now: startedAt, uuid: deps.uuid };
+  const { journeys, revisions, logs } = migrateProbeState(
+    previous,
+    measured,
+    options.location,
+    context,
+  );
   for (const { observation } of vantageOffline ? [] : measured) {
     if (observation.outcome === 'not_completed') continue;
     const key = journeyKey(observation.journey);
@@ -178,7 +231,7 @@ export async function runProbes(
       logs.push(transitionLog(next.transition, observation, options.location, context));
   }
   const keys = spec.journeys.map(journeyKey);
-  const queued = [...previous.pending, ...logs].slice(-MAX_PENDING_LOGS);
+  const queued = [...currentPending(previous.pending, revisions), ...logs].slice(-MAX_PENDING_LOGS);
   const heartbeat = heartbeatLog(
     options.location,
     options.intervalSeconds,
@@ -206,7 +259,7 @@ export async function runProbes(
   const delivered = await deps.deliver([...queued, ...results, heartbeat]);
   const pending = delivered ? [] : queued;
   return {
-    state: { schema_version: 1, journeys, pending },
+    state: { schema_version: 1, journeys, revisions, pending },
     summary: {
       location: options.location,
       started_at: startedAt,

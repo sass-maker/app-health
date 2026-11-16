@@ -4,6 +4,7 @@ import {
   CatalogSyncStatusV1,
   MAX_CATALOG_OUTSIDE_APPS,
   projectCanonicalCatalog,
+  projectCanonicalCatalogWithRevisions,
 } from '../src/catalog-sync.js';
 
 function project(overrides: Record<string, unknown> = {}) {
@@ -21,7 +22,9 @@ function project(overrides: Record<string, unknown> = {}) {
         nativeSessions: 'applicable',
         serverRequests: 'unknown',
       },
-      probe: { journeys: [{ journey: 'home', url: 'https://private.invalid/canary' }] },
+      probe: {
+        journeys: [{ journey: 'home', budget_ms: 2000, url: 'https://private.invalid/canary' }],
+      },
     },
     ...overrides,
   };
@@ -236,4 +239,48 @@ describe('portfolio synchronization contracts', () => {
     acknowledged.preserve_outside_catalog_app_ids = ['duplicate', 'duplicate'];
     expect(CatalogSyncRequestV1.safeParse(acknowledged).success).toBe(false);
   });
+});
+
+it('revisions follow public definitions without uploading them or private extras', async () => {
+  const entry = project();
+  const value = catalog(entry);
+  const initial = await projectCanonicalCatalogWithRevisions(value, null);
+  const revision = initial.monitoring.projects[0]!.journey_revisions!.home;
+  expect(revision).toMatch(/^[a-f0-9]{64}$/);
+  expect(JSON.stringify(initial)).not.toMatch(/private.invalid|PRIVATE_CANARY|localPath/);
+  entry.systems.probe.journeys[0]!.url = 'https://changed.invalid/';
+  const next = await projectCanonicalCatalogWithRevisions(value, null);
+  expect(next.monitoring.projects[0]!.journey_revisions!.home).not.toBe(revision);
+});
+
+it.each([
+  { url: 'http://example.test/' },
+  { budget_ms: undefined },
+  { method: 'POST' },
+  { expect: { json: 'invalid' } },
+])(
+  'keeps unsupported public definitions pending without blocking the remaining catalog %j',
+  async (change) => {
+    const entry = project();
+    Object.assign(entry.systems.probe.journeys[0]!, change);
+    const projection = await projectCanonicalCatalogWithRevisions(catalog(entry), null);
+    expect(projection.monitoring.projects[0]!.journey_revisions!.home).toBe('0'.repeat(64));
+  },
+);
+
+it('keeps one unsupported POST/private definition pending while projecting other valid projects', async () => {
+  const unsupported = project();
+  Object.assign(unsupported.systems.probe.journeys[0]!, {
+    method: 'POST',
+    url: 'http://localhost/private',
+    body: { privateNote: 'UNSUPPORTED_PRIVATE_CANARY' },
+  });
+  const valid = project({ id: 'beta', name: 'Beta' });
+  const result = await projectCanonicalCatalogWithRevisions(catalog(unsupported, valid), null);
+  expect(result.projects).toHaveLength(2);
+  expect(result.monitoring.projects[0]!.journey_revisions!.home).toBe('0'.repeat(64));
+  expect(result.monitoring.projects[1]!.journey_revisions!.home).not.toBe('0'.repeat(64));
+  expect(JSON.stringify(result)).not.toMatch(
+    /UNSUPPORTED_PRIVATE_CANARY|localhost|POST|privateNote/,
+  );
 });

@@ -1074,6 +1074,328 @@ try {
   log(
     'Catalog runtime: actual workerd/D1 unlinked-project denial, explicit outside preservation, later identity linking and canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
   );
+  const publisherRequest = (path, body, token, caller = '192.0.2.2') =>
+    mf.dispatchFetch(`https://dashboard.example.com${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        ...(caller ? { 'cf-connecting-ip': caller } : {}),
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        'content-type': 'application/json',
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const enrollment = await publisherRequest('/v1/catalog/publisher/enroll', {
+    label: 'Local runtime publisher',
+  });
+  assert.equal(enrollment.status, 201);
+  const paired = await enrollment.json();
+  for (let i = 0; i < 3; i += 1)
+    assert.equal(
+      (await publisherRequest('/v1/catalog/publisher/enroll', { label: 'Bounded pending' })).status,
+      201,
+    );
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher/enroll', { label: 'Over caller bound' })).status,
+    429,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Independent caller' },
+        undefined,
+        '192.0.2.3',
+      )
+    ).status,
+    201,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Unknown caller' },
+        undefined,
+        'invalid-caller',
+      )
+    ).status,
+    403,
+  );
+  for (const address of [
+    '2001:db8:1234:5678::1',
+    '2001:db8:1234:5678::2',
+    '2001:db8:1234:5678:abcd::3',
+    '2001:db8:1234:5678:ffff::4',
+  ])
+    assert.equal(
+      (
+        await publisherRequest(
+          '/v1/catalog/publisher/enroll',
+          { label: 'IPv6 bounded' },
+          undefined,
+          address,
+        )
+      ).status,
+      201,
+    );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Same IPv6 network' },
+        undefined,
+        '2001:db8:1234:5678::5',
+      )
+    ).status,
+    429,
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/catalog/publisher/enroll',
+        { label: 'Another IPv6 network' },
+        undefined,
+        '2001:db8:1234:5679::1',
+      )
+    ).status,
+    201,
+  );
+  assert.equal((await publisherRequest('/v1/catalog/publisher', {}, paired.secret)).status, 403);
+  assert.ok(
+    [401, 403].includes((await publisherRequest('/v1/apps', undefined, paired.secret)).status),
+  );
+  assert.ok(
+    [401, 403].includes(
+      (await publisherRequest('/v1/catalog/sync', undefined, paired.secret)).status,
+    ),
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/mcp',
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        paired.secret,
+      )
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await request('/v1/catalog/publishers/approve', {
+        code: paired.code,
+        allow_automatic_updates: true,
+        preserve_outside_catalog_app_ids: [],
+      })
+    ).status,
+    200,
+  );
+  const publisherStatus = await (
+    await publisherRequest('/v1/catalog/publisher', undefined, paired.secret)
+  ).json();
+  assert.equal(publisherStatus.state, 'approved');
+  const automaticProjection = JSON.parse(JSON.stringify(nextProjection));
+  automaticProjection.expected_previous_hash = publisherStatus.projection_hash;
+  automaticProjection.projects.pop();
+  automaticProjection.monitoring.projects.pop();
+  const omittedRevisions = JSON.parse(JSON.stringify(automaticProjection));
+  omittedRevisions.monitoring.projects[0] = {
+    ...omittedRevisions.monitoring.projects[0],
+    scope: 'public',
+    reason: null,
+    journeys: ['fixture'],
+  };
+  delete omittedRevisions.monitoring.projects[0].journey_revisions;
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', omittedRevisions, paired.secret)).status,
+    400,
+  );
+  automaticProjection.monitoring.projects = automaticProjection.monitoring.projects.map((row) => ({
+    ...row,
+    journey_revisions: Object.fromEntries(row.journeys.map((id) => [id, 'a'.repeat(64)])),
+  }));
+  const automatic = await publisherRequest(
+    '/v1/catalog/publisher',
+    automaticProjection,
+    paired.secret,
+  );
+  assert.equal(automatic.status, 200, await automatic.clone().text());
+  const automaticAck = await automatic.json();
+  assert.equal(automaticAck.project_count, 2);
+  assert.equal((await (await request('/v1/apps')).json()).apps.length, 2);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
+  const revisionWorkspace = await db
+    .prepare('SELECT workspace_id FROM catalog_publishers WHERE id = ?')
+    .bind(paired.publisher_id)
+    .first();
+  const oldRun = await db
+    .prepare('SELECT state_json FROM workspace_monitoring_runs WHERE workspace_id = ?')
+    .bind(revisionWorkspace.workspace_id)
+    .first();
+  const suspendedState = oldRun
+    ? JSON.parse(oldRun.state_json)
+    : { schema_version: 1, journeys: {}, revisions: {}, pending: [] };
+  suspendedState.journeys['app-health/api-health'] = {
+    status: 'failing',
+    bad_streak: 1,
+    good_streak: 0,
+    incident_id: 'runtime-prior-open',
+    opened_at: Date.now() - 1000,
+  };
+  suspendedState.journeys['removed/check'] = suspendedState.journeys['app-health/api-health'];
+  suspendedState.revisions = { ...suspendedState.revisions, 'removed/check': 'b'.repeat(64) };
+  suspendedState.pending = [
+    {
+      log_id: 'runtime-removed-pending',
+      event: 'journey.failed',
+      props: { project: 'removed', journey: 'check' },
+    },
+  ];
+  await db
+    .prepare(
+      'INSERT INTO workspace_monitoring_runs (workspace_id,lease_id,lease_started_at,state_json) VALUES (?, ?, 0, ?) ON CONFLICT(workspace_id) DO UPDATE SET lease_started_at=0,state_json=excluded.state_json',
+    )
+    .bind(revisionWorkspace.workspace_id, 'retention-fixture', JSON.stringify(suspendedState))
+    .run();
+  const resultsBeforeSuspension = (
+    await db.prepare("SELECT count(*) AS n FROM log_events WHERE event='probe.result'").first()
+  ).n;
+  monitoringProbeStarted = false;
+  assert.equal((await mf.dispatchFetch('http://localhost/cdn-cgi/handler/scheduled')).status, 200);
+  let retainedSuspension;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    retainedSuspension = JSON.parse(
+      (
+        await db
+          .prepare('SELECT state_json FROM workspace_monitoring_runs WHERE workspace_id = ?')
+          .bind(revisionWorkspace.workspace_id)
+          .first()
+      ).state_json,
+    );
+    if (!retainedSuspension.journeys['removed/check']) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  assert.equal(
+    retainedSuspension.journeys['app-health/api-health'].incident_id,
+    'runtime-prior-open',
+  );
+  assert.equal(retainedSuspension.journeys['removed/check'], undefined);
+  assert.deepEqual(retainedSuspension.pending, []);
+  assert.equal(monitoringProbeStarted, false);
+  assert.equal(
+    (await db.prepare("SELECT count(*) AS n FROM log_events WHERE event='probe.result'").first()).n,
+    resultsBeforeSuspension,
+  );
+  const oldOwnerProjection = JSON.parse(JSON.stringify(automaticProjection));
+  oldOwnerProjection.expected_previous_hash = automaticAck.projection_hash;
+  oldOwnerProjection.monitoring.projects.forEach((row) => delete row.journey_revisions);
+  const downgraded = await request('/v1/catalog/sync', oldOwnerProjection);
+  assert.equal(downgraded.status, 400);
+  assert.equal((await downgraded.json()).code, 'revisions_required');
+  const privateOnly = JSON.parse(JSON.stringify(oldOwnerProjection));
+  privateOnly.monitoring.projects.forEach((row) => {
+    row.scope = 'local';
+    row.reason = 'Private fixture.';
+    row.journeys = [];
+  });
+  const privateResponse = await request('/v1/catalog/sync', privateOnly);
+  assert.equal(privateResponse.status, 200);
+  const privateAck = await privateResponse.json();
+  oldOwnerProjection.expected_previous_hash = privateAck.projection_hash;
+  assert.equal((await request('/v1/catalog/sync', oldOwnerProjection)).status, 400);
+  assert.equal(
+    (
+      await db
+        .prepare(
+          'SELECT count(*) AS n FROM workspace_catalog_revision_fences WHERE workspace_id = ?',
+        )
+        .bind(revisionWorkspace.workspace_id)
+        .first()
+    ).n,
+    1,
+  );
+  await assert.rejects(
+    db
+      .prepare(
+        "INSERT INTO workspace_portfolio_sync_guards (workspace_id,projects_json,projection_hash,expected_previous_hash,preserve_outside_catalog_app_ids_json) SELECT workspace_id,projects_json,projection_hash,projection_hash,'[]' FROM workspace_portfolio_snapshots WHERE workspace_id = ?",
+      )
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog revisions required/,
+  );
+  await assert.rejects(
+    db
+      .prepare('DELETE FROM workspace_monitoring_projects WHERE workspace_id = ?')
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog monitoring transaction required/,
+  );
+  await assert.rejects(
+    db
+      .prepare(
+        'UPDATE workspace_monitoring_projects SET journey_revisions_json=NULL WHERE workspace_id = ?',
+      )
+      .bind(revisionWorkspace.workspace_id)
+      .run(),
+    /catalog monitoring transaction required/,
+  );
+  assert.equal(
+    (
+      await db
+        .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
+        .bind(revisionWorkspace.workspace_id)
+        .first()
+    ).n,
+    2,
+  );
+  automaticProjection.expected_previous_hash = privateAck.projection_hash;
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    200,
+  );
+  const publisherWorkspace = await db
+    .prepare('SELECT workspace_id FROM catalog_publishers WHERE id = ?')
+    .bind(paired.publisher_id)
+    .first();
+  await db
+    .prepare("INSERT INTO apps (id, name, created_at) VALUES ('runtime-new-outside', 'Outside', 1)")
+    .run();
+  await db
+    .prepare('INSERT INTO workspace_apps (app_id, workspace_id) VALUES (?, ?)')
+    .bind('runtime-new-outside', publisherWorkspace.workspace_id)
+    .run();
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    409,
+  );
+  const outsideReview = {
+    publisher_id: paired.publisher_id,
+    allow_automatic_updates: true,
+    preserve_outside_catalog_app_ids: ['runtime-new-outside'],
+  };
+  assert.equal(
+    (
+      await request('/v1/catalog/publishers/review', {
+        ...outsideReview,
+        preserve_outside_catalog_app_ids: [],
+      })
+    ).status,
+    409,
+  );
+  assert.equal((await request('/v1/catalog/publishers/review', outsideReview)).status, 200);
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', automaticProjection, paired.secret)).status,
+    200,
+  );
+  assert.equal(
+    (await request('/v1/catalog/publishers/revoke', { publisher_id: paired.publisher_id })).status,
+    200,
+  );
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', undefined, paired.secret)).status,
+    401,
+  );
+  log(
+    'Catalog publisher runtime: restricted pairing, owner approval, automatic removal, stable ingest keys, general API/MCP denial and revocation verified through actual workerd/D1.',
+  );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);
   log(

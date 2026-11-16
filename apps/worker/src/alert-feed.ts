@@ -104,7 +104,8 @@ export async function readOwnerAlertFeed(
   source?: MonitoringSource,
 ): Promise<OwnerAlertFeed> {
   const limit = Math.max(1, Math.min(ALERT_FEED_LIMIT, Math.floor(requestedLimit)));
-  const probeEvent = "l.event IN ('journey.failed', 'journey.degraded', 'journey.recovered')";
+  const probeEvent =
+    "l.event IN ('journey.failed', 'journey.degraded', 'journey.recovered', 'journey.superseded')";
   const syntheticJourney = `(${probeEvent} AND (json_type(l.props, '$.journey') IS NOT NULL
     OR json_type(l.props, '$.location') IS NOT NULL)) OR json_extract(l.props, '$.synthetic') IS 1`;
   const scope = `FROM log_events l
@@ -113,7 +114,7 @@ export async function readOwnerAlertFeed(
     JOIN current_workspace_catalog c
       ON c.workspace_id = ? AND c.lifecycle IN ('primary', 'active')
     WHERE (l.event IN ('feedback.submitted', 'waitlist.join', 'newsletter.subscribe',
-        'journey.recovered')
+        'journey.recovered', 'journey.superseded')
       OR l.level = 'error'
       OR (l.level = 'warn' AND l.event LIKE '%.degraded'))
       AND (l.event NOT LIKE 'journey.%'

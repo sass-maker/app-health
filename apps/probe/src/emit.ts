@@ -4,7 +4,7 @@
 // ids, numeric timings and failure classes: no URLs, bodies, headers or values.
 
 import type { Journey } from './spec.ts';
-import type { Transition } from './incident.ts';
+import type { JourneyState, Transition } from './incident.ts';
 import type { FailureKind, Phases } from './types.d.ts';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -21,6 +21,7 @@ export interface ProbeLog {
 
 export interface Observation {
   journey: Journey;
+  revision?: string;
   outcome: 'ok' | 'slow' | 'failed' | 'not_completed';
   failure?: FailureKind;
   status?: number;
@@ -64,6 +65,7 @@ export function transitionLog(
     props: definedProps({
       project: journey.project,
       journey: journey.journey,
+      revision: observation.revision,
       incident_id: transition.incident_id,
       transition: transition.kind,
       opened_at: transition.opened_at,
@@ -84,6 +86,36 @@ export function transitionLog(
       asset_total_ms: observation.assetTotalMs,
       server_ms: observation.serverMs,
       edge: observation.edge,
+    }),
+  };
+}
+
+/** Close the meaning of a prior incident without claiming the new check recovered. */
+export function supersededLog(
+  journey: Journey,
+  previous: JourneyState,
+  revision: string,
+  previousRevision: string | undefined,
+  location: string,
+  context: { now: number; uuid: () => string },
+): ProbeLog {
+  return {
+    log_id: context.uuid(),
+    timestamp: context.now,
+    event: 'journey.superseded',
+    level: 'info',
+    title: `${journey.project} ${journey.journey} previous check superseded`,
+    props: definedProps({
+      project: journey.project,
+      journey: journey.journey,
+      location,
+      synthetic: true,
+      incident_id: previous.incident_id,
+      opened_at: previous.opened_at,
+      revision,
+      previous_revision: previousRevision,
+      transition: 'superseded',
+      reason: previousRevision ? 'definition_changed' : 'definition_unverified',
     }),
   };
 }
@@ -112,6 +144,7 @@ export function resultLog(
     props: definedProps({
       project: observation.journey.project,
       journey: observation.journey.journey,
+      revision: observation.revision,
       location: options.location,
       interval_seconds: options.intervalSeconds,
       vantage_offline: options.vantageOffline || observation.failure === 'run_deadline',
