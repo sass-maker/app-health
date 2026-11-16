@@ -1,3 +1,8 @@
+import {
+  auditRuntimeEntry,
+  AUDIT_RUNTIME_SHA,
+  verifyAuditAdvanceRuntime,
+} from './audit-advance-runtime.mjs';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,11 +23,13 @@ import { makeSignature } from 'better-auth/crypto';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const scratch = await mkdtemp(join(tmpdir(), 'app-health-accounts-runtime-'));
 const config = join(scratch, 'wrangler.json');
+const auditEntry = join(scratch, 'audit-runtime-entry.ts');
+await writeFile(auditEntry, auditRuntimeEntry(join(root, 'src/analytics-entry.ts')));
 await writeFile(
   config,
   JSON.stringify({
     name: 'app-health-local-accounts-check',
-    main: join(root, 'src/analytics-entry.ts'),
+    main: auditEntry,
     compatibility_date: '2026-07-22',
     compatibility_flags: ['nodejs_compat', 'global_fetch_strictly_public'],
   }),
@@ -38,6 +45,8 @@ const bundle = spawnSync(
     config,
     '--outdir',
     join(scratch, 'bundle'),
+    '--define',
+    `__APP_HEALTH_BUILD_SHA__:${JSON.stringify(AUDIT_RUNTIME_SHA)}`,
   ],
   {
     cwd: root,
@@ -216,7 +225,7 @@ const mf = new Miniflare({
     throw new Error('External providers are disabled in this test');
   },
   modulesRoot: join(scratch, 'bundle'),
-  modules: [{ type: 'ESModule', path: join(scratch, 'bundle/analytics-entry.js') }],
+  modules: [{ type: 'ESModule', path: join(scratch, 'bundle/audit-runtime-entry.js') }],
   compatibilityDate: '2026-07-22',
   compatibilityFlags: ['nodejs_compat', 'global_fetch_strictly_public'],
   d1Databases: ['DB'],
@@ -266,7 +275,7 @@ try {
     for (const statement of splitMigrationSql(sql)) await db.prepare(statement).run();
   }
   const now = new Date().toISOString();
-  const expires = new Date(Date.now() + 60_000).toISOString();
+  const expires = new Date(Date.now() + 300_000).toISOString();
   await db
     .prepare('INSERT INTO apps (id, name, created_at) VALUES (?, ?, ?)')
     .bind(selfAppId, 'App Health self analytics', Date.now())
@@ -1396,6 +1405,7 @@ try {
   log(
     'Catalog publisher runtime: restricted pairing, owner approval, automatic removal, stable ingest keys, general API/MCP denial and revocation verified through actual workerd/D1.',
   );
+  log(JSON.stringify(await verifyAuditAdvanceRuntime({ runtime: mf, db, secret })));
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);
   log(

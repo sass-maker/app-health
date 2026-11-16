@@ -100,6 +100,9 @@ export interface OwnerRequestTimings {
   capabilitySetupReadMs?: number;
   analyticsCacheLookupMs?: number;
   analyticsQueryWaitMs?: number;
+  analyticsSummaryMs?: number;
+  analyticsSummaryProviderMs?: number;
+  analyticsPresenceMs?: number;
   analyticsTrendMs?: number;
   analyticsPagesMs?: number;
   analyticsSourcesMs?: number;
@@ -184,6 +187,9 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['capability_setup_read', timings.capabilitySetupReadMs],
     ['analytics_cache_lookup', timings.analyticsCacheLookupMs],
     ['analytics_query_wait', timings.analyticsQueryWaitMs],
+    ['analytics_summary', timings.analyticsSummaryMs],
+    ['analytics_summary_provider', timings.analyticsSummaryProviderMs],
+    ['analytics_presence', timings.analyticsPresenceMs],
     ['analytics_trend', timings.analyticsTrendMs],
     ['analytics_pages', timings.analyticsPagesMs],
     ['analytics_sources', timings.analyticsSourcesMs],

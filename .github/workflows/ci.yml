@@ -29,8 +29,7 @@ jobs:
       - name: Package production release candidate
         run: |
           pnpm run build:production
-          pnpm --filter @app-health/worker exec wrangler deploy --env="" --dry-run --outdir ../../.release/worker
-          git rev-parse HEAD > .release/source-sha.txt
+          node scripts/package-worker.mjs deploy --dry-run --outdir ../../.release/worker
       - name: Retain exact-source production package
         uses: actions/upload-artifact@v4
         with:
@@ -41,6 +40,7 @@ jobs:
           path: |
             .release/worker/
             .release/source-sha.txt
+            .release/worker-package.json
             apps/web/dist/
 
   go:

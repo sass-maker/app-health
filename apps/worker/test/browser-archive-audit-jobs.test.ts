@@ -9,6 +9,7 @@ import type { BrowserEnvironment } from '../src/browser-routes.js';
 import { digestBrowserEventFacts } from '../src/browser-facts-digest.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import {
+  advanceBrowserArchiveAuditJob,
   cleanupExpiredBrowserArchiveAuditJobs,
   processBrowserArchiveAuditJob,
   processPendingBrowserArchiveAuditJobs,
@@ -675,6 +676,211 @@ describe('resumable browser archive audit jobs', () => {
       .bind(old.job_id)
       .first<{ count: number }>();
     expect(oldFacts?.count).toBe(0);
+  });
+
+  it('advances exactly one owned slice and reports a busy lease without skipping work', async () => {
+    const now = Date.now();
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, now);
+    const owner = {
+      id: 'account',
+      label: 'Owner',
+      authKind: 'account' as const,
+      workspaceRole: 'owner' as const,
+      workspaceId: WORKSPACE,
+      appIds: [batch.app_id],
+    };
+    const env = {
+      DB: db,
+      BROWSER_ARCHIVE: archive,
+      BROWSER_HISTORY: history,
+    } as unknown as BrowserEnvironment;
+    const url = `https://health.test/v1/browser/archive-audits/${started.job_id}/advance`;
+    const post = (origin = 'https://health.test', body = '{}') =>
+      new Request(url, { method: 'POST', headers: { origin }, body });
+    await db
+      .prepare(
+        'UPDATE browser_archive_audit_jobs SET lease_token = ?, lease_until = ? WHERE job_id = ?',
+      )
+      .bind('busy', now + 300_000, started.job_id)
+      .run();
+    const busy = await handleBrowserOwner(post(), env, owner, false);
+    expect(busy?.status).toBe(409);
+    expect(await busy!.json()).toMatchObject({ outcome: 'busy', lease_acquired: false });
+    expect(batchLookupCalls).toBe(0);
+    await db
+      .prepare('UPDATE browser_archive_audit_jobs SET lease_until = ? WHERE job_id = ?')
+      .bind(now - 1, started.job_id)
+      .run();
+    const result = await handleBrowserOwner(post(), env, owner, false);
+    expect(result?.status).toBe(200);
+    expect(await result!.json()).toMatchObject({
+      complete: false,
+      outcome: 'advanced',
+      attempted_slices: 1,
+      lease_acquired: true,
+      phase: 'receipts',
+      progress: { receipts_processed: 1 },
+    });
+    expect(batchLookupCalls).toBe(1);
+    expect(dayPageCalls).toBe(0);
+    const foreign = await handleBrowserOwner(
+      post(),
+      env,
+      { ...owner, workspaceId: 'foreign' },
+      false,
+    );
+    expect(foreign?.status).toBe(404);
+    await db
+      .prepare(
+        "UPDATE browser_archive_audit_jobs SET status = 'finished', phase = 'done' WHERE job_id = ?",
+      )
+      .bind(started.job_id)
+      .run();
+    const terminal = await handleBrowserOwner(post(), env, owner, false);
+    expect(await terminal!.json()).toMatchObject({
+      outcome: 'terminal',
+      attempted_slices: 0,
+      lease_acquired: false,
+    });
+    expect(batchLookupCalls).toBe(1);
+  });
+
+  it('requires an explicit full account owner and a same-origin bounded empty request before job access', async () => {
+    const env = {
+      DB: db,
+      BROWSER_ARCHIVE: archive,
+      BROWSER_HISTORY: history,
+    } as unknown as BrowserEnvironment;
+    const owner = {
+      id: 'account',
+      label: 'Owner',
+      authKind: 'account' as const,
+      workspaceRole: 'owner' as const,
+      workspaceId: WORKSPACE,
+      appIds: [batch.app_id],
+    };
+    const url =
+      'https://health.test/v1/browser/archive-audits/11111111-1111-4111-8111-111111111111/advance';
+    for (const denied of [
+      { ...owner, authKind: undefined },
+      { ...owner, authKind: 'api-token' as const },
+      { ...owner, workspaceRole: 'editor' as const },
+      { ...owner, workspaceRole: 'viewer' as const },
+      { ...owner, appId: batch.app_id },
+      { ...owner, apiScopes: [] },
+      { ...owner, apiPermission: 'manage' as const },
+    ])
+      expect(
+        (
+          await handleBrowserOwner(
+            new Request(url, {
+              method: 'POST',
+              headers: { origin: 'https://health.test' },
+              body: '{}',
+            }),
+            env,
+            denied,
+            false,
+          )
+        )?.status,
+      ).toBe(403);
+    for (const origin of [
+      '',
+      'null',
+      'https://evil.test',
+      'http://health.test',
+      'https://health.test:444',
+    ])
+      expect(
+        (
+          await handleBrowserOwner(
+            new Request(url, { method: 'POST', headers: { origin }, body: '{}' }),
+            env,
+            owner,
+            false,
+          )
+        )?.status,
+      ).toBe(403);
+    for (const body of ['[]', 'null', '{', '{"force":true}', ' '.repeat(65) + '{}'])
+      expect(
+        (
+          await handleBrowserOwner(
+            new Request(url, { method: 'POST', headers: { origin: 'https://health.test' }, body }),
+            env,
+            owner,
+            false,
+          )
+        )?.status,
+      ).toBe(400);
+    expect(
+      (
+        await handleBrowserOwner(
+          new Request(`${url}?day=${DAY}`, {
+            method: 'POST',
+            headers: { origin: 'https://health.test' },
+            body: '{}',
+          }),
+          env,
+          owner,
+          false,
+        )
+      )?.status,
+    ).toBe(400);
+    expect(batchLookupCalls).toBe(0);
+  });
+
+  it('shares retry classification between owner advancement and the scheduler without advancing failed cursors', async () => {
+    const now = Date.now();
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, now);
+    const bindings = { db, archive, history: { get: async () => null } };
+    expect(
+      await advanceBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, now + 1),
+    ).toMatchObject({ outcome: 'failed', attempted_slices: 1, lease_acquired: true });
+    const row = await db
+      .prepare(
+        'SELECT receipt_cursor, slice_failures, lease_token FROM browser_archive_audit_jobs WHERE job_id = ?',
+      )
+      .bind(started.job_id)
+      .first();
+    expect(row).toMatchObject({ receipt_cursor: 0, slice_failures: 1, lease_token: null });
+    await processPendingBrowserArchiveAuditJobs(bindings, now + 2);
+    await advanceBrowserArchiveAuditJob(bindings, WORKSPACE, started.job_id, now + 3);
+    const state = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, now + 4);
+    expect(state).toMatchObject({ status: 'incomplete', progress: { receipts_processed: 0 } });
+    expect(state?.incomplete_reasons).toContain('audit_slice_retries_exhausted');
+  });
+
+  it('keeps digest classifications while bounding status projection for malformed retained headers', async () => {
+    const started = await startBrowserArchiveAuditJob(db, WORKSPACE, DAY, 5_000);
+    const valid = 'a'.repeat(64);
+    const cases = [
+      { receipt: valid, archive: valid, expected: 'matched' },
+      { receipt: null, archive: valid, expected: 'legacy_receipts' },
+      { receipt: valid, archive: null, expected: 'missing_archive_digests' },
+      { receipt: valid, archive: 'b'.repeat(64), expected: 'mismatched' },
+      { receipt: valid.repeat(1024), archive: valid.repeat(1024), expected: 'mismatched' },
+      { receipt: `${valid}\0tail`, archive: `${valid}\0tail`, expected: 'mismatched' },
+      { receipt: 'é'.repeat(32), archive: 'é'.repeat(32), expected: 'mismatched' },
+      { receipt: '', archive: '', expected: 'mismatched' },
+    ];
+    for (const [index, value] of cases.entries())
+      await db
+        .prepare(
+          `INSERT INTO browser_archive_audit_facts
+        (job_id, identity_hash, has_receipt, queue_stage_observed, receipt_digest_version,
+         receipt_digest, archive_count, archive_in_day, archive_digest_version, archive_digest)
+        VALUES (?, ?, 1, 1, 1, ?, 1, 1, 1, ?)`,
+        )
+        .bind(started.job_id, index.toString(16).padStart(64, '0'), value.receipt, value.archive)
+        .run();
+    const result = await readBrowserArchiveAuditJob(db, WORKSPACE, started.job_id, 5_100);
+    expect(result?.observed_comparison_counts).toMatchObject({
+      matched: 1,
+      mismatched: 5,
+      legacy_receipts: 1,
+      missing_archive_digests: 1,
+      queue_stage_receipts: 8,
+    });
   });
 
   it('serializes overlapping slice deliveries with a D1 lease', async () => {

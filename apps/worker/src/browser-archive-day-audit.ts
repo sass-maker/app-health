@@ -22,6 +22,7 @@ const SEGMENT_BYTES_LIMIT = 64 * 1024 * 1024;
 const SEGMENT_BYTES_MAX = 2 * 1024 * 1024;
 const DECOMPRESSED_BYTES_LIMIT = 8 * 1024 * 1024;
 const DECOMPRESSED_BYTES_MAX = 2 * 1024 * 1024;
+const ARCHIVE_RECORD_BYTES_MAX = 64 * 1024;
 const ARCHIVE_FACT_LIMIT = 10_000;
 
 type DayCursor = { event_day: string; object_key: string; snapshot_sequence: number };
@@ -259,6 +260,12 @@ function validateSegmentRows(
   const batches: CollectedBrowserBatch[] = [];
   const bounds = { count: 0, minimum: Infinity, maximum: -Infinity };
   for (const line of lines) {
+    // Every archive producer limits a UTF-8 record, including its newline, to 64 KiB.
+    if (
+      line.length + 1 > ARCHIVE_RECORD_BYTES_MAX ||
+      new TextEncoder().encode(`${line}\n`).byteLength > ARCHIVE_RECORD_BYTES_MAX
+    )
+      throw new BrowserArchiveSegmentError('archive record byte cap', 'object_limit');
     const parsed = JSON.parse(line);
     if (!isArchiveBatch(parsed, workspace))
       throw new BrowserArchiveSegmentError('invalid archive batch', 'archive_integrity');
