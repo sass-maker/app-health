@@ -8,7 +8,9 @@ const source = readFileSync('public/tracker.js', 'utf8');
 let originalPush: History['pushState'];
 beforeEach(async () => {
   vi.resetModules();
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();
   originalPush = history.pushState;
@@ -26,9 +28,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
-it('ships under 3.6KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
-  // Navigation handoff retains queued actions independently of an in-flight batch.
-  expect(gzipSync(source).length).toBeLessThanOrEqual(3600);
+it('ships under 4.5KB gzip and sends sanitized pageviews and explicit events without credentials', async () => {
+  // The bundled transactional identity authority adds no extra script request or CSP permission.
+  expect(gzipSync(source).length).toBeLessThanOrEqual(4500);
   api().page('/users/123?email=private@example.com#token');
   api().track('signup.completed');
   await api().flush();
@@ -89,7 +91,7 @@ it('keeps a beacon batch for retry until an acknowledged response and sends no h
   vi.stubGlobal('navigator', { sendBeacon: beacon });
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
   window.dispatchEvent(new Event('pagehide'));
-  expect(beacon).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(beacon).toHaveBeenCalledOnce());
   expect(api().diagnostics().accepted).toBe(0);
   await vi.advanceTimersByTimeAsync(16000);
   expect(fetch).not.toHaveBeenCalled();
@@ -156,6 +158,7 @@ it('shares an anonymous visitor across reloads, rotates visits after inactivity,
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   history.replaceState({}, '', '/landing?utm_source=launch&utm_medium=email&utm_campaign=summer');
   vi.resetModules();
@@ -182,6 +185,7 @@ it('shares an anonymous visitor across reloads, rotates visits after inactivity,
   nextScript.dataset.endpoint = '/v1/browser';
   vi.spyOn(document, 'currentScript', 'get').mockReturnValue(nextScript);
   await import('../public/tracker.js');
+  await api().flush();
   vi.setSystemTime(Date.now() + 1_800_001);
   api().page('/returning');
   await api().flush();
@@ -225,8 +229,10 @@ it('uses at most two idle heartbeats per visible minute and cancels redundant sc
   vi.mocked(fetch).mockClear();
   await vi.advanceTimersByTimeAsync(29_999);
   expect(fetch).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(30_001);
-  expect(fetch).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(1);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+  await vi.advanceTimersByTimeAsync(30_000);
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   for (const [, init] of vi.mocked(fetch).mock.calls)
     expect(JSON.parse(String(init?.body)).events).toEqual([]);
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
@@ -256,6 +262,7 @@ it('aborts outstanding delivery on stop and drops unsupported referrer host synt
   });
   const tracker = api();
   const delivery = tracker.flush();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body));
   expect(body.events[1].referrer).toBe('');
   tracker.stop();

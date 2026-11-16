@@ -23,9 +23,13 @@
   let generation = 0;
   const visitorKey = `h:${scope}:v`;
   const visitKey = `h:${scope}:w`;
+  const migratedKey = `h:${scope}:m`;
   let storage;
-  let visitor;
   let visit;
+  let database;
+  let connection;
+  let cancelOpen;
+  const transactions = new Map();
   let entered = ['reload', 'back_forward'].includes(
     globalThis.performance.getEntriesByType?.('navigation')[0]?.type,
   );
@@ -46,6 +50,11 @@
     if (!enabled() || cookieless) return;
     try {
       storage = sessionOnly ? globalThis.sessionStorage : globalThis.localStorage;
+      if (!sessionOnly) {
+        storage?.getItem(visitorKey);
+        storage?.setItem(`${migratedKey}:probe`, '1');
+        storage?.removeItem(`${migratedKey}:probe`);
+      }
     } catch {
       storage = undefined;
     }
@@ -73,6 +82,14 @@
       return false;
     }
   }
+  function readLegacy(key) {
+    const value = storage.getItem(key);
+    try {
+      return JSON.parse(value || 'null');
+    } catch {
+      return null;
+    }
+  }
   function attribution(path) {
     const url = new URL(path || location.href, location.href);
     const value = (name) =>
@@ -98,17 +115,6 @@
     return /^[a-zA-Z0-9 _.,+-]{1,100}$/.test(value) ? value : '';
   }
 
-  function recognizedVisitor(now) {
-    if (sessionOnly || !storage) return undefined;
-    const saved = readStored(visitorKey);
-    if (!storage) return undefined;
-    if (saved && uuid(saved.id) && saved.expires > now) {
-      visitor = saved;
-      return false;
-    }
-    visitor = { id: crypto.randomUUID(), expires: now + 90 * 86400000 };
-    return writeStored(visitorKey, visitor) ? true : undefined;
-  }
   function validVisit(value) {
     return (
       value &&
@@ -120,31 +126,22 @@
   }
   function visitContext(meaningful, path = location.href) {
     const now = Date.now();
-    const saved = readStored(visitKey);
+    const saved = sessionOnly && readStored(visitKey);
     if (validVisit(saved)) visit = saved;
     if (!meaningful)
       return validVisit(visit) && now >= visit.last && now - visit.last < 1800000
         ? contextOf(visit)
         : null;
-    const freshVisitor = recognizedVisitor(now);
-    const visitorId = freshVisitor === undefined ? undefined : visitor.id;
-    if (
-      !validVisit(visit) ||
-      visit.visitor_id !== visitorId ||
-      now - visit.last >= 1800000 ||
-      now < visit.last
-    ) {
+    if (!validVisit(visit) || now - visit.last >= 1800000 || now < visit.last) {
       visit = {
         id: crypto.randomUUID(),
         last: now,
-        visitor_id: visitorId,
-        type: visitorId ? (freshVisitor ? 'new' : 'returning') : undefined,
         attribution: attribution(path),
       };
     }
     entered = true;
     visit = { ...visit, last: now };
-    if (storage && !writeStored(visitKey, visit)) {
+    if (sessionOnly && storage && !writeStored(visitKey, visit)) {
       visit = { ...visit, visitor_id: undefined, type: undefined };
     }
     return contextOf(visit);
@@ -155,6 +152,185 @@
       ...(value.visitor_id ? { visitor_id: value.visitor_id, visit_type: value.type } : {}),
       attribution: value.attribution,
     };
+  }
+
+  function openIdentity(version) {
+    database ||= new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = () => {
+        settled = true;
+        clearTimeout(timeout);
+        if (cancelOpen === fail) cancelOpen = undefined;
+        reject(new Error('Identity storage unavailable'));
+      };
+      const timeout = setTimeout(fail, 2000);
+      cancelOpen = fail;
+      try {
+        const opening = globalThis.indexedDB.open('app-health-identity', 1);
+        opening.onupgradeneeded = () => {
+          if (!enabled() || generation !== version || settled) opening.transaction.abort();
+          else opening.result.createObjectStore('scopes');
+        };
+        opening.onerror = opening.onblocked = fail;
+        opening.onsuccess = () => {
+          clearTimeout(timeout);
+          if (settled || !enabled() || generation !== version) {
+            opening.result.close();
+            fail();
+            return;
+          }
+          settled = true;
+          if (cancelOpen === fail) cancelOpen = undefined;
+          const db = opening.result;
+          connection = db;
+          db.onversionchange = () => db.close();
+          resolve(db);
+        };
+      } catch {
+        fail();
+      }
+    });
+    return database;
+  }
+  function persistentIdentity(meaningful, path, version) {
+    return openIdentity(version).then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          if (!enabled() || generation !== version) return reject(new Error('Identity cancelled'));
+          const transaction = db.transaction('scopes', 'readwrite');
+          const timeout = setTimeout(cancel, 2000);
+          let candidate;
+          const finish = () => {
+            clearTimeout(timeout);
+            transactions.delete(transaction);
+          };
+          function cancel() {
+            finish();
+            try {
+              transaction.abort();
+            } catch {
+              /* The transaction already finished. */
+            }
+          }
+          transactions.set(transaction, cancel);
+          transaction.onabort = transaction.onerror = () => {
+            finish();
+            reject(new Error('Identity transaction failed'));
+          };
+          transaction.oncomplete = () => {
+            finish();
+            if (!enabled() || generation !== version)
+              return reject(new Error('Identity cancelled'));
+            if (meaningful && candidate) {
+              try {
+                storage.setItem(migratedKey, '1');
+                storage.setItem(visitorKey, JSON.stringify(candidate.visitor));
+                storage.setItem(visitKey, JSON.stringify(candidate.visit));
+              } catch {
+                /* The canonical record committed; retry the old-tab mirror on the next action. */
+              }
+            }
+            resolve(candidate);
+          };
+          const store = transaction.objectStore('scopes');
+          const reading = store.get(scope);
+          reading.onsuccess = () => {
+            try {
+              if (!enabled() || generation !== version) return cancel();
+              const now = Date.now();
+              let saved = reading.result;
+              if (!saved && !meaningful) return;
+              if (!saved)
+                saved =
+                  storage.getItem(migratedKey) !== '1'
+                    ? { visitor: readLegacy(visitorKey), visit: readLegacy(visitKey) }
+                    : {};
+              const previousVisitor = saved.visitor;
+              const known =
+                previousVisitor &&
+                uuid(previousVisitor.id) &&
+                Number.isFinite(previousVisitor.expires) &&
+                previousVisitor.expires > now;
+              const visitor = known
+                ? { id: previousVisitor.id, expires: previousVisitor.expires }
+                : { id: crypto.randomUUID(), expires: now + 90 * 86400000 };
+              let current = saved.visit;
+              if (known && validVisit(current)) {
+                const legacy = readLegacy(visitKey);
+                if (
+                  legacy?.id === current.id &&
+                  legacy.visitor_id === visitor.id &&
+                  Number.isFinite(legacy.last) &&
+                  legacy.last > current.last &&
+                  legacy.last <= now &&
+                  now - legacy.last < 1800000
+                )
+                  current = { ...current, last: legacy.last };
+              }
+              if (
+                !validVisit(current) ||
+                !['new', 'returning'].includes(current.type) ||
+                current.visitor_id !== visitor.id ||
+                now - current.last >= 1800000 ||
+                now < current.last
+              ) {
+                current = meaningful
+                  ? {
+                      id: crypto.randomUUID(),
+                      last: now,
+                      visitor_id: visitor.id,
+                      type: known ? 'returning' : 'new',
+                      attribution: attribution(path),
+                    }
+                  : null;
+              }
+              if (!current) return;
+              current = {
+                id: current.id,
+                last: current.last,
+                visitor_id: visitor.id,
+                type: current.type,
+                attribution: {
+                  ...Object.fromEntries(
+                    ['source', 'medium', 'campaign', 'content', 'term'].map((name) => [
+                      name,
+                      String(current.attribution[name] || '')
+                        .replace(/[^a-zA-Z0-9 _.,:+/-]/g, '')
+                        .slice(0, 100),
+                    ]),
+                  ),
+                  entry_path: safePath(current.attribution.entry_path),
+                },
+              };
+              candidate = { visitor, visit: meaningful ? { ...current, last: now } : current };
+              if (meaningful) store.put(candidate, scope);
+            } catch {
+              cancel();
+            }
+          };
+        }),
+    );
+  }
+  function forgetPersistentIdentity() {
+    if (!storage) return;
+    storage = undefined;
+    visit = validVisit(visit)
+      ? { id: visit.id, last: visit.last, attribution: visit.attribution }
+      : undefined;
+    cancelOpen?.();
+    for (const cancel of transactions.values()) cancel();
+    connection?.close();
+    connection = database = undefined;
+  }
+  async function refreshIdentity() {
+    if (!storage || sessionOnly || queue.length || pending || handoffs.length) return;
+    const version = generation;
+    try {
+      const saved = await persistentIdentity(false, undefined, version);
+      if (generation === version && enabled() && storage) visit = saved?.visit;
+    } catch {
+      if (generation === version) forgetPersistentIdentity();
+    }
   }
 
   function safePath(value) {
@@ -239,6 +415,8 @@
 
   async function flush() {
     if (waiting) await recording;
+    if (storage && !sessionOnly) await refreshIdentity();
+    if (waiting) await recording;
     if (!enabled() || document.visibilityState === 'hidden') return;
     if (delivery) {
       await delivery.catch(() => {});
@@ -295,30 +473,41 @@
       diagnostics.dropped++;
       return;
     }
-    if (!storage || sessionOnly || !navigator.locks) return record(...args);
+    const timestamp = Date.now();
+    if (!storage || sessionOnly) return record(args, undefined, timestamp);
     const version = generation;
     waiting++;
-    recording = navigator.locks
-      .request(visitKey, () => {
-        if (version === generation) record(...args);
+    recording = (recording || Promise.resolve())
+      .then(async () => {
+        if (version !== generation || !enabled()) return;
+        if (!storage) return record(args, undefined, timestamp);
+        const saved = await persistentIdentity(true, args[2], version);
+        if (version !== generation || !enabled()) return;
+        if (!storage) return record(args, undefined, timestamp);
+        visit = saved.visit;
+        entered = true;
+        record(args, contextOf(visit), timestamp);
       })
       .catch(() => {
         if (version === generation) {
-          storage = undefined;
-          record(...args);
+          forgetPersistentIdentity();
+          record(args, undefined, timestamp);
         }
       })
       .finally(() => {
         if (version === generation) waiting--;
       });
   }
-  function record(type, name, path, properties, value) {
+  function record(
+    [type, name, path, properties, value],
+    context = visitContext(true, path),
+    timestamp = Date.now(),
+  ) {
     if (!enabled()) return;
-    const context = visitContext(true, path);
     documentVisit ||= context.session_id;
     queue.push({
       event_id: crypto.randomUUID(),
-      timestamp: Date.now(),
+      timestamp,
       context,
       type,
       path: safePath(path),
@@ -373,6 +562,8 @@
   }
   async function beacon() {
     if (waiting) await recording;
+    if (storage && !sessionOnly) await refreshIdentity();
+    if (waiting) await recording;
     if (!enabled()) return true;
     const send = (item) => {
       if (item.handedOff) return true;
@@ -404,6 +595,11 @@
   }
   function pause() {
     generation++;
+    cancelOpen?.();
+    for (const cancel of transactions.values()) cancel();
+    transactions.clear();
+    connection?.close();
+    connection = database = undefined;
     request?.abort();
     clearTimeout(timer);
     timer = null;
@@ -416,7 +612,7 @@
     pending = null;
     waiting = 0;
     recording = undefined;
-    visit = visitor = storage = documentVisit = undefined;
+    visit = storage = documentVisit = undefined;
   }
   function resume() {
     if (!enabled()) return;

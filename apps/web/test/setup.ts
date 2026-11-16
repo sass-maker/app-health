@@ -1,4 +1,10 @@
 import '@testing-library/jest-dom/vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { beforeEach, vi } from 'vitest';
+
+beforeEach(() => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+});
 
 if (!window.matchMedia) {
   window.matchMedia = () => ({

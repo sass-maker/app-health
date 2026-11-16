@@ -78,6 +78,10 @@ for (const { width, failReadback } of [
     let needsReview = true;
     let inventoryUnavailable = failReadback;
     let uploaded = '';
+    let releaseInitialStatus!: () => void;
+    let pendingStatus: Promise<void> | undefined = new Promise((resolve) => {
+      releaseInitialStatus = resolve;
+    });
     const active = canonical.projects.filter(
       (row: { lifecycle: { portfolioStatus: string } }) =>
         row.lifecycle.portfolioStatus === 'active',
@@ -130,6 +134,7 @@ for (const { width, failReadback } of [
           }),
     );
     await page.route('**/v1/catalog/sync', async (route) => {
+      if (route.request().method() === 'GET') await pendingStatus;
       if (route.request().method() === 'POST') {
         uploaded = route.request().postData() ?? '';
         synchronized = true;
@@ -213,6 +218,7 @@ for (const { width, failReadback } of [
       }),
     );
     await page.goto('/app?project=app-56&environment=env-56#overview');
+    await page.getByText('Import active portfolio', { exact: true }).click();
     const input = page.getByLabel('Canonical catalog JSON');
     await input.setInputFiles({
       name: 'invalid.json',
@@ -220,6 +226,15 @@ for (const { width, failReadback } of [
       buffer: Buffer.from('{'),
     });
     await expect(page.getByText('Choose a valid canonical catalog JSON file.')).toBeVisible();
+    await expect(page.getByText('Loading catalog status…')).toBeVisible();
+    await expect(page.getByText('Catalog status unavailable', { exact: true })).toHaveCount(0);
+    await page.screenshot({
+      path: join(evidence, `catalog-invalid-file-pending-${width}-${failReadback}.png`),
+      animations: 'disabled',
+    });
+    releaseInitialStatus();
+    pendingStatus = undefined;
+    await expect(page.getByText('No catalog imported yet', { exact: true })).toBeVisible();
     await input.setInputFiles({
       name: 'projects.json',
       mimeType: 'application/json',
@@ -278,8 +293,27 @@ for (const { width, failReadback } of [
       ),
     ).toHaveCount(0);
     expect(new URL(page.url()).search).toBe('');
+    let releaseStatus!: () => void;
+    pendingStatus = new Promise<void>((resolve) => {
+      releaseStatus = resolve;
+    });
     await page.reload();
+    await expect(page.getByText('SaaS Maker catalog', { exact: true })).toBeVisible();
+    await page.evaluate(async () => document.fonts.ready);
+    const reportSection = page.locator('#daily-engagement');
+    await page.screenshot({
+      path: join(evidence, `catalog-status-pending-${width}-${failReadback}.png`),
+      animations: 'disabled',
+    });
+    const pendingTop = (await reportSection.boundingBox())!.y;
+    releaseStatus();
+    pendingStatus = undefined;
     await expect(page.getByText('SaaS Maker · 40 active projects')).toBeVisible();
+    await page.screenshot({
+      path: join(evidence, `catalog-status-ready-${width}-${failReadback}.png`),
+      animations: 'disabled',
+    });
+    expect(Math.abs((await reportSection.boundingBox())!.y - pendingTop)).toBeLessThanOrEqual(1);
     await expect(page.getByText('project unavailable', { exact: true })).toHaveCount(0);
     await expect(page.getByLabel('Monitoring roster file')).toHaveCount(0);
     expect(uploaded).not.toMatch(/PRIVATE_CANARY|localPath|ignored.invalid|ownerNotes/);

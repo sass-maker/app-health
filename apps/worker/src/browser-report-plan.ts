@@ -7,10 +7,15 @@ import {
 
 const totals =
   "SUM(IF(blob3 = 'pageview', _sample_interval, 0)) AS pageviews, SUM(IF(blob3 = 'event', _sample_interval, 0)) AS events";
-const identities =
-  "COUNT(DISTINCT blob7) - MAX(IF(blob7 = '', 1, 0)) AS sessions, COUNT(DISTINCT blob8) - MAX(IF(blob8 = '', 1, 0)) AS visitors";
-const visits =
-  "COUNT(DISTINCT IF(blob9 = 'new', blob7, '')) - MAX(IF(blob9 = 'new' AND blob7 != '', 0, 1)) AS new_sessions, COUNT(DISTINCT IF(blob9 = 'returning', blob7, '')) - MAX(IF(blob9 = 'returning' AND blob7 != '', 0, 1)) AS returning_sessions, COUNT(DISTINCT IF(blob9 != 'new' AND blob9 != 'returning', blob7, '')) - MAX(IF(blob7 != '' AND blob9 != 'new' AND blob9 != 'returning', 0, 1)) AS unidentified_sessions";
+const sessionCount = "COUNT(DISTINCT blob7) - MAX(IF(blob7 = '', 1, 0))";
+const identities = `${sessionCount} AS sessions, COUNT(DISTINCT blob8) - MAX(IF(blob8 = '', 1, 0)) AS visitors`;
+function sessionCountWhere(condition: string) {
+  return `COUNT(DISTINCT IF(${condition}, blob7, '')) - MAX(IF((${condition}) AND blob7 != '', 0, 1))`;
+}
+const newSessions = sessionCountWhere("blob9 = 'new'");
+const typedSessions = sessionCountWhere("blob9 IN ('new', 'returning')");
+// Classify each observed session once; new takes precedence over mixed typed batches.
+const visits = `${newSessions} AS new_sessions, (${typedSessions}) - (${newSessions}) AS returning_sessions, (${sessionCount}) - (${typedSessions}) AS unidentified_sessions`;
 const sample = 'MAX(_sample_interval) AS sample_interval';
 const dimensions = {
   audience: [

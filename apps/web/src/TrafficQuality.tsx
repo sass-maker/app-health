@@ -184,7 +184,9 @@ function ReadingMetadata({
             : 'Refresh failed. Showing previous reading.'}
       </p>
       <p>
-        {state.status === 'ready' ? 'Current bot window:' : 'Previous bot window:'}{' '}
+        <span className="inline-block min-w-32">
+          {state.status === 'ready' ? 'Current bot window:' : 'Previous bot window:'}
+        </span>{' '}
         <time dateTime={new Date(state.report.from).toISOString()}>
           {format(state.report.from)}
         </time>{' '}

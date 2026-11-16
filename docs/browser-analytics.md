@@ -61,7 +61,7 @@ Add `data-vitals` (empty, `"1"`, or `"true"`) to the tracker tag to opt in.
 When its script pathname ends in `/tracker.js`, the tracker lazily loads shared
 `/tracker-extras.js`, which loads `/vitals.js` from the same host;
 `vitals.js` is a separate opt-in static file with no runtime dependencies.
-The core tracker keeps its **3600-byte gzip** budget; optional vitals code stays
+The core tracker keeps its **4500-byte gzip** budget; optional vitals code stays
 separate. A bounded `?v=` release token propagates to optional assets for cache
 separation; it does not provide immutable historical version hosting. Vitals emit one `web.vitals`
 log per document, sent on the first hidden transition or pagehide. Optional
@@ -82,14 +82,26 @@ observers and listeners too.
 
 ## Semantics and privacy
 
-- Persistent anonymous visitors are the default for new installations. IDs stay in
-  first-party local storage for up to 90 days, scoped by `data-project`; visits
-  expire after 30 minutes without a pageview or explicit product event. Same-origin
-  tabs share the visit. Web Locks serialize identity changes where supported, so
-  simultaneous tabs do not create separate visitors. Without Web Locks, storage
-  sharing is best-effort and simultaneous creation can race. Heartbeats do not
+- Persistent anonymous visitors are the default for new installations. IDs use a
+  first-party IndexedDB record, scoped by `data-project`, with a 90-day expiry;
+  visits expire after 30 minutes without a pageview or explicit product event.
+  Same-origin tabs update the visitor and visit in one transaction. Events wait
+  for that transaction to commit; storage failure uses an unidentified memory
+  session. The identity coordinator ships in the existing tracker script.
+  Heartbeats do not
   prolong inactivity or create historical events; expired visits stop sending
   idle heartbeats. Scrolls and pointer movement alone do not extend a visit.
+- The first upgraded visit imports valid legacy localStorage identity once.
+  Meaningful commits mirror sanitized canonical IDs so open old tabs and an
+  old-script rollback can retain them. Only newer activity from the exact same
+  visitor/session can extend inactivity; mirror IDs, expiry, type and attribution
+  never override the canonical record. Read-only refreshes reconcile matching activity
+  in memory for heartbeats and checkout context without writing either store.
+  Aborted transactions do not mirror. Startup never rewrites a completed marker. Older code retains its original concurrency limitations.
+  Clear all site data to reset recognition: clearing only localStorage retains the
+  canonical identity, while clearing only IndexedDB after completed migration
+  leaves a marker that prevents mirror ID resurrection. If marker writes are
+  interrupted or blocked, clear all site data for a reliable reset.
 - `data-identity="session"` omits persistent visitor IDs. Blocked storage falls
   back to an in-memory session. Raw session and visitor IDs are hashed with the
   app/environment scope before queueing or archival. Legacy identity remains
@@ -132,7 +144,7 @@ complete India calendar day after activation is the earliest bot-filtered
 visitor qualification candidate; historical days, including October 1, are not
 retroactively classified.
 
-The standalone tracker has no runtime dependencies and a tested **3600-byte gzip**
+The standalone tracker has no runtime dependencies and a tested **4500-byte gzip**
 budget. It queues at most 100 events, sends at most 25 per batch, flushes after
 1.5 seconds, and reuses its batch ID on retry. A request times out after ten
 seconds; retryable failures get at most three attempts with backoff. Permanent
@@ -413,7 +425,7 @@ redirect preserves the browser source without extra landing-request cookies;
 there is no demonstrated need for an edge fallback in this change. A stripped
 referrer cannot be recovered by reading the destination request's Referer header.
 
-The tracker remains dependency-free with a 3600-byte gzip budget (including the opt-in vitals loader and navigation handoff).
+The tracker remains dependency-free with a 4500-byte gzip budget (including the opt-in vitals loader and navigation handoff).
 The opt-in `vitals.js` (about 2.9 KB gzip) is served separately and only loaded on request. Delivery is bounded to
 100 queued/waiting events, 25 per batch and three fetch attempts; retries keep
 stable batch/event IDs. Storage restrictions prevent reliable cross-tab or

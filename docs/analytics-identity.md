@@ -13,7 +13,26 @@ Persistent visitor IDs expire after 90 days. A visit expires after 30 minutes
 without meaningful activity; idle heartbeats do not extend it or create pageviews.
 Same-origin tabs share persistent visitor and visit state. Different browsers,
 devices, origins, and projects are not automatically linked. Clearing or blocking
-storage reduces recognition. Session-only and older SDK payloads omit visitor
+storage reduces recognition. Persistent state uses one IndexedDB transaction per
+meaningful event; the context is queued only after commit. The first upgraded
+visit imports matching legacy localStorage IDs once. Each meaningful committed
+update mirrors sanitized IDs for existing old tabs; the IndexedDB record remains
+authoritative. Only a newer, bounded activity timestamp from a matching legacy
+visitor and session can extend its activity. Legacy IDs, expiry, attribution and
+visit type cannot replace canonical values after migration. Read-only refreshes
+reconcile matching activity in memory to retain heartbeat and checkout context;
+they do not write either store. Aborted or cancelled transactions do not mirror.
+The mirror preserves IDs for open older trackers and old-script rollback, though
+those older writers still have their original nontransactional concurrency limit.
+Clearing all site data resets recognition; a localStorage-only clear retains the
+canonical identity and the next meaningful commit restores its mirror. An
+IndexedDB-only clear after completed migration leaves the marker, so mirrored IDs
+are not imported again. Startup probes writability with a transient separate key and never downgrades
+the completed marker. Interrupted marker writes leave migration incomplete;
+clear all site data for a reliable reset in that case. Blocked storage falls back
+to a stable unidentified in-memory session, preserving a previously committed
+active session ID while omitting its visitor fields.
+Session-only and older SDK payloads omit visitor
 identity; reports show their sessions as unidentified rather than new visitors.
 
 The collector hashes random IDs with project/environment scope before queueing.
@@ -29,6 +48,12 @@ together. Sampling can undercount distinct visitors and sessions. Dimension
 counts describe pageviews (or occurrences when filtering an event), not people.
 Only the selected group of dimensions is queried, using the existing scoped
 60-second cache. Public links retain their explicit limited disclosure contract.
+
+Session cohorts partition the observed sessions in each reported window. A
+session with any `new` batch is new; otherwise one with a `returning` batch is
+returning; the rest are unidentified. An untyped fallback batch does not make a
+previously typed session unidentified too. Sampling still makes distinct counts
+lower bounds; this classification does not recover unobserved identities.
 
 ## Delivery and cost boundaries
 
