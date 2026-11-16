@@ -110,6 +110,11 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
       await page.setViewportSize({ width, height: 1000 });
       if ((await page.locator('html').getAttribute('data-theme')) !== theme)
         await page.getByRole('button', { name: `Switch to ${theme} mode` }).click();
+      await page.screenshot({
+        path: resolve(evidence, `acquisition-${theme}-${width}.png`),
+        fullPage: true,
+        animations: 'disabled',
+      });
       await expect(page.getByRole('button', { name: 'clear all filters' })).toHaveCSS(
         'color',
         await page.locator('body').evaluate((body) => getComputedStyle(body).color),
@@ -117,11 +122,6 @@ test('owner analytics audience breakdowns are real, responsive, and filterable',
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
-      await page.screenshot({
-        path: resolve(evidence, `acquisition-${theme}-${width}.png`),
-        fullPage: true,
-        animations: 'disabled',
-      });
     }
   await page.getByRole('button', { name: 'clear all filters' }).click();
 
