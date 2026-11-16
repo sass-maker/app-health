@@ -9,7 +9,12 @@ test.afterEach(async () => {
   server?.closeAllConnections();
   if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
 });
-async function fixture(request: APIRequestContext, baseURL: string, attributes = '') {
+async function fixture(
+  request: APIRequestContext,
+  baseURL: string,
+  attributes = '',
+  publicOrigin?: string,
+) {
   let key = '';
   server = createServer((req, res) => {
     if (req.url === '/fixture/redirect') {
@@ -22,7 +27,7 @@ async function fixture(request: APIRequestContext, baseURL: string, attributes =
     );
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const origin = publicOrigin ?? `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const project = await (
     await request.post('/v1/apps', {
       data: { name: 'Tracker session browser test', environment: 'local' },
@@ -60,6 +65,103 @@ async function report(request: APIRequestContext, project: Project) {
   ).json();
 }
 
+async function controlledSource(
+  page: Page,
+  request: APIRequestContext,
+  project: Project,
+  host: string,
+  policy: string,
+  redirect: boolean,
+) {
+  // Fetch interception covers every redirect hop without TLS exceptions or social traffic.
+  // Playwright routing only intercepts the initial request in a redirect chain.
+  const cdp = await page.context().newCDPSession(page);
+  const failures: string[] = [];
+  const unexpected: string[] = [];
+  const remoteResponses: string[] = [];
+  await cdp.send('Network.enable');
+  cdp.on('Network.responseReceived', ({ response }) => {
+    if (response.remoteIPAddress) remoteResponses.push(response.url);
+  });
+  async function fulfill(
+    requestId: string,
+    status: number,
+    contentType: string,
+    body = '',
+    headers: { name: string; value: string }[] = [],
+  ) {
+    await cdp.send('Fetch.fulfillRequest', {
+      requestId,
+      responseCode: status,
+      responseHeaders: [{ name: 'content-type', value: contentType }, ...headers],
+      body: Buffer.from(body).toString('base64'),
+    });
+  }
+  cdp.on('Fetch.requestPaused', async ({ requestId, networkId, request: incoming }) => {
+    try {
+      const url = new URL(incoming.url);
+      if (url.origin === `https://${host}` && url.pathname === '/__app_health_fixture')
+        return await fulfill(
+          requestId,
+          200,
+          'text/html',
+          `<!doctype html><a referrerpolicy="${policy}" href="${project.origin}/fixture/${redirect ? 'redirect' : 'landing'}">Visit product</a>`,
+        );
+      if (url.origin === project.origin) {
+        if (url.pathname === '/tracker.js') {
+          const response = await request.get('/tracker.js');
+          return await fulfill(
+            requestId,
+            response.status(),
+            'text/javascript',
+            await response.text(),
+          );
+        }
+        if (url.pathname === '/v1/browser' && incoming.method === 'POST') {
+          const data =
+            incoming.postData ??
+            (networkId &&
+              (await cdp.send('Network.getRequestPostData', { requestId: networkId })).postData);
+          if (!data) throw new Error('Missing local collector batch');
+          const response = await request.post('/v1/browser', {
+            headers: { origin: project.origin, 'content-type': 'text/plain' },
+            data,
+          });
+          return await fulfill(
+            requestId,
+            response.status(),
+            'application/json',
+            await response.text(),
+          );
+        }
+        if (url.pathname === '/fixture/redirect')
+          return await fulfill(requestId, 302, 'text/html', '', [
+            { name: 'location', value: '/fixture/landing' },
+          ]);
+        if (url.pathname.startsWith('/fixture/'))
+          return await fulfill(
+            requestId,
+            200,
+            'text/html',
+            `<!doctype html><title>Tracker fixture</title><a href="/fixture/next">Next</a><script src="/tracker.js" data-key="${project.key}" data-endpoint="${project.origin}/v1/browser"></script>`,
+          );
+      }
+      if (
+        [project.origin, `https://${host}`].includes(url.origin) &&
+        url.pathname === '/favicon.ico'
+      )
+        return await fulfill(requestId, 204, 'image/x-icon');
+      unexpected.push(incoming.url);
+      await cdp.send('Fetch.failRequest', { requestId, errorReason: 'BlockedByClient' });
+    } catch (error) {
+      failures.push(String(error));
+      await cdp.send('Fetch.failRequest', { requestId, errorReason: 'Failed' }).catch(() => {});
+    }
+  });
+  await cdp.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
+  return { failures, unexpected, remoteResponses };
+}
+
 // Controlled source documents: real browser link/referrer behavior, no requests to social platforms.
 for (const [host, source, policy, redirect] of [
   ['www.reddit.com', 'Reddit', 'strict-origin-when-cross-origin', false],
@@ -69,19 +171,13 @@ for (const [host, source, policy, redirect] of [
 ] as const) {
   test(`untagged ${host} link with ${policy}${redirect ? ' and redirect' : ''} reaches the collector`, async ({
     page,
-    context,
     request,
     baseURL,
   }) => {
-    const project = await fixture(request, baseURL!);
+    const project = await fixture(request, baseURL!, '', 'https://product.app-health.invalid');
     const batches = receipts(page);
-    const origin = `http://${host}/__app_health_fixture`;
-    await context.route(origin, (route) =>
-      route.fulfill({
-        contentType: 'text/html',
-        body: `<a referrerpolicy="${policy}" href="${project.origin}/fixture/${redirect ? 'redirect' : 'landing'}">Visit product</a>`,
-      }),
-    );
+    const controlled = await controlledSource(page, request, project, host, policy, redirect);
+    const origin = `https://${host}/__app_health_fixture`;
     await page.goto(origin);
     await page.getByRole('link', { name: 'Visit product' }).click();
     await flush(page);
@@ -100,6 +196,9 @@ for (const [host, source, policy, redirect] of [
     await flush(page);
     expect(batches.at(-1)!.session_id).toBe(batches[0].session_id);
     expect((await report(request, project)).sessions).toBe(1);
+    expect(controlled.failures).toEqual([]);
+    expect(controlled.unexpected).toEqual([]);
+    expect(controlled.remoteResponses).toEqual([]);
   });
 }
 

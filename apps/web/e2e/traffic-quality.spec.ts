@@ -106,13 +106,14 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   const readyHeights = new Map<number, number>();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
-    await page.clock.runFor(50);
+    await page.clock.runFor(250);
     await expect(card).toBeVisible();
+    // Finish responsive transitions before comparing geometry across reading states.
+    await card.screenshot({ path: resolve(evidence, `card-${width}.png`), animations: 'disabled' });
     readyHeights.set(width, (await card.boundingBox())!.height);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
-    await card.screenshot({ path: resolve(evidence, `card-${width}.png`), animations: 'disabled' });
     await page.screenshot({
       path: resolve(evidence, `analytics-${width}.png`),
       fullPage: true,
@@ -130,31 +131,31 @@ test('traffic quality keeps browser counts useful through bot loading, failures 
   await expect(card.locator('[aria-live]')).toHaveCount(0);
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
-    await page.clock.runFor(50);
-    expect(
-      Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
-    ).toBeLessThanOrEqual(1);
+    await page.clock.runFor(250);
     await card.screenshot({
       path: resolve(evidence, `refreshing-${width}.png`),
       animations: 'disabled',
     });
+    expect(
+      Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
+    ).toBeLessThanOrEqual(1);
   }
   release();
   await expect(card.getByText('Refresh failed. Showing previous reading.')).toBeVisible();
   await expect(card.getByText('7', { exact: true })).toBeVisible();
   for (const width of [390, 768, 1440]) {
     await page.setViewportSize({ width, height: 1100 });
-    await page.clock.runFor(50);
+    await page.clock.runFor(250);
+    await card.screenshot({
+      path: resolve(evidence, `refresh-failed-${width}.png`),
+      animations: 'disabled',
+    });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
     expect(
       Math.abs((await card.boundingBox())!.height - readyHeights.get(width)!),
     ).toBeLessThanOrEqual(1);
-    await card.screenshot({
-      path: resolve(evidence, `refresh-failed-${width}.png`),
-      animations: 'disabled',
-    });
   }
   mode = 'observed';
   await card.getByRole('button', { name: 'Refresh traffic quality' }).click();
