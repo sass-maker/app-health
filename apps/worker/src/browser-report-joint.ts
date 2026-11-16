@@ -29,7 +29,8 @@ export function jointRankingSql(source: string, sourceFiltered: boolean, dimensi
       ...dimensions.map(([, blob]) => blob),
     ]),
   ];
-  const normalized = (sourceFiltered ? source : analyticsSourceFrom(source)).replace(
+  const browserSource = `${source} AND blob3 IN ('pageview', 'event')`;
+  const normalized = (sourceFiltered ? browserSource : analyticsSourceFrom(browserSource)).replace(
     'SELECT *,',
     `SELECT ${columns.join(',')},`,
   );

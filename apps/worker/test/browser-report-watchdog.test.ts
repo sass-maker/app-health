@@ -493,3 +493,25 @@ it('canonicalizes only unspecified within-tie order and exposes incorrect count 
     { name: 'high', count: 2 },
   ]);
 });
+
+it.each([
+  { breakdown: 'audience' as const },
+  { breakdown: 'technology' as const },
+  { breakdown: 'audience' as const, country: 'Unknown' },
+  { breakdown: 'technology' as const, source: 'Unknown' },
+])('keeps mixed native-session points out of browser joint rankings for %j', async (extra) => {
+  fixture.seed();
+  const native = {
+    blob3: 'native_session',
+    ...Object.fromEntries(Array.from({ length: 16 }, (_, index) => [`blob${index + 4}`, ''])),
+    blob20: 'synthetic-native-session',
+  };
+  for (let index = 0; index < 3; index++)
+    fixture.add({ ...native, double2: reportNow - 500 - index });
+  const filter = { ...reportScope, ...extra };
+  const original = await run(filter, { first: 'pages' });
+  const candidate = await run(filter);
+  expect(observable(candidate.report)).toEqual(observable(original.report));
+  expect(candidate.queries).toHaveLength(extra.country || extra.source ? 4 : 6);
+  expect(candidate.queries.filter(isPages)).toHaveLength(1);
+});
