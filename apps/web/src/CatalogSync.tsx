@@ -84,60 +84,16 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
     preview,
     setPreview,
     setMessage,
-    setStatusError,
     busy,
     setBusy,
     status,
-    setStatus,
     generation,
     statusGeneration,
     activeRequest,
-    fileInput,
   } = state;
   const previewGeneration = generation.current;
   if (scope.role !== 'owner' || ownerToken) return null;
 
-  async function readFile(file: File | undefined) {
-    const epoch = scope.epoch;
-    const run = ++generation.current;
-    activeRequest.current?.abort();
-    const controller = new AbortController();
-    activeRequest.current = controller;
-    const current = () =>
-      run === generation.current && epoch === workspaceScope().epoch && !controller.signal.aborted;
-    setPreview(null);
-    setMessage('');
-    if (!file) return;
-    setBusy(true);
-    let statusRun: number | undefined;
-    try {
-      if (file.size > MAX_FILE_BYTES) throw new Error('Catalog file exceeds 8 MiB.');
-      const text = await file.text();
-      if (!current()) return;
-      const projection = await projectCanonicalCatalogWithRevisions(JSON.parse(text), null);
-      if (!current()) return;
-      statusRun = ++statusGeneration.current;
-      setStatusError('');
-      const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
-        signal: controller.signal,
-      });
-      const status = await readCatalogStatus(response);
-      if (current() && statusRun === statusGeneration.current) {
-        setStatus(status);
-        setStatusError('');
-        setPreview({ ...projection, expected_previous_hash: status.projection_hash });
-      }
-    } catch (error) {
-      if (current()) {
-        const message = catalogPreviewError(error);
-        setMessage(message);
-        if (statusRun === statusGeneration.current) setStatusError(message);
-      }
-    } finally {
-      if (current()) setBusy(false);
-      if (fileInput.current) fileInput.current.value = '';
-    }
-  }
   async function synchronize() {
     if (!preview || busy || unresolvedCatalogLinks(preview, status)) return;
     if (!catalogSubmissionCurrent(scope.epoch, previewGeneration, generation.current)) return;
@@ -170,7 +126,72 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       if (current()) setBusy(false);
     }
   }
-  return <CatalogSyncCard state={state} readFile={readFile} synchronize={synchronize} />;
+  return (
+    <CatalogSyncCard
+      state={state}
+      readFile={(file) => prepareCatalogPreview(state, ownerToken, file)}
+      synchronize={synchronize}
+    />
+  );
+}
+
+async function prepareCatalogPreview(
+  state: CatalogSyncState,
+  ownerToken: string,
+  file: File | undefined,
+) {
+  const {
+    scope,
+    generation,
+    activeRequest,
+    setPreview,
+    setMessage,
+    setBusy,
+    statusGeneration,
+    setStatusError,
+    setStatus,
+    fileInput,
+  } = state;
+  const epoch = scope.epoch;
+  const run = ++generation.current;
+  activeRequest.current?.abort();
+  const controller = new AbortController();
+  activeRequest.current = controller;
+  const current = () =>
+    run === generation.current && epoch === workspaceScope().epoch && !controller.signal.aborted;
+  setPreview(null);
+  setMessage('');
+  if (!file) return;
+  setBusy(true);
+  let statusRun: number | undefined;
+  try {
+    if (file.size > MAX_FILE_BYTES) throw new Error('Catalog file exceeds 8 MiB.');
+    const text = await file.text();
+    if (!current()) return;
+    const projection = await projectCanonicalCatalogWithRevisions(JSON.parse(text), null);
+    if (!current()) return;
+    statusRun = statusGeneration.current;
+    setStatusError('');
+    const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
+      signal: controller.signal,
+    });
+    const status = await readCatalogStatus(response);
+    if (current() && statusRun === statusGeneration.current) {
+      statusGeneration.current += 1;
+      setStatus(status);
+      setStatusError('');
+      setPreview({ ...projection, expected_previous_hash: status.projection_hash });
+    }
+  } catch (error) {
+    if (current()) {
+      const message = catalogPreviewError(error);
+      setMessage(message);
+      if (statusRun === statusGeneration.current) setStatusError(message);
+    }
+  } finally {
+    if (current()) setBusy(false);
+    if (fileInput.current) fileInput.current.value = '';
+  }
 }
 
 type CatalogSyncState = ReturnType<typeof useCatalogState>;

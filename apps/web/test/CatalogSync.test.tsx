@@ -492,3 +492,53 @@ it('fences an old initial status after a valid preview and committed synchroniza
   expect(screen.getByText('SaaS Maker · 39 active projects')).toBeTruthy();
   expect(screen.queryByText('SaaS Maker · 57 active projects')).toBeNull();
 });
+
+it('retains bootstrap status when a pending preview is superseded by a retained file-change event', async () => {
+  owner();
+  let finishInitial!: (response: Response) => void;
+  let finishPreview!: (response: Response) => void;
+  let reads = 0;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (path !== '/v1/catalog/sync') return Response.json({ publishers: [] });
+      reads++;
+      return new Promise<Response>((resolve) => {
+        if (reads === 1) finishInitial = resolve;
+        else finishPreview = resolve;
+      });
+    }),
+  );
+  render(<CatalogSync ownerToken="" />);
+  const input = screen.getByLabelText('Canonical catalog JSON');
+  fireEvent.change(input, { target: { files: [file(source)] } });
+  await waitFor(() => expect(reads).toBe(2));
+  expect((input as HTMLInputElement).disabled).toBe(true);
+  fireEvent.change(input, { target: { files: [file(null, async () => '{')] } });
+  await screen.findByText('Choose a valid canonical catalog JSON file.');
+  await act(async () =>
+    finishInitial(
+      Response.json({
+        ...catalogStatus,
+        source: 'saas-maker',
+        project_count: 39,
+        projection_hash: 'a'.repeat(64),
+        updated_at: Date.now(),
+      }),
+    ),
+  );
+  expect(await screen.findByText('SaaS Maker · 39 active projects')).toBeTruthy();
+  await act(async () =>
+    finishPreview(
+      Response.json({
+        ...catalogStatus,
+        source: 'saas-maker',
+        project_count: 57,
+        projection_hash: 'b'.repeat(64),
+        updated_at: Date.now(),
+      }),
+    ),
+  );
+  expect(screen.getByText('SaaS Maker · 39 active projects')).toBeTruthy();
+  expect(screen.queryByLabelText('Catalog preview')).toBeNull();
+});
