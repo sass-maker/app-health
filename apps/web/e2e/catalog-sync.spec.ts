@@ -54,7 +54,9 @@ const canonical = process.env.APP_HEALTH_OWNER_CATALOG
           },
           probe:
             index < 38
-              ? { journeys: [{ journey: 'home', url: 'https://ignored.invalid/' }] }
+              ? {
+                  journeys: [{ journey: 'home', url: 'https://ignored.invalid/', budget_ms: 2000 }],
+                }
               : { scope: index === 38 ? 'local' : 'private', absent: 'PRIVATE_CANARY' },
         },
       })),
@@ -71,6 +73,8 @@ for (const { width, failReadback } of [
   }) => {
     await page.setViewportSize({ width, height: 1000 });
     let synchronized = false;
+    let automaticRemoval = false;
+    let connected = false;
     let inventoryUnavailable = failReadback;
     let uploaded = '';
     const active = canonical.projects.filter(
@@ -89,35 +93,38 @@ for (const { width, failReadback } of [
         : route.fulfill({
             headers: { 'x-app-health-workspace-role': 'owner' },
             json: {
-              apps: Array.from({ length: synchronized ? 40 : 57 }, (_, index) => ({
-                app: {
-                  id: `app-${index}`,
-                  name: synchronized ? active[index].name : `Old project ${index + 1}`,
-                  created_at: now,
-                },
-                environments: [
-                  {
-                    id: `env-${index}`,
-                    app_id: `app-${index}`,
-                    name: 'production',
+              apps: Array.from(
+                { length: synchronized ? (automaticRemoval ? 39 : 40) : 57 },
+                (_, index) => ({
+                  app: {
+                    id: `app-${index}`,
+                    name: synchronized ? active[index].name : `Old project ${index + 1}`,
                     created_at: now,
                   },
-                  ...(index === 0
-                    ? [{ id: 'env-stage', app_id: 'app-0', name: 'staging', created_at: now }]
-                    : []),
-                ],
-                ...(synchronized
-                  ? {
-                      catalog: {
-                        source: 'saas-maker',
-                        catalog_id: active[index].id,
-                        kind: active[index].classification.kind,
-                        future_form: active[index].classification.futureForm,
-                        auth_model: active[index].deployment.authModel,
-                      },
-                    }
-                  : {}),
-              })),
+                  environments: [
+                    {
+                      id: `env-${index}`,
+                      app_id: `app-${index}`,
+                      name: 'production',
+                      created_at: now,
+                    },
+                    ...(index === 0
+                      ? [{ id: 'env-stage', app_id: 'app-0', name: 'staging', created_at: now }]
+                      : []),
+                  ],
+                  ...(synchronized
+                    ? {
+                        catalog: {
+                          source: 'saas-maker',
+                          catalog_id: active[index].id,
+                          kind: active[index].classification.kind,
+                          future_form: active[index].classification.futureForm,
+                          auth_model: active[index].deployment.authModel,
+                        },
+                      }
+                    : {}),
+                }),
+              ),
             },
           }),
     );
@@ -129,8 +136,8 @@ for (const { width, failReadback } of [
       await route.fulfill({
         json: {
           source: synchronized ? 'saas-maker' : null,
-          projection_hash: synchronized ? 'a'.repeat(64) : null,
-          project_count: synchronized ? 40 : null,
+          projection_hash: synchronized ? (automaticRemoval ? 'b' : 'a').repeat(64) : null,
+          project_count: synchronized ? (automaticRemoval ? 39 : 40) : null,
           updated_at: synchronized ? now : null,
           mapped_catalog_ids: synchronized
             ? active.map((row: { id: string }) => row.id)
@@ -141,6 +148,37 @@ for (const { width, failReadback } of [
           unlinked_apps: [{ app_id: 'app-56', name: 'External project' }],
         },
       });
+    });
+    await page.route('**/v1/catalog/publishers', (route) =>
+      route.fulfill({
+        json: {
+          publishers: connected
+            ? [
+                {
+                  id: '11111111-1111-4111-8111-111111111111',
+                  label: 'Fleet Mac',
+                  approved_at: now,
+                  revoked_at: null,
+                  last_attempt_at: null,
+                  last_success_at: null,
+                  last_error: null,
+                },
+              ]
+            : [],
+        },
+      }),
+    );
+    await page.route('**/v1/catalog/publishers/pairing?*', (route) =>
+      route.fulfill({ json: { label: 'Fleet Mac' } }),
+    );
+    await page.route('**/v1/catalog/publishers/approve', async (route) => {
+      expect(route.request().postDataJSON()).toEqual({
+        code: 'ABCDEF123456',
+        allow_automatic_updates: true,
+        preserve_outside_catalog_app_ids: ['app-56'],
+      });
+      connected = true;
+      await route.fulfill({ json: { publisher_id: '11111111-1111-4111-8111-111111111111' } });
     });
     const live = { measured_at: now, ttl_ms: 45000, total: 0, projects: [] };
     await page.route('**/v1/analytics', (route) =>
@@ -247,5 +285,40 @@ for (const { width, failReadback } of [
     ).toBeLessThanOrEqual(1);
     await page.getByText('SaaS Maker · 40 active projects').scrollIntoViewIfNeeded();
     await page.screenshot({ path: join(evidence, `catalog-synchronized-${width}.png`) });
+    if (!failReadback) {
+      await page.getByText('Automatic catalog updates', { exact: true }).click();
+      await page.getByLabel('Connection code from your Mac').fill('ABCDEF123456');
+      await page.getByRole('button', { name: 'Review connection', exact: true }).click();
+      await expect(page.getByText('Connect Fleet Mac', { exact: true })).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Connect automatic updates', exact: true }),
+      ).toBeDisabled();
+      await page
+        .getByRole('checkbox', { name: /Keep External project outside this catalog/ })
+        .check();
+      await page
+        .getByRole('checkbox', {
+          name: 'Allow automatic updates to this workspace from this connection.',
+        })
+        .check();
+      await page
+        .getByLabel('Confirm automatic catalog connection')
+        .screenshot({ path: join(evidence, `catalog-publisher-review-${width}.png`) });
+      await page.getByRole('button', { name: 'Connect automatic updates', exact: true }).click();
+      await expect(page.getByText('Fleet Mac · connected', { exact: true })).toBeVisible();
+      automaticRemoval = true;
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(
+        page.getByText('SaaS Maker · 39 active projects', { exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole('button', { name: active[39].name, exact: true })).toHaveCount(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+      ).toBeLessThanOrEqual(1);
+      await page
+        .getByText('SaaS Maker · 39 active projects', { exact: true })
+        .scrollIntoViewIfNeeded();
+      await page.screenshot({ path: join(evidence, `catalog-publisher-live39-${width}.png`) });
+    }
   });
 }

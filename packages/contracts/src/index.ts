@@ -37,3 +37,6 @@ export * from './traffic-quality.js';
 export * from './monitoring.js';
 
 export * from './catalog-sync.js';
+export * from './catalog-publisher.js';
+
+export { probeDefinitionRevision } from './probe-revision.js';

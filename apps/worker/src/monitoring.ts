@@ -1,5 +1,9 @@
 import { catalogSnapshotStatus } from './catalog-sync.js';
 import {
+  reviewedMonitoringJourney,
+  reviewedMonitoringRevisions,
+} from './monitoring-configuration.js';
+import {
   MonitoringPolicyV1,
   MonitoringReportV1,
   type MonitoringPolicy,
@@ -53,8 +57,8 @@ export async function saveMonitoringPolicy(
       db
         .prepare(
           `INSERT INTO workspace_monitoring_projects
-        (workspace_id, catalog_id, name, scope, reason, journeys_json, updated_at, revision)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        (workspace_id, catalog_id, name, scope, reason, journeys_json, journey_revisions_json, updated_at, revision)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           workspaceId,
@@ -63,6 +67,7 @@ export async function saveMonitoringPolicy(
           row.scope,
           row.reason,
           JSON.stringify(row.journeys),
+          row.journey_revisions ? JSON.stringify(row.journey_revisions) : null,
           now,
           revision,
         ),
@@ -169,8 +174,8 @@ function monitoringStatements(
   return [
     db
       .prepare(
-        `SELECT p.catalog_id, p.name, p.scope, p.reason, p.journeys_json, p.updated_at,
-        c.app_id, e.id AS environment_id
+        `SELECT p.catalog_id, p.name, p.scope, p.reason, p.journeys_json, p.journey_revisions_json, p.updated_at,
+        c.app_id, c.kind AS catalog_kind, e.id AS environment_id
       FROM workspace_monitoring_projects p
       LEFT JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
         AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
@@ -187,6 +192,7 @@ function monitoringStatements(
       SELECT p.catalog_id, json_extract(l.props, '$.journey') AS journey,
         json_extract(l.props, '$.location') AS location, l.timestamp,
         json_extract(l.props, '$.status') AS health,
+        json_extract(l.props, '$.revision') AS check_revision,
         json_extract(l.props, '$.interval_seconds') AS interval_seconds,
         json_extract(l.props, '$.vantage_offline') AS vantage_offline,
         json_extract(l.props, '$.failure') AS failure,
@@ -205,6 +211,10 @@ function monitoringStatements(
       WHERE p.workspace_id = ? ${selected}
         AND l.app_id = ? AND l.environment_id = ?
         AND l.event = 'probe.result' AND l.source = 'server'
+        AND (p.journey_revisions_json IS NULL OR EXISTS (
+          SELECT 1 FROM json_each(p.journey_revisions_json) definition
+          WHERE definition.key = json_extract(l.props, '$.journey')
+            AND definition.value = json_extract(l.props, '$.revision')))
         AND l.timestamp >= ? AND l.timestamp <= ?
         AND EXISTS (SELECT 1 FROM workspace_apps sender
           WHERE sender.workspace_id = p.workspace_id AND sender.app_id = l.app_id)
@@ -240,6 +250,7 @@ export async function readMonitoringReport(
   const receiptRows = results[1].results!;
   if (policyRows.length > 60 || receiptRows.length > MAX_OBSERVATIONS)
     throw new Error('Monitoring report capacity exceeded');
+  const reviewed = await reviewedMonitoringRevisions();
   const byCheck = new Map<string, Observation[]>();
   for (const row of receiptRows) {
     const value = observation(row, now);
@@ -259,10 +270,29 @@ export async function readMonitoringReport(
       app_id: row.app_id === null ? null : String(row.app_id),
       environment_id: row.environment_id === null ? null : String(row.environment_id),
     };
+    const pending = new Set(
+      row.catalog_kind != null
+        ? project.journeys.filter(
+            (journey) =>
+              !reviewedMonitoringJourney(project.catalog_id, journey) ||
+              (row.journey_revisions_json != null &&
+                JSON.parse(String(row.journey_revisions_json))[journey] !==
+                  reviewed.get(`${project.catalog_id}/${journey}`)),
+          )
+        : [],
+    );
     const withChecks = {
       ...project,
+      reason: pending.size
+        ? 'Awaiting reviewed check configuration. Setup is required; these checks have not run.'
+        : project.reason,
       checks: project.journeys.map((journey) =>
-        checkState(journey, byCheck.get(JSON.stringify([project.catalog_id, journey])) ?? []),
+        checkState(
+          journey,
+          pending.has(journey)
+            ? []
+            : (byCheck.get(JSON.stringify([project.catalog_id, journey])) ?? []),
+        ),
       ),
     };
     return { ...withChecks, state: projectState(withChecks) };

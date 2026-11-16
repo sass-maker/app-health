@@ -1,3 +1,4 @@
+import { probeDefinitionRevision } from '../../../packages/contracts/src/probe-revision.ts';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -213,6 +214,7 @@ describe('runProbes', () => {
   it('keeps undelivered transitions queued, bounded, and retries them with the same ids', async () => {
     const failing = { 'https://anime.test/': { ...html(), status: 500 } };
     const offline = harness(failing, false);
+    const revision = await probeDefinitionRevision(spec.journeys[0]!);
     const crowded: ProbeState = {
       ...emptyState(),
       pending: Array.from({ length: MAX_PENDING_LOGS }, (_, index) => ({
@@ -221,7 +223,7 @@ describe('runProbes', () => {
         event: 'journey.failed',
         level: 'error' as const,
         title: 't',
-        props: {},
+        props: { project: 'anime-list', journey: 'home', revision },
       })),
     };
     const first = await runProbes(spec, crowded, options, offline.deps);
@@ -343,4 +345,64 @@ describe('cli', () => {
     await writeState(statePath, emptyState());
     expect(await readState(statePath)).toEqual(emptyState());
   });
+});
+
+it('resets a changed check incident while retaining unchanged hysteresis and tags results', async () => {
+  const single = { ...spec, journeys: [spec.journeys[0]!] };
+  const bad = harness({ 'https://anime.test/': { ...html(), status: 503 } }, false);
+  const opened = await runProbes(single, emptyState(), options, bad.deps);
+  const good = harness({ ...healthy });
+  const recovering = await runProbes(single, opened.state, options, good.deps);
+  expect(recovering.state.journeys['anime-list/home']!.status).toBe('failing');
+  const changed = structuredClone(single);
+  changed.journeys[0]!.expect.body_includes = ['root'];
+  const reset = await runProbes(changed, opened.state, options, good.deps);
+  expect(reset.state.journeys['anime-list/home']!.status).toBe('healthy');
+  expect(good.sent.at(-1)!.filter((log) => log.event === 'journey.failed')).toEqual([]);
+  expect(reset.state.revisions!['anime-list/home']).not.toBe(
+    opened.state.revisions!['anime-list/home'],
+  );
+  expect(good.sent.at(-1)!.find((log) => log.event === 'probe.result')!.props.revision).toBe(
+    reset.state.revisions!['anime-list/home'],
+  );
+});
+
+it('drops removed check state and queued incidents without resurrecting deleted projects', async () => {
+  const bad = harness(
+    {
+      'https://anime.test/': { ...html(), status: 503 },
+      'https://anime.test/api/search': { ...json({}), status: 503 },
+    },
+    false,
+  );
+  const opened = await runProbes(spec, emptyState(), options, bad.deps);
+  opened.state.pending.push(
+    {
+      log_id: 'heartbeat',
+      timestamp: 1000,
+      event: 'probe.heartbeat',
+      level: 'debug',
+      title: 'heartbeat',
+      props: {},
+    },
+    {
+      log_id: 'wrong-heartbeat',
+      timestamp: 1000,
+      event: 'probe.heartbeat',
+      level: 'debug',
+      title: 'not a workspace heartbeat',
+      props: { project: 'deleted', journey: 'gone' },
+    },
+  );
+  const remaining = { ...spec, journeys: [spec.journeys[0]!] };
+  const good = harness({ ...healthy });
+  const result = await runProbes(remaining, opened.state, options, good.deps);
+  expect(good.sent[0]!.some((log) => log.log_id === 'heartbeat')).toBe(true);
+  expect(good.sent[0]!.some((log) => log.log_id === 'wrong-heartbeat')).toBe(false);
+  expect(Object.keys(result.state.revisions!)).toEqual(['anime-list/home']);
+  expect(Object.keys(result.state.journeys)).toEqual(['anime-list/home']);
+  expect(good.sent[0]!.some((log) => log.props.journey === 'search')).toBe(false);
+  expect(
+    good.sent[0]!.some((log) => log.event === 'journey.failed' && log.props.journey === 'home'),
+  ).toBe(true);
 });

@@ -4,6 +4,7 @@ import { emptyState, runProbes, type ProbeState } from '../../probe/src/run.ts';
 import { journeyKey, parseSpec } from '../../probe/src/spec.ts';
 import type { HttpResult, Measure } from '../../probe/src/types.d.ts';
 import type { ProbeLog } from '../../probe/src/emit.ts';
+import { reviewedMonitoringRevisions } from './monitoring-configuration.js';
 import generated from '../../probe/journeys.json';
 
 const INTERVAL_SECONDS = 3600;
@@ -98,7 +99,7 @@ export async function runScheduledMonitoring(
   const policy = (
     await db
       .prepare(
-        `SELECT p.catalog_id, p.journeys_json, p.revision
+        `SELECT p.catalog_id, p.journeys_json, p.journey_revisions_json, p.revision
     FROM workspace_monitoring_projects p
     JOIN current_workspace_catalog c ON c.workspace_id = p.workspace_id
       AND c.catalog_id = p.catalog_id AND c.lifecycle IN ('primary', 'active')
@@ -107,13 +108,26 @@ export async function runScheduledMonitoring(
     WHERE p.workspace_id = ? AND p.scope = 'public' LIMIT 61`,
       )
       .bind(target.workspaceId)
-      .all<{ catalog_id: string; journeys_json: string; revision: string }>()
+      .all<{
+        catalog_id: string;
+        journeys_json: string;
+        journey_revisions_json: string | null;
+        revision: string;
+      }>()
   ).results;
   if (!policy.length) return;
   if (policy.length > 60) throw new Error('Monitoring policy capacity exceeded');
+  const reviewed = await reviewedMonitoringRevisions();
   const allowed = new Set(
     policy.flatMap((row) =>
-      (JSON.parse(row.journeys_json) as string[]).map((journey) => `${row.catalog_id}/${journey}`),
+      (JSON.parse(row.journeys_json) as string[])
+        .filter(
+          (journey) =>
+            !row.journey_revisions_json ||
+            JSON.parse(row.journey_revisions_json)[journey] ===
+              reviewed.get(`${row.catalog_id}/${journey}`),
+        )
+        .map((journey) => `${row.catalog_id}/${journey}`),
     ),
   );
   const spec = parseSpec(generated);

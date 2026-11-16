@@ -8,7 +8,7 @@ import {
 import type { D1DatabaseLike } from './d1-adapter.js';
 import type { OwnerIdentity } from './identity.js';
 import { readPublicJson } from './public-body.js';
-import generated from '../../probe/journeys.json';
+import { reviewedMonitoringJourney } from './monitoring-configuration.js';
 
 export class CatalogSyncConflict extends Error {}
 class CatalogSyncLimit extends Error {}
@@ -39,7 +39,7 @@ export async function catalogSnapshotStatus(db: D1DatabaseLike, workspace: strin
 
 const UNLINKED_MESSAGE =
   'Review unlinked workspace projects before synchronizing. Link active catalog projects through /v1/catalog/import with existing_app_id, or explicitly acknowledge projects to preserve outside this catalog. Reload the preview after changes.';
-async function unlinkedCatalogApps(db: D1DatabaseLike, workspace: string) {
+export async function unlinkedCatalogApps(db: D1DatabaseLike, workspace: string) {
   return (
     await db
       .prepare(
@@ -81,11 +81,12 @@ export async function syncCatalog(
   workspace: string,
   input: CatalogSyncRequest,
   now: number,
+  publisher?: { id: string; verifierHash: string },
 ) {
-  const reviewed = new Set(generated.journeys.map((row) => `${row.project}/${row.journey}`));
   if (
+    !publisher &&
     input.monitoring.projects.some((row) =>
-      row.journeys.some((journey) => !reviewed.has(`${row.catalog_id}/${journey}`)),
+      row.journeys.some((journey) => !reviewedMonitoringJourney(row.catalog_id, journey)),
     )
   )
     throw new CatalogSyncConflict(
@@ -127,12 +128,14 @@ export async function syncCatalog(
   try {
     const result = await db.batch([
       statement(
-        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash, preserve_outside_catalog_app_ids_json) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO workspace_portfolio_sync_guards (workspace_id, projects_json, projection_hash, expected_previous_hash, preserve_outside_catalog_app_ids_json, publisher_id, publisher_verifier_hash) VALUES (?, ?, ?, ?, ?, ?, ?)',
         workspace,
         payload,
         projectionHash,
         input.expected_previous_hash,
         JSON.stringify(input.preserve_outside_catalog_app_ids),
+        publisher?.id ?? null,
+        publisher?.verifierHash ?? null,
       ),
       statement(
         `INSERT INTO apps (id, name, created_at)
@@ -167,8 +170,8 @@ export async function syncCatalog(
       ),
       statement('DELETE FROM workspace_monitoring_projects WHERE workspace_id = ?', workspace),
       statement(
-        `INSERT INTO workspace_monitoring_projects (workspace_id, catalog_id, name, scope, reason, journeys_json, updated_at, revision)
-        SELECT ?, json_extract(value, '$.catalog_id'), json_extract(value, '$.name'), json_extract(value, '$.scope'), json_extract(value, '$.reason'), json_extract(value, '$.journeys'), ?, ? FROM json_each(?)`,
+        `INSERT INTO workspace_monitoring_projects (workspace_id, catalog_id, name, scope, reason, journeys_json, journey_revisions_json, updated_at, revision)
+        SELECT ?, json_extract(value, '$.catalog_id'), json_extract(value, '$.name'), json_extract(value, '$.scope'), json_extract(value, '$.reason'), json_extract(value, '$.journeys'), json_extract(value, '$.journey_revisions'), ?, ? FROM json_each(?)`,
         workspace,
         now,
         projectionHash,

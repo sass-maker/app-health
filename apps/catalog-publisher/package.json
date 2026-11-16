@@ -1,0 +1,20 @@
+{
+  "name": "@app-health/catalog-publisher",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Owner-local canonical catalog publisher.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@app-health/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.4",
+    "typescript": "^5.6.0",
+    "vitest": "^3.2.7"
+  }
+}

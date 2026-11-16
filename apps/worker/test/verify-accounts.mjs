@@ -1074,6 +1074,77 @@ try {
   log(
     'Catalog runtime: actual workerd/D1 unlinked-project denial, explicit outside preservation, later identity linking and canonical inventory, role metadata, stable keys, retry and stale revision rejection verified.',
   );
+  const publisherRequest = (path, body, token) =>
+    mf.dispatchFetch(`https://dashboard.example.com${path}`, {
+      method: body === undefined ? 'GET' : 'POST',
+      headers: {
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+        'content-type': 'application/json',
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  const enrollment = await publisherRequest('/v1/catalog/publisher/enroll', {
+    label: 'Local runtime publisher',
+  });
+  assert.equal(enrollment.status, 201);
+  const paired = await enrollment.json();
+  assert.equal((await publisherRequest('/v1/catalog/publisher', {}, paired.secret)).status, 403);
+  assert.ok(
+    [401, 403].includes((await publisherRequest('/v1/apps', undefined, paired.secret)).status),
+  );
+  assert.ok(
+    [401, 403].includes(
+      (await publisherRequest('/v1/catalog/sync', undefined, paired.secret)).status,
+    ),
+  );
+  assert.equal(
+    (
+      await publisherRequest(
+        '/v1/mcp',
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        paired.secret,
+      )
+    ).status,
+    401,
+  );
+  assert.equal(
+    (
+      await request('/v1/catalog/publishers/approve', {
+        code: paired.code,
+        allow_automatic_updates: true,
+        preserve_outside_catalog_app_ids: [],
+      })
+    ).status,
+    200,
+  );
+  const publisherStatus = await (
+    await publisherRequest('/v1/catalog/publisher', undefined, paired.secret)
+  ).json();
+  assert.equal(publisherStatus.state, 'approved');
+  const automaticProjection = JSON.parse(JSON.stringify(nextProjection));
+  automaticProjection.expected_previous_hash = publisherStatus.projection_hash;
+  automaticProjection.projects.pop();
+  automaticProjection.monitoring.projects.pop();
+  const automatic = await publisherRequest(
+    '/v1/catalog/publisher',
+    automaticProjection,
+    paired.secret,
+  );
+  assert.equal(automatic.status, 200, await automatic.clone().text());
+  assert.equal((await automatic.json()).project_count, 2);
+  assert.equal((await (await request('/v1/apps')).json()).apps.length, 2);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM keys').first()).n, keysBeforeSync);
+  assert.equal(
+    (await request('/v1/catalog/publishers/revoke', { publisher_id: paired.publisher_id })).status,
+    200,
+  );
+  assert.equal(
+    (await publisherRequest('/v1/catalog/publisher', undefined, paired.secret)).status,
+    401,
+  );
+  log(
+    'Catalog publisher runtime: restricted pairing, owner approval, automatic removal, stable ingest keys, general API/MCP denial and revocation verified through actual workerd/D1.',
+  );
   assert.equal((await request('/v1/auth/sign-out', {})).status, 200);
   assert.equal((await request('/v1/apps')).status, 401);
   log(

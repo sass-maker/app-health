@@ -21,6 +21,7 @@ export interface ProbeLog {
 
 export interface Observation {
   journey: Journey;
+  revision?: string;
   outcome: 'ok' | 'slow' | 'failed' | 'not_completed';
   failure?: FailureKind;
   status?: number;
@@ -64,6 +65,7 @@ export function transitionLog(
     props: definedProps({
       project: journey.project,
       journey: journey.journey,
+      revision: observation.revision,
       incident_id: transition.incident_id,
       transition: transition.kind,
       opened_at: transition.opened_at,
@@ -112,6 +114,7 @@ export function resultLog(
     props: definedProps({
       project: observation.journey.project,
       journey: observation.journey.journey,
+      revision: observation.revision,
       location: options.location,
       interval_seconds: options.intervalSeconds,
       vantage_offline: options.vantageOffline || observation.failure === 'run_deadline',

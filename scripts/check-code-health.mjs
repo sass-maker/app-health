@@ -14,6 +14,7 @@ checkShadcnVendor();
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const productionPaths = [
   'apps/probe/src',
+  'apps/catalog-publisher/src',
   'apps/web/src',
   'apps/worker/src',
   'packages/contracts/src',
@@ -104,6 +105,11 @@ function checkCoverage() {
       label: 'Journey probe',
       filter: '@app-health/probe',
       minimums: { lines: 98.8, branches: 96.87, functions: 100, statements: 98.8 },
+    },
+    {
+      label: 'Catalog publisher',
+      filter: '@app-health/catalog-publisher',
+      minimums: { lines: 95, branches: 85, functions: 95, statements: 95 },
     },
     {
       label: 'Node SDK',

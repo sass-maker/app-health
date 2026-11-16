@@ -3,18 +3,20 @@ import {
   ListAppsResponseV1,
   CatalogSyncStatusV1,
   type CatalogSyncStatus,
-  projectCanonicalCatalog,
+  projectCanonicalCatalogWithRevisions,
   type CatalogSyncRequest,
 } from '@app-health/contracts';
 import { Button } from '@saas-maker/ui/components/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@saas-maker/ui/components/card';
 import { ownerFetch } from './lib/owner-fetch.js';
 import { useWorkspaceScope, workspaceScope } from './lib/workspace-scope.js';
+import { CatalogPublishers } from './CatalogPublishers.js';
 
 export interface CatalogSyncCommit {
   epoch: number;
   listed: ListAppsResponseV1 | null;
   projectCount: number;
+  automatic?: boolean;
 }
 
 export const CATALOG_SYNC_EVENT = 'app-health-catalog-synchronized';
@@ -101,7 +103,7 @@ export function CatalogSync({ ownerToken }: { ownerToken: string }) {
       if (file.size > MAX_FILE_BYTES) throw new Error('Catalog file exceeds 8 MiB.');
       const text = await file.text();
       if (!current()) return;
-      const projection = projectCanonicalCatalog(JSON.parse(text), null);
+      const projection = await projectCanonicalCatalogWithRevisions(JSON.parse(text), null);
       const response = await ownerFetch('/v1/catalog/sync', ownerToken, {
         signal: controller.signal,
       });
@@ -181,6 +183,7 @@ function CatalogSyncCard({
         ) : null}
       </CardHeader>
       <CardContent className="space-y-3 px-5 py-0">
+        <CatalogPublishers />
         <details open={!status?.project_count || Boolean(preview)}>
           <summary className="cursor-pointer text-xs font-medium">
             {status?.project_count ? 'Update from catalog' : 'Import active portfolio'}

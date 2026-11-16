@@ -4,6 +4,7 @@ import {
   CatalogSyncStatusV1,
   MAX_CATALOG_OUTSIDE_APPS,
   projectCanonicalCatalog,
+  projectCanonicalCatalogWithRevisions,
 } from '../src/catalog-sync.js';
 
 function project(overrides: Record<string, unknown> = {}) {
@@ -21,7 +22,9 @@ function project(overrides: Record<string, unknown> = {}) {
         nativeSessions: 'applicable',
         serverRequests: 'unknown',
       },
-      probe: { journeys: [{ journey: 'home', url: 'https://private.invalid/canary' }] },
+      probe: {
+        journeys: [{ journey: 'home', budget_ms: 2000, url: 'https://private.invalid/canary' }],
+      },
     },
     ...overrides,
   };
@@ -236,4 +239,27 @@ describe('portfolio synchronization contracts', () => {
     acknowledged.preserve_outside_catalog_app_ids = ['duplicate', 'duplicate'];
     expect(CatalogSyncRequestV1.safeParse(acknowledged).success).toBe(false);
   });
+});
+
+it('revisions follow public definitions without uploading them or private extras', async () => {
+  const entry = project();
+  const value = catalog(entry);
+  const initial = await projectCanonicalCatalogWithRevisions(value, null);
+  const revision = initial.monitoring.projects[0]!.journey_revisions!.home;
+  expect(revision).toMatch(/^[a-f0-9]{64}$/);
+  expect(JSON.stringify(initial)).not.toMatch(/private.invalid|PRIVATE_CANARY|localPath/);
+  entry.systems.probe.journeys[0]!.url = 'https://changed.invalid/';
+  const next = await projectCanonicalCatalogWithRevisions(value, null);
+  expect(next.monitoring.projects[0]!.journey_revisions!.home).not.toBe(revision);
+});
+
+it.each([
+  { url: 'http://example.test/' },
+  { budget_ms: undefined },
+  { method: 'POST' },
+  { expect: { json: 'invalid' } },
+])('retains the previous catalog on malformed public definition %j', async (change) => {
+  const entry = project();
+  Object.assign(entry.systems.probe.journeys[0]!, change);
+  await expect(projectCanonicalCatalogWithRevisions(catalog(entry), null)).rejects.toThrow();
 });

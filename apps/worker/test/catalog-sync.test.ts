@@ -1,4 +1,8 @@
-import { CatalogImportRequestV1 } from '@app-health/contracts';
+import {
+  probeDefinitionRevision,
+  projectCanonicalCatalogWithRevisions,
+  CatalogImportRequestV1,
+} from '@app-health/contracts';
 import { importCatalogProjects } from '../src/catalog-import.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import { D1WorkspaceHealth } from '../src/workspace-health.js';
@@ -19,9 +23,11 @@ import {
   handleCatalogSyncRoute,
   syncCatalog,
 } from '../src/catalog-sync.js';
-import { handleMonitoringRoute } from '../src/monitoring.js';
+import { handleMonitoringRoute, readMonitoringReport } from '../src/monitoring.js';
+import { runScheduledMonitoring } from '../src/monitoring-scheduled.js';
 import { snapshotCachedAnalytics } from '../src/analytics-cache.js';
 import generated from '../../probe/journeys.json';
+import { handleCatalogPublisher, handleCatalogPublisherOwner } from '../src/catalog-publishers.js';
 
 const databases: DatabaseSync[] = [];
 afterEach(() => {
@@ -154,6 +160,579 @@ function canonical() {
 function input() {
   return projectCanonicalCatalog(canonical(), null);
 }
+
+const publisherOwner = {
+  id: 'owner',
+  label: 'Owner',
+  authKind: 'account' as const,
+  workspaceRole: 'owner' as const,
+  workspaceId: 'ws',
+};
+function publisherRequest(path: string, body?: unknown, secret?: string) {
+  return new Request(`https://dashboard.example.com/v1/catalog/${path}`, {
+    method: body === undefined ? 'GET' : 'POST',
+    headers: {
+      ...(secret ? { authorization: `Bearer ${secret}` } : {}),
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+function publisherOwnerRequest(path: string, body?: unknown) {
+  const request = publisherRequest(`publishers${path}`, body);
+  if (body !== undefined) request.headers.set('origin', 'https://dashboard.example.com');
+  return request;
+}
+async function enrolledPublisher(f: ReturnType<typeof fixture>) {
+  const response = await handleCatalogPublisher(
+    publisherRequest('publisher/enroll', { label: 'Test Mac' }),
+    f.db,
+    1000,
+  );
+  expect(response?.status).toBe(201);
+  return (await response!.json()) as {
+    publisher_id: string;
+    code: string;
+    secret: string;
+    expires_at: number;
+  };
+}
+async function approvePublisher(
+  f: ReturnType<typeof fixture>,
+  code: string,
+  outside: string[] = [],
+) {
+  return handleCatalogPublisherOwner(
+    publisherOwnerRequest('/approve', {
+      code,
+      allow_automatic_updates: true,
+      preserve_outside_catalog_app_ids: outside,
+    }),
+    f.db,
+    publisherOwner,
+    2000,
+  );
+}
+
+describe('automatic catalog publisher authority', () => {
+  it('adds new metadata automatically while unreviewed checks remain missing and cannot run or inherit receipts', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    const baselineInput = input();
+    baselineInput.monitoring.projects = baselineInput.monitoring.projects.map((row) => ({
+      ...row,
+      scope: 'local',
+      reason: 'Local fixture.',
+      journeys: [],
+    }));
+    const baseline = await syncCatalog(f.db, 'ws', baselineInput, 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    const next = { ...baselineInput, expected_previous_hash: baseline.projection_hash };
+    next.projects = [
+      ...next.projects,
+      { ...next.projects[0]!, catalog_id: 'new-product', name: 'New product' },
+    ];
+    next.monitoring = {
+      ...next.monitoring,
+      projects: [
+        ...next.monitoring.projects,
+        {
+          catalog_id: 'new-product',
+          name: 'New product',
+          scope: 'public',
+          reason: null,
+          journeys: ['new-home'],
+        },
+      ],
+    };
+    expect(
+      (
+        await handleCatalogSyncRoute(
+          new Request('https://dashboard.example.com/v1/catalog/sync', {
+            method: 'POST',
+            body: JSON.stringify(next),
+          }),
+          f.db,
+          publisherOwner,
+        )
+      )?.status,
+    ).toBe(409);
+    const response = await handleCatalogPublisher(
+      publisherRequest('publisher', next, paired.secret),
+      f.db,
+      3000,
+    );
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({ project_count: 41 });
+    f.sqlite
+      .prepare(
+        "INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level, props, source) VALUES ('unreviewed-receipt', 'app-0', 'env-0', 3000, 'probe.result', 'debug', ?, 'server')",
+      )
+      .run(
+        JSON.stringify({
+          project: 'new-product',
+          journey: 'new-home',
+          location: 'cloudflare',
+          interval_seconds: 3600,
+          status: 'healthy',
+          total_ms: 1,
+        }),
+      );
+    const report = await readMonitoringReport(f.db, 'ws', 4000, undefined, {
+      appId: 'app-0',
+      environmentId: 'env-0',
+    });
+    expect(report.projects.find((row) => row.catalog_id === 'new-product')).toMatchObject({
+      state: 'missing',
+      reason: expect.stringContaining('Awaiting reviewed check configuration'),
+      checks: [{ journey: 'new-home', freshness: 'missing', health: null, observations: [] }],
+    });
+    const source = await new D1ControlPlane(f.db).createKey('app-0', 'env-0', 4000);
+    const fetcher = vi.fn(async () => Response.json({ ok: true }));
+    await runScheduledMonitoring(
+      {
+        DB: f.db,
+        APP_HEALTH_SELF_BACKEND_KEY: source.rawKey,
+        APP_HEALTH_SELF_APP_ID: 'app-0',
+        APP_HEALTH_SELF_ENVIRONMENT_ID: 'env-0',
+      },
+      fetcher,
+      4000,
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it('imports changed definitions while fencing old fetches and old healthy receipts until reviewed configuration matches', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    const source = canonical();
+    for (const row of source.projects)
+      if (row.systems.probe.journeys)
+        row.systems.probe.journeys = generated.journeys.filter((check) => check.project === row.id);
+    const baselineInput = await projectCanonicalCatalogWithRevisions(source, null);
+    await syncCatalog(f.db, 'ws', baselineInput, 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    const target = source.projects.find((row) => row.systems.probe.journeys?.length)!;
+    const definition = target.systems.probe.journeys![0]!;
+    const original = structuredClone(definition);
+    const revision = await probeDefinitionRevision(original);
+    f.sqlite
+      .prepare(
+        "INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level, props, source) VALUES ('old-healthy', 'app-0', 'env-0', 3000, 'probe.result', 'debug', ?, 'server')",
+      )
+      .run(
+        JSON.stringify({
+          project: target.id,
+          journey: definition.journey,
+          revision,
+          location: 'cloudflare',
+          interval_seconds: 3600,
+          status: 'healthy',
+          total_ms: 1,
+        }),
+      );
+    const healthyReport = await readMonitoringReport(f.db, 'ws', 3500, undefined, {
+      appId: 'app-0',
+      environmentId: 'env-0',
+    });
+    expect(
+      healthyReport.projects.find((row) => row.catalog_id === target.id)!.checks[0]!.health,
+    ).toBe('healthy');
+    for (const change of [
+      { url: 'https://unreviewed.invalid/' },
+      { expect: { body_includes: ['changed marker'] } },
+    ]) {
+      Object.assign(definition, original, change);
+      const next = await projectCanonicalCatalogWithRevisions(
+        source,
+        (
+          f.sqlite.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots').get() as {
+            projection_hash: string;
+          }
+        ).projection_hash,
+      );
+      target.name = 'Updated product';
+      const response = await handleCatalogPublisher(
+        publisherRequest('publisher', next, paired.secret),
+        f.db,
+        4000,
+      );
+      expect(response?.status).toBe(200);
+      const report = await readMonitoringReport(f.db, 'ws', 4500, undefined, {
+        appId: 'app-0',
+        environmentId: 'env-0',
+      });
+      expect(report.projects.find((row) => row.catalog_id === target.id)!.checks[0]).toMatchObject({
+        freshness: 'missing',
+        health: null,
+        observations: [],
+      });
+      const key = await new D1ControlPlane(f.db).createKey('app-0', 'env-0', 4500);
+      const fetcher = vi.fn<typeof fetch>(async () => new Response('OK'));
+      await runScheduledMonitoring(
+        {
+          DB: f.db,
+          APP_HEALTH_SELF_BACKEND_KEY: key.rawKey,
+          APP_HEALTH_SELF_APP_ID: 'app-0',
+          APP_HEALTH_SELF_ENVIRONMENT_ID: 'env-0',
+        },
+        fetcher,
+        5000,
+      );
+      expect(
+        fetcher.mock.calls.some(
+          ([url]) => String(url) === original.url || String(url).includes('unreviewed.invalid'),
+        ),
+      ).toBe(false);
+      f.sqlite.prepare('DELETE FROM workspace_monitoring_runs').run();
+    }
+    Object.assign(definition, original);
+    const fixed = await projectCanonicalCatalogWithRevisions(
+      source,
+      (
+        f.sqlite.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots').get() as {
+          projection_hash: string;
+        }
+      ).projection_hash,
+    );
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', fixed, paired.secret),
+          f.db,
+          6000,
+        )
+      )?.status,
+    ).toBe(200);
+    const fixedReport = await readMonitoringReport(f.db, 'ws', 6500, undefined, {
+      appId: 'app-0',
+      environmentId: 'env-0',
+    });
+    expect(
+      fixedReport.projects.find((row) => row.catalog_id === target.id)!.checks[0]!.health,
+    ).toBe('healthy');
+  });
+  it('keeps an older active publisher visible ahead of ten recently revoked connections', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    for (let index = 0; index < 10; index += 1) {
+      f.sqlite
+        .prepare(
+          'INSERT INTO catalog_publishers (id, verifier_hash, pairing_code, label, created_at, expires_at, workspace_id, approved_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        )
+        .run(
+          crypto.randomUUID(),
+          `revoked-hash-${index}`,
+          index.toString(16).padStart(12, '0').toUpperCase(),
+          `Revoked ${index}`,
+          3000,
+          4000,
+          'ws',
+          3000 + index,
+          4000 + index,
+        );
+    }
+    const response = await handleCatalogPublisherOwner(
+      publisherOwnerRequest(''),
+      f.db,
+      publisherOwner,
+    );
+    const body = (await response!.json()) as {
+      publishers: Array<{ id: string; revoked_at: number | null }>;
+    };
+    expect(body.publishers).toHaveLength(10);
+    expect(body.publishers[0]).toMatchObject({ id: paired.publisher_id, revoked_at: null });
+  });
+  it('pairs once, removes an active project atomically and retains excluded identity, keys and history', async () => {
+    const f = fixture();
+    seed(f, 41, 40, 1);
+    const initial = { ...input(), preserve_outside_catalog_app_ids: ['app-40'] };
+    const baseline = await syncCatalog(f.db, 'ws', initial, 1000);
+    const paired = await enrolledPublisher(f);
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', input(), paired.secret),
+          f.db,
+          1500,
+        )
+      )?.status,
+    ).toBe(403);
+    expect((await approvePublisher(f, paired.code, ['app-40']))?.status).toBe(200);
+    const tokenRows = f.sqlite.prepare('SELECT verifier_hash FROM catalog_publishers').all();
+    expect(JSON.stringify(tokenRows)).not.toContain(paired.secret);
+    const next = { ...input(), expected_previous_hash: baseline.projection_hash };
+    next.projects = next.projects.slice(1);
+    next.monitoring.projects = next.monitoring.projects.slice(1);
+    const response = await handleCatalogPublisher(
+      publisherRequest('publisher', next, paired.secret),
+      f.db,
+      3000,
+    );
+    expect(response?.status).toBe(200);
+    const acknowledged = (await response!.json()) as { project_count: number };
+    expect(acknowledged.project_count).toBe(39);
+    expect(
+      f.sqlite
+        .prepare('SELECT count(*) AS n FROM current_workspace_catalog WHERE workspace_id = ?')
+        .get('ws'),
+    ).toEqual({ n: 39 });
+    expect(
+      f.sqlite
+        .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
+        .get('ws'),
+    ).toEqual({ n: 39 });
+    expect(f.sqlite.prepare("SELECT verifier_hash FROM keys WHERE id='stable-key'").get()).toEqual({
+      verifier_hash: 'stable-verifier',
+    });
+    expect(
+      f.sqlite.prepare("SELECT id FROM apps WHERE id IN ('app-0', 'app-40')").all(),
+    ).toHaveLength(2);
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 4000))
+        ?.status,
+    ).toBe(200);
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', undefined, paired.secret),
+          f.db,
+          paired.expires_at + 86400000,
+        )
+      )?.status,
+    ).toBe(200);
+    const list = await handleCatalogPublisherOwner(publisherOwnerRequest(''), f.db, publisherOwner);
+    const listed = JSON.stringify(await list!.json());
+    expect(listed).not.toContain(paired.secret);
+    expect(listed).not.toContain('verifier_hash');
+    expect(listed).toContain('last_success_at');
+  });
+
+  it('requires the real workspace owner, explicit outside decisions and an unexpired code', async () => {
+    const f = fixture();
+    seed(f, 41, 40, 1);
+    await syncCatalog(
+      f.db,
+      'ws',
+      { ...input(), preserve_outside_catalog_app_ids: ['app-40'] },
+      1000,
+    );
+    const paired = await enrolledPublisher(f);
+    for (const owner of [
+      { ...publisherOwner, workspaceRole: 'editor' as const },
+      { ...publisherOwner, authKind: 'api-token' as const },
+      { ...publisherOwner, appId: 'app-0' },
+    ])
+      expect(
+        (
+          await handleCatalogPublisherOwner(
+            publisherOwnerRequest('/approve', {
+              code: paired.code,
+              allow_automatic_updates: true,
+              preserve_outside_catalog_app_ids: ['app-40'],
+            }),
+            f.db,
+            owner,
+          )
+        )?.status,
+      ).toBe(403);
+    expect((await approvePublisher(f, paired.code))?.status).toBe(409);
+    const unconfirmed = publisherOwnerRequest('/approve', {
+      code: paired.code,
+      allow_automatic_updates: false,
+      preserve_outside_catalog_app_ids: ['app-40'],
+    });
+    expect((await handleCatalogPublisherOwner(unconfirmed, f.db, publisherOwner))?.status).toBe(
+      400,
+    );
+    const crossOrigin = publisherOwnerRequest('/approve', {
+      code: paired.code,
+      allow_automatic_updates: true,
+      preserve_outside_catalog_app_ids: ['app-40'],
+    });
+    crossOrigin.headers.set('origin', 'https://evil.example');
+    expect((await handleCatalogPublisherOwner(crossOrigin, f.db, publisherOwner))?.status).toBe(
+      403,
+    );
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', undefined, paired.secret),
+          f.db,
+          paired.expires_at + 1,
+        )
+      )?.status,
+    ).toBe(401);
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/approve', {
+            code: paired.code,
+            allow_automatic_updates: true,
+            preserve_outside_catalog_app_ids: ['app-40'],
+          }),
+          f.db,
+          publisherOwner,
+          paired.expires_at + 1,
+        )
+      )?.status,
+    ).toBe(409);
+  });
+
+  it('fences a revocation that occurs after authentication but before the SQL commit', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    const baseline = await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    expect((await approvePublisher(f, paired.code))?.status).toBe(200);
+    const next = { ...input(), expected_previous_hash: baseline.projection_hash };
+    next.projects[0]!.name = 'Must not commit';
+    next.monitoring.projects[0]!.name = 'Must not commit';
+    f.beforeBatch(() => {
+      f.sqlite
+        .prepare('UPDATE catalog_publishers SET revoked_at = 2500 WHERE id = ?')
+        .run(paired.publisher_id);
+    });
+    expect(
+      (await handleCatalogPublisher(publisherRequest('publisher', next, paired.secret), f.db, 3000))
+        ?.status,
+    ).toBe(401);
+    expect(
+      f.sqlite.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots').get(),
+    ).toEqual({ projection_hash: baseline.projection_hash });
+    expect(
+      f.sqlite
+        .prepare('SELECT name FROM workspace_monitoring_projects ORDER BY catalog_id LIMIT 1')
+        .get(),
+    ).not.toEqual({ name: 'Must not commit' });
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', undefined, paired.secret),
+          f.db,
+          4000,
+        )
+      )?.status,
+    ).toBe(401);
+  });
+
+  it('cannot choose its workspace or expand outside acknowledgements and stops for newly unlinked apps', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    const baseline = await syncCatalog(f.db, 'ws', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    await approvePublisher(f, paired.code);
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', { ...input(), workspace_id: 'foreign' }, paired.secret),
+          f.db,
+          3000,
+        )
+      )?.status,
+    ).toBe(400);
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest(
+            'publisher',
+            { ...input(), preserve_outside_catalog_app_ids: ['app-0'] },
+            paired.secret,
+          ),
+          f.db,
+          3000,
+        )
+      )?.status,
+    ).toBe(400);
+    f.sqlite.exec(
+      "INSERT INTO apps VALUES ('new-outside', 'Outside', 1, NULL); INSERT INTO workspace_apps VALUES ('new-outside','ws');",
+    );
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest(
+            'publisher',
+            { ...input(), expected_previous_hash: baseline.projection_hash },
+            paired.secret,
+          ),
+          f.db,
+          3000,
+        )
+      )?.status,
+    ).toBe(409);
+    expect(
+      f.sqlite.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots').get(),
+    ).toEqual({ projection_hash: baseline.projection_hash });
+    expect(f.sqlite.prepare('SELECT last_error FROM catalog_publishers').get()).toEqual({
+      last_error: 'review_required',
+    });
+  });
+
+  it('binds a pairing code to exactly one owner workspace and isolates revocation', async () => {
+    const f = fixture();
+    seed(f, 40, 40);
+    await syncCatalog(f.db, 'ws', input(), 1000);
+    await syncCatalog(f.db, 'foreign', input(), 1000);
+    const paired = await enrolledPublisher(f);
+    const body = {
+      code: paired.code,
+      allow_automatic_updates: true,
+      preserve_outside_catalog_app_ids: [],
+    };
+    const replies = await Promise.all([
+      handleCatalogPublisherOwner(
+        publisherOwnerRequest('/approve', body),
+        f.db,
+        publisherOwner,
+        2000,
+      ),
+      handleCatalogPublisherOwner(
+        publisherOwnerRequest('/approve', body),
+        f.db,
+        { ...publisherOwner, workspaceId: 'foreign', id: 'other' },
+        2000,
+      ),
+    ]);
+    expect(replies.map((r) => r!.status).sort()).toEqual([200, 409]);
+    const bound = f.sqlite.prepare('SELECT workspace_id FROM catalog_publishers').get() as {
+      workspace_id: string;
+    };
+    const other = bound.workspace_id === 'ws' ? 'foreign' : 'ws';
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/revoke', { publisher_id: paired.publisher_id }),
+          f.db,
+          { ...publisherOwner, workspaceId: other },
+          3000,
+        )
+      )?.status,
+    ).toBe(404);
+    expect(
+      (
+        await handleCatalogPublisherOwner(
+          publisherOwnerRequest('/revoke', { publisher_id: paired.publisher_id }),
+          f.db,
+          { ...publisherOwner, workspaceId: bound.workspace_id },
+          3000,
+        )
+      )?.status,
+    ).toBe(200);
+    expect(
+      (
+        await handleCatalogPublisher(
+          publisherRequest('publisher', undefined, paired.secret),
+          f.db,
+          4000,
+        )
+      )?.status,
+    ).toBe(401);
+  });
+});
 function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36, unlinked = 0) {
   const projects = input().projects;
   for (let index = 0; index < count; index += 1) {
