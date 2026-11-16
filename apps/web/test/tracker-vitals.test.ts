@@ -83,7 +83,9 @@ async function installTracker(
 }
 const loadedScripts = () => document.head.querySelectorAll<HTMLScriptElement>('script');
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();
   history.replaceState({}, '', '/');

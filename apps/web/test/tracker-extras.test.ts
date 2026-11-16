@@ -68,7 +68,9 @@ it('reports unknown download suffixes as other rather than capturing path fragme
   ]);
 });
 it('reports each coarse milestone once per page and cancels scheduled work on cleanup', async () => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   vi.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValue(2000);
   vi.stubGlobal('innerHeight', 1000);
   vi.stubGlobal('scrollY', 800);
@@ -96,7 +98,9 @@ it('reports each coarse milestone once per page and cancels scheduled work on cl
   expect(track).toHaveBeenCalledTimes(8);
 });
 it.each(['hidden', 'prerender', 'short'])('does not measure %s pages', async (mode) => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   vi.spyOn(document.documentElement, 'scrollHeight', 'get').mockReturnValue(
     mode === 'short' ? 500 : 2000,
   );

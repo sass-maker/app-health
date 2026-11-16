@@ -13,7 +13,14 @@ Persistent visitor IDs expire after 90 days. A visit expires after 30 minutes
 without meaningful activity; idle heartbeats do not extend it or create pageviews.
 Same-origin tabs share persistent visitor and visit state. Different browsers,
 devices, origins, and projects are not automatically linked. Clearing or blocking
-storage reduces recognition. Session-only and older SDK payloads omit visitor
+storage reduces recognition. Persistent state uses one IndexedDB transaction per
+meaningful event; the context is queued only after commit. The first upgraded
+visit imports matching legacy localStorage IDs once and retires those keys.
+Older open tabs must reload to join this authority. Clearing all site data resets
+recognition; a localStorage-only clear retains the canonical IndexedDB identity.
+An IndexedDB-only clear leaves the migration marker, so legacy IDs are not imported
+again. Blocked storage falls back to a stable unidentified in-memory session.
+Session-only and older SDK payloads omit visitor
 identity; reports show their sessions as unidentified rather than new visitors.
 
 The collector hashes random IDs with project/environment scope before queueing.

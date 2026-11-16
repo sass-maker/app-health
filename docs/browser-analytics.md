@@ -82,14 +82,20 @@ observers and listeners too.
 
 ## Semantics and privacy
 
-- Persistent anonymous visitors are the default for new installations. IDs stay in
-  first-party local storage for up to 90 days, scoped by `data-project`; visits
-  expire after 30 minutes without a pageview or explicit product event. Same-origin
-  tabs share the visit. Web Locks serialize identity changes where supported, so
-  simultaneous tabs do not create separate visitors. Without Web Locks, storage
-  sharing is best-effort and simultaneous creation can race. Heartbeats do not
+- Persistent anonymous visitors are the default for new installations. IDs use a
+  first-party IndexedDB record, scoped by `data-project`, with a 90-day expiry;
+  visits expire after 30 minutes without a pageview or explicit product event.
+  Same-origin tabs update the visitor and visit in one transaction. Events wait
+  for that transaction to commit; storage failure uses an unidentified memory
+  session. The identity coordinator ships in the existing tracker script.
+  Heartbeats do not
   prolong inactivity or create historical events; expired visits stop sending
   idle heartbeats. Scrolls and pointer movement alone do not extend a visit.
+- The first upgraded visit imports valid legacy localStorage identity once and
+  retires those keys. Existing tabs using the old tracker remain separate until
+  reloaded. Clear the site's data to reset all identity state: clearing only
+  localStorage retains the canonical IndexedDB identity, while clearing only
+  IndexedDB leaves a migration marker that prevents legacy ID resurrection.
 - `data-identity="session"` omits persistent visitor IDs. Blocked storage falls
   back to an in-memory session. Raw session and visitor IDs are hashed with the
   app/environment scope before queueing or archival. Legacy identity remains

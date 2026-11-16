@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { BrowserBatchV1 } from '@app-health/contracts';
 import type { AppHealthTracker } from '../public/tracker.js';
+import { holdIdentityOpen } from './tracker-storage.js';
 import { start, assetURL } from '../public/tracker-extras.js';
 
 const api = (): AppHealthTracker => window.appHealth!;
@@ -28,7 +29,9 @@ async function install(data: Record<string, string | undefined> = {}, src = '') 
   await vi.dynamicImportSettled();
 }
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   values = new Map();
   store = {
     getItem: vi.fn((name: string) => values.get(name) ?? null),
@@ -181,34 +184,21 @@ it('enforces exclusion in this document even when preference storage is blocked'
   expect(batches()[0].visitor_id).toBeUndefined();
 });
 
-it('rejects stale Web Lock callbacks across revoke and regrant', async () => {
-  const records: Array<() => void> = [];
-  Object.defineProperty(navigator, 'locks', {
-    configurable: true,
-    value: {
-      request: vi.fn(
-        (_key: string, record: () => void) =>
-          new Promise<void>((resolve) =>
-            records.push(() => {
-              record();
-              resolve();
-            }),
-          ),
-      ),
-    },
-  });
+it('rejects stale identity callbacks across revoke and regrant', async () => {
+  const held = holdIdentityOpen();
   try {
     await install();
     api().track('stale');
+    await vi.waitFor(() => expect(held.waiting()).toBe(1));
     expect(api().checkoutMetadata()).toEqual({ app_health_page: '/landing' });
     api().consent(false);
     api().consent(true);
-    records.forEach((record) => record());
+    held.release();
     await api().flush();
     expect(batches()[0].events.map((event) => event.name)).toEqual([undefined]);
     expect(api().diagnostics().queued).toBe(0);
   } finally {
-    Reflect.deleteProperty(navigator, 'locks');
+    held.release();
   }
 });
 
@@ -222,6 +212,7 @@ it('aborts pending delivery and does not retry a pre-revocation batch', async ()
     );
   });
   const delivery = api().flush();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   api().ignore(true);
   expect(signal?.aborted).toBe(true);
   await delivery;

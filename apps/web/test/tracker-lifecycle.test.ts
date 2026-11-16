@@ -3,6 +3,8 @@ import { Blob as NodeBlob } from 'node:buffer';
 import { BrowserBatchV1 } from '@app-health/contracts';
 import type { AppHealthTracker } from '../public/tracker.js';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { IDBDatabase } from 'fake-indexeddb';
+import { holdIdentityOpen, identityRecord } from './tracker-storage.js';
 
 const tracker = () => window.appHealth as AppHealthTracker;
 const payloads = () =>
@@ -22,7 +24,9 @@ async function install(identity?: 'session') {
 }
 
 beforeEach(async () => {
-  vi.useFakeTimers();
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'],
+  });
   globalThis.localStorage?.clear();
   globalThis.sessionStorage?.clear();
   await install();
@@ -54,6 +58,7 @@ it('sends an event queued during an in-flight pageview before a caller finishes 
       }),
   );
   const pageview = tracker().flush();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   tracker().track('library_opened');
   const action = tracker().flush();
   expect(fetch).toHaveBeenCalledTimes(1);
@@ -76,10 +81,11 @@ it('hands off a queued action on pagehide while the earlier keepalive request is
   const beacon = vi.fn().mockReturnValue(true);
   vi.stubGlobal('navigator', { sendBeacon: beacon });
   const first = tracker().flush();
+  await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const firstBody = String(vi.mocked(fetch).mock.calls[0][1]?.body);
   tracker().track('directory_opened', { traffic_class: 'qa' });
   window.dispatchEvent(new Event('pagehide'));
-  await Promise.resolve();
+  await vi.waitFor(() => expect(beacon).toHaveBeenCalledTimes(1));
   const bodies = await Promise.all(
     beacon.mock.calls.map(async ([, body]) => (body as Blob).text()),
   );
@@ -97,26 +103,19 @@ it('hands off a queued action on pagehide while the earlier keepalive request is
   expect(tracker().diagnostics()).toMatchObject({ accepted: 2, queued: 0 });
 });
 
-it('waits for coordinated recording but not a collector response when handing off navigation', async () => {
+it('waits for durable recording but not a collector response when handing off navigation', async () => {
   tracker().stop();
   vi.stubGlobal('Blob', NodeBlob);
   const beacon = vi.fn().mockReturnValue(true);
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  Object.defineProperty(navigator, 'locks', {
-    configurable: true,
-    value: { request: vi.fn((_key: string, record: () => void) => gate.then(record)) },
-  });
+  const held = holdIdentityOpen();
   Object.defineProperty(navigator, 'sendBeacon', { configurable: true, value: beacon });
   try {
     await install();
     tracker().track('directory_opened', { traffic_class: 'qa' });
     const handoff = tracker().flushForNavigation!();
-    await Promise.resolve();
+    await vi.waitFor(() => expect(held.waiting()).toBe(1));
     expect(beacon).not.toHaveBeenCalled();
-    release();
+    held.release();
     expect(await handoff).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
     const body = await (beacon.mock.calls[0][1] as NodeBlob).text();
@@ -126,7 +125,7 @@ it('waits for coordinated recording but not a collector response when handing of
     ]);
     expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 2 });
   } finally {
-    Reflect.deleteProperty(navigator, 'locks');
+    held.release();
     Reflect.deleteProperty(navigator, 'sendBeacon');
   }
 });
@@ -151,7 +150,7 @@ it('does not resend accepted navigation beacons on repeated lifecycle events', a
   expect(await tracker().flushForNavigation!()).toBe(true);
   window.dispatchEvent(new Event('pagehide'));
   window.dispatchEvent(new Event('pagehide'));
-  await Promise.resolve();
+  await vi.waitFor(() => expect(beacon).toHaveBeenCalledTimes(1));
   expect(beacon).toHaveBeenCalledTimes(1);
   expect(tracker().diagnostics()).toMatchObject({ accepted: 0, queued: 1 });
   await tracker().flush();
@@ -209,6 +208,7 @@ it('shares persistent context across reloads and starts a new visitor after 90 d
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   await install();
   vi.mocked(fetch).mockClear();
@@ -230,6 +230,7 @@ it('splits meaningful events after 30 minutes while preserving queued context', 
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   await install();
   await tracker().flush();
@@ -250,13 +251,17 @@ it('preserves the context of queued events when a later visit starts before deli
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   await install();
+  vi.mocked(fetch).mockResolvedValueOnce({ ok: false, status: 503 } as Response);
+  await tracker().flush();
   vi.setSystemTime(Date.now() + 1_800_001);
   tracker().track('next_visit');
   await tracker().flush();
   await tracker().flush();
-  const [first, second] = validPayloads();
+  const [first, retry, second] = validPayloads();
+  expect(retry).toEqual(first);
   expect(first.events.map((event) => event.type)).toEqual(['pageview']);
   expect(second.events.map((event) => event.name)).toEqual(['next_visit']);
   expect(first.visitor_id).toBe(second.visitor_id);
@@ -271,6 +276,7 @@ it('preserves visitor, visit and entry attribution on an internal reload', async
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   history.replaceState({}, '', '/entry?utm_source=launch');
   await install();
@@ -339,13 +345,14 @@ it('adopts another tab’s current session for heartbeats without reviving its o
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   await install();
   await tracker().flush();
   const original = validPayloads()[0];
-  const key = 'h:ahk_pub_lifecycle:w';
-  const next = { ...JSON.parse(values.get(key)!), id: crypto.randomUUID(), last: Date.now() };
-  values.set(key, JSON.stringify(next));
+  const stored = (await identityRecord('ahk_pub_lifecycle'))!;
+  const next = { ...stored.visit, id: crypto.randomUUID(), last: Date.now() };
+  await identityRecord('ahk_pub_lifecycle', () => ({ ...stored, visit: next }));
   await tracker().flush();
   const heartbeat = validPayloads().at(-1)!;
   expect(heartbeat.session_id).not.toBe(original.session_id);
@@ -372,58 +379,46 @@ it.each(['reload', 'back_forward'])('does not reuse an expired source on %s', as
   expect(validPayloads()[0].attribution?.source).toBe('');
 });
 
-it('waits for cross-tab coordination before flushing and bounds waiting records', async () => {
+it('waits for durable coordination before flushing and bounds waiting records', async () => {
   tracker().stop();
-  const values = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-  });
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  const request = vi.fn((_key: string, record: () => void) => gate.then(record));
-  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } });
+  const held = holdIdentityOpen();
   try {
     await install();
     for (let i = 0; i < 150; i++) tracker().track('queued');
     expect(tracker().diagnostics()).toMatchObject({ queued: 100, dropped: 51 });
     const flush = tracker().flush();
+    await vi.waitFor(() => expect(held.waiting()).toBe(1));
     expect(fetch).not.toHaveBeenCalled();
-    release();
+    held.release();
     await flush;
     expect(validPayloads()[0].events).toHaveLength(25);
-    expect(request).toHaveBeenCalledTimes(100);
+    while (tracker().diagnostics().queued) await tracker().flush();
+    expect(tracker().diagnostics()).toMatchObject({ accepted: 100, dropped: 51 });
+    expect(new Set(validPayloads().map((batch) => batch.session_id)).size).toBe(1);
   } finally {
-    Reflect.deleteProperty(navigator, 'locks');
+    held.release();
   }
 });
 
-it('falls back to a stable unidentified session if browser locks are denied', async () => {
+it('falls back to a stable unidentified session if identity transactions are denied', async () => {
   tracker().stop();
-  const values = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
+  const transaction = IDBDatabase.prototype.transaction;
+  vi.spyOn(IDBDatabase.prototype, 'transaction').mockImplementation(function (
+    this: IDBDatabase,
+    ...args
+  ) {
+    if (args[1] === 'readwrite') throw new Error('SecurityError');
+    return transaction.apply(this, args);
   });
-  Object.defineProperty(navigator, 'locks', {
-    configurable: true,
-    value: { request: vi.fn().mockRejectedValue(new Error('SecurityError')) },
-  });
-  try {
-    await install();
-    await tracker().flush();
-    tracker().track('next');
-    await tracker().flush();
-    const [first, second] = validPayloads();
-    expect(first.session_id).toBe(second.session_id);
-    expect(first.visitor_id).toBeUndefined();
-    expect(second.visitor_id).toBeUndefined();
-    expect(tracker().diagnostics().accepted).toBe(2);
-  } finally {
-    Reflect.deleteProperty(navigator, 'locks');
-  }
+  await install();
+  await tracker().flush();
+  tracker().track('next');
+  await tracker().flush();
+  const [first, second] = validPayloads();
+  expect(first.session_id).toBe(second.session_id);
+  expect(first.visitor_id).toBeUndefined();
+  expect(second.visitor_id).toBeUndefined();
+  expect(tracker().diagnostics().accepted).toBe(2);
 });
 
 it('records restored back-forward cache visits without duplicating the initial pageshow', async () => {

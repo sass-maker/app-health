@@ -209,28 +209,68 @@ test('simultaneous tabs serialize identity creation and report one visitor and s
   baseURL,
 }) => {
   const project = await fixture(request, baseURL!);
-  // Hold the same browser-native lock so both fresh trackers contend deterministically.
+  // Hold a real readwrite transaction so both fresh trackers contend for the same authority.
   await page.goto(`${project.origin}/blank`);
-  await page.evaluate((key) => {
-    (window as unknown as { release: () => void }).release = () => {};
-    void navigator.locks.request(
-      `h:${key}:w`,
-      () =>
-        new Promise<void>((resolve) => {
-          (window as unknown as { release: () => void }).release = resolve;
-        }),
-    );
-  }, project.key);
-  await expect
-    .poll(() => page.evaluate(async () => (await navigator.locks.query()).held?.length))
-    .toBe(1);
+  await context.addInitScript(() => {
+    const original = IDBDatabase.prototype.transaction;
+    const state = window as unknown as { identityTransactions: number };
+    state.identityTransactions = 0;
+    IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...args) {
+      if (this.name === 'app-health-identity' && args[1] === 'readwrite')
+        state.identityTransactions++;
+      return original.apply(this, args);
+    };
+    // Reproduce the incoherent legacy snapshot even when tabs run on one renderer.
+    const get = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key) {
+      return key.endsWith(':w') ? null : get.call(this, key);
+    };
+  });
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const opening = indexedDB.open('app-health-identity', 1);
+      opening.onupgradeneeded = () => opening.result.createObjectStore('scopes');
+      opening.onsuccess = () => resolve(opening.result);
+      opening.onerror = () => reject(opening.error);
+    });
+    const transaction = db.transaction('scopes', 'readwrite');
+    const store = transaction.objectStore('scopes');
+    let released = false;
+    const pump = () => {
+      if (!released) store.get('barrier').onsuccess = pump;
+    };
+    pump();
+    const safety = setTimeout(() => {
+      released = true;
+    }, 10000);
+    (window as unknown as { releaseIdentity: () => Promise<void> }).releaseIdentity = () => {
+      released = true;
+      clearTimeout(safety);
+      return new Promise<void>((resolve) => {
+        transaction.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+      });
+    };
+  });
   const tabs = await Promise.all([context.newPage(), context.newPage()]);
   const batches = tabs.map(receipts);
   await Promise.all(tabs.map((tab) => tab.goto(`${project.origin}/fixture/landing`)));
   await expect
-    .poll(() => page.evaluate(async () => (await navigator.locks.query()).pending?.length))
-    .toBe(2);
-  await page.evaluate(() => (window as unknown as { release: () => void }).release());
+    .poll(() =>
+      Promise.all(
+        tabs.map((tab) =>
+          tab.evaluate(
+            () => (window as unknown as { identityTransactions: number }).identityTransactions,
+          ),
+        ),
+      ),
+    )
+    .toEqual([1, 1]);
+  await page.evaluate(() =>
+    (window as unknown as { releaseIdentity: () => Promise<void> }).releaseIdentity(),
+  );
   await Promise.all(tabs.map(flush));
   expect(batches[0][0].visitor_id).toBeTruthy();
   expect(batches[0][0].visitor_id).toBe(batches[1][0].visitor_id);
@@ -240,10 +280,24 @@ test('simultaneous tabs serialize identity creation and report one visitor and s
     .toMatchObject({ visitors: 1, new_sessions: 1, returning_sessions: 0 });
   expect((await report(request, project)).sessions).toBe(1);
   // Simulate persisted inactivity without waiting 30 minutes or changing collector time.
-  await tabs[0].evaluate((key) => {
-    const name = `h:${key}:w`;
-    const visit = JSON.parse(localStorage.getItem(name)!);
-    localStorage.setItem(name, JSON.stringify({ ...visit, last: Date.now() - 1_800_001 }));
+  await tabs[0].evaluate(async (scope) => {
+    const db = await new Promise<IDBDatabase>((resolve) => {
+      const opening = indexedDB.open('app-health-identity', 1);
+      opening.onsuccess = () => resolve(opening.result);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction('scopes', 'readwrite');
+      const store = transaction.objectStore('scopes');
+      const request = store.get(scope);
+      request.onsuccess = () =>
+        store.put(
+          { ...request.result, visit: { ...request.result.visit, last: Date.now() - 1_800_001 } },
+          scope,
+        );
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
   }, project.key);
   await tabs[0].evaluate(() => window.appHealth!.track('resumed'));
   await flush(tabs[0]);
@@ -319,6 +373,128 @@ test('consent and persistent own-visit exclusion gate actual collector traffic a
   expect(first).toHaveLength(2);
   expect(first[1].events.map((event) => event.name)).toEqual([undefined]);
   await secondPage.close();
+});
+
+test('persistent identity migrates an active legacy visit once across concurrent tabs', async ({
+  context,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(request, baseURL!);
+  const visitor = { id: crypto.randomUUID(), expires: Date.now() + 86400000 };
+  const visit = {
+    id: crypto.randomUUID(),
+    last: Date.now(),
+    visitor_id: visitor.id,
+    type: 'returning',
+    attribution: {
+      source: 'launch',
+      medium: '',
+      campaign: '',
+      content: '',
+      term: '',
+      entry_path: '/original',
+    },
+  };
+  await context.addInitScript(
+    ({ key, visitor, visit }) => {
+      localStorage.setItem(`h:${key}:v`, JSON.stringify(visitor));
+      localStorage.setItem(`h:${key}:w`, JSON.stringify(visit));
+    },
+    { key: project.key, visitor, visit },
+  );
+  const tabs = await Promise.all([context.newPage(), context.newPage()]);
+  const batches = tabs.map(receipts);
+  await Promise.all(tabs.map((tab) => tab.goto(`${project.origin}/fixture/landing`)));
+  await Promise.all(tabs.map(flush));
+  for (const recorded of batches) {
+    expect(recorded[0]).toMatchObject({
+      visitor_id: visitor.id,
+      session_id: visit.id,
+      visit_type: 'returning',
+      attribution: visit.attribution,
+    });
+  }
+  await expect.poll(async () => (await report(request, project)).audience.visitors).toBe(1);
+  expect((await report(request, project)).sessions).toBe(1);
+  await tabs[0].reload();
+  await flush(tabs[0]);
+  expect(batches[0].at(-1)?.session_id).toBe(visit.id);
+  await Promise.all(tabs.map((tab) => tab.close()));
+});
+
+test('transactional identity aborts before commit on consent revocation and never sends stale events', async ({
+  page,
+  context,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(request, baseURL!);
+  await context.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    let revoke = true;
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args) {
+      const request = put.apply(this, args);
+      if (revoke && this.name === 'scopes') {
+        revoke = false;
+        window.appHealth!.consent(false);
+        (window as unknown as { revokedInTransaction: boolean }).revokedInTransaction = true;
+      }
+      return request;
+    };
+  });
+  const batches = receipts(page);
+  await page.goto(`${project.origin}/fixture/landing`);
+  await page.waitForFunction(
+    () => (window as unknown as { revokedInTransaction: boolean }).revokedInTransaction,
+  );
+  await flush(page);
+  expect(batches).toEqual([]);
+  expect(
+    await page.evaluate(async (scope) => {
+      const opening = indexedDB.open('app-health-identity', 1);
+      const db = await new Promise<IDBDatabase>((resolve) => {
+        opening.onsuccess = () => resolve(opening.result);
+      });
+      const tx = db.transaction('scopes', 'readonly');
+      const get = tx.objectStore('scopes').get(scope);
+      const missing = await new Promise<boolean>((resolve) => {
+        tx.oncomplete = () => resolve(get.result === undefined);
+      });
+      db.close();
+      return missing;
+    }, project.key),
+  ).toBe(true);
+  await page.evaluate(() => window.appHealth!.consent(true));
+  await flush(page);
+  expect(batches).toHaveLength(1);
+  expect(batches[0].events.map((event) => event.name)).toEqual([undefined]);
+  expect(batches[0].visitor_id).toBeTruthy();
+});
+
+test('persistent identity falls back to unidentified memory when IndexedDB is denied', async ({
+  page,
+  context,
+  request,
+  baseURL,
+}) => {
+  const project = await fixture(request, baseURL!);
+  await context.addInitScript(() => {
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      get() {
+        throw new DOMException('Denied', 'SecurityError');
+      },
+    });
+  });
+  const batches = receipts(page);
+  await page.goto(`${project.origin}/fixture/landing`);
+  await flush(page);
+  await page.evaluate(() => window.appHealth!.track('next'));
+  await flush(page);
+  expect(batches).toHaveLength(2);
+  expect(batches[0].session_id).toBe(batches[1].session_id);
+  expect(batches.every((batch) => !batch.visitor_id && !batch.visit_type)).toBe(true);
 });
 
 test('cookieless identity stays in memory and checkout metadata contains only sanitized attribution', async ({
