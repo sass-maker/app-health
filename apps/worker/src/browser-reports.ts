@@ -157,7 +157,7 @@ export function localBrowserReport(
       )
       .map(([key, values]) => [key, rank(values)]),
   ) as Record<string, { name: string; count: number }[]>;
-  const unidentified = Math.max(0, sessions.size - newSessions.size - returningSessions.size);
+  const typedSessions = new Set([...newSessions, ...returningSessions]).size;
   const report = {
     from,
     to,
@@ -173,8 +173,8 @@ export function localBrowserReport(
     audience: {
       visitors: visitors.size,
       new_sessions: newSessions.size,
-      returning_sessions: returningSessions.size,
-      unidentified_sessions: unidentified,
+      returning_sessions: typedSessions - newSessions.size,
+      unidentified_sessions: sessions.size - typedSessions,
       ...dimensionCounts,
     } as NonNullable<BrowserReport['audience']>,
     engagement: hasSegmentFilter(filter)

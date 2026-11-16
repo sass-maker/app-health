@@ -282,6 +282,31 @@ it('retries interrupted legacy retirement without discarding the committed autho
   expect(batches().every((batch) => batch.session_id === original.visit.id)).toBe(true);
 });
 
+it('does not migrate or retire legacy IDs during a read-only refresh with no canonical record', async () => {
+  const original = legacy();
+  seedLegacy(original);
+  const set = Storage.prototype.setItem;
+  let interrupted = false;
+  vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+    if (!interrupted && key === `h:${scope}:m` && value === '1') {
+      interrupted = true;
+      throw new Error('Retirement interrupted');
+    }
+    set.call(this, key, value);
+  });
+  await install();
+  await api().flush();
+  await identityRecord(scope, () => undefined);
+  await api().flush();
+  expect(await identityRecord(scope)).toBeUndefined();
+  expect(localStorage.getItem(`h:${scope}:m`)).toBe('0');
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:v`)!)).toEqual(original.visitor);
+  expect(JSON.parse(localStorage.getItem(`h:${scope}:w`)!)).toEqual(original.visit);
+  api().track('after_reset');
+  await api().flush();
+  expect(batches().at(-1)?.visitor_id).toBe(original.visitor.id);
+});
+
 it('drops callbacks from a stopped generation instead of creating or sending its identity', async () => {
   const held = holdIdentityOpen();
   await install();

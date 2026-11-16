@@ -41,6 +41,12 @@ counts describe pageviews (or occurrences when filtering an event), not people.
 Only the selected group of dimensions is queried, using the existing scoped
 60-second cache. Public links retain their explicit limited disclosure contract.
 
+Session cohorts partition the observed sessions in each reported window. A
+session with any `new` batch is new; otherwise one with a `returning` batch is
+returning; the rest are unidentified. An untyped fallback batch does not make a
+previously typed session unidentified too. Sampling still makes distinct counts
+lower bounds; this classification does not recover unobserved identities.
+
 ## Delivery and cost boundaries
 
 Browser queue acknowledgement follows durable staging of archive and analytical

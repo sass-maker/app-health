@@ -239,6 +239,7 @@
               if (!enabled() || generation !== version) return cancel();
               const now = Date.now();
               let saved = reading.result;
+              if (!saved && !meaningful) return;
               retireLegacy = storage.getItem(migratedKey) !== '1';
               if (!saved)
                 saved = retireLegacy

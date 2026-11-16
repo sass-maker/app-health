@@ -518,6 +518,11 @@ test('persistent identity keeps its committed session when a later transaction f
   expect(batches.every((batch) => batch.session_id === batches[0].session_id)).toBe(true);
   expect(batches.slice(1).every((batch) => !batch.visitor_id && !batch.visit_type)).toBe(true);
   await expect.poll(async () => (await report(request, project)).sessions).toBe(1);
+  expect((await report(request, project)).audience).toMatchObject({
+    new_sessions: 1,
+    returning_sessions: 0,
+    unidentified_sessions: 0,
+  });
 });
 
 test('persistent identity falls back to unidentified memory when IndexedDB is denied', async ({
