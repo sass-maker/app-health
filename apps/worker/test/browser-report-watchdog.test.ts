@@ -411,3 +411,62 @@ it('enforces the absolute deadline even before its abort timer can be dispatched
   expect(provider.queries).toHaveLength(6);
   expect(provider.queries.filter(isPages)).toHaveLength(1);
 });
+
+it.each(['pages', 'counter'] as const)(
+  'starts all five useful independent calls before the %s watchdog decision',
+  async (first) => {
+    fixture.seed();
+    const provider = fixture.provider({ first: 'same' });
+    let releasePages!: () => void;
+    let releasePeriods!: () => void;
+    const fetchImpl: typeof fetch = async (input, init) => {
+      const response = await provider.fetchImpl(input, init);
+      if (isPages(String(init?.body)))
+        return new Promise((resolve) => {
+          releasePages = () => resolve(response);
+        });
+      if (isPeriods(String(init?.body)))
+        return new Promise((resolve) => {
+          releasePeriods = () => resolve(response);
+        });
+      return response;
+    };
+    const pending = queryBrowserReport('workspace', reportScope, { ...options, fetchImpl });
+    await vi.waitFor(() => {
+      expect(releasePages).toBeTypeOf('function');
+      expect(releasePeriods).toBeTypeOf('function');
+    });
+    expect(provider.queries).toHaveLength(5);
+    expect(provider.queries.some((sql) => sql.includes('pageview_sessions'))).toBe(true);
+    expect(provider.queries.some((sql) => sql.includes('argMax'))).toBe(true);
+    if (first === 'pages') releasePages();
+    else releasePeriods();
+    await vi.waitFor(() => expect(provider.queries).toHaveLength(first === 'pages' ? 10 : 6));
+    if (first === 'pages') releasePeriods();
+    else releasePages();
+    const result = await pending;
+    expect(result.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(5);
+    expect(provider.queries.filter(isPages)).toHaveLength(1);
+  },
+);
+
+it('fails a late original-pages rejection after the joint decision without unhandled retries', async () => {
+  fixture.seed();
+  const provider = fixture.provider({ first: 'same' });
+  let rejectPages!: (error: Error) => void;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (isPages(String(init?.body))) {
+      await provider.fetchImpl(input, init);
+      return new Promise((_resolve, reject) => {
+        rejectPages = reject;
+      });
+    }
+    return provider.fetchImpl(input, init);
+  };
+  const pending = queryBrowserReport('workspace', reportScope, { ...options, fetchImpl });
+  const rejected = expect(pending).rejects.toThrow('late pages failure');
+  await vi.waitFor(() => expect(provider.queries.some(isJoint)).toBe(true));
+  rejectPages(Error('late pages failure'));
+  await rejected;
+  expect(provider.queries).toHaveLength(6);
+});
