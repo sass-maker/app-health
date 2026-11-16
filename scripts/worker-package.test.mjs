@@ -16,6 +16,7 @@ test('deploy and staged upload bind the same immutable source definition, tag an
     ]);
     assert.equal(args[args.indexOf('--define') + 1], `__APP_HEALTH_BUILD_SHA__:"${sha}"`);
     assert.equal(args[args.indexOf('--tag') + 1], sha);
+    assert.equal(args[args.indexOf('--config') + 1], 'wrangler.jsonc');
     assert.equal(args[args.indexOf('--outdir') + 1], '../../.release/worker');
     assert.equal(args.at(-1), 'literal $() `text`');
     assert.deepEqual(
@@ -53,6 +54,7 @@ test('publication reuses the prepared Worker instead of rebuilding changed sourc
     assert(!upload.includes('--define'));
     assert(!upload.includes('--outdir'));
     assert.equal(upload[upload.indexOf('--tag') + 1], sha);
+    assert.equal(upload[upload.indexOf('--config') + 1], 'wrangler.jsonc');
   }
 });
 
@@ -144,5 +146,20 @@ test('allows generated rendered evidence without accepting dirty source inputs',
     await packageWorker(root, 'deploy', ['--dry-run']);
     const calls = JSON.parse(await readFile(join(root, '.release/calls.json'), 'utf8'));
     assert.equal(calls.length, 1);
+  });
+});
+
+test('rejects a nonempty output directory before packaging and preserves unknown files', async () => {
+  await packageFixture(async (root) => {
+    const directory = join(root, '.release/worker');
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'unknown-module.js'), 'preserved previous output');
+    await assert.rejects(packageWorker(root, 'deploy', ['--dry-run']), /empty output directory/);
+    assert.equal(
+      await readFile(join(directory, 'unknown-module.js'), 'utf8'),
+      'preserved previous output',
+    );
+    await assert.rejects(readFile(join(root, '.release/calls.json')), /ENOENT/);
+    await assert.rejects(readFile(join(root, '.release/worker-package.json')), /ENOENT/);
   });
 });

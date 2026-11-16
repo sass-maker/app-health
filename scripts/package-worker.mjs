@@ -26,6 +26,8 @@ export function workerPackageArguments(mode, sha, args = []) {
   }
   return [
     ...(mode === 'deploy' ? ['deploy'] : ['versions', 'upload']),
+    '--config',
+    'wrangler.jsonc',
     '--env',
     '',
     '--define',
@@ -97,6 +99,13 @@ export function workerUploadArguments(mode, preparedArgs, entry) {
 export async function packageWorker(root, mode, args) {
   const sha = sourceState(root);
   const argv = workerPackageArguments(mode, sha, args);
+  const outdir = argv[argv.indexOf('--outdir') + 1];
+  const directory = resolve(root, 'apps/worker', outdir);
+  await mkdir(directory, { recursive: true });
+  if ((await readdir(directory)).length)
+    throw new Error(
+      'Worker packaging requires an empty output directory; preserve prior artifacts first',
+    );
   const run = (flags) => {
     const result = spawnSync(
       'pnpm',
@@ -112,8 +121,6 @@ export async function packageWorker(root, mode, args) {
   };
   run(argv.includes('--dry-run') ? argv : [...argv, '--dry-run']);
   if (sourceState(root) !== sha) throw new Error('Worker source changed during packaging');
-  const outdir = argv[argv.indexOf('--outdir') + 1];
-  const directory = resolve(root, 'apps/worker', outdir);
   const artifacts = await artifactChecksums(directory);
   const entry = join(directory, 'analytics-entry.js');
   if (!artifacts.some((file) => file.file === 'analytics-entry.js'))
