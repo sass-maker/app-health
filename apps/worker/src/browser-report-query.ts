@@ -185,13 +185,27 @@ async function loadReport(
   options: QueryOptions,
 ) {
   const deadlineAt = performance.now() + 10_000;
+  const plan = browserReportPlan(
+    workspace,
+    filter,
+    from,
+    to,
+    step,
+    filter.app_id ? [filter.app_id] : options.appIds,
+  );
+  if (!plan.jointSql)
+    return loadReportRows(plan, filter, from, to, {
+      ...options,
+      signal: undefined,
+      deadlineAt: undefined,
+    });
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(new DOMException('Analytics deadline elapsed', 'TimeoutError')),
-    10_000,
+    Math.max(0, deadlineAt - performance.now()),
   );
   try {
-    return await loadReportRows(workspace, filter, from, to, step, {
+    return await loadReportRows(plan, filter, from, to, {
       ...options,
       signal: controller.signal,
       deadlineAt,
@@ -205,21 +219,12 @@ async function loadReport(
 }
 
 async function loadReportRows(
-  workspace: string,
+  plan: ReturnType<typeof browserReportPlan>,
   filter: BrowserReportFilter,
   from: number,
   to: number,
-  step: number,
   options: QueryOptions,
 ) {
-  const plan = browserReportPlan(
-    workspace,
-    filter,
-    from,
-    to,
-    step,
-    filter.app_id ? [filter.app_id] : options.appIds,
-  );
   const optionalStart =
     filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
   const queryWaitStarted = options.timings ? performance.now() : undefined;

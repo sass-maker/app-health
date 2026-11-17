@@ -38,6 +38,16 @@ function fallbackRankings(args: Arguments, joint: AbortController) {
   };
   return { start, decided, started: () => pending !== undefined };
 }
+function jointWatchdog(fallback: ReturnType<typeof fallbackRankings>, controller: AbortController) {
+  const timeout = setTimeout(() => {
+    try {
+      fallback.start();
+    } catch (error) {
+      controller.abort(error);
+    }
+  }, 2_000);
+  return () => clearTimeout(timeout);
+}
 /** Start the bounded speculative read immediately; validation only controls acceptance. */
 export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
   const controller = new AbortController();
@@ -74,18 +84,21 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
     observe('current', currentRankingCounter(rows));
     return rows;
   });
-  const joint = queryJointRows(args.plan.jointSql!, args.options, controller).then((data) => {
-    prepared = prepareJointRankings({
-      data,
-      filter: args.filter,
-      from: args.from,
-      to: args.to,
-      dimensions: args.plan.dimensionBlobs,
-    });
-    if (!prepared) fallback.start();
-    reconcile();
-    return prepared;
-  });
+  const stopWatchdog = jointWatchdog(fallback, controller);
+  const joint = queryJointRows(args.plan.jointSql!, args.options, controller)
+    .then((data) => {
+      prepared = prepareJointRankings({
+        data,
+        filter: args.filter,
+        from: args.from,
+        to: args.to,
+        dimensions: args.plan.dimensionBlobs,
+      });
+      if (!prepared) fallback.start();
+      reconcile();
+      return prepared;
+    })
+    .finally(stopWatchdog);
   const fixed = Promise.all([trend, pages, periods]);
   const acceptance = Promise.all([fixed, joint]).then(([controls, rows]) => {
     assertProviderDeadline(args.options);
@@ -102,10 +115,14 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
         : undefined;
     return folded ? [folded.sources, folded.events, ...folded.dimensions] : fallback.start();
   });
-  const [controls, rankings] = await Promise.all([
-    fixed,
-    Promise.race([acceptance, fallback.decided]),
-  ]);
-  assertProviderDeadline(args.options);
-  return [controls[0], controls[1], rankings[0], rankings[1], controls[2], ...rankings.slice(2)];
+  try {
+    const [controls, rankings] = await Promise.all([
+      fixed,
+      Promise.race([acceptance, fallback.decided]),
+    ]);
+    assertProviderDeadline(args.options);
+    return [controls[0], controls[1], rankings[0], rankings[1], controls[2], ...rankings.slice(2)];
+  } finally {
+    stopWatchdog();
+  }
 }

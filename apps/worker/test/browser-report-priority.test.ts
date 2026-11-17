@@ -178,8 +178,11 @@ it('enforces the absolute provider deadline before delayed timer dispatch', asyn
 });
 
 it.each([
-  { range: '7d' as const }, { range: '30d' as const },
-  { breakdown: 'acquisition' as const }, { app_id: undefined }, { environment_id: undefined },
+  { range: '7d' as const },
+  { range: '30d' as const },
+  { breakdown: 'acquisition' as const },
+  { app_id: undefined },
+  { environment_id: undefined },
 ])('preserves original per-call timeouts without a whole-report guard for %j', async (extra) => {
   fixture.seed();
   const filter = { ...reportScope, ...extra };
@@ -189,7 +192,9 @@ it.each([
   let clock = 0;
   vi.spyOn(performance, 'now').mockImplementation(() => clock);
   const report = await queryBrowserReport('workspace', filter, {
-    accountId: 'a'.repeat(32), token: 'synthetic', appIds: ['app'],
+    accountId: 'a'.repeat(32),
+    token: 'synthetic',
+    appIds: ['app'],
     fetchImpl: async (input, init) => {
       signals.push(init!.signal!);
       const response = await provider.fetchImpl(input, init);
@@ -200,5 +205,5 @@ it.each([
   expect(report).toEqual(expected.report);
   expect(provider.queries).toEqual(expected.queries);
   expect(new Set(signals).size).toBe(provider.queries.length);
-  expect(signals.every(signal => !signal.aborted)).toBe(true);
+  expect(signals.every((signal) => !signal.aborted)).toBe(true);
 });

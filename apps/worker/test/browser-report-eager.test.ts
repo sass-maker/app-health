@@ -341,7 +341,7 @@ it('dispatches original five on current/trend disagreement while joint headers a
 });
 
 it.each(['headers', 'body'] as const)(
-  'fails closed at shared deadline for stalled joint %s without retry',
+  'fails closed at shared deadline when original fallback requests stall after joint %s',
   async (mode) => {
     seed(30);
     vi.useFakeTimers();
@@ -367,16 +367,30 @@ it.each(['headers', 'body'] as const)(
                   },
                 }),
               );
+        if (!(
+          isPages(sql) ||
+          isPeriods(sql) ||
+          sql.includes('GROUP BY bucket') ||
+          sql.includes('pageview_sessions') ||
+          sql.includes('argMax')
+        ))
+          return await new Promise<Response>((_resolve, reject) => {
+            init!.signal!.addEventListener('abort', () => reject(init!.signal!.reason), {
+              once: true,
+            });
+          });
         return provider.fetchImpl(input, init);
       },
     });
     const rejected = expect(pending).rejects.toThrow('Analytics deadline elapsed');
     await vi.advanceTimersByTimeAsync(9999);
-    expect(queries).toHaveLength(6);
-    expect(signals.every((signal) => !signal.aborted)).toBe(true);
+    expect(queries).toHaveLength(11);
+    expect(
+      signals.filter((_, index) => !isJoint(queries[index])).every((signal) => !signal.aborted),
+    ).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     await rejected;
-    expect(queries).toHaveLength(6);
+    expect(queries).toHaveLength(11);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     expect(cancelled).toBe(mode === 'body');
   },
@@ -695,15 +709,30 @@ it.each(['headers', 'body'] as const)(
     let cancelled = false;
     let releaseHeaders: ((response: Response) => void) | undefined;
     const pending = queryBrowserReport('workspace', fixed, {
-      accountId: 'a'.repeat(32), token: 'synthetic', appIds: ['app'],
+      accountId: 'a'.repeat(32),
+      token: 'synthetic',
+      appIds: ['app'],
       fetchImpl: async (input, init) => {
-        const sql = String(init?.body); queries.push(sql);
-        if (isJoint(sql)) return mode === 'headers'
-          ? await new Promise<Response>((resolve) => { releaseHeaders = resolve; })
-          : new Response(new ReadableStream({ cancel() { cancelled = true; } }));
+        const sql = String(init?.body);
+        queries.push(sql);
+        if (isJoint(sql))
+          return mode === 'headers'
+            ? await new Promise<Response>((resolve) => {
+                releaseHeaders = resolve;
+              })
+            : new Response(
+                new ReadableStream({
+                  cancel() {
+                    cancelled = true;
+                  },
+                }),
+              );
         return provider.fetchImpl(input, init);
       },
-    }).then((report) => ({ report, error: undefined }), (error: unknown) => ({ report: undefined, error }));
+    }).then(
+      (report) => ({ report, error: undefined }),
+      (error: unknown) => ({ report: undefined, error }),
+    );
     try {
       await vi.advanceTimersByTimeAsync(1999);
       expect(queries).toHaveLength(6);
@@ -713,7 +742,15 @@ it.each(['headers', 'body'] as const)(
       expect(outcome.error).toBeUndefined();
       expect(outcome.report).toEqual(expected);
       if (releaseHeaders) {
-        releaseHeaders(new Response(new ReadableStream({ cancel() { cancelled = true; } })));
+        releaseHeaders(
+          new Response(
+            new ReadableStream({
+              cancel() {
+                cancelled = true;
+              },
+            }),
+          ),
+        );
         await vi.advanceTimersByTimeAsync(0);
       }
       expect(cancelled).toBe(true);
@@ -727,3 +764,32 @@ it.each(['headers', 'body'] as const)(
     }
   },
 );
+
+it('rejects a delayed watchdog past the shared deadline without dispatching or leaking a timer', async () => {
+  seed(30);
+  vi.useFakeTimers();
+  let clock = 0;
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  const provider = fixture.provider();
+  const queries: string[] = [];
+  const pending = queryBrowserReport('workspace', fixed, {
+    accountId: 'a'.repeat(32),
+    token: 'synthetic',
+    appIds: ['app'],
+    fetchImpl: async (input, init) => {
+      const sql = String(init?.body);
+      queries.push(sql);
+      if (isJoint(sql)) return await new Promise<Response>(() => {});
+      return provider.fetchImpl(input, init);
+    },
+  });
+  const rejected = expect(pending).rejects.toThrow('Analytics deadline elapsed');
+  await vi.advanceTimersByTimeAsync(0);
+  expect(queries).toHaveLength(6);
+  clock = 10001;
+  await vi.advanceTimersByTimeAsync(2000);
+  await rejected;
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(queries).toHaveLength(6);
+  expect(vi.getTimerCount()).toBe(0);
+});
