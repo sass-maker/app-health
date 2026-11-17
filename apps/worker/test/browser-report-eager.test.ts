@@ -458,3 +458,66 @@ it.each(['overflow', 'cutoff-tie'] as const)(
     expect(result.pages).toHaveLength(reason === 'overflow' ? 1 : 20);
   },
 );
+
+it.each(
+  ['trend', 'period', 'pages'].flatMap((control) =>
+    ['joint-first', 'control-first'].map((order) => ({ control, order })),
+  ),
+)(
+  'dispatches originals on cross-result mismatch for $control/$order before unrelated controls',
+  async ({ control, order }) => {
+    seed(30);
+    const queries: string[] = [];
+    let releaseOther!: () => void;
+    let releaseArrival!: () => void;
+    const other = new Promise<void>((resolve) => {
+      releaseOther = resolve;
+    });
+    const arrival = new Promise<void>((resolve) => {
+      releaseArrival = resolve;
+    });
+    let firstReady = false;
+    const pending = queryBrowserReport('workspace', fixed, {
+      accountId: 'a'.repeat(32),
+      token: 'synthetic',
+      fetchImpl: async (_input, init) => {
+        const sql = String(init?.body);
+        queries.push(sql);
+        const kind = isPeriods(sql)
+          ? 'period'
+          : isPages(sql)
+            ? 'pages'
+            : sql.includes('GROUP BY bucket')
+              ? 'trend'
+              : undefined;
+        if (isJoint(sql)) {
+          if (order === 'control-first') await arrival;
+          else firstReady = true;
+        } else if (kind) {
+          if (kind !== control) await other;
+          else if (order === 'joint-first') await arrival;
+          else firstReady = true;
+        }
+        let rows = fixture.database.prepare(sqliteAnalyticsSql(sql)).all();
+        if (kind === control)
+          rows = rows.map((row) => ({
+            ...row,
+            [control === 'pages' ? 'count' : 'pageviews']:
+              Number(row[control === 'pages' ? 'count' : 'pageviews']) + 1,
+          }));
+        return Response.json({ data: rows });
+      },
+    });
+    try {
+      await vi.waitFor(() => expect(firstReady).toBe(true));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      releaseArrival();
+      await vi.waitFor(() => expect(queries).toHaveLength(11), { timeout: 200, interval: 5 });
+    } finally {
+      releaseArrival();
+      releaseOther();
+      await pending;
+    }
+    expect(queries.filter(isJoint)).toHaveLength(1);
+  },
+);

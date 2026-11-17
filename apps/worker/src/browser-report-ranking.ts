@@ -7,6 +7,7 @@ import {
   prepareJointRankings,
   foldJointRankings,
   validPageControl,
+  jointControlsAgree,
 } from './browser-report-joint.js';
 import { assertProviderDeadline, queryJointRows } from './browser-report-transport.js';
 import type { QueryOptions, QueryRow } from './browser-report-query-types.js';
@@ -42,18 +43,31 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
   const controller = new AbortController();
   const fallback = fallbackRankings(args, controller);
   const counts: Record<string, ReturnType<typeof currentRankingCounter>> = {};
+  let prepared: ReturnType<typeof prepareJointRankings>;
+  let pageControl: QueryRow[] | undefined;
+  const reconcile = () => {
+    if (
+      prepared &&
+      (!jointControlsAgree(prepared, counts.trend, pageControl) ||
+        !jointControlsAgree(prepared, counts.current))
+    )
+      fallback.start();
+  };
   const observe = (key: string, count: ReturnType<typeof currentRankingCounter>) => {
     counts[key] = count;
     const other = counts[key === 'trend' ? 'current' : 'trend'];
     if (!count || (other && (other.pageviews !== count.pageviews || other.events !== count.events)))
       fallback.start();
+    reconcile();
   };
   const trend = args.run(0).then((rows) => {
     observe('trend', trendRankingCounter(rows));
     return rows;
   });
   const pages = args.run(1).then((rows) => {
+    pageControl = rows;
     if (!validPageControl(rows)) fallback.start();
+    reconcile();
     return rows;
   });
   const periods = args.run(4).then((rows) => {
@@ -61,15 +75,16 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
     return rows;
   });
   const joint = queryJointRows(args.plan.jointSql!, args.options, controller).then((data) => {
-    const folded = prepareJointRankings({
+    prepared = prepareJointRankings({
       data,
       filter: args.filter,
       from: args.from,
       to: args.to,
       dimensions: args.plan.dimensionBlobs,
     });
-    if (!folded) fallback.start();
-    return folded;
+    if (!prepared) fallback.start();
+    reconcile();
+    return prepared;
   });
   const fixed = Promise.all([trend, pages, periods]);
   const acceptance = Promise.all([fixed, joint]).then(([controls, rows]) => {

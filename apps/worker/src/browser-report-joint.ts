@@ -261,6 +261,21 @@ export function prepareJointRankings(args: {
     return undefined;
   }
 }
+export function jointControlsAgree(
+  folded: NonNullable<ReturnType<typeof prepareJointRankings>>,
+  counter?: Totals,
+  pages?: readonly Row[],
+): boolean {
+  try {
+    return (
+      (counter === undefined ||
+        (folded.count.pageviews === counter.pageviews && folded.count.events === counter.events)) &&
+      (pages === undefined || samePages(pages, folded.pages))
+    );
+  } catch {
+    return false;
+  }
+}
 export function foldJointRankings(args: {
   folded: NonNullable<ReturnType<typeof prepareJointRankings>>;
   counter: Totals;
@@ -269,13 +284,9 @@ export function foldJointRankings(args: {
 }): { sources: Rank[]; events: Rank[]; dimensions: Rank[][] } | undefined {
   try {
     const { folded } = args;
-    const trend = trendTotals(args.trend);
     if (
-      folded.count.pageviews !== args.counter.pageviews ||
-      folded.count.events !== args.counter.events ||
-      folded.count.pageviews !== trend.pageviews ||
-      folded.count.events !== trend.events ||
-      !samePages(args.pages, folded.pages)
+      !jointControlsAgree(folded, args.counter, args.pages) ||
+      !jointControlsAgree(folded, trendTotals(args.trend))
     )
       return undefined;
     return { sources: folded.sources, events: folded.events, dimensions: folded.dimensions };
