@@ -160,7 +160,7 @@ describe('visitor reporting across periods and legacy clients', () => {
           expect(remote.sampled).toBe(sampleInterval > 1);
           expect(fetchImpl).toHaveBeenCalledTimes(Object.keys(extra).length ? 8 : 10);
           const previous = database
-            .prepare(sqliteAnalyticsSql(queries.find((sql) => sql.includes('GROUP BY period'))!))
+            .prepare(sqliteAnalyticsSql(queries[4]))
             .all()
             .find((row) => row.period === 0)!;
           const localPrevious = localBrowserReport(
