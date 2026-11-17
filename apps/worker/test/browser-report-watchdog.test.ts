@@ -419,6 +419,7 @@ it.each(['pages', 'counter'] as const)(
     const provider = fixture.provider({ first: 'same' });
     let releasePages!: () => void;
     let releasePeriods!: () => void;
+    let releaseTrend!: () => void;
     const fetchImpl: typeof fetch = async (input, init) => {
       const response = await provider.fetchImpl(input, init);
       if (isPages(String(init?.body)))
@@ -429,12 +430,17 @@ it.each(['pages', 'counter'] as const)(
         return new Promise((resolve) => {
           releasePeriods = () => resolve(response);
         });
+      if (String(init?.body).includes('GROUP BY bucket'))
+        return new Promise((resolve) => {
+          releaseTrend = () => resolve(response);
+        });
       return response;
     };
     const pending = queryBrowserReport('workspace', reportScope, { ...options, fetchImpl });
     await vi.waitFor(() => {
       expect(releasePages).toBeTypeOf('function');
       expect(releasePeriods).toBeTypeOf('function');
+      expect(releaseTrend).toBeTypeOf('function');
     });
     expect(provider.queries).toHaveLength(5);
     expect(provider.queries.some((sql) => sql.includes('pageview_sessions'))).toBe(true);
@@ -444,6 +450,7 @@ it.each(['pages', 'counter'] as const)(
     await vi.waitFor(() => expect(provider.queries).toHaveLength(first === 'pages' ? 10 : 6));
     if (first === 'pages') releasePeriods();
     else releasePages();
+    releaseTrend();
     const result = await pending;
     expect(result.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(5);
     expect(provider.queries.filter(isPages)).toHaveLength(1);

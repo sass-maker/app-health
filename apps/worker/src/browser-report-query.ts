@@ -1,6 +1,8 @@
 import {
   foldJointRankings,
   lowCurrentCounter,
+  lowTrendCounter,
+  agreesWithCurrentPeriod,
   useRankingWatchdog,
 } from './browser-report-joint.js';
 import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
@@ -312,6 +314,7 @@ async function loadReportRows(
         optionalStart,
         run,
         independent,
+        trend,
         pages,
         periods,
         options,
@@ -394,6 +397,7 @@ async function chooseRankings(args: {
   optionalStart: number;
   run: (index: number) => Promise<QueryRow[]>;
   independent: Promise<QueryRow[][]>;
+  trend: Promise<QueryRow[]>;
   pages: Promise<QueryRow[]>;
   periods: Promise<QueryRow[]>;
   options: QueryOptions;
@@ -408,6 +412,7 @@ async function chooseRankings(args: {
   const decision = await Promise.race([
     args.pages.then(() => undefined),
     args.periods.then(lowCurrentCounter),
+    args.trend.then(lowTrendCounter),
   ]);
   if (args.options.timings)
     args.options.timings.analyticsRankingDecisionMs = performance.now() - started;
@@ -416,16 +421,19 @@ async function chooseRankings(args: {
     queryJoint(args.plan.jointSql!, args.options),
     args.independent,
   ]);
-  const folded = foldJointRankings({
-    data: joint[0],
-    filter: args.filter,
-    from: args.from,
-    to: args.to,
-    dimensions: args.plan.dimensionBlobs,
-    counter: decision,
-    trend: joint[1][0],
-    pages: joint[1][1],
-  });
+  let folded: ReturnType<typeof foldJointRankings>;
+  if (agreesWithCurrentPeriod(joint[1][2], decision)) {
+    folded = foldJointRankings({
+      data: joint[0],
+      filter: args.filter,
+      from: args.from,
+      to: args.to,
+      dimensions: args.plan.dimensionBlobs,
+      counter: decision,
+      trend: joint[1][0],
+      pages: joint[1][1],
+    });
+  }
   if (folded) return [folded.sources, folded.events, ...folded.dimensions];
   if (args.options.timings) args.options.timings.analyticsJointFallbacks = 1;
   const fallbackStarted = performance.now();

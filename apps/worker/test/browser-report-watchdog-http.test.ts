@@ -94,6 +94,7 @@ beforeAll(async () => {
     let sql = '';
     for await (const part of incoming) sql += String(part);
     queries.push(sql);
+    if (isPeriods(sql) && mode === 'late-period') return;
     if (isJoint(sql) && mode === 'non-ok') {
       response.writeHead(503);
       response.end();
@@ -123,9 +124,11 @@ beforeAll(async () => {
         ? 9000
         : mode === 'late-malformed' && remainingRanking
           ? 5000
-          : (mode === 'pages' ? isPeriods(sql) : isPages(sql))
-            ? 20
-            : 0;
+          : mode === 'trend' && isPeriods(sql)
+            ? 40
+            : (mode === 'pages' ? isPeriods(sql) || sql.includes('GROUP BY bucket') : isPages(sql))
+              ? 20
+              : 0;
     const timer = setTimeout(send, delay);
     response.on('close', () => clearTimeout(timer));
   });
@@ -189,7 +192,7 @@ it('compares full authenticated Worker reports through real HTTP provider transp
     const body = await baseline.json();
     expect(queries).toHaveLength(10);
     queries = [];
-    mode = 'counter';
+    mode = 'trend';
     const candidate = await report();
     expect(candidate.status).toBe(200);
     expect(observable(await candidate.json())).toEqual(observable(body));
@@ -213,39 +216,46 @@ it('compares full authenticated Worker reports through real HTTP provider transp
   }
 }, 15_000);
 
-it('separates candidate cache and in-flight bodies from original-plan entries while keeping 60-second reuse', async () => {
-  setup();
-  mode = 'counter';
-  cacheEnabled = true;
-  let release!: (value: unknown) => void;
-  const pending = snapshotCachedAnalytics(
-    env.DB,
-    env.CLOUDFLARE_ACCOUNT_ID!,
-    workspace,
-    JSON.stringify([filter(), [scope.app_id]]),
-    () =>
-      new Promise((resolve) => {
-        release = resolve;
-      }),
-  );
-  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
-  const first = await report();
-  expect(first.status).toBe(200);
-  const body = await first.json();
-  expect(queries).toHaveLength(6);
-  release({ original_marker: true });
-  await pending;
-  const repeated = await report();
-  expect(await repeated.json()).toEqual(body);
-  expect(queries).toHaveLength(6);
-  expect(
-    [...entries.keys()].filter((key) =>
-      decodeURIComponent(key).includes('browser-report:pages-watchdog-v1'),
-    ),
-  ).toHaveLength(1);
-  expect(new Set(ttl)).toEqual(new Set(['max-age=60']));
-  expect(repeated.headers.get('server-timing')).not.toContain('analytics_joint;dur=');
-});
+it.each(['original', 'pages-watchdog-v1'])(
+  'separates candidate cache and in-flight bodies from %s entries while keeping 60-second reuse',
+  async (priorPlan) => {
+    setup();
+    mode = 'counter';
+    cacheEnabled = true;
+    let release!: (value: unknown) => void;
+    const pending = snapshotCachedAnalytics(
+      env.DB,
+      env.CLOUDFLARE_ACCOUNT_ID!,
+      workspace,
+      JSON.stringify(
+        priorPlan === 'original'
+          ? [filter(), [scope.app_id]]
+          : ['browser-report:' + priorPlan, filter(), [scope.app_id]],
+      ),
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    const first = await report();
+    expect(first.status).toBe(200);
+    const body = await first.json();
+    expect(queries).toHaveLength(6);
+    release({ original_marker: true });
+    await pending;
+    const repeated = await report();
+    expect(await repeated.json()).toEqual(body);
+    expect(queries).toHaveLength(6);
+    expect(
+      [...entries.keys()].filter((key) =>
+        decodeURIComponent(key).includes('browser-report:trend-pages-watchdog-v2'),
+      ),
+    ).toHaveLength(1);
+    expect(new Set(ttl)).toEqual(new Set(['max-age=60']));
+    expect(repeated.headers.get('server-timing')).not.toContain('analytics_joint;dur=');
+  },
+);
 
 it('does not retry a non-OK joint provider response', async () => {
   setup();
@@ -255,7 +265,7 @@ it('does not retry a non-OK joint provider response', async () => {
   expect(queries).toHaveLength(6);
 });
 
-it.each(['headers', 'body', 'late-malformed'])(
+it.each(['headers', 'body', 'late-malformed', 'late-period'])(
   'uses one original provider deadline across %s and fallback bodies',
   async (failure) => {
     setup();
