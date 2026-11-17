@@ -65,12 +65,28 @@ export function lowCurrentCounter(rows: readonly Row[]): Totals | undefined {
       return undefined;
     const current = rows.find((_, index) => periods[index] === 1);
     if (!current) return undefined;
-    const count = totals(current);
-    const total = count.pageviews + count.events;
-    return total >= 1 && total <= 20 ? count : undefined;
+    return lowTraffic(totals(current));
   } catch {
     return undefined;
   }
+}
+
+export function lowTrendCounter(rows: readonly Row[]): Totals | undefined {
+  try {
+    return lowTraffic(trendTotals(rows));
+  } catch {
+    return undefined;
+  }
+}
+
+function lowTraffic(count: Totals): Totals | undefined {
+  const total = count.pageviews + count.events;
+  return total >= 1 && total <= 20 ? count : undefined;
+}
+
+export function agreesWithCurrentPeriod(rows: readonly Row[], counter: Totals): boolean {
+  const current = lowCurrentCounter(rows);
+  return current?.pageviews === counter.pageviews && current.events === counter.events;
 }
 
 function accumulate(map: Map<string, Rank>, name: string, count: number, lastSeen: number) {
