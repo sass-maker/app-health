@@ -1,0 +1,124 @@
+import { DatabaseSync } from 'node:sqlite';
+import { vi } from 'vitest';
+import { sqliteAnalyticsSql } from './analytics-sqlite.js';
+
+export const reportNow = 1_800_000_000_000;
+export const reportScope = { range: '24h' as const, app_id: 'app', environment_id: 'env' };
+export const isPages = (sql: string) => sql.startsWith('SELECT blob4 AS name');
+export const isPeriods = (sql: string) => sql.includes('GROUP BY period');
+export type FixtureRow = Record<string, string | number>;
+export function rankingFixture() {
+  const database = new DatabaseSync(':memory:');
+  database.exec(
+    `CREATE TABLE app_health_browser_v1 (index1 TEXT, ${Array.from({ length: 20 }, (_, i) => `blob${i + 1} TEXT DEFAULT ''`).join(',')}, double1 REAL, double2 REAL, _sample_interval REAL)`,
+  );
+  database.aggregate('argMax', {
+    start: '',
+    step: (state: string, value: unknown, key: unknown) =>
+      Number(key) >= (state ? Number(state.split('\u0000', 1)[0]) : -Infinity)
+        ? `${Number(key)}\u0000${String(value)}`
+        : state,
+    result: (state: string) => state.slice(state.indexOf('\u0000') + 1),
+  });
+  function add(overrides: FixtureRow = {}) {
+    const row = {
+      index1: 'workspace',
+      blob1: 'app',
+      blob2: 'env',
+      blob3: 'pageview',
+      blob4: "/a'b",
+      blob5: '',
+      blob6: '',
+      blob7: 'session',
+      blob8: 'visitor',
+      blob9: 'new',
+      blob10: 'www.google.com',
+      blob11: 'email',
+      blob12: 'hello',
+      blob13: 'Email',
+      blob14: 'Desktop',
+      blob15: 'Firefox',
+      blob16: 'IN',
+      blob17: '/start',
+      blob18: 'top',
+      blob19: 'test',
+      double1: 1,
+      double2: reportNow - 1000,
+      _sample_interval: 1,
+      ...overrides,
+    };
+    database
+      .prepare(
+        `INSERT INTO app_health_browser_v1 (${Object.keys(row).join(',')}) VALUES (${Object.keys(
+          row,
+        )
+          .map(() => '?')
+          .join(',')})`,
+      )
+      .run(...Object.values(row));
+  }
+  function seed() {
+    add();
+    add();
+    add({
+      blob4: '/other',
+      blob16: '',
+      blob13: '',
+      blob14: '',
+      blob15: '',
+      blob17: '',
+      blob10: '',
+      blob6: '',
+    });
+    add({ blob4: '', blob16: 'Unknown' });
+    add({ blob4: 'Unknown', blob16: 'Unknown' });
+    add({ blob3: 'event', blob5: 'opened', double2: reportNow - 900 });
+    add({ blob3: 'event', blob5: 'opened', double2: reportNow - 800 });
+    add({ blob3: 'event', blob5: '', double2: reportNow - 700 });
+    add({
+      double2: reportNow - 90_000_000,
+      blob7: 'previous',
+      blob8: 'previous',
+      blob9: 'returning',
+    });
+    add({ index1: 'foreign' });
+    add({ blob1: 'foreign' });
+    add({ blob2: 'foreign' });
+    add({ double2: reportNow });
+  }
+  function provider() {
+    const queries: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+      const sql = String(init?.body);
+      queries.push(sql);
+      const data = database.prepare(sqliteAnalyticsSql(sql)).all();
+      return Response.json({ data });
+    });
+    return { fetchImpl, queries };
+  }
+  return { database, add, seed, provider };
+}
+
+export function observable(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    const entries = value.map(observable);
+    if (!entries.every((row) => row && typeof row === 'object' && 'name' in row && 'count' in row))
+      return entries;
+    const ranked = entries as Array<{ name: unknown; count: unknown }>;
+    const result: unknown[] = [];
+    for (let index = 0; index < ranked.length;) {
+      let end = index + 1;
+      while (end < ranked.length && ranked[end].count === ranked[index].count) end++;
+      result.push(
+        ...ranked
+          .slice(index, end)
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+      );
+      index = end;
+    }
+    return result;
+  }
+  if (value && typeof value === 'object')
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, observable(item)]));
+  return value;
+}
