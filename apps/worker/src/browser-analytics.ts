@@ -50,6 +50,8 @@ export interface CollectedBrowserBatch {
   attribution?: BrowserAttribution;
   metadata?: { channel: string; device: string; browser: string; country: string };
 }
+import type { NativeArchiveScope, NativeArchiveResult } from './browser-archive-native-verifier.js';
+
 export interface BrowserBindings {
   DB?: D1DatabaseLike;
   BROWSER_EVENTS?: {
@@ -61,6 +63,13 @@ export interface BrowserBindings {
   BROWSER_HISTORY?: Pick<R2Bucket, 'put' | 'list' | 'delete'> & Partial<Pick<R2Bucket, 'get'>>;
   BROWSER_ARCHIVE?: {
     getByName(name: string): {
+      startNativeAudit?(id: string, scope: NativeArchiveScope): Promise<NativeArchiveResult>;
+      nativeAuditStatus?(id: string, scope: NativeArchiveScope): Promise<NativeArchiveResult>;
+      advanceNativeAudit?(
+        id: string,
+        scope: NativeArchiveScope,
+        seq: number,
+      ): Promise<NativeArchiveResult>;
       stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult>;
       lookupStaged(
         batches: Array<Pick<CollectedBrowserBatch, 'app_id' | 'environment_id' | 'batch_id'>>,

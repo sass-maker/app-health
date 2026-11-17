@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { URL } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { ArchiveSegmentManifestV1 } from '@app-health/contracts';
@@ -11,7 +11,7 @@ import {
 } from '../src/browser-facts-digest.js';
 import { DatabaseSync } from 'node:sqlite';
 import { Miniflare } from 'miniflare';
-import ts from 'typescript';
+import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -82,7 +82,7 @@ export class TestArchive extends BrowserArchive {
 }
 export default { async fetch(request, env) {
   const { action, value, shard = 'test' } = await request.json();
-  const stub = env.ARCHIVE.get(env.ARCHIVE.idFromName(shard));
+  const stub = env.ARCHIVE.getByName(shard + ':browser-archive-v1:0');
   try { return Response.json((await stub[action](value)) ?? null); }
   catch (error) { return Response.json({ error: error.message }, { status: 503 }); }
 } };
@@ -109,37 +109,21 @@ function batch(id: string, extra = '') {
 
 async function harness() {
   const path = await mkdtemp(join(tmpdir(), 'app-health-archive-'));
-  const source = await readFile(new URL('../src/browser-archive.ts', import.meta.url), 'utf8');
-  const projection = await readFile(
-    new URL('../src/browser-projection.ts', import.meta.url),
-    'utf8',
-  );
-  const segment = await readFile(new URL('../src/archive-segment.ts', import.meta.url), 'utf8');
-  const digest = await readFile(new URL('../src/browser-facts-digest.ts', import.meta.url), 'utf8');
-  const archiveSource = source
-    .replace("import { projectBrowserBatch } from './browser-projection.js';", '')
-    .replace(/import \{[^}]+\} from '.\/browser-archive-day-audit.js';/, '')
-    .replace("import { persistArchiveSegment } from './archive-segment.js';", '')
-    .replace(/import \{[^}]+\} from '.\/browser-facts-digest.js';/, '');
-  const script =
-    ts.transpileModule(segment, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-    }).outputText +
-    ts.transpileModule(
-      digest
-        .replaceAll('export const ', 'const ')
-        .replaceAll('export async function ', 'async function '),
-      {
-        compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-      },
-    ).outputText +
-    ts.transpileModule(projection, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-    }).outputText +
-    ts.transpileModule(archiveSource, {
-      compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
-    }).outputText +
-    wrapper;
+  const require = createRequire(import.meta.url);
+  const { build } = createRequire(require.resolve('wrangler/package.json'))('esbuild');
+  const bundled = await build({
+    stdin: {
+      contents: `import { BrowserArchive } from ${JSON.stringify(fileURLToPath(new URL('../src/browser-archive.ts', import.meta.url)))};\n${wrapper}`,
+      resolveDir: fileURLToPath(new URL('..', import.meta.url)),
+    },
+    bundle: true,
+    write: false,
+    platform: 'browser',
+    format: 'esm',
+    target: 'es2022',
+    external: ['cloudflare:workers'],
+  });
+  const script = bundled.outputFiles[0].text;
   const start = () =>
     new Miniflare({
       modules: true,
@@ -851,7 +835,7 @@ function unitArchive(withAnalytics = false) {
   };
   const ctx = {
     storage,
-    id: { toString: () => 'unit-shard' },
+    id: { name: 'workspace-one:browser-archive-v1:0', toString: () => 'unit-shard' },
     blockConcurrencyWhile(run: () => Promise<void>) {
       ready = run();
     },
@@ -881,6 +865,57 @@ function unitArchive(withAnalytics = false) {
 }
 
 const collected = (id: string) => batch(id) as unknown as CollectedBrowserBatch;
+
+describe('BrowserArchive role boundaries', () => {
+  it('constructs diagnostics without producer SQL or scheduling and guards every producer entry', async () => {
+    const id = crypto.randomUUID();
+    const ctx = {
+      id: { name: 'browser-native-audit-v1:' + id },
+      storage: {
+        get sql() {
+          throw new Error('producer SQL touched');
+        },
+      },
+      blockConcurrencyWhile() {
+        throw new Error('producer scheduling touched');
+      },
+    };
+    const archive = new BrowserArchive(ctx as unknown as DurableObjectState, {
+      BROWSER_HISTORY: {} as R2Bucket,
+    });
+    await expect(archive.stage([])).rejects.toThrow('producer role');
+    await expect(archive.lookupStaged([])).rejects.toThrow('producer role');
+    expect(() => archive.status()).toThrow('producer role');
+    expect(() => archive.archiveSegmentsForEventDay('2026-11-12')).toThrow('producer role');
+    expect(() =>
+      archive.archiveSegmentsForScope({ app_id: 'a', environment_id: 'e', from: 1, to: 2 }),
+    ).toThrow('producer role');
+    await expect(archive.reindexScopeSegments('2026-11-12', null, 'w')).rejects.toThrow(
+      'producer role',
+    );
+    expect(() => archive.archiveSegmentForBatch('a', 'e', 'b')).toThrow('producer role');
+    await expect(archive.flush()).rejects.toThrow('producer role');
+    await archive.alarm();
+    const scope = {
+      workspace: 'w',
+      app_id: 'a',
+      environment_id: 'e',
+      day: new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10),
+    };
+    expect(archive.startNativeAudit(id, scope)).toMatchObject({ outcome: 'running' });
+    expect(archive.nativeAuditStatus(id, scope)).toMatchObject({ outcome: 'running' });
+    expect(await archive.advanceNativeAudit(id, scope, 0)).toMatchObject({
+      outcome: 'unknown',
+      reasons: ['source_unavailable'],
+    });
+    expect(() => archive.startNativeAudit(crypto.randomUUID(), scope)).toThrow('diagnostic role');
+    const invalid = new BrowserArchive({ ...ctx, id: {} } as unknown as DurableObjectState, {
+      BROWSER_HISTORY: {} as R2Bucket,
+    });
+    await invalid.alarm();
+    expect(() => invalid.nativeAuditStatus(id, scope)).toThrow('diagnostic role');
+  });
+});
 
 describe('BrowserArchive instrumented SQLite coverage and counter invariants', () => {
   let unit: ReturnType<typeof unitArchive>;

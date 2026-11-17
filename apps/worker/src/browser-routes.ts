@@ -1,4 +1,10 @@
 import { currentPortfolioAppIds } from './catalog-inventory.js';
+import {
+  isNativeArchiveScope,
+  nativeArchiveDiagnosticName,
+  nativeArchiveExecutionSHA,
+  type NativeArchiveScope,
+} from './browser-archive-native-verifier.js';
 import { handleTrafficQuality } from './traffic-quality.js';
 import { browserScopeIndexOwnerRoute } from './browser-scope-index.js';
 import { apiScopeAllows } from './api-scope.js';
@@ -658,6 +664,11 @@ async function handleBrowserArchiveAuditOwner(
   local: boolean,
   path: string,
 ): Promise<Response | null> {
+  if (
+    path === '/v1/browser/native-archive-audits' ||
+    path.startsWith('/v1/browser/native-archive-audits/')
+  )
+    return nativeArchiveOwnerRoute(request, env, owner, local, path);
   if (!isBrowserAuditPath(path)) return null;
   if (path.endsWith('/advance') && request.method === 'POST')
     return advanceBrowserAuditRoute(
@@ -675,6 +686,104 @@ async function handleBrowserArchiveAuditOwner(
   if (path.startsWith(`${BROWSER_AUDIT_PATH}/`) && request.method === 'GET')
     return readBrowserAuditStatusRoute(request, env, owner.workspaceId!, path);
   return json(405, { error: 'Method not allowed.' });
+}
+
+type NativeAuditInput = { scope: NativeArchiveScope; id: string; seq: number; name: string };
+
+async function nativeAuditInput(
+  request: Request,
+  workspace: string,
+  action: string,
+): Promise<NativeAuditInput | Response> {
+  let value: unknown;
+  try {
+    value = await readPublicJson(request, 1024);
+  } catch {
+    return json(400, { error: 'Invalid native archive request.' });
+  }
+  const keys = [
+    'app_id',
+    'environment_id',
+    'day',
+    ...(action === 'start' ? [] : ['session_id']),
+    ...(action === 'advance' ? ['seq'] : []),
+  ];
+  if (!isRecord(value) || !exactKeys(value, keys))
+    return json(400, { error: 'Invalid native archive fields.' });
+  const scope: NativeArchiveScope = {
+    workspace,
+    app_id: value.app_id as string,
+    environment_id: value.environment_id as string,
+    day: value.day as string,
+  };
+  if (
+    !isNativeArchiveScope(scope) ||
+    (action === 'advance' && (!Number.isSafeInteger(value.seq) || Number(value.seq) < 0))
+  )
+    return json(400, { error: 'Provide one settled India day and production scope.' });
+  const id = action === 'start' ? crypto.randomUUID() : value.session_id;
+  if (typeof id !== 'string') return json(400, { error: 'Invalid native archive session.' });
+  try {
+    return { scope, id, seq: value.seq as number, name: nativeArchiveDiagnosticName(id) };
+  } catch {
+    return json(400, { error: 'Invalid native archive session.' });
+  }
+}
+
+function nativeAuditRequestError(request: Request, action: string): Response | null {
+  const url = new URL(request.url);
+  if (request.headers.get('origin') !== url.origin)
+    return json(403, { error: 'Same-origin operator request required.' });
+  if (request.method !== 'POST' || !['start', 'status', 'advance'].includes(action))
+    return json(405, { error: 'Method not allowed.' });
+  return url.search ? json(400, { error: 'Invalid native archive request.' }) : null;
+}
+
+function nativeAuditBindings(env: BrowserEnvironment): env is BrowserEnvironment & {
+  DB: D1DatabaseLike;
+  BROWSER_ARCHIVE: NonNullable<BrowserEnvironment['BROWSER_ARCHIVE']>;
+} {
+  return Boolean(env.DB && env.BROWSER_ARCHIVE && env.BROWSER_HISTORY?.get);
+}
+
+async function nativeArchiveOwnerRoute(
+  request: Request,
+  env: BrowserEnvironment,
+  owner: OwnerIdentity,
+  local: boolean,
+  path: string,
+): Promise<Response> {
+  if (!fullAuditAccountOwner(owner, local))
+    return json(403, { error: 'Full account workspace owner access is required.' });
+  const base = '/v1/browser/native-archive-audits';
+  const action = path === base ? 'start' : path.slice(base.length + 1);
+  const invalid = nativeAuditRequestError(request, action);
+  if (invalid) return invalid;
+  const input = await nativeAuditInput(request, owner.workspaceId, action);
+  if (input instanceof Response) return input;
+  const { scope, id, seq, name } = input;
+  if (!owner.appIds?.includes(scope.app_id))
+    return json(404, { error: 'Production scope not found.' });
+  if (!nativeAuditBindings(env))
+    return json(503, { error: 'Native archive bindings are unavailable.' });
+  try {
+    if (!(await ownedProductionScope(env.DB, owner.workspaceId, scope)))
+      return json(404, { error: 'Production scope not found.' });
+    const stub = env.BROWSER_ARCHIVE.getByName(name);
+    if (!stub.startNativeAudit || !stub.nativeAuditStatus || !stub.advanceNativeAudit)
+      return json(503, { error: 'Native archive verifier is unavailable.' });
+    const state =
+      action === 'start'
+        ? await stub.startNativeAudit(id, scope)
+        : action === 'status'
+          ? await stub.nativeAuditStatus(id, scope)
+          : await stub.advanceNativeAudit(id, scope, seq);
+    return json(200, { ...state, outer_execution_sha: nativeArchiveExecutionSHA() });
+  } catch {
+    return json(503, {
+      error: 'Native archive outcome is unknown. Read session status before retrying.',
+    });
+  }
 }
 
 type BrowserPresence = ReturnType<NonNullable<BrowserBindings['WORKSPACE_PRESENCE']>['getByName']>;
@@ -842,7 +951,7 @@ async function browserReport(
         env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify(['browser-report:eager-bounded-v4', filter.data, reportAppIds]),
+        JSON.stringify([filter.data, reportAppIds]),
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,
