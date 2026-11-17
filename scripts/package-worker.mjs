@@ -104,7 +104,7 @@ export async function packageWorker(root, mode, args) {
   await mkdir(directory, { recursive: true });
   if ((await readdir(directory)).length)
     throw new Error(
-      'Worker packaging requires an empty output directory; preserve prior artifacts first',
+      `Worker packaging requires an empty output directory: ${directory}. Move or archive prior artifacts, or choose a fresh --outdir, then retry.`,
     );
   const run = (flags) => {
     const result = spawnSync(

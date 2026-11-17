@@ -1,3 +1,8 @@
+import {
+  foldJointRankings,
+  lowCurrentCounter,
+  useRankingWatchdog,
+} from './browser-report-joint.js';
 import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
 import { browserQuery } from './browser-query.js';
 import {
@@ -14,10 +19,15 @@ type AnalyticsQueryStage =
   | 'analyticsAudiencePreviousMs'
   | 'analyticsDimensionMaxMs'
   | 'analyticsEngagementMs'
-  | 'analyticsExitsMs';
+  | 'analyticsExitsMs'
+  | 'analyticsJointMs';
 type AnalyticsReportTimings = {
   analyticsQueryWaitMs?: number;
   analyticsReportAssemblyMs?: number;
+  analyticsRankingDecisionMs?: number;
+  analyticsRankingFallbackMs?: number;
+  analyticsJointAttempts?: number;
+  analyticsJointFallbacks?: number;
 } & Partial<Record<AnalyticsQueryStage, number>>;
 type QueryOptions = {
   accountId: string;
@@ -25,12 +35,14 @@ type QueryOptions = {
   fetchImpl?: typeof fetch;
   appIds?: readonly string[];
   timings?: AnalyticsReportTimings;
+  signal?: AbortSignal;
+  deadlineAt?: number;
 };
 
 interface QueryResponse {
   data: QueryRow[];
 }
-interface QueryRow {
+interface QueryRow extends Record<string, unknown> {
   period?: number | string;
   name?: string;
   count?: number | string;
@@ -56,10 +68,17 @@ const number = (value: unknown): number => {
   return n;
 };
 const sampleInterval = (value: unknown): number => (value == null ? 0 : number(value));
+function assertProviderDeadline(options: QueryOptions) {
+  options.signal?.throwIfAborted();
+  if (options.deadlineAt !== undefined && performance.now() >= options.deadlineAt)
+    throw new DOMException('Analytics deadline elapsed', 'TimeoutError');
+}
 async function query(sql: string, options: QueryOptions): Promise<QueryRow[]> {
+  assertProviderDeadline(options);
   const response = await browserQuery(sql, options);
   if (!response.ok) throw new Error('event reports unavailable');
   const body = (await response.json()) as QueryResponse;
+  assertProviderDeadline(options);
   if (!Array.isArray(body.data) || body.data.length > 100)
     throw new Error('invalid analytical response');
   return body.data;
@@ -232,6 +251,34 @@ async function loadReport(
   step: number,
   options: QueryOptions,
 ) {
+  const deadlineAt = performance.now() + 10_000;
+  const controller = new AbortController();
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException('Analytics deadline elapsed', 'TimeoutError')),
+    10_000,
+  );
+  try {
+    return await loadReportRows(workspace, filter, from, to, step, {
+      ...options,
+      signal: controller.signal,
+      deadlineAt,
+    });
+  } catch (error) {
+    controller.abort(error);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function loadReportRows(
+  workspace: string,
+  filter: BrowserReportFilter,
+  from: number,
+  to: number,
+  step: number,
+  options: QueryOptions,
+) {
   const plan = browserReportPlan(
     workspace,
     filter,
@@ -242,42 +289,48 @@ async function loadReport(
   );
   const optionalStart =
     filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
-  const fixedStages: AnalyticsQueryStage[] = [
-    'analyticsTrendMs',
-    'analyticsPagesMs',
-    'analyticsSourcesMs',
-    'analyticsEventsMs',
-    'analyticsAudiencePreviousMs',
-  ];
-  const coreStage = (index: number): AnalyticsQueryStage => {
-    if (index < fixedStages.length) return fixedStages[index];
-    return 'analyticsDimensionMaxMs';
-  };
-  const timedQuery = async (sql: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
-    const started = options.timings ? performance.now() : undefined;
-    try {
-      return await query(sql, options);
-    } finally {
-      if (options.timings && started !== undefined)
-        options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
-    }
-  };
   const queryWaitStarted = options.timings ? performance.now() : undefined;
   let results: QueryRow[][];
   let optional: PromiseSettledResult<QueryRow[]>[];
   try {
-    [results, optional] = await Promise.all([
-      Promise.all(
-        plan.sql.slice(0, optionalStart).map((sql, index) => timedQuery(sql, coreStage(index))),
-      ),
-      Promise.allSettled(
-        plan.sql
-          .slice(optionalStart)
-          .map((sql, index) =>
-            timedQuery(sql, index === 0 ? 'analyticsEngagementMs' : 'analyticsExitsMs'),
-          ),
-      ),
-    ]);
+    const { run, runOptional } = reportQueries(plan.sql, optionalStart, options);
+    if (!useRankingWatchdog(filter) || !plan.jointSql) {
+      [results, optional] = await Promise.all([
+        Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
+        runOptional(),
+      ]);
+    } else {
+      const trend = run(0);
+      const pages = run(1);
+      const periods = run(4);
+      const independent = Promise.all([trend, pages, periods]);
+      const rankings = chooseRankings({
+        plan,
+        filter,
+        from,
+        to,
+        optionalStart,
+        run,
+        independent,
+        pages,
+        periods,
+        options,
+      });
+      const [fixed, rankedRows, settled] = await Promise.all([
+        independent,
+        rankings,
+        runOptional(),
+      ]);
+      results = [
+        fixed[0],
+        fixed[1],
+        rankedRows[0],
+        rankedRows[1],
+        fixed[2],
+        ...rankedRows.slice(2),
+      ];
+      optional = settled;
+    }
   } finally {
     if (options.timings && queryWaitStarted !== undefined)
       options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
@@ -301,6 +354,110 @@ async function loadReport(
     engagementAvailable: optional.every((result) => result.status === 'fulfilled'),
     dimensionBlobs: plan.dimensionBlobs,
   };
+}
+
+function reportQueries(sql: readonly string[], optionalStart: number, options: QueryOptions) {
+  const fixedStages: AnalyticsQueryStage[] = [
+    'analyticsTrendMs',
+    'analyticsPagesMs',
+    'analyticsSourcesMs',
+    'analyticsEventsMs',
+    'analyticsAudiencePreviousMs',
+  ];
+  const timedQuery = async (statement: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
+    const started = performance.now();
+    try {
+      return await query(statement, options);
+    } finally {
+      if (options.timings)
+        options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
+    }
+  };
+  return {
+    run: (index: number) => timedQuery(sql[index], fixedStages[index] ?? 'analyticsDimensionMaxMs'),
+    runOptional: () =>
+      Promise.allSettled(
+        sql
+          .slice(optionalStart)
+          .map((statement, index) =>
+            timedQuery(statement, index === 0 ? 'analyticsEngagementMs' : 'analyticsExitsMs'),
+          ),
+      ),
+  };
+}
+
+async function chooseRankings(args: {
+  plan: ReturnType<typeof browserReportPlan>;
+  filter: BrowserReportFilter;
+  from: number;
+  to: number;
+  optionalStart: number;
+  run: (index: number) => Promise<QueryRow[]>;
+  independent: Promise<QueryRow[][]>;
+  pages: Promise<QueryRow[]>;
+  periods: Promise<QueryRow[]>;
+  options: QueryOptions;
+}): Promise<QueryRow[][]> {
+  const original = () =>
+    Promise.all(
+      [2, 3, ...Array.from({ length: args.optionalStart - 5 }, (_, index) => index + 5)].map(
+        args.run,
+      ),
+    );
+  const started = performance.now();
+  const decision = await Promise.race([
+    args.pages.then(() => undefined),
+    args.periods.then(lowCurrentCounter),
+  ]);
+  if (args.options.timings)
+    args.options.timings.analyticsRankingDecisionMs = performance.now() - started;
+  if (!decision) return original();
+  const joint = await Promise.all([
+    queryJoint(args.plan.jointSql!, args.options),
+    args.independent,
+  ]);
+  const folded = foldJointRankings({
+    data: joint[0],
+    filter: args.filter,
+    from: args.from,
+    to: args.to,
+    dimensions: args.plan.dimensionBlobs,
+    counter: decision,
+    trend: joint[1][0],
+    pages: joint[1][1],
+  });
+  if (folded) return [folded.sources, folded.events, ...folded.dimensions];
+  if (args.options.timings) args.options.timings.analyticsJointFallbacks = 1;
+  const fallbackStarted = performance.now();
+  try {
+    assertProviderDeadline(args.options);
+    return await original();
+  } finally {
+    if (args.options.timings)
+      args.options.timings.analyticsRankingFallbackMs = performance.now() - fallbackStarted;
+  }
+}
+
+async function queryJoint(sql: string, options: QueryOptions): Promise<unknown> {
+  const started = performance.now();
+  if (options.timings) options.timings.analyticsJointAttempts = 1;
+  try {
+    assertProviderDeadline(options);
+    const response = await browserQuery(sql, options);
+    if (!response.ok) throw new Error('event reports unavailable');
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch (error) {
+      assertProviderDeadline(options);
+      if (error instanceof SyntaxError) return undefined;
+      throw error;
+    }
+    assertProviderDeadline(options);
+    return body && typeof body === 'object' && 'data' in body ? body.data : undefined;
+  } finally {
+    if (options.timings) options.timings.analyticsJointMs = performance.now() - started;
+  }
 }
 
 function validateReportPeriods(rows: QueryRow[]): void {
