@@ -499,9 +499,17 @@ it.each(
           else firstReady = true;
         }
         let rows = fixture.database.prepare(sqliteAnalyticsSql(sql)).all();
+        if (isJoint(sql))
+          rows = rows.map((row) => ({
+            ...row,
+            source_name: 'speculative-only',
+            dim0: 'speculative-only',
+            event_name: row.event_kind === 'event' ? 'speculative.only' : row.event_name,
+          }));
         if (kind === control)
           rows = rows.map((row) => ({
             ...row,
+            ...(control === 'period' ? { visitors: Number(row.visitors) + 1 } : {}),
             [control === 'pages' ? 'count' : 'pageviews']:
               Number(row[control === 'pages' ? 'count' : 'pageviews']) + 1,
           }));
@@ -519,5 +527,11 @@ it.each(
       await pending;
     }
     expect(queries.filter(isJoint)).toHaveLength(1);
+    const result = await pending;
+    const expected = (await execute({ ...fixed, app_id: undefined })).result;
+    if (control === 'trend') expected.series[0].pageviews += 1;
+    else if (control === 'pages') expected.pages[0].count += 1;
+    else expected.audience!.visitors += 1;
+    expect(observable(result)).toEqual(observable(expected));
   },
 );
