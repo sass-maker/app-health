@@ -89,7 +89,6 @@ export function rankingFixture() {
   }
   function provider(
     options: {
-      first?: 'counter' | 'pages' | 'same' | 'trend';
       transform?: (sql: string, rows: Record<string, unknown>[]) => unknown;
       before?: (sql: string) => void;
     } = {},
@@ -100,14 +99,6 @@ export function rankingFixture() {
       queries.push(sql);
       options.before?.(sql);
       const data = database.prepare(sqliteAnalyticsSql(sql)).all();
-      if (options.first === 'trend' && isPeriods(sql))
-        await new Promise((resolve) => setTimeout(resolve, 5));
-      if (
-        (options.first !== 'pages' && options.first !== 'same' && isPages(sql)) ||
-        (options.first === 'pages' && isPeriods(sql)) ||
-        (options.first !== 'trend' && sql.includes('GROUP BY bucket'))
-      )
-        await new Promise((resolve) => setTimeout(resolve, 2));
       return Response.json({ data: options.transform ? options.transform(sql, data) : data });
     });
     return { fetchImpl, queries };

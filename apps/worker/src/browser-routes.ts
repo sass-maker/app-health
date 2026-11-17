@@ -842,7 +842,7 @@ async function browserReport(
         env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify(['browser-report:trend-pages-watchdog-v2', filter.data, reportAppIds]),
+        JSON.stringify(['browser-report:optional-first-v3', filter.data, reportAppIds]),
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,

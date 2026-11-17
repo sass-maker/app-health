@@ -112,11 +112,6 @@ export interface OwnerRequestTimings {
   analyticsEngagementMs?: number;
   analyticsExitsMs?: number;
   analyticsReportAssemblyMs?: number;
-  analyticsJointMs?: number;
-  analyticsRankingDecisionMs?: number;
-  analyticsRankingFallbackMs?: number;
-  analyticsJointAttempts?: number;
-  analyticsJointFallbacks?: number;
   appsProjectionMs?: number;
   ownerHandlerTotalMs?: number;
   routeReadMs?: number;
@@ -204,20 +199,11 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['analytics_engagement', timings.analyticsEngagementMs],
     ['analytics_exits', timings.analyticsExitsMs],
     ['analytics_report_assembly', timings.analyticsReportAssemblyMs],
-    ['analytics_joint', timings.analyticsJointMs],
-    ['analytics_ranking_decision', timings.analyticsRankingDecisionMs],
-    ['analytics_ranking_fallback', timings.analyticsRankingFallbackMs],
     ['route_read', timings.routeReadMs],
     ['owner_handler_total', timings.ownerHandlerTotalMs],
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)
     .map(([name, milliseconds]) => `${name};dur=${milliseconds.toFixed(2)}`);
-  for (const [name, count] of [
-    ['analytics_joint_attempts', timings.analyticsJointAttempts],
-    ['analytics_joint_fallbacks', timings.analyticsJointFallbacks],
-  ] as const) {
-    if (count === 1) values.push(`${name};desc="1"`);
-  }
   if (!values.length) return response;
   const headers = new Headers(response.headers);
   headers.set('server-timing', values.join(', '));

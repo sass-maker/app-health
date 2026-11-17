@@ -1,10 +1,3 @@
-import {
-  foldJointRankings,
-  lowCurrentCounter,
-  lowTrendCounter,
-  agreesWithCurrentPeriod,
-  useRankingWatchdog,
-} from './browser-report-joint.js';
 import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
 import { browserQuery } from './browser-query.js';
 import {
@@ -21,15 +14,10 @@ type AnalyticsQueryStage =
   | 'analyticsAudiencePreviousMs'
   | 'analyticsDimensionMaxMs'
   | 'analyticsEngagementMs'
-  | 'analyticsExitsMs'
-  | 'analyticsJointMs';
+  | 'analyticsExitsMs';
 type AnalyticsReportTimings = {
   analyticsQueryWaitMs?: number;
   analyticsReportAssemblyMs?: number;
-  analyticsRankingDecisionMs?: number;
-  analyticsRankingFallbackMs?: number;
-  analyticsJointAttempts?: number;
-  analyticsJointFallbacks?: number;
 } & Partial<Record<AnalyticsQueryStage, number>>;
 type QueryOptions = {
   accountId: string;
@@ -296,44 +284,11 @@ async function loadReportRows(
   let optional: PromiseSettledResult<QueryRow[]>[];
   try {
     const { run, runOptional } = reportQueries(plan.sql, optionalStart, options);
-    if (!useRankingWatchdog(filter) || !plan.jointSql) {
-      [results, optional] = await Promise.all([
-        Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
-        runOptional(),
-      ]);
-    } else {
-      const trend = run(0);
-      const pages = run(1);
-      const periods = run(4);
-      const independent = Promise.all([trend, pages, periods]);
-      const rankings = chooseRankings({
-        plan,
-        filter,
-        from,
-        to,
-        optionalStart,
-        run,
-        independent,
-        trend,
-        pages,
-        periods,
-        options,
-      });
-      const [fixed, rankedRows, settled] = await Promise.all([
-        independent,
-        rankings,
-        runOptional(),
-      ]);
-      results = [
-        fixed[0],
-        fixed[1],
-        rankedRows[0],
-        rankedRows[1],
-        fixed[2],
-        ...rankedRows.slice(2),
-      ];
-      optional = settled;
-    }
+    const pendingOptional = runOptional();
+    [results, optional] = await Promise.all([
+      Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
+      pendingOptional,
+    ]);
   } finally {
     if (options.timings && queryWaitStarted !== undefined)
       options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
@@ -387,85 +342,6 @@ function reportQueries(sql: readonly string[], optionalStart: number, options: Q
           ),
       ),
   };
-}
-
-async function chooseRankings(args: {
-  plan: ReturnType<typeof browserReportPlan>;
-  filter: BrowserReportFilter;
-  from: number;
-  to: number;
-  optionalStart: number;
-  run: (index: number) => Promise<QueryRow[]>;
-  independent: Promise<QueryRow[][]>;
-  trend: Promise<QueryRow[]>;
-  pages: Promise<QueryRow[]>;
-  periods: Promise<QueryRow[]>;
-  options: QueryOptions;
-}): Promise<QueryRow[][]> {
-  const original = () =>
-    Promise.all(
-      [2, 3, ...Array.from({ length: args.optionalStart - 5 }, (_, index) => index + 5)].map(
-        args.run,
-      ),
-    );
-  const started = performance.now();
-  const decision = await Promise.race([
-    args.pages.then(() => undefined),
-    args.periods.then(lowCurrentCounter),
-    args.trend.then(lowTrendCounter),
-  ]);
-  if (args.options.timings)
-    args.options.timings.analyticsRankingDecisionMs = performance.now() - started;
-  if (!decision) return original();
-  const joint = await Promise.all([
-    queryJoint(args.plan.jointSql!, args.options),
-    args.independent,
-  ]);
-  let folded: ReturnType<typeof foldJointRankings>;
-  if (agreesWithCurrentPeriod(joint[1][2], decision)) {
-    folded = foldJointRankings({
-      data: joint[0],
-      filter: args.filter,
-      from: args.from,
-      to: args.to,
-      dimensions: args.plan.dimensionBlobs,
-      counter: decision,
-      trend: joint[1][0],
-      pages: joint[1][1],
-    });
-  }
-  if (folded) return [folded.sources, folded.events, ...folded.dimensions];
-  if (args.options.timings) args.options.timings.analyticsJointFallbacks = 1;
-  const fallbackStarted = performance.now();
-  try {
-    assertProviderDeadline(args.options);
-    return await original();
-  } finally {
-    if (args.options.timings)
-      args.options.timings.analyticsRankingFallbackMs = performance.now() - fallbackStarted;
-  }
-}
-
-async function queryJoint(sql: string, options: QueryOptions): Promise<unknown> {
-  const started = performance.now();
-  if (options.timings) options.timings.analyticsJointAttempts = 1;
-  try {
-    assertProviderDeadline(options);
-    const response = await browserQuery(sql, options);
-    if (!response.ok) throw new Error('event reports unavailable');
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (error) {
-      assertProviderDeadline(options);
-      if (error instanceof SyntaxError) return undefined;
-      throw error;
-    }
-    assertProviderDeadline(options);
-    return body && typeof body === 'object' && 'data' in body ? body.data : undefined;
-  } finally {
-    if (options.timings) options.timings.analyticsJointMs = performance.now() - started;
-  }
 }
 
 function validateReportPeriods(rows: QueryRow[]): void {
