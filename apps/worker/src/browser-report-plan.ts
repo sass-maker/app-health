@@ -1,3 +1,4 @@
+import { jointRankingSql, useEagerRankings } from './browser-report-joint.js';
 import { normalizeAnalyticsSource, type BrowserReportFilter } from '@app-health/contracts';
 import {
   analyticsSourceFrom,
@@ -140,5 +141,8 @@ export function browserReportPlan(
   return {
     sql,
     dimensionBlobs,
+    jointSql: useEagerRankings(filter)
+      ? jointRankingSql(source, Boolean(filter.source), dimensionBlobs)
+      : undefined,
   };
 }

@@ -37,6 +37,7 @@ let queries: string[] = [];
 const entries = new Map<string, Response>();
 const ttl: string[] = [];
 let cacheEnabled = false;
+let speculativeClosed = false;
 const filter = () => BrowserReportFilter.parse({ ...scope, range: '24h', date: '2026-11-12' });
 const request = (path: string, body?: unknown, authenticated = true) =>
   worker.fetch(
@@ -96,6 +97,20 @@ beforeAll(async () => {
     for await (const part of incoming) sql += String(part);
     queries.push(sql);
     const optional = sql.includes('pageview_sessions') || sql.includes('argMax');
+    const joint = sql.includes('GROUP BY event_kind');
+    if (joint && mode === 'joint-http') {
+      response.writeHead(503);
+      response.end('unavailable');
+      return;
+    }
+    if (joint && mode === 'joint-bodycap') {
+      response.on('close', () => {
+        speculativeClosed = true;
+      });
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.write(' '.repeat(1024 * 1024 + 1));
+      return;
+    }
     if (isPeriods(sql) && mode === 'core-headers') return;
     if (isPeriods(sql) && mode === 'core-body') {
       response.writeHead(200, { 'content-type': 'application/json' });
@@ -158,6 +173,7 @@ function setup(count = 8) {
   headerStarts = [];
   peakWaitingHeaders = 0;
   dispatchesAtFirstHeaders = undefined;
+  speculativeClosed = false;
   let waitingHeaders = 0;
   const queued: Array<() => void> = [];
   const providerFetch: typeof fetch = async (_input, init) => {
@@ -201,20 +217,22 @@ function setup(count = 8) {
 function expectedDispatches(extra: Partial<BrowserReportFilter> = {}) {
   const selected = { ...filter(), ...extra };
   const { from, to, step } = reportWindow(selected, Date.now());
-  const { sql } = browserReportPlan(workspace, selected, from, to, step, [scope.app_id]);
-  return selected.source ? sql : [...sql.slice(-2), ...sql.slice(0, -2)];
+  const { sql, jointSql } = browserReportPlan(workspace, selected, from, to, step, [scope.app_id]);
+  return jointSql
+    ? [...(selected.source ? [] : sql.slice(-2)), sql[0], sql[1], sql[4], jointSql]
+    : [...sql.slice(-2), ...sql.slice(0, -2)];
 }
 
-it('gives long optional queries a first-wave header slot without waiting to dispatch all ten', async () => {
+it('gives long optional queries a first-wave header slot in the six-call eager plan', async () => {
   setup();
   mode = 'normal';
   const pending = report();
-  await vi.waitFor(() => expect(dispatches).toHaveLength(10));
+  await vi.waitFor(() => expect(dispatches).toHaveLength(6));
   expect(dispatches).toEqual(expectedDispatches());
   const response = await pending;
   expect(response.status).toBe(200);
-  expect(queries).toHaveLength(10);
-  expect(dispatchesAtFirstHeaders).toBe(10);
+  expect(queries).toHaveLength(6);
+  expect(dispatchesAtFirstHeaders).toBe(6);
   expect(peakWaitingHeaders).toBe(6);
   expect(headerStarts.slice(0, 6).some((sql) => sql.includes('pageview_sessions'))).toBe(true);
   expect(headerStarts.slice(0, 6).some((sql) => sql.includes('argMax'))).toBe(true);
@@ -232,20 +250,35 @@ it.each([
   { count: 8, breakdown: 'acquisition' as const },
   { count: 30, breakdown: 'audience' as const },
   { count: 30, breakdown: 'technology' as const },
+  { count: 101, breakdown: 'audience' as const },
+  { count: 101, breakdown: 'technology' as const },
   { count: 8, breakdown: 'audience' as const, source: 'google.com' },
   { count: 8, breakdown: 'technology' as const, source: 'google.com' },
+  { count: 101, breakdown: 'technology' as const, source: 'google.com' },
 ])('preserves immediate calls and scoped report metrics for %j', async ({ count, ...extra }) => {
   setup(count);
   mode = 'normal';
   const pending = report(extra);
-  const calls = extra.source ? 8 : extra.breakdown === 'acquisition' ? 12 : 10;
-  await vi.waitFor(() => expect(dispatches).toHaveLength(calls));
+  const initial = expectedDispatches(extra);
+  const calls =
+    extra.breakdown === 'acquisition'
+      ? 12
+      : count > 100
+        ? extra.source
+          ? 9
+          : 11
+        : extra.source
+          ? 4
+          : 6;
   const response = await pending;
   expect(response.status).toBe(200);
   expect(queries).toHaveLength(calls);
-  expect(dispatchesAtFirstHeaders).toBe(calls);
-  expect(dispatches).toEqual(expectedDispatches(extra));
-  expect(peakWaitingHeaders).toBe(6);
+  expect(dispatchesAtFirstHeaders).toBe(initial.length);
+  expect(dispatches.slice(0, initial.length)).toEqual(initial);
+  expect(dispatches).toHaveLength(calls);
+  expect(new Set(dispatches).size).toBe(calls);
+  expect(peakWaitingHeaders).toBeLessThanOrEqual(6);
+  expect(peakWaitingHeaders).toBeGreaterThanOrEqual(Math.min(6, initial.length));
   for (const sql of queries) {
     expect(sql).toContain(`index1 = '${workspace}'`);
     expect(sql).toContain(`blob1 = '${scope.app_id}'`);
@@ -257,39 +290,42 @@ it.each([
   };
   expect(body.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(count);
   expect(body.engagement !== undefined).toBe(!extra.source);
-  expect(response.headers.get('server-timing')).not.toContain('analytics_joint');
+  expect(response.headers.get('server-timing')?.includes('analytics_joint_attempts')).toBe(
+    extra.breakdown !== 'acquisition',
+  );
 });
 
-it('retains body and inflight isolation from the two unpromoted cache plans with60second TTL', async () => {
+it('retains body and inflight isolation from the three earlier cache plans with60second TTL', async () => {
   setup();
   mode = 'normal';
   cacheEnabled = true;
   const releases: Array<() => void> = [];
-  const pending = ['pages-watchdog-v1', 'trend-pages-watchdog-v2'].map((plan) =>
-    snapshotCachedAnalytics(
-      env.DB,
-      env.CLOUDFLARE_ACCOUNT_ID!,
-      workspace,
-      JSON.stringify(['browser-report:' + plan, filter(), [scope.app_id]]),
-      () =>
-        new Promise((resolve) => {
-          releases.push(() => resolve({ unpromoted_marker: true }));
-        }),
-    ),
+  const pending = ['pages-watchdog-v1', 'trend-pages-watchdog-v2', 'optional-first-v3'].map(
+    (plan) =>
+      snapshotCachedAnalytics(
+        env.DB,
+        env.CLOUDFLARE_ACCOUNT_ID!,
+        workspace,
+        JSON.stringify(['browser-report:' + plan, filter(), [scope.app_id]]),
+        () =>
+          new Promise((resolve) => {
+            releases.push(() => resolve({ unpromoted_marker: true }));
+          }),
+      ),
   );
-  await vi.waitFor(() => expect(releases).toHaveLength(2));
+  await vi.waitFor(() => expect(releases).toHaveLength(3));
   const first = await report();
   expect(first.status).toBe(200);
   const body = await first.json();
-  expect(queries).toHaveLength(10);
+  expect(queries).toHaveLength(6);
   releases.forEach((release) => release());
   await Promise.all(pending);
   const second = await report();
   expect(observable(await second.json())).toEqual(observable(body));
-  expect(queries).toHaveLength(10);
+  expect(queries).toHaveLength(6);
   expect(
     [...entries.keys()].filter((key) =>
-      decodeURIComponent(key).includes('browser-report:optional-first-v3'),
+      decodeURIComponent(key).includes('browser-report:eager-bounded-v4'),
     ),
   ).toHaveLength(1);
   expect(new Set(ttl)).toEqual(new Set(['max-age=60']));
@@ -307,7 +343,7 @@ it('isolates optional provider failures without retrying or discarding core metr
   };
   expect(body.engagement).toBeUndefined();
   expect(body.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(8);
-  expect(dispatches).toHaveLength(10);
+  expect(dispatches).toHaveLength(6);
 });
 
 it.each(['core-headers', 'core-body'])(
@@ -318,7 +354,7 @@ it.each(['core-headers', 'core-body'])(
     const started = performance.now();
     const response = await report();
     expect(response.status).toBe(503);
-    expect(dispatches).toHaveLength(10);
+    expect(dispatches).toHaveLength(6);
     expect(performance.now() - started).toBeLessThan(13000);
   },
   18000,
@@ -336,3 +372,24 @@ it('rejects unauthenticated and foreign scopes before starting provider work', a
   ).toBe(403);
   expect(dispatches).toHaveLength(0);
 });
+
+it.each(['joint-http', 'joint-bodycap'])(
+  'recovers from real HTTP speculative %s without discarding report data',
+  async (failure) => {
+    setup(30);
+    mode = failure;
+    const response = await report();
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      series: Array<{ pageviews: number }>;
+      engagement?: unknown;
+    };
+    expect(body.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(30);
+    expect(body.engagement).toBeDefined();
+    expect(dispatches).toHaveLength(11);
+    expect(queries).toHaveLength(11);
+    expect(dispatches.filter((sql) => sql.includes('GROUP BY event_kind'))).toHaveLength(1);
+    expect(response.headers.get('server-timing')).toContain('analytics_joint_fallbacks;desc="1"');
+    if (failure === 'joint-bodycap') await vi.waitFor(() => expect(speculativeClosed).toBe(true));
+  },
+);

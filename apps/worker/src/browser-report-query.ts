@@ -1,55 +1,13 @@
 import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
-import { browserQuery } from './browser-query.js';
+import { queryReportRows } from './browser-report-transport.js';
+import { eagerReportRows } from './browser-report-ranking.js';
+import type { AnalyticsQueryStage, QueryOptions, QueryRow } from './browser-report-query-types.js';
 import {
   type BrowserReport,
   BrowserReportFilter,
   type BrowserEngagement,
 } from '@app-health/contracts';
 import { reportWindow } from './browser-report-window.js';
-type AnalyticsQueryStage =
-  | 'analyticsTrendMs'
-  | 'analyticsPagesMs'
-  | 'analyticsSourcesMs'
-  | 'analyticsEventsMs'
-  | 'analyticsAudiencePreviousMs'
-  | 'analyticsDimensionMaxMs'
-  | 'analyticsEngagementMs'
-  | 'analyticsExitsMs';
-type AnalyticsReportTimings = {
-  analyticsQueryWaitMs?: number;
-  analyticsReportAssemblyMs?: number;
-} & Partial<Record<AnalyticsQueryStage, number>>;
-type QueryOptions = {
-  accountId: string;
-  token: string;
-  fetchImpl?: typeof fetch;
-  appIds?: readonly string[];
-  timings?: AnalyticsReportTimings;
-  signal?: AbortSignal;
-  deadlineAt?: number;
-};
-
-interface QueryResponse {
-  data: QueryRow[];
-}
-interface QueryRow extends Record<string, unknown> {
-  period?: number | string;
-  name?: string;
-  count?: number | string;
-  last_seen?: number | string;
-  bucket?: number | string;
-  pageviews?: number | string;
-  events?: number | string;
-  sessions?: number | string;
-  visitors?: number | string;
-  new_sessions?: number | string;
-  returning_sessions?: number | string;
-  unidentified_sessions?: number | string;
-  bounced_sessions?: number | string;
-  pageview_sessions?: number | string;
-  average_session_duration_ms?: number | string;
-  sample_interval: number | string;
-}
 const number = (value: unknown): number => {
   if ((typeof value !== 'number' && typeof value !== 'string') || String(value).trim() === '')
     throw new Error('invalid analytical response');
@@ -58,21 +16,6 @@ const number = (value: unknown): number => {
   return n;
 };
 const sampleInterval = (value: unknown): number => (value == null ? 0 : number(value));
-function assertProviderDeadline(options: QueryOptions) {
-  options.signal?.throwIfAborted();
-  if (options.deadlineAt !== undefined && performance.now() >= options.deadlineAt)
-    throw new DOMException('Analytics deadline elapsed', 'TimeoutError');
-}
-async function query(sql: string, options: QueryOptions): Promise<QueryRow[]> {
-  assertProviderDeadline(options);
-  const response = await browserQuery(sql, options);
-  if (!response.ok) throw new Error('event reports unavailable');
-  const body = (await response.json()) as QueryResponse;
-  assertProviderDeadline(options);
-  if (!Array.isArray(body.data) || body.data.length > 100)
-    throw new Error('invalid analytical response');
-  return body.data;
-}
 export async function queryBrowserReport(
   workspace: string,
   filter: BrowserReportFilter,
@@ -286,7 +229,9 @@ async function loadReportRows(
     const { run, runOptional } = reportQueries(plan.sql, optionalStart, options);
     const pendingOptional = runOptional();
     [results, optional] = await Promise.all([
-      Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
+      plan.jointSql
+        ? eagerReportRows({ plan, filter, from, to, run, options })
+        : Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
       pendingOptional,
     ]);
   } finally {
@@ -325,7 +270,7 @@ function reportQueries(sql: readonly string[], optionalStart: number, options: Q
   const timedQuery = async (statement: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
     const started = performance.now();
     try {
-      return await query(statement, options);
+      return await queryReportRows(statement, options);
     } finally {
       if (options.timings)
         options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
