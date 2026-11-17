@@ -65,40 +65,46 @@ describe('browser reports', () => {
   it('queries bounded aggregates with workspace and validated filters in every query', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
-    const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
-      const sql = String(init?.body);
-      let data: unknown[];
-      if (sql.includes('GROUP BY bucket'))
-        data = [{ bucket: '23', pageviews: '10', events: '4', sample_interval: 2 }];
-      else if (sql.includes('GROUP BY period'))
-        data = [
-          {
-            period: 1,
-            sessions: 1,
-            visitors: 1,
-            new_sessions: 1,
-            returning_sessions: 0,
-            unidentified_sessions: 0,
-            sample_interval: 2,
-          },
-          { period: 0, pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 },
-        ];
-      else if (sql.includes('MAX(double2) AS last_seen'))
-        data = [{ name: 'signup.completed', count: 4, last_seen: now - 4000, sample_interval: 2 }];
-      else {
-        const name = sql.startsWith('SELECT blob4 AS name')
-          ? '/pricing'
-          : sql.startsWith('SELECT blob13 AS name')
-            ? 'organic'
-            : sql.startsWith('SELECT blob17 AS name')
-              ? '/'
-              : sql.startsWith("SELECT IF(blob16 = '', 'Unknown', blob16) AS name")
-                ? 'IN'
-                : '';
-        data = [{ name, count: 4, sample_interval: 2 }];
-      }
-      return Response.json({ data });
-    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [{ bucket: '23', pageviews: '10', events: '4', sample_interval: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ data: [{ name: '/pricing', count: 4, sample_interval: 2 }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: [{ name: '', count: 4, sample_interval: 2 }] }))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [{ name: 'signup.completed', count: 4, last_seen: now - 4000, sample_interval: 2 }],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: [
+            {
+              period: 1,
+              sessions: 1,
+              visitors: 1,
+              new_sessions: 1,
+              returning_sessions: 0,
+              unidentified_sessions: 0,
+              sample_interval: 2,
+            },
+            { period: 0, pageviews: 0, events: 0, sessions: 0, visitors: 0, sample_interval: 1 },
+          ],
+        }),
+      );
+    fetchImpl
+      .mockResolvedValueOnce(
+        Response.json({ data: [{ name: 'organic', count: 4, sample_interval: 2 }] }),
+      )
+      .mockResolvedValueOnce(Response.json({ data: [{ name: '/', count: 4, sample_interval: 2 }] }))
+      .mockResolvedValueOnce(
+        Response.json({ data: [{ name: 'IN', count: 4, sample_interval: 2 }] }),
+      );
     const options = { accountId: 'a'.repeat(32), token: 'test', fetchImpl };
     const timings: {
       analyticsQueryWaitMs?: number;
@@ -120,7 +126,7 @@ describe('browser reports', () => {
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
     expect(report.sessions).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(9);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();
