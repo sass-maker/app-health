@@ -128,26 +128,34 @@ function trendTotals(rows: readonly Row[]): Totals {
   );
 }
 
-function pageKeys(original: readonly Row[]): string[] {
-  const seen = new Set<string>();
-  const keys = original
-    .map((row) => {
-      if (
-        typeof row.name !== 'string' ||
-        row.name.length > 256 ||
-        seen.has(row.name) ||
-        integer(row.sample_interval) !== 1
-      )
-        throw new Error('Invalid joint pages control');
-      seen.add(row.name);
-      return JSON.stringify([row.name, integer(row.count)]);
-    })
-    .sort();
-  return keys;
+function pageCounts(original: readonly Row[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  let previous = Infinity;
+  for (const row of original) {
+    if (
+      typeof row.name !== 'string' ||
+      row.name.length > 256 ||
+      counts.has(row.name) ||
+      integer(row.sample_interval) !== 1
+    )
+      throw new Error('Invalid joint pages control');
+    const count = integer(row.count);
+    if (!count || count > previous) throw new Error('Invalid joint page order');
+    counts.set(row.name, count);
+    previous = count;
+  }
+  return counts;
 }
-function samePages(original: readonly Row[], folded: readonly Rank[]): boolean {
-  const expected = folded.map((row) => JSON.stringify([row.name, row.count])).sort();
-  return JSON.stringify(pageKeys(original)) === JSON.stringify(expected);
+function samePages(original: readonly Row[], folded: ReadonlyMap<string, Rank>): boolean {
+  if (original.length !== Math.min(20, folded.size)) return false;
+  const selected = pageCounts(original);
+  const topCounts = [...folded.values()]
+    .map((row) => row.count)
+    .sort((a, b) => b - a)
+    .slice(0, 20);
+  return [...selected].every(
+    ([name, count], index) => folded.get(name)?.count === count && count === topCounts[index],
+  );
 }
 
 type JointRow = {
@@ -204,7 +212,7 @@ function decodeJointRows(data: unknown, from: number, to: number): JointRow[] {
 export function validPageControl(rows: readonly Row[]): boolean {
   if (rows.length > 20) return false;
   try {
-    pageKeys(rows);
+    pageCounts(rows);
     return true;
   } catch {
     return false;
@@ -235,7 +243,7 @@ function jointMargins(
     });
   }
   return {
-    pages: ranking(pages, 20),
+    pages,
     sources: ranking(sources, 20),
     events: ranking(events, 100),
     dimensions: dimensions.map((map) => ranking(map, 20)),

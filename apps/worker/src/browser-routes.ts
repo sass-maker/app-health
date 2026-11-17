@@ -951,7 +951,7 @@ async function browserReport(
         env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify([filter.data, reportAppIds]),
+        JSON.stringify(['browser-report:page-control-bounded-v5', filter.data, reportAppIds]),
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,

@@ -198,22 +198,15 @@ it.each([
   );
   expect(r.queries).toHaveLength(11);
 });
-it.each(['pages', 'sources', 'dimension'] as const)(
-  'falls back at a tied top20 %s cutoff',
-  async (kind) => {
-    for (let i = 0; i < 21; i++)
-      fixture.add({
-        double2: from + 1000 + i,
-        ...(kind === 'pages'
-          ? { blob4: '/p' + i }
-          : kind === 'sources'
-            ? { blob10: 'host' + i + '.example' }
-            : { blob17: '/entry' + i }),
-      });
-    const r = await pair();
-    expect(r.queries).toHaveLength(11);
-  },
-);
+it.each(['sources', 'dimension'] as const)('falls back at a tied top20 %s cutoff', async (kind) => {
+  for (let i = 0; i < 21; i++)
+    fixture.add({
+      double2: from + 1000 + i,
+      ...(kind === 'sources' ? { blob10: 'host' + i + '.example' } : { blob17: '/entry' + i }),
+    });
+  const r = await pair();
+  expect(r.queries).toHaveLength(11);
+});
 it.each(['http', 'network', 'json', 'utf8'] as const)(
   'preserves original success on speculative %s failure',
   async (kind) => {
@@ -432,7 +425,9 @@ it.each(['overflow', 'cutoff-tie'] as const)(
   'dispatches original five before fixed controls after decisive joint %s',
   async (reason) => {
     if (reason === 'overflow') seed(101);
-    else for (let i = 0; i < 21; i++) fixture.add({ double2: from + 1000 + i, blob4: '/path' + i });
+    else
+      for (let i = 0; i < 21; i++)
+        fixture.add({ double2: from + 1000 + i, blob10: 'host' + i + '.example' });
     const provider = fixture.provider();
     let release!: () => void;
     const blocked = new Promise<void>((resolve) => {
@@ -455,7 +450,8 @@ it.each(['overflow', 'cutoff-tie'] as const)(
       release();
     }
     const result = await pending;
-    expect(result.pages).toHaveLength(reason === 'overflow' ? 1 : 20);
+    expect(result.pages).toHaveLength(1);
+    if (reason === 'cutoff-tie') expect(result.sources).toHaveLength(20);
   },
 );
 
@@ -536,13 +532,153 @@ it.each(
   },
 );
 
-it.each([0, 10])('accepts the original valid top20 page selection starting at%i among30 tied pages', async (offset) => {
-  for (let i = 0; i < 30; i++) fixture.add({ double2: from + 1000 + i, blob4: '/distinct-' + String(i).padStart(2, '0') });
-  const selected = Array.from({ length: 20 }, (_, i) => ({name: '/distinct-' + String(offset+i).padStart(2, '0'),count:1,sample_interval:1}));
-  const original = await execute({...fixed, app_id:undefined}, sql => isPages(sql) ? Response.json({data:selected}) : undefined);
-  const candidate = await execute(fixed, sql => isPages(sql) ? Response.json({data:selected}) : undefined);
+it.each([0, 10])(
+  'accepts the original valid top20 page selection starting at%i among30 tied pages',
+  async (offset) => {
+    for (let i = 0; i < 30; i++)
+      fixture.add({ double2: from + 1000 + i, blob4: '/distinct-' + String(i).padStart(2, '0') });
+    const selected = Array.from({ length: 20 }, (_, i) => ({
+      name: '/distinct-' + String(offset + i).padStart(2, '0'),
+      count: 1,
+      sample_interval: 1,
+    }));
+    const original = await execute({ ...fixed, app_id: undefined }, (sql) =>
+      isPages(sql) ? Response.json({ data: selected }) : undefined,
+    );
+    const candidate = await execute(fixed, (sql) =>
+      isPages(sql) ? Response.json({ data: selected }) : undefined,
+    );
+    expect(candidate.result).toEqual(original.result);
+    expect(candidate.result.pages).toEqual(selected.map(({ name, count }) => ({ name, count })));
+    expect(candidate.queries).toHaveLength(6);
+    expect(candidate.timings.analyticsJointFallbacks).toBeUndefined();
+  },
+);
+
+function distinctPages(count = 30) {
+  for (let i = 0; i < count; i++)
+    fixture.add({ double2: from + 1000 + i, blob4: '/distinct-' + String(i).padStart(2, '0') });
+}
+function selectedPages(offset = 0) {
+  return Array.from({ length: 20 }, (_, i) => ({
+    name: '/distinct-' + String(offset + i).padStart(2, '0'),
+    count: 1,
+    sample_interval: 1,
+  }));
+}
+async function pagePair(control: Rows, filter: BrowserReportFilter = fixed) {
+  const override: Override = (sql) => (isPages(sql) ? Response.json({ data: control }) : undefined);
+  const original = await execute({ ...filter, app_id: undefined }, override);
+  const candidate = await execute(filter, override);
   expect(candidate.result).toEqual(original.result);
-  expect(candidate.result.pages).toEqual(selected.map(({name,count}) => ({name,count})));
-  expect(candidate.queries).toHaveLength(6);
-  expect(candidate.timings.analyticsJointFallbacks).toBeUndefined();
+  expect(candidate.result.pages).toEqual(
+    control.map((row) => ({ name: row.name || 'Unknown', count: Number(row.count) })),
+  );
+  return candidate;
+}
+it.each([30, 100, 101, 145])(
+  'keeps bounded full page margins for%i distinct pages',
+  async (count) => {
+    distinctPages(count);
+    const r = await pagePair(selectedPages(10).reverse());
+    expect(r.queries).toHaveLength(count <= 100 ? 6 : 11);
+    expect(r.timings.analyticsJointFallbacks).toBe(count <= 100 ? undefined : 1);
+  },
+);
+it.each([
+  ['missing', (rows: Rows) => rows.slice(1)],
+  ['empty', (_rows: Rows) => []],
+  ['too-many', (rows: Rows) => [...rows, { name: '/distinct-29', count: 1, sample_interval: 1 }]],
+  ['duplicate', (rows: Rows) => [rows[0], ...rows.slice(0, 19)]],
+  ['unknown-name', (rows: Rows) => [{ ...rows[0], name: '/not-in-joint' }, ...rows.slice(1)]],
+  ['wrong-count', (rows: Rows) => [{ ...rows[0], count: 2 }, ...rows.slice(1)]],
+  ['zero-count', (rows: Rows) => [...rows.slice(0, 19), { ...rows[19], count: 0 }]],
+  ['sampled', (rows: Rows) => rows.map((row) => ({ ...row, sample_interval: 2 }))],
+  ['oversized-name', (rows: Rows) => [{ ...rows[0], name: 'x'.repeat(257) }, ...rows.slice(1)]],
+] as const)('retains original report and falls back for %s page control', async (_name, mutate) => {
+  distinctPages();
+  const r = await pagePair(mutate(selectedPages()));
+  expect(r.queries).toHaveLength(11);
+  expect(r.timings.analyticsJointFallbacks).toBe(1);
 });
+it('rejects a control omitting a strictly larger page despite all selected names/counts matching', async () => {
+  distinctPages();
+  for (let i = 0; i < 3; i++) fixture.add({ double2: from + 2000 + i, blob4: '/larger' });
+  expect((await pagePair(selectedPages())).queries).toHaveLength(11);
+});
+it('rejects forged top counts on lower pages and a non-descending page selection', async () => {
+  distinctPages();
+  fixture.add({ double2: from + 2000, blob4: '/larger' });
+  expect(
+    (
+      await pagePair([
+        { name: '/distinct-00', count: 2, sample_interval: 1 },
+        ...selectedPages(1).slice(0, 19),
+      ])
+    ).queries,
+  ).toHaveLength(11);
+  expect(
+    (
+      await pagePair([
+        ...selectedPages().slice(0, 19),
+        { name: '/larger', count: 2, sample_interval: 1 },
+      ])
+    ).queries,
+  ).toHaveLength(11);
+});
+it('preserves distinct raw blank and Unknown page keys before report normalization', async () => {
+  distinctPages();
+  fixture.database.exec(
+    "UPDATE app_health_browser_v1 SET blob4='' WHERE blob4='/distinct-00'; UPDATE app_health_browser_v1 SET blob4='Unknown' WHERE blob4='/distinct-01'",
+  );
+  const control = [
+    { name: '', count: 1, sample_interval: 1 },
+    { name: 'Unknown', count: 1, sample_interval: 1 },
+    ...selectedPages(2).slice(0, 18),
+  ];
+  const r = await pagePair(control);
+  expect(r.queries).toHaveLength(6);
+  expect(r.result.pages.slice(0, 2)).toEqual([
+    { name: 'Unknown', count: 1 },
+    { name: 'Unknown', count: 1 },
+  ]);
+});
+it.each(['audience', 'technology'] as const)(
+  'accepts tied page controls with %s source segmentation',
+  async (breakdown) => {
+    distinctPages();
+    const r = await pagePair(selectedPages(10), { ...fixed, breakdown, source: 'google.com' });
+    expect(r.queries).toHaveLength(4);
+    expect(r.timings.analyticsJointFallbacks).toBeUndefined();
+  },
+);
+it.each(['blob13', 'blob17', 'blob16', 'blob14', 'blob15'] as const)(
+  'retains the non-page %s cutoff guard',
+  async (blob) => {
+    for (let i = 0; i < 21; i++) fixture.add({ double2: from + 1000 + i, [blob]: 'value' + i });
+    const breakdown = blob === 'blob14' || blob === 'blob15' ? 'technology' : 'audience';
+    const r = await pair({ ...fixed, breakdown });
+    expect(r.queries).toHaveLength(11);
+    expect(r.timings.analyticsJointFallbacks).toBe(1);
+  },
+);
+it.each(['name', 'count'] as const)(
+  'preserves original errors for malformed page %s without retry',
+  async (field) => {
+    distinctPages();
+    const controls = selectedPages().map((row, index) =>
+      index ? row : { ...row, [field]: field === 'name' ? null : 'invalid' },
+    );
+    for (const filter of [{ ...fixed, app_id: undefined }, fixed]) {
+      const queries: string[] = [];
+      await expect(
+        execute(filter, (sql) => {
+          queries.push(sql);
+          return isPages(sql) ? Response.json({ data: controls }) : undefined;
+        }),
+      ).rejects.toThrow();
+      expect(queries).toHaveLength(filter.app_id ? 11 : 10);
+      expect(queries.filter(isJoint)).toHaveLength(filter.app_id ? 1 : 0);
+    }
+  },
+);

@@ -220,7 +220,7 @@ function expectedDispatches(extra: Partial<BrowserReportFilter> = {}) {
   const { sql, jointSql } = browserReportPlan(workspace, selected, from, to, step, [scope.app_id]);
   return jointSql
     ? [...(selected.source ? [] : sql.slice(-2)), sql[0], sql[1], sql[4], jointSql]
-    : [...sql.slice(-2), ...sql.slice(0, -2)];
+    : sql;
 }
 
 it('gives long optional queries a first-wave header slot in the six-call eager plan', async () => {
@@ -295,25 +295,33 @@ it.each([
   );
 });
 
-it('retains body and inflight isolation from the three earlier cache plans with60second TTL', async () => {
+it('retains body and inflight isolation from public315 and four earlier cache plans with60second TTL', async () => {
   setup();
   mode = 'normal';
   cacheEnabled = true;
   const releases: Array<() => void> = [];
-  const pending = ['pages-watchdog-v1', 'trend-pages-watchdog-v2', 'optional-first-v3'].map(
-    (plan) =>
-      snapshotCachedAnalytics(
-        env.DB,
-        env.CLOUDFLARE_ACCOUNT_ID!,
-        workspace,
-        JSON.stringify(['browser-report:' + plan, filter(), [scope.app_id]]),
-        () =>
-          new Promise((resolve) => {
-            releases.push(() => resolve({ unpromoted_marker: true }));
-          }),
-      ),
+  const keys = [
+    JSON.stringify([filter(), [scope.app_id]]),
+    ...[
+      'pages-watchdog-v1',
+      'trend-pages-watchdog-v2',
+      'optional-first-v3',
+      'eager-bounded-v4',
+    ].map((plan) => JSON.stringify(['browser-report:' + plan, filter(), [scope.app_id]])),
+  ];
+  const pending = keys.map((key) =>
+    snapshotCachedAnalytics(
+      env.DB,
+      env.CLOUDFLARE_ACCOUNT_ID!,
+      workspace,
+      key,
+      () =>
+        new Promise((resolve) => {
+          releases.push(() => resolve({ unpromoted_marker: true }));
+        }),
+    ),
   );
-  await vi.waitFor(() => expect(releases).toHaveLength(3));
+  await vi.waitFor(() => expect(releases).toHaveLength(5));
   const first = await report();
   expect(first.status).toBe(200);
   const body = await first.json();
@@ -325,7 +333,7 @@ it('retains body and inflight isolation from the three earlier cache plans with6
   expect(queries).toHaveLength(6);
   expect(
     [...entries.keys()].filter((key) =>
-      decodeURIComponent(key).includes('browser-report:eager-bounded-v4'),
+      decodeURIComponent(key).includes('browser-report:page-control-bounded-v5'),
     ),
   ).toHaveLength(1);
   expect(new Set(ttl)).toEqual(new Set(['max-age=60']));

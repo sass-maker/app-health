@@ -26,13 +26,15 @@ async function run(filter: BrowserReportFilter = reportScope) {
 }
 
 it.each(['audience', 'technology', 'acquisition'] as const)(
-  'preserves full %s measurements while prioritizing optional work',
+  'preserves full %s measurements with scoped dispatch',
   async (breakdown) => {
     fixture.seed();
     const result = await run({ ...reportScope, breakdown });
     expect(result.queries).toHaveLength(breakdown === 'acquisition' ? 12 : 6);
-    expect(result.queries[0]).toContain('pageview_sessions');
-    expect(result.queries[1]).toContain('argMax');
+    if (breakdown !== 'acquisition') {
+      expect(result.queries[0]).toContain('pageview_sessions');
+      expect(result.queries[1]).toContain('argMax');
+    }
     expect(result.queries.filter(isPages)).toHaveLength(1);
     const { from, to, step } = reportWindow({ ...reportScope, breakdown }, reportNow);
     const { sql, jointSql } = browserReportPlan(
@@ -44,9 +46,7 @@ it.each(['audience', 'technology', 'acquisition'] as const)(
       ['app'],
     );
     expect(result.queries).toEqual(
-      jointSql
-        ? [...sql.slice(-2), sql[0], sql[1], sql[4], jointSql]
-        : [...sql.slice(-2), ...sql.slice(0, -2)],
+      jointSql ? [...sql.slice(-2), sql[0], sql[1], sql[4], jointSql] : sql,
     );
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(5);
     expect(result.report.series.reduce((sum, row) => sum + row.events, 0)).toBe(3);
@@ -98,7 +98,7 @@ it.each([0, 1, 20, 21, 101])(
   async (count) => {
     for (let index = 0; index < count; index++) fixture.add({ blob4: `/path${index}` });
     const result = await run();
-    expect(result.queries).toHaveLength(count === 1 || count === 20 ? 6 : 11);
+    expect(result.queries).toHaveLength(count >= 1 && count <= 100 ? 6 : 11);
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(count);
     expect(result.report.pages.length).toBe(Math.min(count, 20));
   },
@@ -108,9 +108,15 @@ it.each(['1h', '24h', '7d', '30d'] as const)(
   'preserves original immediate behavior for %s',
   async (range) => {
     fixture.seed();
-    expect((await run({ ...reportScope, range })).queries).toHaveLength(
-      range === '7d' || range === '30d' ? 10 : 6,
-    );
+    const selected = { ...reportScope, range };
+    const result = await run(selected);
+    expect(result.queries).toHaveLength(range === '7d' || range === '30d' ? 10 : 6);
+    if (range === '7d' || range === '30d') {
+      const { from, to, step } = reportWindow(selected, reportNow);
+      expect(result.queries).toEqual(
+        browserReportPlan('workspace', selected, from, to, step, ['app']).sql,
+      );
+    }
   },
 );
 

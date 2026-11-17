@@ -227,11 +227,12 @@ async function loadReportRows(
   let optional: PromiseSettledResult<QueryRow[]>[];
   try {
     const { run, runOptional } = reportQueries(plan.sql, optionalStart, options);
+    const original = plan.jointSql
+      ? undefined
+      : Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index)));
     const pendingOptional = runOptional();
     [results, optional] = await Promise.all([
-      plan.jointSql
-        ? eagerReportRows({ plan, filter, from, to, run, options })
-        : Promise.all(plan.sql.slice(0, optionalStart).map((_, index) => run(index))),
+      original ?? eagerReportRows({ plan, filter, from, to, run, options }),
       pendingOptional,
     ]);
   } finally {
