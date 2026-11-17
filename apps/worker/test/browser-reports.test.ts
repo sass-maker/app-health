@@ -120,7 +120,7 @@ describe('browser reports', () => {
       expect(init?.body).toContain("blob5 = 'signup.completed'");
     }
     expect(report.sessions).toBe(1);
-    expect(fetchImpl).toHaveBeenCalledTimes(8);
+    expect(fetchImpl).toHaveBeenCalledTimes(9);
     await expect(
       queryBrowserReport('w-one', { range: '24h', event: "x' OR 1=1" }, options),
     ).rejects.toThrow();

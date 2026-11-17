@@ -30,15 +30,24 @@ it.each(['audience', 'technology', 'acquisition'] as const)(
   async (breakdown) => {
     fixture.seed();
     const result = await run({ ...reportScope, breakdown });
-    expect(result.queries).toHaveLength(breakdown === 'acquisition' ? 12 : 10);
+    expect(result.queries).toHaveLength(breakdown === 'acquisition' ? 12 : 6);
     expect(result.queries[0]).toContain('pageview_sessions');
     expect(result.queries[1]).toContain('argMax');
     expect(result.queries.filter(isPages)).toHaveLength(1);
     const { from, to, step } = reportWindow({ ...reportScope, breakdown }, reportNow);
-    const { sql } = browserReportPlan('workspace', { ...reportScope, breakdown }, from, to, step, [
-      'app',
-    ]);
-    expect(result.queries).toEqual([...sql.slice(-2), ...sql.slice(0, -2)]);
+    const { sql, jointSql } = browserReportPlan(
+      'workspace',
+      { ...reportScope, breakdown },
+      from,
+      to,
+      step,
+      ['app'],
+    );
+    expect(result.queries).toEqual(
+      jointSql
+        ? [...sql.slice(-2), sql[0], sql[1], sql[4], jointSql]
+        : [...sql.slice(-2), ...sql.slice(0, -2)],
+    );
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(5);
     expect(result.report.series.reduce((sum, row) => sum + row.events, 0)).toBe(3);
     expect(result.report.previous?.pageviews).toBe(1);
@@ -65,37 +74,31 @@ it.each([
   { medium: 'email' },
   { content: 'top' },
   { term: 'test' },
-] as const)(
-  'retains SQL filtering and eight immediate required queries for %j',
-  async (segment) => {
-    fixture.seed();
-    for (const breakdown of ['audience', 'technology'] as const) {
-      const result = await run({ ...reportScope, breakdown, ...segment });
-      expect(result.queries).toHaveLength(8);
-      expect(result.queries.filter(isPages)).toHaveLength(1);
-      expect(
-        result.queries.some((sql) => sql.includes('pageview_sessions') || sql.includes('argMax')),
-      ).toBe(false);
-      expect(result.report.engagement).toBeUndefined();
-      for (const sql of result.queries) {
-        expect(sql).toContain("index1 = 'workspace'");
-        expect(sql).toContain("blob1 = 'app'");
-        expect(sql).toContain("blob2 = 'env'");
-        expect(sql).toContain("blob1 IN ('app')");
-      }
+] as const)('retains SQL filtering and four immediate required queries for %j', async (segment) => {
+  fixture.seed();
+  for (const breakdown of ['audience', 'technology'] as const) {
+    const result = await run({ ...reportScope, breakdown, ...segment });
+    expect(result.queries).toHaveLength(4);
+    expect(result.queries.filter(isPages)).toHaveLength(1);
+    expect(
+      result.queries.some((sql) => sql.includes('pageview_sessions') || sql.includes('argMax')),
+    ).toBe(false);
+    expect(result.report.engagement).toBeUndefined();
+    for (const sql of result.queries) {
+      expect(sql).toContain("index1 = 'workspace'");
+      expect(sql).toContain("blob1 = 'app'");
+      expect(sql).toContain("blob2 = 'env'");
+      expect(sql).toContain("blob1 IN ('app')");
     }
-  },
-);
+  }
+});
 
 it.each([0, 1, 20, 21, 101])(
-  'uses the same original query count for %i current events',
+  'preserves original page truncation for %i current events',
   async (count) => {
     for (let index = 0; index < count; index++) fixture.add({ blob4: `/path${index}` });
     const result = await run();
-    expect(result.queries).toHaveLength(10);
-    const { from, to, step } = reportWindow(reportScope, reportNow);
-    const { sql } = browserReportPlan('workspace', reportScope, from, to, step, ['app']);
-    expect(result.queries).toEqual([...sql.slice(-2), ...sql.slice(0, -2)]);
+    expect(result.queries).toHaveLength(count === 1 || count === 20 ? 6 : 11);
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(count);
     expect(result.report.pages.length).toBe(Math.min(count, 20));
   },
@@ -105,7 +108,9 @@ it.each(['1h', '24h', '7d', '30d'] as const)(
   'preserves original immediate behavior for %s',
   async (range) => {
     fixture.seed();
-    expect((await run({ ...reportScope, range })).queries).toHaveLength(10);
+    expect((await run({ ...reportScope, range })).queries).toHaveLength(
+      range === '7d' || range === '30d' ? 10 : 6,
+    );
   },
 );
 
@@ -118,7 +123,7 @@ it('keeps exact completed India-day edges and weighted sampled estimates', async
   expect(result.report.to).toBe(from + 86400000);
   expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(3);
   expect(result.report.sampled).toBe(true);
-  expect(result.queries).toHaveLength(10);
+  expect(result.queries).toHaveLength(11);
 });
 
 it('aborts all started work on a mandatory failure without retrying', async () => {
@@ -137,7 +142,7 @@ it('aborts all started work on a mandatory failure without retrying', async () =
       fetchImpl,
     }),
   ).rejects.toThrow('mandatory trend');
-  expect(signals).toHaveLength(10);
+  expect(signals).toHaveLength(6);
   expect(signals.every((signal) => signal.aborted)).toBe(true);
 });
 
@@ -163,5 +168,5 @@ it('enforces the absolute provider deadline before delayed timer dispatch', asyn
       fetchImpl,
     }),
   ).rejects.toThrow('Analytics deadline elapsed');
-  expect(provider.queries).toHaveLength(10);
+  expect(provider.queries).toHaveLength(6);
 });
