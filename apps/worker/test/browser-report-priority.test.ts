@@ -1,13 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BrowserReportFilter } from '@app-health/contracts';
 import { queryBrowserReport } from '../src/browser-report-query.js';
-import {
-  rankingFixture,
-  reportNow,
-  reportScope,
-  isJoint,
-  isPages,
-} from './ranking-report-fixture.js';
+import { browserReportPlan } from '../src/browser-report-plan.js';
+import { reportWindow } from '../src/browser-report-window.js';
+import { rankingFixture, reportNow, reportScope, isPages } from './ranking-report-fixture.js';
 
 let fixture: ReturnType<typeof rankingFixture>;
 beforeEach(() => {
@@ -18,11 +14,8 @@ afterEach(() => {
   fixture.database.close();
   vi.restoreAllMocks();
 });
-async function run(
-  filter: BrowserReportFilter = reportScope,
-  config: Parameters<typeof fixture.provider>[0] = {},
-) {
-  const provider = fixture.provider(config);
+async function run(filter: BrowserReportFilter = reportScope) {
+  const provider = fixture.provider();
   const report = await queryBrowserReport('workspace', filter, {
     accountId: 'a'.repeat(32),
     token: 'synthetic',
@@ -41,7 +34,11 @@ it.each(['audience', 'technology', 'acquisition'] as const)(
     expect(result.queries[0]).toContain('pageview_sessions');
     expect(result.queries[1]).toContain('argMax');
     expect(result.queries.filter(isPages)).toHaveLength(1);
-    expect(result.queries.some(isJoint)).toBe(false);
+    const { from, to, step } = reportWindow({ ...reportScope, breakdown }, reportNow);
+    const { sql } = browserReportPlan('workspace', { ...reportScope, breakdown }, from, to, step, [
+      'app',
+    ]);
+    expect(result.queries).toEqual([...sql.slice(-2), ...sql.slice(0, -2)]);
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(5);
     expect(result.report.series.reduce((sum, row) => sum + row.events, 0)).toBe(3);
     expect(result.report.previous?.pageviews).toBe(1);
@@ -96,7 +93,9 @@ it.each([0, 1, 20, 21, 101])(
     for (let index = 0; index < count; index++) fixture.add({ blob4: `/path${index}` });
     const result = await run();
     expect(result.queries).toHaveLength(10);
-    expect(result.queries.some(isJoint)).toBe(false);
+    const { from, to, step } = reportWindow(reportScope, reportNow);
+    const { sql } = browserReportPlan('workspace', reportScope, from, to, step, ['app']);
+    expect(result.queries).toEqual([...sql.slice(-2), ...sql.slice(0, -2)]);
     expect(result.report.series.reduce((sum, row) => sum + row.pageviews, 0)).toBe(count);
     expect(result.report.pages.length).toBe(Math.min(count, 20));
   },

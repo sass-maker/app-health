@@ -11,7 +11,9 @@ import { createAccountAuth } from '../src/accounts.js';
 import { snapshotCachedAnalytics } from '../src/analytics-cache.js';
 import { splitMigrationSql } from './migration-sql.js';
 import { sqliteAnalyticsSql } from './analytics-sqlite.js';
-import { rankingFixture, observable, isJoint, isPeriods } from './ranking-report-fixture.js';
+import { browserReportPlan } from '../src/browser-report-plan.js';
+import { reportWindow } from '../src/browser-report-window.js';
+import { rankingFixture, observable, isPeriods } from './ranking-report-fixture.js';
 
 const mf = new Miniflare({
   modules: true,
@@ -196,12 +198,19 @@ function setup(count = 8) {
   });
 }
 
+function expectedDispatches(extra: Partial<BrowserReportFilter> = {}) {
+  const selected = { ...filter(), ...extra };
+  const { from, to, step } = reportWindow(selected, Date.now());
+  const { sql } = browserReportPlan(workspace, selected, from, to, step, [scope.app_id]);
+  return selected.source ? sql : [...sql.slice(-2), ...sql.slice(0, -2)];
+}
+
 it('gives long optional queries a first-wave header slot without waiting to dispatch all ten', async () => {
   setup();
   mode = 'normal';
   const pending = report();
   await vi.waitFor(() => expect(dispatches).toHaveLength(10));
-  expect(dispatches.some(isJoint)).toBe(false);
+  expect(dispatches).toEqual(expectedDispatches());
   const response = await pending;
   expect(response.status).toBe(200);
   expect(queries).toHaveLength(10);
@@ -220,6 +229,7 @@ it('gives long optional queries a first-wave header slot without waiting to disp
 it.each([
   { count: 8, breakdown: 'audience' as const },
   { count: 8, breakdown: 'technology' as const },
+  { count: 8, breakdown: 'acquisition' as const },
   { count: 30, breakdown: 'audience' as const },
   { count: 30, breakdown: 'technology' as const },
   { count: 8, breakdown: 'audience' as const, source: 'google.com' },
@@ -228,13 +238,13 @@ it.each([
   setup(count);
   mode = 'normal';
   const pending = report(extra);
-  const calls = extra.source ? 8 : 10;
+  const calls = extra.source ? 8 : extra.breakdown === 'acquisition' ? 12 : 10;
   await vi.waitFor(() => expect(dispatches).toHaveLength(calls));
   const response = await pending;
   expect(response.status).toBe(200);
   expect(queries).toHaveLength(calls);
   expect(dispatchesAtFirstHeaders).toBe(calls);
-  expect(dispatches.some(isJoint)).toBe(false);
+  expect(dispatches).toEqual(expectedDispatches(extra));
   expect(peakWaitingHeaders).toBe(6);
   for (const sql of queries) {
     expect(sql).toContain(`index1 = '${workspace}'`);

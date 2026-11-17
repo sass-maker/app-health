@@ -4,7 +4,6 @@ import { sqliteAnalyticsSql } from './analytics-sqlite.js';
 
 export const reportNow = 1_800_000_000_000;
 export const reportScope = { range: '24h' as const, app_id: 'app', environment_id: 'env' };
-export const isJoint = (sql: string) => sql.includes('GROUP BY event_kind');
 export const isPages = (sql: string) => sql.startsWith('SELECT blob4 AS name');
 export const isPeriods = (sql: string) => sql.includes('GROUP BY period');
 export type FixtureRow = Record<string, string | number>;
@@ -87,19 +86,13 @@ export function rankingFixture() {
     add({ blob2: 'foreign' });
     add({ double2: reportNow });
   }
-  function provider(
-    options: {
-      transform?: (sql: string, rows: Record<string, unknown>[]) => unknown;
-      before?: (sql: string) => void;
-    } = {},
-  ) {
+  function provider() {
     const queries: string[] = [];
     const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
       const sql = String(init?.body);
       queries.push(sql);
-      options.before?.(sql);
       const data = database.prepare(sqliteAnalyticsSql(sql)).all();
-      return Response.json({ data: options.transform ? options.transform(sql, data) : data });
+      return Response.json({ data });
     });
     return { fetchImpl, queries };
   }
