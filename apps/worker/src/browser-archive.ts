@@ -7,6 +7,14 @@ import { persistArchiveSegment } from './archive-segment.js';
 import { DurableObject } from 'cloudflare:workers';
 import type { CollectedBrowserBatch } from './browser-analytics.js';
 import { browserFactsDigestVersion, digestBrowserEventFacts } from './browser-facts-digest.js';
+import {
+  browserArchiveRole,
+  NativeBrowserArchiveVerifier,
+  nativeArchiveDiagnosticName,
+  type NativeArchiveScope,
+  type NativeArchiveResult,
+} from './browser-archive-native-verifier.js';
+import type { D1DatabaseLike } from './d1-adapter.js';
 
 const FLUSH_BYTES = 1024 * 1024;
 const MAX_PENDING_BYTES = 8 * FLUSH_BYTES;
@@ -24,6 +32,7 @@ const MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE = 100;
 const INDIA_OFFSET_MS = 5 * 60 * 60_000 + 30 * 60_000;
 
 export interface BrowserArchiveEnvironment {
+  DB?: D1DatabaseLike;
   BROWSER_HISTORY: Pick<R2Bucket, 'put' | 'get' | 'list' | 'delete'>;
   BROWSER_ANALYTICS?: Pick<AnalyticsEngineDataset, 'writeDataPoint'>;
 }
@@ -230,11 +239,18 @@ async function archiveFingerprint(content: string): Promise<string> {
 
 /** Queue consumers route consistently by workspace + shard, including every retry. */
 export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
+  readonly #role: ReturnType<typeof browserArchiveRole>;
+  #nativeVerifier: NativeBrowserArchiveVerifier | null = null;
   private flushing: Promise<void> | null = null;
   private reindexing = false;
 
   constructor(ctx: DurableObjectState, env: BrowserArchiveEnvironment) {
     super(ctx, env);
+    this.#role = browserArchiveRole(ctx.id.name);
+    if (this.#role !== 'producer') {
+      if (this.#role === 'diagnostic') this.#nativeVerifier = new NativeBrowserArchiveVerifier(env);
+      return;
+    }
     ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS archive_meta (
         id INTEGER PRIMARY KEY CHECK (id = 1), workspace TEXT, retry_after INTEGER NOT NULL DEFAULT 0
@@ -313,7 +329,38 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     ctx.blockConcurrencyWhile(() => this.schedule());
   }
 
+  private requireProducer(): void {
+    if (this.#role !== 'producer') throw new Error('Archive producer role required');
+  }
+
+  #diagnostic(id: string): NativeBrowserArchiveVerifier {
+    if (
+      this.#role !== 'diagnostic' ||
+      this.ctx.id.name !== nativeArchiveDiagnosticName(id) ||
+      !this.#nativeVerifier
+    )
+      throw new Error('Archive diagnostic role required');
+    return this.#nativeVerifier;
+  }
+
+  startNativeAudit(id: string, scope: NativeArchiveScope): NativeArchiveResult {
+    return this.#diagnostic(id).start(id, scope);
+  }
+
+  nativeAuditStatus(id: string, scope: NativeArchiveScope): NativeArchiveResult {
+    return this.#diagnostic(id).status(id, scope);
+  }
+
+  advanceNativeAudit(
+    id: string,
+    scope: NativeArchiveScope,
+    seq: number,
+  ): Promise<NativeArchiveResult> {
+    return this.#diagnostic(id).advance(id, scope, seq);
+  }
+
   async stage(batches: CollectedBrowserBatch[]): Promise<BrowserArchiveStageResult> {
+    this.requireProducer();
     if (!Array.isArray(batches) || batches.length > MAX_STAGE_BATCHES)
       throw new Error('Archive stage exceeds 100 batches');
     const prepared = await Promise.all(batches.map(prepareBatch));
@@ -330,6 +377,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
    * it does not prove Queue/DLQ exhaustion or successful R2 archival.
    */
   async lookupStaged(batches: BatchIdentity[]): Promise<BrowserArchiveStagingLookup> {
+    this.requireProducer();
     if (!Array.isArray(batches) || batches.length > MAX_STAGE_BATCHES)
       throw new Error('Archive staging lookup exceeds 100 batches');
     const identities = batches.map((batch) => {
@@ -364,6 +412,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private insert(batches: PreparedBatch[]): BrowserArchiveStageResult {
+    this.requireProducer();
     this.prune();
     const fresh = this.newBatches(batches);
     const stats = this.status();
@@ -409,6 +458,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private newBatches(batches: PreparedBatch[]): PreparedBatch[] {
+    this.requireProducer();
     const workspace =
       this.ctx.storage.sql
         .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
@@ -434,6 +484,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   status(): ArchiveStats {
+    this.requireProducer();
     return this.ctx.storage.sql
       .exec<ArchiveStats>(
         'SELECT pending_batches, pending_bytes, ledger_batches FROM archive_counts WHERE id = 1',
@@ -449,6 +500,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     cursor: ArchiveDayIndexCursor | null = null,
     limit = MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE,
   ): ArchiveDayIndexPage {
+    this.requireProducer();
     return this.archiveDayIndexPage(day, cursor, limit, true);
   }
 
@@ -458,6 +510,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     limit: number,
     prune: boolean,
   ): ArchiveDayIndexPage {
+    this.requireProducer();
     if (!validIndiaDay(day)) throw new Error('Invalid India calendar day');
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE)
       throw new Error('Archive day index page exceeds limit');
@@ -513,6 +566,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     cursor: ArchiveScopeCursor | null = null,
     limit = MAX_ARCHIVE_DAY_INDEX_PAGE_SIZE,
   ): ArchiveScopePage {
+    this.requireProducer();
     const key = scopeWindowKey(scope);
     if (!validScopePage(key, cursor, limit))
       throw new Error('Invalid archive scope cursor or page limit');
@@ -569,6 +623,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     cursor: ArchiveDayIndexCursor | null,
     expectedWorkspace: string,
   ): Promise<ArchiveScopeIndexResult> {
+    this.requireProducer();
     if (!validIndiaDay(day) || !validDayIndexCursor(day, cursor))
       throw new Error('Invalid archive scope index request');
     if (
@@ -632,6 +687,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     | { scopes: ScopeBounds[]; reason?: never }
     | { scopes: null; reason: ArchiveScopeIndexResult['failed'][number]['reason'] }
   > {
+    this.requireProducer();
     try {
       const result = await readBrowserArchiveAuditSegment(
         { workspace, history: this.env.BROWSER_HISTORY },
@@ -668,6 +724,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     scopes: ScopeBounds[] | null,
     failure?: ArchiveScopeIndexResult['failed'][number]['reason'],
   ): void {
+    this.requireProducer();
     this.ctx.storage.transactionSync(() => {
       const currentWorkspace = this.ctx.storage.sql
         .exec<{ workspace: string | null }>('SELECT workspace FROM archive_meta WHERE id = 1')
@@ -701,6 +758,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
     environmentId: string,
     batchId: string,
   ): ArchiveBatchIndexEntry | null {
+    this.requireProducer();
     if ([appId, environmentId, batchId].some((value) => !value || value.length > 200))
       throw new Error('Invalid archive batch identity');
     this.ctx.storage.sql.exec(
@@ -722,6 +780,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private prune(): void {
+    this.requireProducer();
     this.ctx.storage.sql.exec(
       'DELETE FROM archive_seen WHERE identity IN (SELECT seen.identity FROM archive_seen seen LEFT JOIN projection_pending projection ON projection.identity = seen.identity WHERE seen.expires_at <= ? AND projection.identity IS NULL ORDER BY seen.expires_at LIMIT 1000)',
       Date.now(),
@@ -729,6 +788,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private async schedule(): Promise<void> {
+    this.requireProducer();
     const current = await this.ctx.storage.getAlarm();
     const stats = this.status();
     const meta = this.ctx.storage.sql
@@ -762,6 +822,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
 
   /** Also usable by a bounded operational drain; only one segment uploads at a time. */
   async flush(): Promise<void> {
+    this.requireProducer();
     if (this.flushing) return this.flushing;
     const operation = this.upload();
     this.flushing = operation;
@@ -773,6 +834,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private seal(): SegmentRow | null {
+    this.requireProducer();
     const existing = this.ctx.storage.sql
       .exec<SegmentRow>('SELECT id, object_key FROM archive_segments LIMIT 1')
       .toArray()[0];
@@ -801,6 +863,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private async upload(): Promise<void> {
+    this.requireProducer();
     const segment = this.ctx.storage.transactionSync(() => this.seal());
     if (!segment) return;
     try {
@@ -829,6 +892,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private complete(segment: string, rows: PendingRow[]): void {
+    this.requireProducer();
     const now = Date.now();
     const days = new Set<string>();
     const batches: CollectedBrowserBatch[] = [];
@@ -887,6 +951,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private scopeBounds(batches: CollectedBrowserBatch[]): ScopeBounds[] {
+    this.requireProducer();
     const scopes = new Map<string, ScopeBounds>();
     for (const batch of batches) {
       const key = JSON.stringify([batch.app_id, batch.environment_id]);
@@ -906,6 +971,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private replaceScopeSegments(objectKey: string, scopes: ScopeBounds[], indexedAt: number): void {
+    this.requireProducer();
     this.ctx.storage.sql.exec('DELETE FROM archive_scope_segments WHERE object_key = ?', objectKey);
     for (const scope of scopes)
       this.ctx.storage.sql.exec(
@@ -920,6 +986,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   override async alarm(): Promise<void> {
+    if (this.#role !== 'producer') return;
     this.prune();
     const retry = this.ctx.storage.sql
       .exec<{ retry_after: number }>('SELECT retry_after FROM archive_meta WHERE id = 1')
@@ -941,6 +1008,7 @@ export class BrowserArchive extends DurableObject<BrowserArchiveEnvironment> {
   }
 
   private async projectPending(): Promise<void> {
+    this.requireProducer();
     const rows = this.ctx.storage.sql
       .exec<ProjectionRow>(
         'SELECT identity, payload, attempts FROM projection_pending WHERE next_attempt_at <= ? ORDER BY next_attempt_at, identity LIMIT ?',
