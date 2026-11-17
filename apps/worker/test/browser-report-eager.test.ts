@@ -682,3 +682,48 @@ it.each(['name', 'count'] as const)(
     }
   },
 );
+
+it.each(['headers', 'body'] as const)(
+  'returns the exact original report after a pending optional joint %s reaches2000ms',
+  async (mode) => {
+    seed(30);
+    const expected = (await execute({ ...fixed, app_id: undefined })).result;
+    vi.useFakeTimers();
+    vi.setSystemTime(reportNow);
+    const provider = fixture.provider();
+    const queries: string[] = [];
+    let cancelled = false;
+    let releaseHeaders: ((response: Response) => void) | undefined;
+    const pending = queryBrowserReport('workspace', fixed, {
+      accountId: 'a'.repeat(32), token: 'synthetic', appIds: ['app'],
+      fetchImpl: async (input, init) => {
+        const sql = String(init?.body); queries.push(sql);
+        if (isJoint(sql)) return mode === 'headers'
+          ? await new Promise<Response>((resolve) => { releaseHeaders = resolve; })
+          : new Response(new ReadableStream({ cancel() { cancelled = true; } }));
+        return provider.fetchImpl(input, init);
+      },
+    }).then((report) => ({ report, error: undefined }), (error: unknown) => ({ report: undefined, error }));
+    try {
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(queries).toHaveLength(6);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(queries).toHaveLength(11);
+      const outcome = await pending;
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.report).toEqual(expected);
+      if (releaseHeaders) {
+        releaseHeaders(new Response(new ReadableStream({ cancel() { cancelled = true; } })));
+        await vi.advanceTimersByTimeAsync(0);
+      }
+      expect(cancelled).toBe(true);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(queries).toHaveLength(11);
+      expect(new Set(queries).size).toBe(11);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await vi.advanceTimersByTimeAsync(10000);
+      await pending;
+    }
+  },
+);
