@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { test } from 'node:test';
+import { URL } from 'node:url';
 
 // Resolve the same installed dependency copy used by the workspace tooling.
 const requireFromKnip = createRequire(
