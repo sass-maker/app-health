@@ -1,0 +1,15 @@
+diff --git a/lib/parse.js b/lib/parse.js
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -539,4 +539,11 @@
+   const extglobClose = token => {
+     const literal = input.slice(token.startIndex, state.index + 1);
+     const body = input.slice(token.startIndex + 2, state.index);
++    // A wildcard nested inside a repeated branch can trigger unbounded
++    // backtracking. Reject that grammar even when the recursion guard is off.
++    const repeated = token.type === 'plus' || token.type === 'star';
++    if (repeated && body.includes('*') && splitTopLevel(body).length === 1) {
++      throw new SyntaxError('Wildcard in a single repeated extglob branch is unsupported');
++    }
++
+     const analysis = analyzeRepeatedExtglob(body, opts);

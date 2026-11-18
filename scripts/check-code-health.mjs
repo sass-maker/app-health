@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -258,12 +259,68 @@ function checkDuplication() {
   });
 }
 
+// pnpm reports the upstream version even when the installed parser is patched.
+function verifyPicomatchPatch(advisory) {
+  const version = '4.0.5';
+  const patchHash = '590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276';
+  const parserHash = 'cfbe0b82164e3217b2b96483bd223e5fbeedcf9f5b5ba3437ae0a869c3f0f409';
+  if (!advisory.findings?.length || advisory.findings.some((item) => item.version !== version))
+    return false;
+
+  const packageId = `picomatch@${version}_patch_hash=${patchHash}`;
+  function copies(lockfileOnly) {
+    const args = ['list', '-r', '--depth', 'Infinity', '--json'];
+    if (lockfileOnly) args.push('--lockfile-only');
+    const packages = JSON.parse(run('pnpm', [...args, 'picomatch']).stdout);
+    const paths = new Set();
+
+    function collect(node) {
+      for (const group of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        for (const dependency of Object.values(node[group] ?? {})) {
+          if (dependency.from === 'picomatch') {
+            if (
+              dependency.version !== version ||
+              !dependency.path?.endsWith(join(packageId, 'node_modules', 'picomatch'))
+            )
+              throw new Error('Found a picomatch resolution outside the verified patch');
+            paths.add(dependency.path);
+          }
+          collect(dependency);
+        }
+      }
+    }
+
+    packages.forEach(collect);
+    return paths;
+  }
+
+  const locked = copies(true);
+  const installed = copies(false);
+  if (!locked.size || locked.size !== installed.size) return false;
+  return [...locked].every((path) => {
+    if (!installed.has(path)) return false;
+    const parser = readFileSync(join(path, 'lib', 'parse.js'));
+    return createHash('sha256').update(parser).digest('hex') === parserHash;
+  });
+}
+
 function checkDependencies() {
   const result = run('pnpm', ['audit', '--json'], { allowFailure: true });
   const report = JSON.parse(result.stdout);
-  const severe = Object.values(report.advisories ?? {}).filter((advisory) =>
-    ['critical', 'high'].includes(advisory.severity),
-  );
+  if (!report.advisories || report.error) throw new Error('Dependency audit returned no result');
+  const severe = Object.values(report.advisories).filter((advisory) => {
+    if (!['critical', 'high'].includes(advisory.severity)) return false;
+    if (
+      advisory.severity === 'high' &&
+      advisory.github_advisory_id === 'GHSA-fc5q-39xc-vjpf' &&
+      advisory.module_name === 'picomatch' &&
+      verifyPicomatchPatch(advisory)
+    ) {
+      log('Verified the installed picomatch patch for GHSA-fc5q-39xc-vjpf.');
+      return false;
+    }
+    return true;
+  });
   const critical = severe.filter((advisory) => advisory.severity === 'critical').length;
   const high = severe.filter((advisory) => advisory.severity === 'high').length;
   log(`Dependencies: ${critical} critical, ${high} high advisories.`);
