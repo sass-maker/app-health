@@ -24,6 +24,9 @@ patchedDependencies:
   '@saas-maker/ui@0.1.20':
     hash: ce62cdb9333f386f9a5452e482b06a5ee85d733a18977b1994bb6e3caf082a7d
     path: patches/saas-maker-ui-0.1.20.patch
+  picomatch@4.0.5:
+    hash: 590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276
+    path: patches/picomatch-4.0.5.patch
 
 importers:
 
@@ -7126,9 +7129,9 @@ snapshots:
     dependencies:
       walk-up-path: 4.0.0
 
-  fdir@6.5.0(picomatch@4.0.5):
+  fdir@6.5.0(picomatch@4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)):
     optionalDependencies:
-      picomatch: 4.0.5
+      picomatch: 4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)
 
   file-entry-cache@8.0.0:
     dependencies:
@@ -7457,13 +7460,13 @@ snapshots:
 
   knip@6.32.2:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.5)
+      fdir: 6.5.0(picomatch@4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276))
       formatly: 0.3.0
       get-tsconfig: 4.14.1
       jiti: 2.7.0
       oxc-parser: 0.143.0
       oxc-resolver: 11.24.2
-      picomatch: 4.0.5
+      picomatch: 4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)
       smol-toml: 1.8.0
       strip-json-comments: 5.0.3
       tinyglobby: 0.2.17
@@ -7764,7 +7767,7 @@ snapshots:
 
   picocolors@1.1.1: {}
 
-  picomatch@4.0.5: {}
+  picomatch@4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276): {}
 
   pirates@4.0.7: {}
 
@@ -8276,8 +8279,8 @@ snapshots:
 
   tinyglobby@0.2.17:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.5)
-      picomatch: 4.0.5
+      fdir: 6.5.0(picomatch@4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276))
+      picomatch: 4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)
 
   tinypool@2.1.2: {}
 
@@ -8457,8 +8460,8 @@ snapshots:
   vite@7.3.7(@types/node@24.13.4)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(tsx@4.23.1)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.1
-      fdir: 6.5.0(picomatch@4.0.5)
-      picomatch: 4.0.5
+      fdir: 6.5.0(picomatch@4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276))
+      picomatch: 4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)
       postcss: 8.5.26
       rollup: 4.62.4
       tinyglobby: 0.2.17
@@ -8486,7 +8489,7 @@ snapshots:
       expect-type: 1.4.0
       magic-string: 0.30.21
       pathe: 2.0.3
-      picomatch: 4.0.5
+      picomatch: 4.0.5(patch_hash=590b4f29a513a2447a01a605e6c28e83b789ab6e93ab558e0db45e26af1e7276)
       std-env: 3.10.0
       tinybench: 2.9.0
       tinyexec: 0.3.2

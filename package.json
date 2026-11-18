@@ -29,7 +29,7 @@
     "quality:complexity": "node --test scripts/lizard-tsx-spans.test.mjs && node scripts/check-code-health.mjs complexity",
     "quality:duplication": "node scripts/check-code-health.mjs duplication",
     "quality:cycles": "knip --cycles --no-config-hints",
-    "quality:dependencies": "node scripts/check-code-health.mjs dependencies",
+    "quality:dependencies": "node --test scripts/picomatch-patch.test.mjs && node scripts/check-code-health.mjs dependencies",
     "quality:suppressions": "node scripts/check-code-health.mjs suppressions",
     "quality:hygiene": "node scripts/check-code-health.mjs hygiene",
     "quality": "pnpm --silent run format:check && pnpm --silent run operations:test && node --test scripts/worker-package.test.mjs && pnpm --silent run quality:go-format && pnpm --silent run lint && pnpm --silent run typecheck && pnpm --silent run quality:go-vet && pnpm --silent run build && node scripts/verify-local-sdk.mjs && pnpm --silent run verify:cloudflare-sample && pnpm --silent run verify:asset-routing && pnpm --filter @app-health/worker run verify:accounts-runtime && pnpm --silent run verify:public-viewer && pnpm --silent run quality:coverage && pnpm --silent run quality:unused && pnpm --silent run quality:complexity && pnpm --silent run quality:duplication && pnpm --silent run quality:cycles && pnpm --silent run quality:dependencies && pnpm --silent run quality:suppressions && pnpm --silent run quality:hygiene && pnpm --filter @app-health/web run test:browser",

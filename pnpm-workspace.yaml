@@ -4,3 +4,4 @@ packages:
   - 'examples/*'
 patchedDependencies:
   '@saas-maker/ui@0.1.20': patches/saas-maker-ui-0.1.20.patch
+  'picomatch@4.0.5': patches/picomatch-4.0.5.patch
