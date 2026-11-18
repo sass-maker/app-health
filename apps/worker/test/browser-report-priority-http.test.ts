@@ -299,7 +299,7 @@ it.each([
   );
 });
 
-it('retains body and inflight isolation from public315 and five earlier cache plans with60second TTL', async () => {
+it('retains body and inflight isolation from public315 and six earlier cache plans with a 60-second TTL', async () => {
   setup();
   mode = 'normal';
   cacheEnabled = true;
@@ -312,6 +312,7 @@ it('retains body and inflight isolation from public315 and five earlier cache pl
       'optional-first-v3',
       'eager-bounded-v4',
       'page-control-bounded-v5',
+      'source-first-v6',
     ].map((plan) => JSON.stringify(['browser-report:' + plan, filter(), [scope.app_id]])),
   ];
   const pending = keys.map((key) =>
@@ -326,7 +327,7 @@ it('retains body and inflight isolation from public315 and five earlier cache pl
         }),
     ),
   );
-  await vi.waitFor(() => expect(releases).toHaveLength(6));
+  await vi.waitFor(() => expect(releases).toHaveLength(7));
   const first = await report();
   expect(first.status).toBe(200);
   const body = await first.json();
@@ -338,7 +339,7 @@ it('retains body and inflight isolation from public315 and five earlier cache pl
   expect(queries).toHaveLength(7);
   expect(
     [...entries.keys()].filter((key) =>
-      decodeURIComponent(key).includes('browser-report:source-first-v6'),
+      decodeURIComponent(key).includes('browser-report:source-first-v7'),
     ),
   ).toHaveLength(1);
   expect(new Set(ttl)).toEqual(new Set(['max-age=60']));
@@ -360,14 +361,15 @@ it('isolates optional provider failures without retrying or discarding core metr
 });
 
 it.each(['core-headers', 'core-body'])(
-  'retains one shared provider deadline for %s',
+  'keeps the first-wave deadline when %s is stalled',
   async (failure) => {
     setup();
     mode = failure;
     const started = performance.now();
     const response = await report();
     expect(response.status).toBe(503);
-    expect(dispatches).toHaveLength(7);
+    expect(dispatches).toHaveLength(11);
+    expect(new Set(dispatches).size).toBe(11);
     expect(performance.now() - started).toBeLessThan(13000);
   },
   18000,

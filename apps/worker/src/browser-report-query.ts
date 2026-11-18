@@ -271,17 +271,22 @@ function reportQueries(sql: readonly string[], optionalStart: number, options: Q
     'analyticsEventsMs',
     'analyticsAudiencePreviousMs',
   ];
-  const timedQuery = async (statement: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
+  const timedQuery = async (
+    statement: string,
+    stage: AnalyticsQueryStage,
+    queryOptions = options,
+  ): Promise<QueryRow[]> => {
     const started = performance.now();
     try {
-      return await queryReportRows(statement, options);
+      return await queryReportRows(statement, queryOptions);
     } finally {
       if (options.timings)
         options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
     }
   };
   return {
-    run: (index: number) => timedQuery(sql[index], fixedStages[index] ?? 'analyticsDimensionMaxMs'),
+    run: (index: number, queryOptions?: QueryOptions) =>
+      timedQuery(sql[index], fixedStages[index] ?? 'analyticsDimensionMaxMs', queryOptions),
     runOptional: () =>
       Promise.allSettled(
         sql

@@ -17,10 +17,11 @@ type Arguments = {
   filter: BrowserReportFilter;
   from: number;
   to: number;
-  run: (index: number) => Promise<QueryRow[]>;
+  run: (index: number, options?: QueryOptions) => Promise<QueryRow[]>;
   options: QueryOptions;
 };
 function fallbackRankings(args: Arguments, joint: AbortController) {
+  const controller = new AbortController();
   let pending: Promise<QueryRow[][]> | undefined;
   let resolve!: (rows: Promise<QueryRow[][]>) => void;
   const decided = new Promise<QueryRow[][]>((done) => {
@@ -31,12 +32,33 @@ function fallbackRankings(args: Arguments, joint: AbortController) {
       assertProviderDeadline(args.options);
       if (args.options.timings) args.options.timings.analyticsJointFallbacks = 1;
       joint.abort(new DOMException('Original rankings selected', 'AbortError'));
-      pending = Promise.all([3, 5, 6, 7].map(args.run));
+      // Dispatch may trail the speculative read by up to the watchdog budget.
+      // Original ranking reads still get their own ten seconds.
+      const options = {
+        ...args.options,
+        signal: controller.signal,
+        deadlineAt: performance.now() + 10_000,
+      };
+      const timer = setTimeout(
+        () => controller.abort(new DOMException('Analytics deadline elapsed', 'TimeoutError')),
+        10_000,
+      );
+      pending = Promise.all([3, 5, 6, 7].map((index) => args.run(index, options)))
+        .catch((error) => {
+          controller.abort(error);
+          throw error;
+        })
+        .finally(() => clearTimeout(timer));
       resolve(pending);
     }
     return pending;
   };
-  return { start, decided, started: () => pending !== undefined };
+  return {
+    start,
+    decided,
+    started: () => pending !== undefined,
+    cancel: (error: unknown) => controller.abort(error),
+  };
 }
 function jointWatchdog(fallback: ReturnType<typeof fallbackRankings>, controller: AbortController) {
   const timeout = setTimeout(() => {
@@ -86,27 +108,25 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
     return rows;
   });
   const stopWatchdog = jointWatchdog(fallback, controller);
-  const joint = queryJointRows(args.plan.jointSql!, args.options, controller)
-    .then((data) => {
-      prepared = prepareJointRankings({
-        data,
-        filter: args.filter,
-        from: args.from,
-        to: args.to,
-        dimensions: args.plan.dimensionBlobs,
-      });
-      if (!prepared) fallback.start();
-      reconcile();
-      return prepared;
-    })
-    .finally(stopWatchdog);
-  const fixed = Promise.all([trend, pages, sources, periods]);
+  const joint = queryJointRows(args.plan.jointSql!, args.options, controller).then((data) => {
+    prepared = prepareJointRankings({
+      data,
+      filter: args.filter,
+      from: args.from,
+      to: args.to,
+      dimensions: args.plan.dimensionBlobs,
+    });
+    if (!prepared) fallback.start();
+    reconcile();
+    return prepared;
+  });
+  const fixed = Promise.all([trend, pages, periods]);
   const acceptance = Promise.all([fixed, joint]).then(([controls, rows]) => {
     assertProviderDeadline(args.options);
     if (fallback.started()) return fallback.start();
     const counter = trendRankingCounter(controls[0]);
     const folded =
-      rows && counter && agreesWithCurrentPeriod(controls[3], counter)
+      rows && counter && agreesWithCurrentPeriod(controls[2], counter)
         ? foldJointRankings({
             folded: rows,
             counter,
@@ -114,15 +134,19 @@ export async function eagerReportRows(args: Arguments): Promise<QueryRow[][]> {
             pages: controls[1],
           })
         : undefined;
+    stopWatchdog();
     return folded ? [folded.events, ...folded.dimensions] : fallback.start();
   });
   try {
-    const [controls, rankings] = await Promise.all([
+    const [controls, sourceRows, rankings] = await Promise.all([
       fixed,
+      sources,
       Promise.race([acceptance, fallback.decided]),
     ]);
-    assertProviderDeadline(args.options);
-    return [controls[0], controls[1], controls[2], rankings[0], controls[3], ...rankings.slice(1)];
+    return [controls[0], controls[1], sourceRows, rankings[0], controls[2], ...rankings.slice(1)];
+  } catch (error) {
+    fallback.cancel(error);
+    throw error;
   } finally {
     stopWatchdog();
   }

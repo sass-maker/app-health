@@ -341,8 +341,39 @@ it('dispatches original four on current/trend disagreement while joint headers a
   expect(r.series.reduce((sum, row) => sum + row.pageviews + row.events, 0)).toBe(30);
 });
 
+it('gives delayed original fallback rankings their full query budget', async () => {
+  seed(145);
+  vi.useFakeTimers();
+  const pending = execute(fixed, async (sql, rows, init) => {
+    const slowControl = isJoint(sql) || sql.includes('GROUP BY bucket') || isPeriods(sql);
+    const slowDimension = sql.includes('GROUP BY name') && sql.includes('blob13');
+    const delay = slowControl ? 1800 : slowDimension ? 9000 : 0;
+    if (delay)
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, delay);
+        init.signal!.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(timer);
+            reject(init.signal!.reason);
+          },
+          { once: true },
+        );
+      });
+    return Response.json({ data: rows });
+  });
+  void pending.catch(() => {});
+  await vi.advanceTimersByTimeAsync(10800);
+  const { queries, result, timings } = await pending;
+  expect(timings.analyticsJointFallbacks).toBe(1);
+  expect(queries).toHaveLength(11);
+  expect(new Set(queries).size).toBe(11);
+  expect(result.series.reduce((sum, row) => sum + row.pageviews + row.events, 0)).toBe(145);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it.each(['headers', 'body'] as const)(
-  'fails closed at shared deadline when original fallback requests stall after joint %s',
+  'fails closed at the fallback deadline when original ranking requests stall after joint %s',
   async (mode) => {
     seed(30);
     vi.useFakeTimers();
@@ -371,6 +402,7 @@ it.each(['headers', 'body'] as const)(
         if (!(
           isPages(sql) ||
           isPeriods(sql) ||
+          sql.includes('source_host') ||
           sql.includes('GROUP BY bucket') ||
           sql.includes('pageview_sessions') ||
           sql.includes('argMax')
@@ -384,11 +416,9 @@ it.each(['headers', 'body'] as const)(
       },
     });
     const rejected = expect(pending).rejects.toThrow('Analytics deadline elapsed');
-    await vi.advanceTimersByTimeAsync(9999);
+    await vi.advanceTimersByTimeAsync(11999);
     expect(queries).toHaveLength(11);
-    expect(
-      signals.filter((_, index) => !isJoint(queries[index])).every((signal) => !signal.aborted),
-    ).toBe(true);
+    expect(signals.slice(7).every((signal) => !signal.aborted)).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     await rejected;
     expect(queries).toHaveLength(11);
