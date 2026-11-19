@@ -6,7 +6,7 @@ import {
 import { importCatalogProjects } from '../src/catalog-import.js';
 import { handleBrowserOwner } from '../src/browser-routes.js';
 import { D1WorkspaceHealth } from '../src/workspace-health.js';
-import { currentPortfolioAppIds } from '../src/catalog-inventory.js';
+import { currentPortfolioAnalyticsSnapshot } from '../src/catalog-inventory.js';
 import { URL } from 'node:url';
 import { readFileSync, readdirSync } from 'node:fs';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
@@ -1399,15 +1399,17 @@ describe('canonical active portfolio synchronization', () => {
     const retry = await syncCatalog(f.db, 'ws', input(), 11);
     expect(retry.projection_hash).toBe(first.projection_hash);
     expect(
-      await currentPortfolioAppIds(
-        f.db,
-        'ws',
-        (
-          f.sqlite
-            .prepare('SELECT app_id FROM workspace_apps WHERE workspace_id = ?')
-            .all('ws') as { app_id: string }[]
-        ).map((row) => row.app_id),
-      ),
+      (
+        await currentPortfolioAnalyticsSnapshot(
+          f.db,
+          'ws',
+          (
+            f.sqlite
+              .prepare('SELECT app_id FROM workspace_apps WHERE workspace_id = ?')
+              .all('ws') as { app_id: string }[]
+          ).map((row) => row.app_id),
+        )
+      ).appIds,
     ).toHaveLength(39);
     const health = await new D1WorkspaceHealth(f.db, 'ws').queryWorkspaceHealth(1750000000000);
     expect(health.environments).toHaveLength(39);
@@ -1863,8 +1865,10 @@ describe('canonical active portfolio synchronization', () => {
       },
     };
     let finishOld!: (value: number) => void;
+    const prior = await currentPortfolioAnalyticsSnapshot(f.db, 'ws', ['app-0', 'app-56']);
+    expect(prior).toEqual({ appIds: ['app-0', 'app-56'], projectionHash: 'manual' });
     const old = snapshotCachedAnalytics(
-      f.db,
+      prior,
       'owner',
       'ws',
       'cohort',
@@ -1875,10 +1879,12 @@ describe('canonical active portfolio synchronization', () => {
       adapter,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await syncCatalog(f.db, 'ws', input(), 10);
+    const { projection_hash } = await syncCatalog(f.db, 'ws', input(), 10);
+    const snapshot = await currentPortfolioAnalyticsSnapshot(f.db, 'ws', ['app-0', 'app-56']);
+    expect(snapshot).toEqual({ appIds: ['app-0'], projectionHash: projection_hash });
     const current = () =>
       snapshotCachedAnalytics(
-        f.db,
+        snapshot,
         'owner',
         'ws',
         'cohort',
@@ -1910,6 +1916,7 @@ describe('canonical active portfolio synchronization', () => {
       ANALYTICS_ENGINE_QUERY_TOKEN: 'synthetic-query',
     };
     const owner = { id: 'owner', label: 'Owner', workspaceId: 'ws', appIds: ['app-0', 'app-56'] };
+    const prepare = vi.spyOn(f.db, 'prepare');
     expect(
       (
         await handleBrowserOwner(
@@ -1923,6 +1930,12 @@ describe('canonical active portfolio synchronization', () => {
     expect(queries.length).toBeGreaterThan(0);
     expect(queries.join(' ')).toContain('app-0');
     expect(queries.join(' ')).not.toContain('app-56');
+    expect(prepare.mock.calls).toEqual([
+      [
+        'SELECT projects_json, projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?',
+      ],
+    ]);
+    prepare.mockClear();
     queries.length = 0;
     expect(
       (
@@ -1937,6 +1950,9 @@ describe('canonical active portfolio synchronization', () => {
       )?.status,
     ).toBe(200);
     expect(queries.join(' ')).toContain('app-56');
+    expect(prepare.mock.calls).toEqual([
+      ['SELECT projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?'],
+    ]);
   });
 
   it('requires an owner account, bounds input and rejects unreviewed public journeys', async () => {

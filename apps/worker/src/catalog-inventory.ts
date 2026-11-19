@@ -33,18 +33,29 @@ export function portfolioInventoryPredicate(workspace: string, app: string) {
   return `(NOT EXISTS (SELECT 1 FROM workspace_portfolio_snapshots selected_snapshot WHERE selected_snapshot.workspace_id = ${workspace}) OR EXISTS (SELECT 1 FROM current_workspace_catalog selected_project WHERE selected_project.workspace_id = ${workspace} AND selected_project.app_id = ${app}))`;
 }
 
-export async function currentPortfolioAppIds(
+export interface PortfolioAnalyticsSnapshot {
+  appIds: readonly string[];
+  projectionHash: string;
+}
+
+/** Read the active roster and its cache revision from the same catalog row. */
+export async function currentPortfolioAnalyticsSnapshot(
   db: D1DatabaseLike | undefined,
   workspace: string,
   owned: readonly string[],
-) {
+): Promise<PortfolioAnalyticsSnapshot> {
   const snapshot = await db
-    ?.prepare('SELECT projects_json FROM workspace_portfolio_snapshots WHERE workspace_id = ?')
+    ?.prepare(
+      'SELECT projects_json, projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?',
+    )
     .bind(workspace)
-    .first<{ projects_json: string }>();
-  if (!snapshot) return owned;
+    .first<{ projects_json: string; projection_hash: string }>();
+  if (!snapshot) return { appIds: owned, projectionHash: 'manual' };
   const selected = new Set(
     (JSON.parse(snapshot.projects_json) as { app_id: string }[]).map((project) => project.app_id),
   );
-  return owned.filter((app) => selected.has(app));
+  return {
+    appIds: owned.filter((app) => selected.has(app)),
+    projectionHash: snapshot.projection_hash,
+  };
 }

@@ -1,4 +1,7 @@
-import { currentPortfolioAppIds } from './catalog-inventory.js';
+import {
+  currentPortfolioAnalyticsSnapshot,
+  type PortfolioAnalyticsSnapshot,
+} from './catalog-inventory.js';
 import {
   isNativeArchiveScope,
   nativeArchiveDiagnosticName,
@@ -852,11 +855,11 @@ export async function handleBrowserOwner(
   if (!env.WORKSPACE_PRESENCE || !env.BROWSER_EVENTS)
     return json(503, { error: 'Browser analytics is not configured yet.' });
   const presence = env.WORKSPACE_PRESENCE.getByName(workspace);
-  const selectedIds = await currentPortfolioAppIds(env.DB, workspace, owner.appIds ?? []);
+  const portfolio = await currentPortfolioAnalyticsSnapshot(env.DB, workspace, owner.appIds ?? []);
   if (path.endsWith('/live'))
-    return browserLiveRoute(request, presence, { ...owner, appIds: selectedIds });
+    return browserLiveRoute(request, presence, { ...owner, appIds: portfolio.appIds });
   return measureOwnerRouteRead(timings, () =>
-    workspaceSummary(workspace, env, presence, selectedIds, timings),
+    workspaceSummary(workspace, env, presence, portfolio, timings),
   );
 }
 
@@ -864,7 +867,7 @@ async function workspaceSummary(
   workspace: string,
   env: BrowserEnvironment,
   presence: BrowserPresence,
-  appIds: readonly string[],
+  portfolio: PortfolioAnalyticsSnapshot,
   timings?: OwnerRequestTimings,
 ): Promise<Response> {
   const measure = async <T>(
@@ -883,7 +886,7 @@ async function workspaceSummary(
     const [metrics, live] = await Promise.all([
       measure('analyticsSummaryMs', () =>
         snapshotCachedAnalytics(
-          env.DB,
+          portfolio,
           env.CLOUDFLARE_ACCOUNT_ID ?? '',
           workspace,
           'summary',
@@ -901,7 +904,7 @@ async function workspaceSummary(
       ),
       measure('analyticsPresenceMs', () => presence.snapshot()),
     ]);
-    const active = new Set(appIds);
+    const active = new Set(portfolio.appIds);
     const liveProjects = live.projects.filter((project) => active.has(project.app_id));
     const body: BrowserSummary = {
       ...metrics,
@@ -919,6 +922,17 @@ async function workspaceSummary(
   } catch {
     return json(503, { error: 'Browser analytics is temporarily unavailable.' });
   }
+}
+
+async function browserReportPortfolio(
+  db: BrowserEnvironment['DB'],
+  owner: OwnerIdentity,
+  appId: string | undefined,
+) {
+  const owned = owner.appIds ?? [];
+  if (appId) return { appIds: owned, cacheSource: db };
+  const snapshot = await currentPortfolioAnalyticsSnapshot(db, owner.workspaceId!, owned);
+  return { appIds: snapshot.appIds, cacheSource: snapshot };
 }
 
 async function browserReport(
@@ -941,14 +955,15 @@ async function browserReport(
   if (!env.BROWSER_ANALYTICS || !accountId || !token)
     return json(503, { error: 'Web analytics is not configured yet.' });
   try {
-    const ownedIds = owner.appIds ?? [];
-    const reportAppIds = filter.data.app_id
-      ? ownedIds
-      : await currentPortfolioAppIds(env.DB, owner.workspaceId!, ownedIds);
+    const { appIds: reportAppIds, cacheSource } = await browserReportPortfolio(
+      env.DB,
+      owner,
+      filter.data.app_id,
+    );
     return json(
       200,
       await snapshotCachedAnalytics(
-        env.DB,
+        cacheSource,
         accountId,
         owner.workspaceId!,
         JSON.stringify([filter.data, reportAppIds]),

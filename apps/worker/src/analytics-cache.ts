@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './d1-adapter.js';
+import type { PortfolioAnalyticsSnapshot } from './catalog-inventory.js';
 interface ReportCache {
   match(request: Request): Promise<Response | undefined>;
   put(request: Request, response: Response): Promise<void>;
@@ -71,7 +72,7 @@ export async function cachedAnalytics<T>(
 
 /** The revision fences both Cloudflare entries and in-flight reads across catalog changes. */
 export async function snapshotCachedAnalytics<T>(
-  db: D1DatabaseLike | undefined,
+  source: D1DatabaseLike | Pick<PortfolioAnalyticsSnapshot, 'projectionHash'> | undefined,
   account: string,
   workspace: string,
   query: string,
@@ -80,14 +81,21 @@ export async function snapshotCachedAnalytics<T>(
   maxAge = 60,
   timings?: AnalyticsCacheTimings,
 ): Promise<T> {
-  const snapshot = await db
-    ?.prepare('SELECT projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?')
-    .bind(workspace)
-    .first<{ projection_hash: string }>();
+  const projectionHash =
+    source && 'projectionHash' in source
+      ? source.projectionHash
+      : ((
+          await source
+            ?.prepare(
+              'SELECT projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?',
+            )
+            .bind(workspace)
+            .first<{ projection_hash: string }>()
+        )?.projection_hash ?? 'manual');
   return cachedAnalytics(
     account,
     workspace,
-    `${snapshot?.projection_hash ?? 'manual'}:${query}`,
+    `${projectionHash}:${query}`,
     load,
     cache,
     maxAge,
