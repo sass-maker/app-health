@@ -111,6 +111,9 @@ export interface OwnerRequestTimings {
   analyticsDimensionMaxMs?: number;
   analyticsEngagementMs?: number;
   analyticsExitsMs?: number;
+  analyticsEngagementExitsMs?: number;
+  analyticsOptionalAttempts?: number;
+  analyticsOptionalFallbacks?: number;
   analyticsReportAssemblyMs?: number;
   appsProjectionMs?: number;
   ownerHandlerTotalMs?: number;
@@ -198,12 +201,18 @@ export function withOwnerServerTiming(response: Response, timings?: OwnerRequest
     ['analytics_dimension_max', timings.analyticsDimensionMaxMs],
     ['analytics_engagement', timings.analyticsEngagementMs],
     ['analytics_exits', timings.analyticsExitsMs],
+    ['analytics_engagement_exits', timings.analyticsEngagementExitsMs],
     ['analytics_report_assembly', timings.analyticsReportAssemblyMs],
     ['route_read', timings.routeReadMs],
     ['owner_handler_total', timings.ownerHandlerTotalMs],
   ]
     .filter((entry): entry is [string, number] => entry[1] !== undefined)
     .map(([name, milliseconds]) => `${name};dur=${milliseconds.toFixed(2)}`);
+  for (const [name, count] of [
+    ['analytics_optional_attempts', timings.analyticsOptionalAttempts],
+    ['analytics_optional_fallbacks', timings.analyticsOptionalFallbacks],
+  ])
+    if (count === 1) values.push(`${name};desc="1"`);
   if (!values.length) return response;
   const headers = new Headers(response.headers);
   headers.set('server-timing', values.join(', '));

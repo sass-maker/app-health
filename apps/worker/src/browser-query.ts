@@ -1,7 +1,7 @@
 /** Shared bounded transport for Analytics Engine reports; callers validate their own rows. */
 export async function browserQuery(
   sql: string,
-  options: { accountId: string; token: string; fetchImpl?: typeof fetch },
+  options: { accountId: string; token: string; fetchImpl?: typeof fetch; signal?: AbortSignal },
 ): Promise<Response> {
   return (options.fetchImpl ?? fetch)(
     `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/analytics_engine/sql`,
@@ -9,7 +9,9 @@ export async function browserQuery(
       method: 'POST',
       headers: { authorization: `Bearer ${options.token}`, 'content-type': 'text/plain' },
       body: sql,
-      signal: AbortSignal.timeout(10000),
+      signal: options.signal
+        ? AbortSignal.any([options.signal, AbortSignal.timeout(10000)])
+        : AbortSignal.timeout(10000),
     },
   );
 }

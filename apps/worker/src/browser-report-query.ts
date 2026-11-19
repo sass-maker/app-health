@@ -1,5 +1,10 @@
 import { browserReportPlan, hasSegmentFilter } from './browser-report-plan.js';
 import { browserQuery } from './browser-query.js';
+import { optionalEngagementSql, useOptionalEngagement } from './browser-engagement-plan.js';
+import {
+  startOptionalEngagement,
+  type OptionalEngagementTimings,
+} from './browser-engagement-query.js';
 import {
   type BrowserReport,
   BrowserReportFilter,
@@ -18,13 +23,16 @@ type AnalyticsQueryStage =
 type AnalyticsReportTimings = {
   analyticsQueryWaitMs?: number;
   analyticsReportAssemblyMs?: number;
-} & Partial<Record<AnalyticsQueryStage, number>>;
+} & Partial<Record<AnalyticsQueryStage, number>> &
+  OptionalEngagementTimings;
 type QueryOptions = {
   accountId: string;
   token: string;
   fetchImpl?: typeof fetch;
   appIds?: readonly string[];
   timings?: AnalyticsReportTimings;
+  optionalEngagement?: true;
+  signal?: AbortSignal;
 };
 
 interface QueryResponse {
@@ -240,48 +248,7 @@ async function loadReport(
     step,
     filter.app_id ? [filter.app_id] : options.appIds,
   );
-  const optionalStart =
-    filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
-  const fixedStages: AnalyticsQueryStage[] = [
-    'analyticsTrendMs',
-    'analyticsPagesMs',
-    'analyticsSourcesMs',
-    'analyticsEventsMs',
-    'analyticsAudiencePreviousMs',
-  ];
-  const coreStage = (index: number): AnalyticsQueryStage => {
-    if (index < fixedStages.length) return fixedStages[index];
-    return 'analyticsDimensionMaxMs';
-  };
-  const timedQuery = async (sql: string, stage: AnalyticsQueryStage): Promise<QueryRow[]> => {
-    const started = options.timings ? performance.now() : undefined;
-    try {
-      return await query(sql, options);
-    } finally {
-      if (options.timings && started !== undefined)
-        options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
-    }
-  };
-  const queryWaitStarted = options.timings ? performance.now() : undefined;
-  let results: QueryRow[][];
-  let optional: PromiseSettledResult<QueryRow[]>[];
-  try {
-    [results, optional] = await Promise.all([
-      Promise.all(
-        plan.sql.slice(0, optionalStart).map((sql, index) => timedQuery(sql, coreStage(index))),
-      ),
-      Promise.allSettled(
-        plan.sql
-          .slice(optionalStart)
-          .map((sql, index) =>
-            timedQuery(sql, index === 0 ? 'analyticsEngagementMs' : 'analyticsExitsMs'),
-          ),
-      ),
-    ]);
-  } finally {
-    if (options.timings && queryWaitStarted !== undefined)
-      options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
-  }
+  const { results, optional } = await loadReportRows(plan, filter, to - from, options);
   const [trend, pages, sources, events, periodRows, ...rest] = results;
   validateReportPeriods(periodRows);
   const audienceRows = periodRows.filter((row) => number(row.period) === 1);
@@ -301,6 +268,80 @@ async function loadReport(
     engagementAvailable: optional.every((result) => result.status === 'fulfilled'),
     dimensionBlobs: plan.dimensionBlobs,
   };
+}
+
+async function loadReportRows(
+  plan: ReturnType<typeof browserReportPlan>,
+  filter: BrowserReportFilter,
+  duration: number,
+  options: QueryOptions,
+) {
+  const optionalStart =
+    filter.event || hasSegmentFilter(filter) ? plan.sql.length : plan.sql.length - 2;
+  const fixedStages: AnalyticsQueryStage[] = [
+    'analyticsTrendMs',
+    'analyticsPagesMs',
+    'analyticsSourcesMs',
+    'analyticsEventsMs',
+    'analyticsAudiencePreviousMs',
+  ];
+  const coreStage = (index: number): AnalyticsQueryStage => {
+    if (index < fixedStages.length) return fixedStages[index];
+    return 'analyticsDimensionMaxMs';
+  };
+  const timedQuery = async (
+    sql: string,
+    stage: AnalyticsQueryStage,
+    signal?: AbortSignal,
+  ): Promise<QueryRow[]> => {
+    const started = options.timings ? performance.now() : undefined;
+    try {
+      return await query(sql, signal ? { ...options, signal } : options);
+    } finally {
+      if (options.timings && started !== undefined)
+        options.timings[stage] = Math.max(options.timings[stage] ?? 0, performance.now() - started);
+    }
+  };
+  const queryWaitStarted = options.timings ? performance.now() : undefined;
+  let results: QueryRow[][];
+  let optional: PromiseSettledResult<QueryRow[]>[];
+  const originalOptional = (signal?: AbortSignal) =>
+    Promise.allSettled(
+      plan.sql
+        .slice(optionalStart)
+        .map((sql, index) =>
+          timedQuery(sql, index === 0 ? 'analyticsEngagementMs' : 'analyticsExitsMs', signal),
+        ),
+    );
+  const combinedSql =
+    options.optionalEngagement && useOptionalEngagement(filter)
+      ? optionalEngagementSql(plan.sql[optionalStart])
+      : undefined;
+  const combined = combinedSql
+    ? startOptionalEngagement({
+        load: (signal) => browserQuery(combinedSql, { ...options, signal }),
+        original: originalOptional,
+        duration,
+        timings: options.timings,
+      })
+    : undefined;
+  try {
+    const core = plan.sql
+      .slice(0, optionalStart)
+      .map((sql, index) => timedQuery(sql, coreStage(index)));
+    combined?.controls(core[0], core[4]);
+    [results, optional] = await Promise.all([
+      Promise.all(core),
+      combined?.result ?? originalOptional(),
+    ]);
+  } catch (error) {
+    combined?.cancel(error);
+    throw error;
+  } finally {
+    if (options.timings && queryWaitStarted !== undefined)
+      options.timings.analyticsQueryWaitMs = performance.now() - queryWaitStarted;
+  }
+  return { results, optional };
 }
 
 function validateReportPeriods(rows: QueryRow[]): void {
