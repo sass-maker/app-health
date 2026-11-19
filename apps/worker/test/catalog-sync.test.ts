@@ -1897,7 +1897,7 @@ describe('canonical active portfolio synchronization', () => {
     expect(await current()).toBe(39);
   });
 
-  it('uses the current roster for default browser reports while preserving explicit owned historical reads', async () => {
+  it('shares one catalog read for default reports and summary while preserving explicit historical reads', async () => {
     const f = fixture();
     seed(f);
     await syncCatalog(f.db, 'ws', input(), 10);
@@ -1952,6 +1952,41 @@ describe('canonical active portfolio synchronization', () => {
     expect(queries.join(' ')).toContain('app-56');
     expect(prepare.mock.calls).toEqual([
       ['SELECT projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?'],
+    ]);
+    prepare.mockClear();
+
+    const summary = await handleBrowserOwner(
+      new Request('https://dashboard.test/v1/analytics'),
+      {
+        ...env,
+        BROWSER_EVENTS: { send: async () => {} },
+        WORKSPACE_PRESENCE: {
+          getByName: () => ({
+            heartbeat: async () => {},
+            fetch: async () => new Response(null, { status: 501 }),
+            snapshot: async () => ({
+              measured_at: 10,
+              ttl_ms: 45000,
+              total: 3,
+              projects: [
+                { app_id: 'app-0', environment_id: 'env-0', active: 1 },
+                { app_id: 'app-56', environment_id: 'env-56', active: 2 },
+              ],
+            }),
+          }),
+        },
+      },
+      owner,
+      false,
+    );
+    expect(summary?.status).toBe(200);
+    expect(await summary?.json()).toMatchObject({
+      live: { total: 1, projects: [{ app_id: 'app-0', environment_id: 'env-0', active: 1 }] },
+    });
+    expect(prepare.mock.calls).toEqual([
+      [
+        'SELECT projects_json, projection_hash FROM workspace_portfolio_snapshots WHERE workspace_id = ?',
+      ],
     ]);
   });
 
