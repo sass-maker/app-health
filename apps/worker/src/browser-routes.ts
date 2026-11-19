@@ -46,6 +46,7 @@ import {
   sealExactBrowserVisitorDay,
 } from './browser-visitor-daily.js';
 import { snapshotCachedAnalytics } from './analytics-cache.js';
+import { useOptionalEngagement } from './browser-engagement-plan.js';
 import type { SharedAnalytics } from '@app-health/contracts';
 import {
   queryPublicBrowserBreakdowns,
@@ -921,6 +922,20 @@ async function workspaceSummary(
   }
 }
 
+function browserReportExecution(
+  owner: OwnerIdentity,
+  filter: BrowserReportFilter,
+  appIds: readonly string[],
+) {
+  const optionalEngagement = owner.authKind === 'account' && useOptionalEngagement(filter);
+  return {
+    cacheQuery: JSON.stringify(
+      optionalEngagement ? ['browser-report:optional-only-v7', filter, appIds] : [filter, appIds],
+    ),
+    optionalEngagement: optionalEngagement ? (true as const) : undefined,
+  };
+}
+
 async function browserReport(
   request: Request,
   env: BrowserEnvironment,
@@ -945,19 +960,21 @@ async function browserReport(
     const reportAppIds = filter.data.app_id
       ? ownedIds
       : await currentPortfolioAppIds(env.DB, owner.workspaceId!, ownedIds);
+    const execution = browserReportExecution(owner, filter.data, reportAppIds);
     return json(
       200,
       await snapshotCachedAnalytics(
         env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify([filter.data, reportAppIds]),
+        execution.cacheQuery,
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,
             token,
             appIds: reportAppIds,
             timings,
+            optionalEngagement: execution.optionalEngagement,
           }),
         undefined,
         60,
