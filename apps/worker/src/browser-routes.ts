@@ -951,7 +951,7 @@ async function browserReport(
         env.DB,
         accountId,
         owner.workspaceId!,
-        JSON.stringify(['browser-report:source-first-v7', filter.data, reportAppIds]),
+        JSON.stringify([filter.data, reportAppIds]),
         () =>
           queryBrowserReport(owner.workspaceId!, filter.data, {
             accountId,
