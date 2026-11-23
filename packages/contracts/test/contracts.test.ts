@@ -71,11 +71,12 @@ describe('latency histogram threshold boundary', () => {
     const below = new Array<number>(16).fill(0);
     below[8] = 20;
     expect(approximatePercentilesWithDegradedBoundary(below, 20, 0).p95_ms).toBe(999);
-    expect(approximatePercentilesWithDegradedBoundary(below, 19, 0).p95_ms).toBe(1000);
+    expect(approximatePercentilesWithDegradedBoundary(below, 19, 0).p95_ms).toBe(999);
+    expect(approximatePercentilesWithDegradedBoundary(below, 18, 0).p95_ms).toBe(1000);
     const exactAtRank = new Array<number>(16).fill(0);
     exactAtRank[7] = 18;
     exactAtRank[8] = 2;
-    expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p95_ms).toBe(1000);
+    expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p95_ms).toBe(999);
 
     const bucket = {
       ...SEED_BUCKETS[0],

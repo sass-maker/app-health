@@ -303,7 +303,7 @@ it('classifies exact 1000ms p95 from complete new V2 samples', async () => {
   const events = [
     ...Array.from({ length: 18 }, (_, index) => ({
       ...event(`degraded-below-${index}`, timestamp),
-      duration_ms: 500,
+      duration_ms: 999,
     })),
     ...Array.from({ length: 2 }, (_, index) => ({
       ...event(`degraded-edge-${index}`, timestamp),
@@ -355,7 +355,7 @@ it('keeps h8 ambiguous when any old writer contribution is unclassified', async 
     batchId: 'mixed-boundary',
   });
   await db
-    .prepare('UPDATE endpoint_rollups SET h8_classified_count = 19 WHERE app_id = ?')
+    .prepare('UPDATE endpoint_rollups SET h8_classified_count = 18 WHERE app_id = ?')
     .bind('mixed-boundary')
     .run();
   const end = Math.floor(now / 60_000) * 60_000;

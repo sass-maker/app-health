@@ -171,7 +171,7 @@ export function histogramP95LowerBound(
   return { p95_lower_bound_ms: approximatePercentiles(lowerHistogram).p95_ms };
 }
 
-/** Resolve only the degraded boundary when every h8 contribution is classified. */
+/** Resolve the degraded boundary only when h8 observations prove which side of 1000ms p95 is on. */
 export function approximatePercentilesWithDegradedBoundary(
   histogram: readonly number[],
   classifiedH8Count = 0,
@@ -194,8 +194,9 @@ export function approximatePercentilesWithDegradedBoundary(
   const target = Math.ceil(total * 0.95);
   const beforeDegradedBin = histogram.slice(0, 8).reduce((sum, count) => sum + count, 0);
   const requiredFromBin = target - beforeDegradedBin;
-  if (exact1000Count >= requiredFromBin) return percentiles;
-  if (classifiedH8Count === degradedBinCount) return { ...percentiles, p95_ms: 999 };
+  const knownBelow1000 = classifiedH8Count - exact1000Count;
+  if (requiredFromBin > degradedBinCount - exact1000Count) return percentiles;
+  if (requiredFromBin <= knownBelow1000) return { ...percentiles, p95_ms: 999 };
   return percentiles;
 }
 
