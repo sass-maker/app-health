@@ -171,7 +171,7 @@ export function histogramP95LowerBound(
   return { p95_lower_bound_ms: approximatePercentiles(lowerHistogram).p95_ms };
 }
 
-/** Resolve the degraded boundary only when h8 observations prove which side of 1000ms p95 is on. */
+/** Resolve the degraded boundary when h8 observations prove a percentile is below or at 1000ms. */
 export function approximatePercentilesWithDegradedBoundary(
   histogram: readonly number[],
   classifiedH8Count = 0,
@@ -188,16 +188,22 @@ export function approximatePercentilesWithDegradedBoundary(
     exact1000Count > classifiedH8Count
   )
     throw new Error('Invalid exact degraded-threshold histogram counts');
-  if (percentiles.p95_ms !== 1000 || degradedBinCount === 0) return percentiles;
+  if (degradedBinCount === 0) return percentiles;
 
   const total = histogram.reduce((sum, count) => sum + count, 0);
-  const target = Math.ceil(total * 0.95);
   const beforeDegradedBin = histogram.slice(0, 8).reduce((sum, count) => sum + count, 0);
-  const requiredFromBin = target - beforeDegradedBin;
   const knownBelow1000 = classifiedH8Count - exact1000Count;
-  if (requiredFromBin > degradedBinCount - exact1000Count) return percentiles;
-  if (requiredFromBin <= knownBelow1000) return { ...percentiles, p95_ms: 999 };
-  return percentiles;
+  const resolve = (upperBound: number, percentile: number) => {
+    if (upperBound !== 1000) return upperBound;
+    const requiredFromBin = Math.ceil(total * percentile) - beforeDegradedBin;
+    if (requiredFromBin > degradedBinCount - exact1000Count) return 1000;
+    if (requiredFromBin <= knownBelow1000) return 999;
+    return 1000;
+  };
+  return {
+    p50_ms: resolve(percentiles.p50_ms, 0.5),
+    p95_ms: resolve(percentiles.p95_ms, 0.95),
+  };
 }
 
 /** Merge buckets for the same (method, route) into an EndpointAggregate. */

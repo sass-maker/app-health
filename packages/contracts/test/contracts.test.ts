@@ -70,6 +70,10 @@ describe('latency histogram threshold boundary', () => {
   it('resolves p95 only when new h8 samples identify the threshold boundary', () => {
     const below = new Array<number>(16).fill(0);
     below[8] = 20;
+    expect(approximatePercentilesWithDegradedBoundary(below, 20, 0)).toEqual({
+      p50_ms: 999,
+      p95_ms: 999,
+    });
     expect(approximatePercentilesWithDegradedBoundary(below, 20, 0).p95_ms).toBe(999);
     expect(approximatePercentilesWithDegradedBoundary(below, 19, 0).p95_ms).toBe(999);
     expect(approximatePercentilesWithDegradedBoundary(below, 18, 0).p95_ms).toBe(1000);
@@ -77,6 +81,7 @@ describe('latency histogram threshold boundary', () => {
     exactAtRank[7] = 18;
     exactAtRank[8] = 2;
     expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p95_ms).toBe(999);
+    expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p50_ms).toBe(500);
 
     const bucket = {
       ...SEED_BUCKETS[0],

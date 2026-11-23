@@ -610,6 +610,7 @@ describe('fixed latency histograms and window merging', () => {
       response.endpoints.find((endpoint) => endpoint.route === '/exact-boundary'),
     ).toMatchObject({
       request_count: 20,
+      p50_ms: 999,
       p95_ms: 1000,
       health_state: 'degraded',
     });
@@ -617,6 +618,7 @@ describe('fixed latency histograms and window merging', () => {
       response.endpoints.find((endpoint) => endpoint.route === '/below-boundary'),
     ).toMatchObject({
       request_count: 20,
+      p50_ms: 999,
       p95_ms: 999,
       health_state: 'healthy',
     });

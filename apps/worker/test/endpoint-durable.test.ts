@@ -320,6 +320,7 @@ it('classifies exact 1000ms p95 from complete new V2 samples', async () => {
   const [aggregate] = mergeBuckets([bucket], '15m', end);
   expect(aggregate).toMatchObject({
     request_count: 20,
+    p50_ms: 999,
     p95_ms: 1000,
     health_state: 'degraded',
   });
@@ -341,7 +342,12 @@ it('resolves a complete 999ms h8 p95 below the degraded threshold', async () => 
   expect(bucket).toMatchObject({
     latency_h8_classified_count: 20,
   });
-  expect(aggregate).toMatchObject({ request_count: 20, p95_ms: 999, health_state: 'healthy' });
+  expect(aggregate).toMatchObject({
+    request_count: 20,
+    p50_ms: 999,
+    p95_ms: 999,
+    health_state: 'healthy',
+  });
 });
 
 it('keeps h8 ambiguous when any old writer contribution is unclassified', async () => {
