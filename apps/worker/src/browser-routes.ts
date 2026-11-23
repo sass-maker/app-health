@@ -935,6 +935,19 @@ async function browserReportPortfolio(
   return { appIds: snapshot.appIds, cacheSource: snapshot };
 }
 
+export function browserReportAuthorization(request: Request, owner: OwnerIdentity, local: boolean) {
+  const filter = BrowserReportFilter.safeParse(
+    Object.fromEntries(new URL(request.url).searchParams),
+  );
+  if (!filter.success)
+    return { ok: false as const, status: 400 as const, error: 'Invalid analytics filter.' };
+  if (!apiScopeAllows(owner, filter.data))
+    return { ok: false as const, status: 403 as const, error: 'API scope forbidden.' };
+  if (!local && filter.data.app_id && !owner.appIds?.includes(filter.data.app_id))
+    return { ok: false as const, status: 403 as const, error: 'Project access denied.' };
+  return { ok: true as const, filter: filter.data };
+}
+
 async function browserReport(
   request: Request,
   env: BrowserEnvironment,
@@ -942,14 +955,10 @@ async function browserReport(
   local: boolean,
   timings?: OwnerRequestTimings,
 ): Promise<Response> {
-  const filter = BrowserReportFilter.safeParse(
-    Object.fromEntries(new URL(request.url).searchParams),
-  );
-  if (!filter.success) return json(400, { error: 'Invalid analytics filter.' });
-  if (!apiScopeAllows(owner, filter.data)) return json(403, { error: 'API scope forbidden.' });
-  if (!local && filter.data.app_id && !owner.appIds?.includes(filter.data.app_id))
-    return json(403, { error: 'Project access denied.' });
-  if (local) return json(200, localAnalytics.report(filter.data));
+  const authorization = browserReportAuthorization(request, owner, local);
+  if (!authorization.ok) return json(authorization.status, { error: authorization.error });
+  const filter = authorization.filter;
+  if (local) return json(200, localAnalytics.report(filter));
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const token = env.ANALYTICS_ENGINE_QUERY_TOKEN;
   if (!env.BROWSER_ANALYTICS || !accountId || !token)
@@ -958,7 +967,7 @@ async function browserReport(
     const { appIds: reportAppIds, cacheSource } = await browserReportPortfolio(
       env.DB,
       owner,
-      filter.data.app_id,
+      filter.app_id,
     );
     return json(
       200,
@@ -966,9 +975,9 @@ async function browserReport(
         cacheSource,
         accountId,
         owner.workspaceId!,
-        JSON.stringify([filter.data, reportAppIds]),
+        JSON.stringify([filter, reportAppIds]),
         () =>
-          queryBrowserReport(owner.workspaceId!, filter.data, {
+          queryBrowserReport(owner.workspaceId!, filter, {
             accountId,
             token,
             appIds: reportAppIds,
