@@ -27,7 +27,7 @@ describe('Analytics Engine telemetry adapter', () => {
     expect(points).toHaveLength(1);
     expect(points[0]).toMatchObject({
       blobs: ['GET', '/users/:id', '3', 'node', 'r1', '', '', LATENCY_HISTOGRAM_SCHEMA_V2],
-      doubles: [2, 1, 32, 101, 2048, 1],
+      doubles: [2, 1, 32, 101, 2048, 1, 0, 0],
     });
     expect(JSON.stringify(points[0])).not.toMatch(
       /event_id|header|cookie|body|identity|stack|trace/i,

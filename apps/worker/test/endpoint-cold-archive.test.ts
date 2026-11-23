@@ -185,6 +185,12 @@ function database() {
     readFileSync(new URL('../migrations/0015_response_payload_bytes.sql', import.meta.url), 'utf8'),
   );
   sqlite.exec(
+    readFileSync(
+      new URL('../migrations/0045_endpoint_exact_degraded_threshold.sql', import.meta.url),
+      'utf8',
+    ),
+  );
+  sqlite.exec(
     readFileSync(new URL('../migrations/0027_endpoint_cold_archives.sql', import.meta.url), 'utf8'),
   );
   return { sqlite, db: new SQLiteD1(sqlite) };

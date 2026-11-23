@@ -34,6 +34,10 @@ export const BucketV1 = z.object({
   sampled: z.boolean().optional(),
   /** Count in a legacy V1 bin that straddles the 2000ms unhealthy threshold. */
   legacy_ambiguous_latency_count: z.number().int().min(0).optional(),
+  /** V2 samples in the 500–1000ms bin whose threshold relation is known. */
+  latency_h8_classified_count: z.number().int().min(0).optional(),
+  /** Classified V2 samples measured at exactly 1000ms. */
+  latency_exact_1000ms_count: z.number().int().min(0).optional(),
   /** Fixed latency histogram counts aligned with LATENCY_BUCKET_BOUNDS_MS. */
   histogram: z.array(z.number().int().min(0)).length(LATENCY_HISTOGRAM_BUCKETS),
 });

@@ -578,6 +578,52 @@ describe('ingest aggregate-only storage', () => {
 });
 
 describe('fixed latency histograms and window merging', () => {
+  it('classifies exact 1000ms p95 in the in-memory V0 adapter', async () => {
+    const { service } = await freshService();
+    const exactEvents = [
+      ...Array.from({ length: 18 }, (_, index) =>
+        makeEvent({
+          event_id: uuid(700 + index),
+          route: '/exact-boundary',
+          duration_ms: 999,
+        }),
+      ),
+      ...Array.from({ length: 2 }, (_, index) =>
+        makeEvent({
+          event_id: uuid(720 + index),
+          route: '/exact-boundary',
+          duration_ms: 1000,
+        }),
+      ),
+    ];
+    const belowEvents = Array.from({ length: 20 }, (_, index) =>
+      makeEvent({
+        event_id: uuid(730 + index),
+        route: '/below-boundary',
+        duration_ms: 999,
+      }),
+    );
+    await service.ingest(SEED_KEY, makeBatch([...exactEvents, ...belowEvents]), NOW);
+
+    const response = await service.queryEndpoints(SEED_APP_ID, SEED_ENV_ID, '15m', NOW);
+    expect(
+      response.endpoints.find((endpoint) => endpoint.route === '/exact-boundary'),
+    ).toMatchObject({
+      request_count: 20,
+      p50_ms: 999,
+      p95_ms: 1000,
+      health_state: 'degraded',
+    });
+    expect(
+      response.endpoints.find((endpoint) => endpoint.route === '/below-boundary'),
+    ).toMatchObject({
+      request_count: 20,
+      p50_ms: 999,
+      p95_ms: 999,
+      health_state: 'healthy',
+    });
+  });
+
   it('places a duration exactly on a bound into that bound bucket', async () => {
     const { service, adapter } = await freshService();
     // 10ms is exactly LATENCY_BUCKET_BOUNDS_MS[2] (index 2).

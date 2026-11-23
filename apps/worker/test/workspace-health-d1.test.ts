@@ -28,6 +28,7 @@ describe('workspace health D1 aggregation', () => {
       '0013_archive_projects.sql',
       '0014_endpoint_rollups.sql',
       '0015_response_payload_bytes.sql',
+      '0045_endpoint_exact_degraded_threshold.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql
@@ -185,8 +186,9 @@ describe('workspace health D1 aggregation', () => {
     });
   });
 
-  it('keeps a V2 500–1000ms p95 threshold crossing uncertain in workspace health', async () => {
-    const now = Math.floor(Date.now() / 60_000) * 60_000;
+  it('classifies exact 1000ms samples and rejects invalid h8 counters in workspace health', async () => {
+    // Pin to an exact UTC hour to exercise a 24h window read entirely from hourly rollups.
+    const now = Date.UTC(2026, 10, 23, 12, 0, 0);
     const owner = new D1ControlPlane(db, 'workspace-one');
     const scope = await owner.createAppEnvironmentKey(
       'Degraded boundary',
@@ -233,7 +235,14 @@ describe('workspace health D1 aggregation', () => {
     expect(environment?.endpoints.metrics).toMatchObject({
       request_count: 20,
       p95_ms: 1000,
-      health_state: 'insufficient-data',
+      health_state: 'degraded',
     });
+    await db
+      .prepare('UPDATE endpoint_rollups SET h8_exact_1000ms_count = 3 WHERE app_id = ?')
+      .bind(scope.app.id)
+      .run();
+    await expect(owner.queryWorkspaceHealth(now + 30_000)).rejects.toThrow(
+      'Invalid workspace endpoint aggregate',
+    );
   });
 });

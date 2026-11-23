@@ -14,6 +14,7 @@ import {
   seededAggregateResponse,
   mergeBuckets,
   approximatePercentiles,
+  approximatePercentilesWithDegradedBoundary,
   MAX_BATCH_EVENTS,
   MAX_ROUTE_LENGTH,
   MAX_DURATION_MS,
@@ -64,6 +65,40 @@ describe('latency histogram threshold boundary', () => {
 
     const [proven] = mergeBuckets([{ ...bucket, error_count: 1 }], '15m', bucket.bucket_start + 1);
     expect(proven.health_state).toBe('unhealthy');
+  });
+
+  it('resolves p95 only when new h8 samples identify the threshold boundary', () => {
+    const below = new Array<number>(16).fill(0);
+    below[8] = 20;
+    expect(approximatePercentilesWithDegradedBoundary(below, 20, 0)).toEqual({
+      p50_ms: 999,
+      p95_ms: 999,
+    });
+    expect(approximatePercentilesWithDegradedBoundary(below, 20, 0).p95_ms).toBe(999);
+    expect(approximatePercentilesWithDegradedBoundary(below, 19, 0).p95_ms).toBe(999);
+    expect(approximatePercentilesWithDegradedBoundary(below, 18, 0).p95_ms).toBe(1000);
+    const exactAtRank = new Array<number>(16).fill(0);
+    exactAtRank[7] = 18;
+    exactAtRank[8] = 2;
+    expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p95_ms).toBe(999);
+    expect(approximatePercentilesWithDegradedBoundary(exactAtRank, 2, 1).p50_ms).toBe(500);
+
+    const bucket = {
+      ...SEED_BUCKETS[0],
+      route: '/classified-boundary',
+      bucket_start: Date.now(),
+      request_count: 20,
+      error_count: 0,
+      histogram: below,
+      latency_h8_classified_count: 20,
+    };
+    expect(mergeBuckets([bucket], '15m', bucket.bucket_start + 1)[0]).toMatchObject({
+      p95_ms: 999,
+      health_state: 'healthy',
+    });
+    expect(() => approximatePercentilesWithDegradedBoundary(below, 20, 21)).toThrow(
+      'Invalid exact degraded-threshold histogram counts',
+    );
   });
 
   it('separates sub-2000ms integer durations from the unhealthy threshold', () => {

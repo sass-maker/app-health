@@ -756,12 +756,19 @@ export class InMemoryAdapter
       if (existing.last_seen === null || input.timestamp > existing.last_seen) {
         existing.last_seen = input.timestamp;
       }
-      existing.histogram[histogramIndex(input.durationMs)] += 1;
+      const index = histogramIndex(input.durationMs);
+      existing.histogram[index] += 1;
+      if (index === 8) {
+        existing.latency_h8_classified_count = (existing.latency_h8_classified_count ?? 0) + 1;
+        if (input.durationMs === 1000)
+          existing.latency_exact_1000ms_count = (existing.latency_exact_1000ms_count ?? 0) + 1;
+      }
       if (input.upstreamSampled) existing.upstream_sampled = true;
       return;
     }
     const histogram = emptyHistogram();
-    histogram[histogramIndex(input.durationMs)] = 1;
+    const index = histogramIndex(input.durationMs);
+    histogram[index] = 1;
     this.buckets.set(key, {
       app_id: input.app_id,
       environment_id: input.environment_id,
@@ -776,6 +783,8 @@ export class InMemoryAdapter
         : {}),
       last_seen: input.timestamp,
       ...(input.upstreamSampled ? { upstream_sampled: true } : {}),
+      ...(index === 8 ? { latency_h8_classified_count: 1 } : {}),
+      ...(input.durationMs === 1000 ? { latency_exact_1000ms_count: 1 } : {}),
       histogram,
     });
   }

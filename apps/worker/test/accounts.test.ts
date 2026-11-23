@@ -46,6 +46,7 @@ describe('Google account boundary with real D1 SQL', () => {
       '0013_archive_projects.sql',
       '0014_endpoint_rollups.sql',
       '0015_response_payload_bytes.sql',
+      '0045_endpoint_exact_degraded_threshold.sql',
       '0016_workspace_membership.sql',
       '0030_analytics_definitions.sql',
       '0031_payment_ledger.sql',

@@ -28,7 +28,8 @@ export async function readEndpointBuckets(
     const offset = values.length;
     values.push(range.from, range.to);
     return `SELECT method, route, histogram_bounds_ms, request_count, error_count,
-      duration_sum_ms, response_bytes_sum, response_bytes_measured, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
+      duration_sum_ms, response_bytes_sum, response_bytes_measured, last_seen, upstream_sampled,
+      h8_classified_count, h8_exact_1000ms_count, ${HISTOGRAM.join(',')}
       FROM endpoint_rollups WHERE app_id = ?1 AND environment_id = ?2
       AND resolution_ms = ${range.resolution} AND bucket_start >= ?${offset + 1}
       AND bucket_start < ?${offset + 2}`;
@@ -42,6 +43,8 @@ export async function readEndpointBuckets(
     SUM(response_bytes_measured) AS response_bytes_measured,
     MAX(last_seen) AS last_seen,
     MAX(upstream_sampled) AS upstream_sampled,
+    SUM(h8_classified_count) AS h8_classified_count,
+    SUM(h8_exact_1000ms_count) AS h8_exact_1000ms_count,
     ${HISTOGRAM.map((name) => `SUM(${name}) AS ${name}`).join(',')}
     FROM (${sources.join(' UNION ALL ')})
     GROUP BY method, route, histogram_bounds_ms ORDER BY method, route LIMIT ${MAX_ROWS + 1}`,
@@ -83,6 +86,12 @@ function mergeReadBuckets(buckets: BucketV1[]): BucketV1[] {
       (existing.response_bytes_measured ?? 0) + (bucket.response_bytes_measured ?? 0);
     existing.last_seen = Math.max(existing.last_seen ?? 0, bucket.last_seen ?? 0);
     existing.upstream_sampled ||= bucket.upstream_sampled;
+    const classifiedH8Count =
+      (existing.latency_h8_classified_count ?? 0) + (bucket.latency_h8_classified_count ?? 0);
+    const exact1000Count =
+      (existing.latency_exact_1000ms_count ?? 0) + (bucket.latency_exact_1000ms_count ?? 0);
+    if (classifiedH8Count > 0) existing.latency_h8_classified_count = classifiedH8Count;
+    if (exact1000Count > 0) existing.latency_exact_1000ms_count = exact1000Count;
     if (bucket.legacy_ambiguous_latency_count)
       existing.legacy_ambiguous_latency_count =
         (existing.legacy_ambiguous_latency_count ?? 0) + bucket.legacy_ambiguous_latency_count;
@@ -104,6 +113,8 @@ function validateCombinedBucket(bucket: BucketV1) {
     bucket.error_count,
     bucket.response_bytes_measured ?? 0,
     bucket.legacy_ambiguous_latency_count ?? 0,
+    bucket.latency_h8_classified_count ?? 0,
+    bucket.latency_exact_1000ms_count ?? 0,
     ...bucket.histogram,
   ];
   if (
@@ -128,10 +139,14 @@ function decodeEndpointBucket(
   const bytesSum = Number(row.response_bytes_sum);
   const bytesMeasured = Number(row.response_bytes_measured);
   const lastSeen = Number(row.last_seen);
+  const classifiedH8Count = Number(row.h8_classified_count ?? 0);
+  const exact1000Count = Number(row.h8_exact_1000ms_count ?? 0);
   if (
     typeof row.method !== 'string' ||
     typeof row.route !== 'string' ||
-    ![count, errors, ...histogram].every((value) => Number.isSafeInteger(value) && value >= 0) ||
+    ![count, errors, classifiedH8Count, exact1000Count, ...histogram].every(
+      (value) => Number.isSafeInteger(value) && value >= 0,
+    ) ||
     errors > count ||
     histogram.reduce((sum, value) => sum + value, 0) !== count ||
     !Number.isFinite(duration) ||
@@ -143,6 +158,9 @@ function decodeEndpointBucket(
     !Number.isFinite(lastSeen)
   )
     throw new Error('Invalid durable endpoint aggregate');
+  if (exact1000Count > classifiedH8Count || classifiedH8Count > histogram[8]!)
+    throw new Error('Invalid exact degraded-threshold endpoint aggregate');
+  const useExactBoundary = schema === 'latency-v2';
   return {
     app_id: appId,
     environment_id: envId,
@@ -158,6 +176,12 @@ function decodeEndpointBucket(
     histogram: normalizeLatencyHistogram(histogram, schema),
     ...(schema === 'legacy-v1' && histogram[9] > 0
       ? { legacy_ambiguous_latency_count: histogram[9] }
+      : {}),
+    ...(useExactBoundary && classifiedH8Count > 0
+      ? { latency_h8_classified_count: classifiedH8Count }
+      : {}),
+    ...(useExactBoundary && exact1000Count > 0
+      ? { latency_exact_1000ms_count: exact1000Count }
       : {}),
     ...(Number(row.upstream_sampled) > 0 ? { upstream_sampled: true } : {}),
   };
