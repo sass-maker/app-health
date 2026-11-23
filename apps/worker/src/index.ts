@@ -60,6 +60,7 @@ import { snapshotCachedAnalytics } from './analytics-cache.js';
 import { EndpointCapacityError } from './endpoint-capacity.js';
 import { legacyLogAlertsAllowed } from './log-alert-scope.js';
 import {
+  browserReportAuthorization,
   handleBrowserIngest,
   handleBrowserOwner,
   type BrowserEnvironment,
@@ -1374,6 +1375,61 @@ function workspaceBundle(
   return { ...bundle, repos, service: new AppHealthService(repos) };
 }
 
+function bearerReportTimings(
+  request: Request,
+  path: string,
+  owner: OwnerIdentity,
+  local: boolean,
+): OwnerRequestTimings | undefined {
+  if (
+    request.method !== 'GET' ||
+    path !== '/v1/analytics/report' ||
+    request.headers.get('x-apphealth-diagnostics')?.trim().toLowerCase() !== 'server-timing' ||
+    !ownerRouteAllowed(request, owner)
+  )
+    return undefined;
+  const authorization = browserReportAuthorization(request, owner, local);
+  return authorization.ok ? accountReadTimings(request, path) : undefined;
+}
+
+function finishBearerReportTiming(
+  response: Response,
+  timings: OwnerRequestTimings | undefined,
+  started: number | undefined,
+): Response {
+  if (!timings) return response;
+  if (started !== undefined) timings.ownerHandlerTotalMs = performance.now() - started;
+  return response.ok || response.status >= 500
+    ? withOwnerServerTiming(response, timings)
+    : response;
+}
+
+async function handleApiTokenOwner(
+  request: Request,
+  token: string,
+  env: Env,
+  url: URL,
+  bundle: AdapterBundle,
+  ctx?: WorkerContext,
+): Promise<Response> {
+  const tokenOwner = env.DB ? await apiTokenIdentity(env.DB, token) : null;
+  if (!tokenOwner)
+    return json(401, { error: 'Invalid, expired or revoked workspace API token' }, true);
+  const path = url.pathname;
+  const timings = bearerReportTimings(request, path, tokenOwner, bundle.local);
+  const started = timings ? performance.now() : undefined;
+  const response = await handleOwnerRoutes(
+    request,
+    workspaceBundle(bundle, env.DB!, tokenOwner.workspaceId!),
+    tokenOwner,
+    url,
+    env,
+    { ctx, ...(timings ? { timings } : {}) },
+  );
+  // Do not expose diagnostics for route, authentication or permission errors.
+  return finishBearerReportTiming(response, timings, started);
+}
+
 /** The pre-account owner key keeps access to unclaimed projects only. */
 async function handleBearerOwner(
   request: Request,
@@ -1383,19 +1439,7 @@ async function handleBearerOwner(
   ctx?: WorkerContext,
 ): Promise<Response> {
   const raw = extractBearerKey(request);
-  if (raw.startsWith('aha_')) {
-    const tokenOwner = env.DB ? await apiTokenIdentity(env.DB, raw) : null;
-    if (!tokenOwner)
-      return json(401, { error: 'Invalid, expired or revoked workspace API token' }, true);
-    return handleOwnerRoutes(
-      request,
-      workspaceBundle(bundle, env.DB!, tokenOwner.workspaceId!),
-      tokenOwner,
-      url,
-      env,
-      { ctx },
-    );
-  }
+  if (raw.startsWith('aha_')) return handleApiTokenOwner(request, raw, env, url, bundle, ctx);
   const owner = await bundle.identity.resolve(request);
   if (!owner) return json(403, { error: 'owner secret required' }, true);
   if (owner.appId || !env.DB) return handleOwnerRoutes(request, bundle, owner, url, env, { ctx });

@@ -1122,6 +1122,146 @@ describe('Google account boundary with real D1 SQL', () => {
     }
   });
 
+  it('opts scoped API-token report Server-Timing into the existing authenticated path only', async () => {
+    const created = await request('/v1/apps', aliceCookie, {
+      name: 'Report timing scope',
+      environment: 'production',
+    });
+    expect(created.status).toBe(201);
+    const project = (await created.json()) as {
+      app: { id: string };
+      environment: { id: string };
+    };
+    const minted = await request('/v1/workspace/api-tokens', aliceCookie, {
+      name: 'Report timing reader',
+      permission: 'read',
+      scopes: [{ app_id: project.app.id, environment_id: project.environment.id }],
+    });
+    expect(minted.status).toBe(201);
+    const token = (await minted.json()) as { token: string };
+    const report =
+      `/v1/analytics/report?app_id=${project.app.id}` +
+      `&environment_id=${project.environment.id}&range=1h&event=signup`;
+    const production = { ...env, BROWSER_ANALYTICS: { writeDataPoint() {} } };
+    const api = (
+      path: string,
+      diagnostics?: string,
+      authorization = `Bearer ${token.token}`,
+      method = 'GET',
+      bindings: Env = production,
+    ) =>
+      worker.fetch(
+        new Request(`https://dashboard.example.com${path}`, {
+          method,
+          headers: {
+            authorization,
+            ...(diagnostics === undefined ? {} : { 'X-AppHealth-Diagnostics': diagnostics }),
+          },
+        }),
+        bindings,
+      );
+    const cache = {
+      match: vi.fn(async () => undefined),
+      put: vi.fn(async () => {}),
+    };
+    vi.stubGlobal('caches', { default: cache });
+    const provider = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async () => Response.json({ data: [] }));
+    const prepare = vi.spyOn(env.DB!, 'prepare');
+    const requestTime = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(requestTime);
+    try {
+      const ordinary = await api(report);
+      expect(ordinary.status, await ordinary.clone().text()).toBe(200);
+      expect(ordinary.headers.get('server-timing')).toBeNull();
+      const ordinaryBody = await ordinary.json();
+      const ordinaryProviderCalls = provider.mock.calls.length;
+      const ordinaryPreparedQueries = prepare.mock.calls.length;
+
+      provider.mockClear();
+      prepare.mockClear();
+      const optedIn = await api(report, 'server-timing');
+      expect(optedIn.status).toBe(200);
+      expect(await optedIn.json()).toEqual(ordinaryBody);
+      expect(provider).toHaveBeenCalledTimes(ordinaryProviderCalls);
+      expect(prepare).toHaveBeenCalledTimes(ordinaryPreparedQueries);
+      const timing = optedIn.headers.get('server-timing') ?? '';
+      for (const stage of [
+        'analytics_cache_lookup',
+        'analytics_query_wait',
+        'analytics_trend',
+        'analytics_pages',
+        'analytics_sources',
+        'analytics_events',
+        'analytics_audience_previous',
+        'analytics_dimension_max',
+        'analytics_report_assembly',
+        'route_read',
+        'owner_handler_total',
+      ])
+        expect(timing).toMatch(new RegExp(`(?:^|, )${stage};dur=\\d+\\.\\d{2}(?:, |$)`));
+      expect(timing).not.toContain(project.app.id);
+      expect(timing).not.toContain(project.environment.id);
+      expect(timing).not.toMatch(/SELECT|FROM|signup/i);
+
+      const unavailableEnv = { ...production, BROWSER_ANALYTICS: undefined };
+      provider.mockClear();
+      prepare.mockClear();
+      const unavailable = await api(
+        report,
+        undefined,
+        `Bearer ${token.token}`,
+        'GET',
+        unavailableEnv,
+      );
+      expect(unavailable.status).toBe(503);
+      const unavailableBody = await unavailable.json();
+      const unavailableProviderCalls = provider.mock.calls.length;
+      const unavailablePreparedQueries = prepare.mock.calls.length;
+
+      provider.mockClear();
+      prepare.mockClear();
+      const optedInUnavailable = await api(
+        report,
+        'server-timing',
+        `Bearer ${token.token}`,
+        'GET',
+        unavailableEnv,
+      );
+      expect(optedInUnavailable.status).toBe(503);
+      expect(await optedInUnavailable.json()).toEqual(unavailableBody);
+      expect(provider).toHaveBeenCalledTimes(unavailableProviderCalls);
+      expect(prepare).toHaveBeenCalledTimes(unavailablePreparedQueries);
+      expect(optedInUnavailable.headers.get('server-timing')).toMatch(
+        /route_read;dur=\d+\.\d{2}, owner_handler_total;dur=\d+\.\d{2}$/,
+      );
+
+      for (const [path, authorization, status] of [
+        [report, 'Bearer invalid-token', 403],
+        [report, `Bearer aha_${'0'.repeat(64)}`, 401],
+        [report.replace(project.environment.id, 'foreign-env'), `Bearer ${token.token}`, 403],
+        [`${report}&app_id=${project.app.id}`, `Bearer ${token.token}`, 403],
+      ] as const) {
+        const denied = await api(path, 'server-timing', authorization);
+        expect(denied.status).toBe(status);
+        expect(denied.headers.get('server-timing')).toBeNull();
+      }
+      const wrongValue = await api(report, 'all');
+      expect(wrongValue.status).toBe(200);
+      expect(wrongValue.headers.get('server-timing')).toBeNull();
+      const wrongRoute = await api('/v1/analytics?range=1h', 'server-timing');
+      expect(wrongRoute.headers.get('server-timing')).toBeNull();
+      const head = await api(report, 'server-timing', `Bearer ${token.token}`, 'HEAD');
+      expect(head.headers.get('server-timing')).toBeNull();
+    } finally {
+      provider.mockRestore();
+      prepare.mockRestore();
+      clock.mockRestore();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('rejects expired or forged sessions and cross-origin cookie writes', async () => {
     expect((await request('/v1/apps', 'garbage')).status).toBe(401);
     const forged = new Request('https://dashboard.example.com/v1/apps', {
