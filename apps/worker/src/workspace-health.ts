@@ -299,6 +299,10 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
         requestCount < 0 ||
         errorCount < 0 ||
         errorCount > requestCount ||
+        classifiedH8Count < 0 ||
+        exact1000Count < 0 ||
+        exact1000Count > classifiedH8Count ||
+        classifiedH8Count > rawHistogram[8]! ||
         rawHistogram.some((value) => value < 0) ||
         rawHistogram.reduce((sum, value) => sum + value, 0) !== requestCount
       )

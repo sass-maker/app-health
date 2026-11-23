@@ -186,7 +186,7 @@ describe('workspace health D1 aggregation', () => {
     });
   });
 
-  it('keeps a V2 500–1000ms p95 threshold crossing uncertain in workspace health', async () => {
+  it('classifies exact 1000ms samples and rejects invalid h8 counters in workspace health', async () => {
     const now = Math.floor(Date.now() / 60_000) * 60_000;
     const owner = new D1ControlPlane(db, 'workspace-one');
     const scope = await owner.createAppEnvironmentKey(
@@ -236,5 +236,14 @@ describe('workspace health D1 aggregation', () => {
       p95_ms: 1000,
       health_state: 'degraded',
     });
+    await db
+      .prepare(
+        'UPDATE endpoint_rollups SET h8_exact_1000ms_count = 3 WHERE app_id = ? AND resolution_ms = 60000',
+      )
+      .bind(scope.app.id)
+      .run();
+    await expect(owner.queryWorkspaceHealth(now + 30_000)).rejects.toThrow(
+      'Invalid workspace endpoint aggregate',
+    );
   });
 });
