@@ -212,7 +212,19 @@ export function mergeBuckets(
   windowLabel: '15m' | '1h' | '24h',
   refreshedAt = NOW,
 ): EndpointAggregateV1[] {
-  const cutoff = refreshedAt - WINDOW_MS[windowLabel];
+  const aggregates = [
+    ...groupBuckets(buckets, refreshedAt - WINDOW_MS[windowLabel], refreshedAt).values(),
+  ]
+    .map(mergeBucketGroup)
+    .filter((aggregate): aggregate is EndpointAggregateV1 => aggregate !== null);
+  return sortAggregates(aggregates);
+}
+
+function groupBuckets(
+  buckets: readonly BucketV1[],
+  cutoff: number,
+  refreshedAt: number,
+): Map<string, BucketV1[]> {
   const byKey = new Map<string, BucketV1[]>();
   for (const b of buckets) {
     if (b.bucket_start < cutoff || b.bucket_start > refreshedAt) continue;
@@ -221,57 +233,58 @@ export function mergeBuckets(
     list.push(b);
     byKey.set(key, list);
   }
-  const aggregates: EndpointAggregateV1[] = [];
-  for (const list of byKey.values()) {
-    const request_count = list.reduce((sum, b) => sum + b.request_count, 0);
-    if (request_count === 0) continue;
-    const error_count = list.reduce((sum, b) => sum + b.error_count, 0);
-    const mergedHistogram = emptyHistogram();
-    let classifiedH8Count = 0;
-    let exact1000Count = 0;
-    for (const b of list) {
-      for (let i = 0; i < mergedHistogram.length; i += 1) {
-        mergedHistogram[i] += b.histogram[i];
-      }
-      classifiedH8Count += b.latency_h8_classified_count ?? 0;
-      exact1000Count += b.latency_exact_1000ms_count ?? 0;
+  return byKey;
+}
+
+function mergeBucketGroup(list: readonly BucketV1[]): EndpointAggregateV1 | null {
+  const request_count = list.reduce((sum, b) => sum + b.request_count, 0);
+  if (request_count === 0) return null;
+  const error_count = list.reduce((sum, b) => sum + b.error_count, 0);
+  const mergedHistogram = emptyHistogram();
+  for (const b of list) {
+    for (let i = 0; i < mergedHistogram.length; i += 1) {
+      mergedHistogram[i] += b.histogram[i];
     }
-    const lastSeenList = list.map((b) => b.last_seen).filter((v): v is number => v != null);
-    const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
-    const { p50_ms, p95_ms } = approximatePercentilesWithDegradedBoundary(
-      mergedHistogram,
-      classifiedH8Count,
-      exact1000Count,
-    );
-    const ambiguousLatencyCount = list.reduce(
-      (sum, bucket) => sum + (bucket.legacy_ambiguous_latency_count ?? 0),
-      0,
-    );
-    const error_rate = request_count > 0 ? error_count / request_count : 0;
-    const bytes_sum = list.reduce((sum, b) => sum + (b.response_bytes_sum ?? 0), 0);
-    const bytes_measured = list.reduce((sum, b) => sum + (b.response_bytes_measured ?? 0), 0);
-    const { method, route } = list[0];
-    aggregates.push({
-      method,
-      route,
-      request_count,
-      error_count,
-      error_rate,
-      p50_ms,
-      p95_ms,
-      avg_response_bytes: bytes_measured > 0 ? bytes_sum / bytes_measured : null,
-      total_response_bytes: bytes_sum,
-      last_seen,
-      health_state: healthState({
-        request_count,
-        error_rate,
-        p95_ms,
-        ...histogramP95LowerBound(mergedHistogram, ambiguousLatencyCount, exact1000Count),
-      }),
-      ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
-      ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),
-    });
   }
+  const { classifiedH8Count, exact1000Count } = sumExactBoundaryCounts(list);
+  const lastSeenList = list.map((b) => b.last_seen).filter((v): v is number => v != null);
+  const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
+  const { p50_ms, p95_ms } = approximatePercentilesWithDegradedBoundary(
+    mergedHistogram,
+    classifiedH8Count,
+    exact1000Count,
+  );
+  const ambiguousLatencyCount = list.reduce(
+    (sum, bucket) => sum + (bucket.legacy_ambiguous_latency_count ?? 0),
+    0,
+  );
+  const error_rate = error_count / request_count;
+  const bytes_sum = list.reduce((sum, b) => sum + (b.response_bytes_sum ?? 0), 0);
+  const bytes_measured = list.reduce((sum, b) => sum + (b.response_bytes_measured ?? 0), 0);
+  const { method, route } = list[0];
+  return {
+    method,
+    route,
+    request_count,
+    error_count,
+    error_rate,
+    p50_ms,
+    p95_ms,
+    avg_response_bytes: bytes_measured > 0 ? bytes_sum / bytes_measured : null,
+    total_response_bytes: bytes_sum,
+    last_seen,
+    health_state: healthState({
+      request_count,
+      error_rate,
+      p95_ms,
+      ...histogramP95LowerBound(mergedHistogram, ambiguousLatencyCount, exact1000Count),
+    }),
+    ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
+    ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),
+  };
+}
+
+function sortAggregates(aggregates: EndpointAggregateV1[]): EndpointAggregateV1[] {
   // deterministic default sort: unhealthy > degraded > healthy > insufficient-data,
   // then by request_count desc, then route asc.
   const order: Record<string, number> = {
@@ -288,6 +301,19 @@ export function mergeBuckets(
     return a.route.localeCompare(b.route);
   });
   return aggregates;
+}
+
+function sumExactBoundaryCounts(buckets: readonly BucketV1[]): {
+  classifiedH8Count: number;
+  exact1000Count: number;
+} {
+  return buckets.reduce(
+    (counts, bucket) => ({
+      classifiedH8Count: counts.classifiedH8Count + (bucket.latency_h8_classified_count ?? 0),
+      exact1000Count: counts.exact1000Count + (bucket.latency_exact_1000ms_count ?? 0),
+    }),
+    { classifiedH8Count: 0, exact1000Count: 0 },
+  );
 }
 
 /** Seeded aggregate response for the dev adapter. */

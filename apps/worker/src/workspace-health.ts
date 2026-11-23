@@ -120,10 +120,7 @@ export function buildWorkspaceHealthSummary(
     existing.error_count += bucket.error_count;
     existing.legacy_ambiguous_latency_count =
       (existing.legacy_ambiguous_latency_count ?? 0) + (bucket.legacy_ambiguous_latency_count ?? 0);
-    existing.latency_h8_classified_count =
-      (existing.latency_h8_classified_count ?? 0) + (bucket.latency_h8_classified_count ?? 0);
-    existing.latency_exact_1000ms_count =
-      (existing.latency_exact_1000ms_count ?? 0) + (bucket.latency_exact_1000ms_count ?? 0);
+    addExactBoundaryCounts(existing, bucket);
     existing.duration_sum_ms += bucket.duration_sum_ms;
     existing.last_seen = Math.max(existing.last_seen ?? 0, bucket.last_seen ?? 0) || null;
     existing.upstream_sampled ||= bucket.upstream_sampled;
@@ -171,6 +168,13 @@ export function buildWorkspaceHealthSummary(
       },
     })),
   });
+}
+
+function addExactBoundaryCounts(target: BucketV1, source: BucketV1): void {
+  target.latency_h8_classified_count =
+    (target.latency_h8_classified_count ?? 0) + (source.latency_h8_classified_count ?? 0);
+  target.latency_exact_1000ms_count =
+    (target.latency_exact_1000ms_count ?? 0) + (source.latency_exact_1000ms_count ?? 0);
 }
 
 export class D1WorkspaceHealth implements WorkspaceHealthRepository {

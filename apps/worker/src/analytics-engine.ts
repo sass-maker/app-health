@@ -133,10 +133,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
       point.count += 1;
       point.errors += event.status_code >= 500 ? 1 : 0;
       point.duration += event.duration_ms;
-      if (bucket === 8) {
-        point.h8Classified += 1;
-        if (event.duration_ms === 1000) point.h8Exact1000 += 1;
-      }
+      recordDegradedBoundary(point, bucket, event.duration_ms);
       if (event.response_bytes !== undefined) {
         point.bytes += event.response_bytes;
         point.bytesMeasured += 1;
@@ -147,29 +144,7 @@ export class AnalyticsEngineBuckets implements BucketRepository {
     }
     if (points.size > MAX_POINTS) throw new EndpointCapacityError();
     for (const point of points.values()) {
-      this.dataset.writeDataPoint({
-        indexes: [scope],
-        blobs: [
-          point.method,
-          point.route,
-          String(point.bucket),
-          runtime,
-          point.release,
-          point.upstreamSampled ? 'sampled' : '',
-          this.durableQuery ? 'durable-v1' : '',
-          LATENCY_HISTOGRAM_SCHEMA_V2,
-        ],
-        doubles: [
-          point.count,
-          point.errors,
-          point.duration,
-          point.lastSeen,
-          point.bytes,
-          point.bytesMeasured,
-          point.h8Classified,
-          point.h8Exact1000,
-        ],
-      });
+      writeAnalyticsPoint(this.dataset, scope, runtime, this.durableQuery !== undefined, point);
     }
   }
 
@@ -259,6 +234,62 @@ export class AnalyticsEngineBuckets implements BucketRepository {
   }
 }
 
+function recordDegradedBoundary(
+  point: { h8Classified: number; h8Exact1000: number },
+  bucket: number,
+  durationMs: number,
+): void {
+  if (bucket !== 8) return;
+  point.h8Classified += 1;
+  if (durationMs === 1000) point.h8Exact1000 += 1;
+}
+
+function writeAnalyticsPoint(
+  dataset: AnalyticsEngineDatasetLike,
+  scope: string,
+  runtime: Runtime,
+  durable: boolean,
+  point: {
+    method: string;
+    route: string;
+    bucket: number;
+    release: string;
+    count: number;
+    errors: number;
+    duration: number;
+    lastSeen: number;
+    bytes: number;
+    bytesMeasured: number;
+    h8Classified: number;
+    h8Exact1000: number;
+    upstreamSampled: boolean;
+  },
+): void {
+  dataset.writeDataPoint({
+    indexes: [scope],
+    blobs: [
+      point.method,
+      point.route,
+      String(point.bucket),
+      runtime,
+      point.release,
+      point.upstreamSampled ? 'sampled' : '',
+      durable ? 'durable-v1' : '',
+      LATENCY_HISTOGRAM_SCHEMA_V2,
+    ],
+    doubles: [
+      point.count,
+      point.errors,
+      point.duration,
+      point.lastSeen,
+      point.bytes,
+      point.bytesMeasured,
+      point.h8Classified,
+      point.h8Exact1000,
+    ],
+  });
+}
+
 function analyticsHistogramSchema(value: string | null | undefined): LatencyHistogramSchema {
   if (value === undefined || value === null || value === '') return 'legacy-v1';
   if (value === LATENCY_HISTOGRAM_SCHEMA_V2) return LATENCY_HISTOGRAM_SCHEMA_V2;
@@ -297,6 +328,10 @@ export function createAnalyticsQuery(options: {
 
 function validateQueryRow(row: QueryRow): void {
   if (!isQueryRowShape(row)) throw new Error('Analytics Engine query returned invalid row');
+  if (!validQueryRowNumbers(row)) throw new Error('Analytics Engine query returned invalid row');
+}
+
+function validQueryRowNumbers(row: QueryRow): boolean {
   const bucket = Number(row.latency_bucket);
   const count = Number(row.request_count);
   const errors = Number(row.error_count);
@@ -304,24 +339,48 @@ function validateQueryRow(row: QueryRow): void {
   const classifiedH8 = Number(row.h8_classified_count ?? 0);
   const exact1000 = Number(row.h8_exact_1000ms_count ?? 0);
   const lastSeen = row.last_seen === null ? null : Number(row.last_seen);
-  const metricsOk =
+  return (
+    validHistogramBucket(bucket) &&
+    validQueryCounts(count, errors, duration, classifiedH8, exact1000) &&
+    validByteMetrics(row) &&
+    validLastSeen(lastSeen) &&
+    !row.method.includes('\u0000') &&
+    !row.route.includes('\u0000')
+  );
+}
+
+function validHistogramBucket(bucket: number): boolean {
+  return Number.isInteger(bucket) && bucket >= 0 && bucket < LATENCY_HISTOGRAM_BUCKETS;
+}
+
+function validQueryCounts(
+  count: number,
+  errors: number,
+  duration: number,
+  classifiedH8: number,
+  exact1000: number,
+): boolean {
+  return (
     [count, errors, duration].every(validMetric) &&
     errors <= count &&
+    validDegradedBoundaryCounts(classifiedH8, exact1000, count)
+  );
+}
+
+function validLastSeen(value: number | null): boolean {
+  return value === null || (Number.isFinite(value) && value >= 0);
+}
+
+function validDegradedBoundaryCounts(
+  classifiedH8: number,
+  exact1000: number,
+  count: number,
+): boolean {
+  return (
     [classifiedH8, exact1000].every((value) => Number.isSafeInteger(value) && value >= 0) &&
     exact1000 <= classifiedH8 &&
-    classifiedH8 <= count &&
-    validByteMetrics(row);
-  if (
-    !Number.isInteger(bucket) ||
-    bucket < 0 ||
-    bucket >= LATENCY_HISTOGRAM_BUCKETS ||
-    !metricsOk ||
-    (lastSeen !== null && (!Number.isFinite(lastSeen) || lastSeen < 0))
-  ) {
-    throw new Error('Analytics Engine query returned invalid row');
-  }
-  if (row.method.includes('\u0000') || row.route.includes('\u0000'))
-    throw new Error('Analytics Engine query returned invalid row');
+    classifiedH8 <= count
+  );
 }
 
 /** Optional response-byte metrics are valid when absent or non-negative finite numbers. */
