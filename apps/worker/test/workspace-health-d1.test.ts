@@ -28,6 +28,7 @@ describe('workspace health D1 aggregation', () => {
       '0013_archive_projects.sql',
       '0014_endpoint_rollups.sql',
       '0015_response_payload_bytes.sql',
+      '0045_endpoint_exact_degraded_threshold.sql',
     ]) {
       const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
       for (const statement of sql
@@ -233,7 +234,7 @@ describe('workspace health D1 aggregation', () => {
     expect(environment?.endpoints.metrics).toMatchObject({
       request_count: 20,
       p95_ms: 1000,
-      health_state: 'insufficient-data',
+      health_state: 'degraded',
     });
   });
 });

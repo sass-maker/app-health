@@ -30,7 +30,11 @@ let db: Awaited<ReturnType<typeof mf.getD1Database>>;
 let writer: D1EndpointWriter;
 beforeAll(async () => {
   db = await mf.getD1Database('DB');
-  for (const migration of ['0014_endpoint_rollups.sql', '0015_response_payload_bytes.sql']) {
+  for (const migration of [
+    '0014_endpoint_rollups.sql',
+    '0015_response_payload_bytes.sql',
+    '0045_endpoint_exact_degraded_threshold.sql',
+  ]) {
     const schema = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
     for (const sql of schema
       .replace(/--[^\n]*/g, '')
@@ -294,7 +298,7 @@ it('keeps legacy threshold-straddling latency unknown without losing request cou
   });
 });
 
-it('does not call a threshold-straddling 500–1000ms p95 degraded as confirmed', async () => {
+it('classifies exact 1000ms p95 from complete new V2 samples', async () => {
   const timestamp = now - 60_000;
   const events = [
     ...Array.from({ length: 18 }, (_, index) => ({
@@ -317,6 +321,49 @@ it('does not call a threshold-straddling 500–1000ms p95 degraded as confirmed'
   expect(aggregate).toMatchObject({
     request_count: 20,
     p95_ms: 1000,
+    health_state: 'degraded',
+  });
+});
+
+it('resolves a complete 999ms h8 p95 below the degraded threshold', async () => {
+  const timestamp = now - 60_000;
+  const events = Array.from({ length: 20 }, (_, index) => ({
+    ...event(`below-edge-${index}`, timestamp),
+    duration_ms: 999,
+  }));
+  await writer.accept('below-boundary', 'prod', 'node', 'r1', events, {
+    now,
+    batchId: 'below-boundary',
+  });
+  const end = Math.floor(now / 60_000) * 60_000;
+  const [bucket] = await readEndpointBuckets(db, 'below-boundary', 'prod', end - 900_000, end);
+  const [aggregate] = mergeBuckets([bucket], '15m', end);
+  expect(bucket).toMatchObject({
+    latency_h8_classified_count: 20,
+  });
+  expect(aggregate).toMatchObject({ request_count: 20, p95_ms: 999, health_state: 'healthy' });
+});
+
+it('keeps h8 ambiguous when any old writer contribution is unclassified', async () => {
+  const timestamp = now - 60_000;
+  const events = Array.from({ length: 20 }, (_, index) => ({
+    ...event(`mixed-${index}`, timestamp),
+    duration_ms: 999,
+  }));
+  await writer.accept('mixed-boundary', 'prod', 'node', 'r1', events, {
+    now,
+    batchId: 'mixed-boundary',
+  });
+  await db
+    .prepare('UPDATE endpoint_rollups SET h8_classified_count = 19 WHERE app_id = ?')
+    .bind('mixed-boundary')
+    .run();
+  const end = Math.floor(now / 60_000) * 60_000;
+  const [bucket] = await readEndpointBuckets(db, 'mixed-boundary', 'prod', end - 900_000, end);
+  const [aggregate] = mergeBuckets([bucket], '15m', end);
+  expect(aggregate).toMatchObject({
+    request_count: 20,
+    p95_ms: 1000,
     health_state: 'insufficient-data',
   });
 });
@@ -332,6 +379,7 @@ it('combines old AE data with durable counts exactly once and keeps source error
       `CREATE TABLE IF NOT EXISTS app_health_endpoint_v1 (
     index1 TEXT, blob1 TEXT, blob2 TEXT, blob3 TEXT, blob5 TEXT, blob6 TEXT, blob7 TEXT, blob8 TEXT,
     double1 REAL, double2 REAL, double3 REAL, double4 REAL, double5 REAL, double6 REAL,
+    double7 REAL, double8 REAL,
     _sample_interval INTEGER, timestamp INTEGER
   )`,
     )
@@ -340,12 +388,12 @@ it('combines old AE data with durable counts exactly once and keeps source error
   for (const tag of ['', 'durable-v1']) {
     await db
       .prepare(
-        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, '', 1, 0, 10, ?, NULL, NULL, 1, ?)`,
+        `INSERT INTO app_health_endpoint_v1 VALUES (?, 'GET', '/users/:id', '2', '', '', ?, '', 1, 0, 10, ?, NULL, NULL, 0, 0, 1, ?)`,
       )
       .bind(scope, tag, now - 60_000, Math.floor((now - 60_000) / 1000))
       .run();
   }
-  const points: { blobs: string[] }[] = [];
+  const points: { blobs: string[]; doubles: number[] }[] = [];
   const adapter = new AnalyticsEngineBuckets(
     { writeDataPoint: (point) => points.push(point) },
     async (sql) => {
@@ -372,6 +420,10 @@ it('combines old AE data with durable counts exactly once and keeps source error
     error_count: 0,
     p95_ms: 10,
   });
+  await adapter.upsertEvents('a', 'prod', 'node', undefined, [
+    { ...event('edge'), duration_ms: 1000 },
+  ]);
+  expect(points[1].doubles.slice(6, 8)).toEqual([1, 1]);
   const broken = new AnalyticsEngineBuckets(
     { writeDataPoint() {} },
     async () => {
@@ -382,6 +434,72 @@ it('combines old AE data with durable counts exactly once and keeps source error
   await expect(broken.queryBuckets('a', 'prod', end - 900_000, end)).rejects.toThrow(
     'legacy unavailable',
   );
+});
+
+it('preserves exact-boundary evidence in Analytics Engine points and reads', async () => {
+  const end = Math.floor(now / 60_000) * 60_000;
+  const events = [
+    ...Array.from({ length: 18 }, (_, index) => ({
+      ...event(`ae-below-${index}`, end - 60_000),
+      duration_ms: 500,
+    })),
+    ...Array.from({ length: 2 }, (_, index) => ({
+      ...event(`ae-edge-${index}`, end - 60_000),
+      duration_ms: 1000,
+    })),
+  ];
+  const points: { indexes: string[]; blobs: string[]; doubles: number[] }[] = [];
+  const adapter = new AnalyticsEngineBuckets(
+    { writeDataPoint: (point) => points.push(point) },
+    async () =>
+      points.map((point) => ({
+        method: point.blobs[0]!,
+        route: point.blobs[1]!,
+        latency_bucket: point.blobs[2]!,
+        histogram_schema: point.blobs[7]!,
+        request_count: point.doubles[0]!,
+        error_count: point.doubles[1]!,
+        duration_sum_ms: point.doubles[2]!,
+        last_seen: point.doubles[3]!,
+        response_bytes_sum: point.doubles[4]!,
+        response_bytes_measured: point.doubles[5]!,
+        h8_classified_count: point.doubles[6]!,
+        h8_exact_1000ms_count: point.doubles[7]!,
+        sample_interval: 1,
+      })),
+  );
+  await adapter.upsertEvents('ae-app', 'prod', 'node', undefined, events);
+  const buckets = await adapter.queryBuckets('ae-app', 'prod', end - 900_000, end);
+  expect(buckets[0]).toMatchObject({
+    latency_h8_classified_count: 2,
+    latency_exact_1000ms_count: 2,
+  });
+  expect(mergeBuckets(buckets, '15m', end)[0]).toMatchObject({
+    request_count: 20,
+    p95_ms: 1000,
+    health_state: 'degraded',
+  });
+
+  const oldWriter = new AnalyticsEngineBuckets({ writeDataPoint() {} }, async () => [
+    {
+      method: 'GET',
+      route: '/users/:id',
+      latency_bucket: '8',
+      histogram_schema: 'latency-v2',
+      request_count: 2,
+      error_count: 0,
+      duration_sum_ms: 2000,
+      last_seen: end - 60_000,
+      sample_interval: 1,
+    },
+  ]);
+  expect(
+    mergeBuckets(
+      await oldWriter.queryBuckets('ae-old-app', 'prod', end - 900_000, end),
+      '15m',
+      end,
+    )[0],
+  ).toMatchObject({ p95_ms: 1000, health_state: 'insufficient-data' });
 });
 
 it('uses disjoint daily/hourly interiors and minute edges without adding tiers together', async () => {

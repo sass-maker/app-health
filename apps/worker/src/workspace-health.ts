@@ -3,7 +3,7 @@ import {
   LATENCY_HISTOGRAM_BUCKETS,
   WINDOW_MS,
   WorkspaceHealthSummaryV1,
-  approximatePercentiles,
+  approximatePercentilesWithDegradedBoundary,
   histogramP95LowerBound,
   healthState,
   latencyHistogramSchemaFromBounds,
@@ -45,6 +45,8 @@ interface WorkspaceMetricRow extends Record<string, unknown> {
   error_count: number;
   last_seen: number;
   upstream_sampled: number;
+  h8_classified_count: number;
+  h8_exact_1000ms_count: number;
 }
 
 export function workspaceEndpointState(
@@ -74,10 +76,15 @@ function capability(
 function metricsFromBucket(bucket: BucketV1) {
   if (bucket.request_count === 0) return null;
   const errorRate = bucket.error_count / bucket.request_count;
-  const { p95_ms } = approximatePercentiles(bucket.histogram);
+  const { p95_ms } = approximatePercentilesWithDegradedBoundary(
+    bucket.histogram,
+    bucket.latency_h8_classified_count ?? 0,
+    bucket.latency_exact_1000ms_count ?? 0,
+  );
   const lowerBound = histogramP95LowerBound(
     bucket.histogram,
     bucket.legacy_ambiguous_latency_count ?? 0,
+    bucket.latency_exact_1000ms_count ?? 0,
   );
   return {
     request_count: bucket.request_count,
@@ -113,6 +120,10 @@ export function buildWorkspaceHealthSummary(
     existing.error_count += bucket.error_count;
     existing.legacy_ambiguous_latency_count =
       (existing.legacy_ambiguous_latency_count ?? 0) + (bucket.legacy_ambiguous_latency_count ?? 0);
+    existing.latency_h8_classified_count =
+      (existing.latency_h8_classified_count ?? 0) + (bucket.latency_h8_classified_count ?? 0);
+    existing.latency_exact_1000ms_count =
+      (existing.latency_exact_1000ms_count ?? 0) + (bucket.latency_exact_1000ms_count ?? 0);
     existing.duration_sum_ms += bucket.duration_sum_ms;
     existing.last_seen = Math.max(existing.last_seen ?? 0, bucket.last_seen ?? 0) || null;
     existing.upstream_sampled ||= bucket.upstream_sampled;
@@ -250,6 +261,8 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
           SUM(r.error_count) AS error_count,
           MAX(r.last_seen) AS last_seen,
           MAX(r.upstream_sampled) AS upstream_sampled,
+          SUM(r.h8_classified_count) AS h8_classified_count,
+          SUM(r.h8_exact_1000ms_count) AS h8_exact_1000ms_count,
           ${HISTOGRAM.map((name) => `SUM(r.${name}) AS ${name}`).join(',')}
         FROM endpoint_rollups r
         JOIN ranges q ON q.resolution_ms = r.resolution_ms
@@ -272,8 +285,17 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
       const requestCount = Number(row.request_count);
       const errorCount = Number(row.error_count);
       const lastSeen = Number(row.last_seen);
+      const classifiedH8Count = Number(row.h8_classified_count ?? 0);
+      const exact1000Count = Number(row.h8_exact_1000ms_count ?? 0);
       if (
-        ![requestCount, errorCount, lastSeen, ...rawHistogram].every(Number.isSafeInteger) ||
+        ![
+          requestCount,
+          errorCount,
+          lastSeen,
+          classifiedH8Count,
+          exact1000Count,
+          ...rawHistogram,
+        ].every(Number.isSafeInteger) ||
         requestCount < 0 ||
         errorCount < 0 ||
         errorCount > requestCount ||
@@ -282,6 +304,7 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
       )
         throw new Error('Invalid workspace endpoint aggregate');
       const histogram = normalizeLatencyHistogram(rawHistogram, schema);
+      const useExactBoundary = schema === 'latency-v2';
       return {
         app_id: row.app_id,
         environment_id: row.environment_id,
@@ -292,6 +315,12 @@ export class D1WorkspaceHealth implements WorkspaceHealthRepository {
         error_count: errorCount,
         ...(schema === 'legacy-v1' && rawHistogram[9] > 0
           ? { legacy_ambiguous_latency_count: rawHistogram[9] }
+          : {}),
+        ...(useExactBoundary && classifiedH8Count > 0
+          ? { latency_h8_classified_count: classifiedH8Count }
+          : {}),
+        ...(useExactBoundary && exact1000Count > 0
+          ? { latency_exact_1000ms_count: exact1000Count }
           : {}),
         duration_sum_ms: 0,
         last_seen: lastSeen,

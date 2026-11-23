@@ -43,12 +43,15 @@ function rollupSql(resolution: number): string {
     'duration_sum_ms',
     'response_bytes_sum',
     'response_bytes_measured',
+    'h8_classified_count',
+    'h8_exact_1000ms_count',
     ...HISTOGRAM,
   ].map((name) => `${name} = endpoint_rollups.${name} + excluded.${name}`);
   return `${UNSEEN}
     INSERT INTO endpoint_rollups (
       app_id, environment_id, resolution_ms, bucket_start, method, route, runtime, release, histogram_bounds_ms,
-      request_count, error_count, duration_sum_ms, response_bytes_sum, response_bytes_measured, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
+      request_count, error_count, duration_sum_ms, response_bytes_sum, response_bytes_measured,
+      h8_classified_count, h8_exact_1000ms_count, last_seen, upstream_sampled, ${HISTOGRAM.join(',')}
     ) SELECT ?2, ?3, ${resolution},
       CAST(json_extract(event, '$.timestamp') / ${resolution} AS INTEGER) * ${resolution},
       json_extract(event, '$.method'), json_extract(event, '$.route'),
@@ -56,6 +59,8 @@ function rollupSql(resolution: number): string {
       COUNT(*), SUM(json_extract(event, '$.error')), SUM(json_extract(event, '$.duration')),
       SUM(COALESCE(json_extract(event, '$.bytes'), 0)),
       SUM(json_extract(event, '$.bytes') IS NOT NULL),
+      SUM(json_extract(event, '$.histogram') = 8),
+      SUM(json_extract(event, '$.duration') = 1000),
       MAX(json_extract(event, '$.timestamp')), MAX(json_extract(event, '$.sampled')),
       ${histograms.join(',')}
     FROM unseen WHERE 1 GROUP BY 4, 5, 6, 7, 8

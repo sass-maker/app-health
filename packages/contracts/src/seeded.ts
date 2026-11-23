@@ -148,19 +148,55 @@ export function approximatePercentiles(histogram: readonly number[]): {
 export function histogramP95LowerBound(
   histogram: readonly number[],
   legacyAmbiguousCount = 0,
+  exact1000Count = 0,
 ): { p95_lower_bound_ms?: number } {
   const degradedBinCount = histogram[8] ?? 0;
+  if (
+    !Number.isSafeInteger(exact1000Count) ||
+    exact1000Count < 0 ||
+    exact1000Count > degradedBinCount
+  )
+    throw new Error('Exact 1000ms count exceeds the degraded-threshold histogram bin');
   if (degradedBinCount === 0 && legacyAmbiguousCount === 0) return {};
   const lowerHistogram = [...histogram];
   if (degradedBinCount > 0) {
-    lowerHistogram[8] -= degradedBinCount;
-    lowerHistogram[7] += degradedBinCount;
+    const unresolvedCount = degradedBinCount - exact1000Count;
+    lowerHistogram[8] = exact1000Count;
+    lowerHistogram[7] += unresolvedCount;
   }
   if (legacyAmbiguousCount > 0) {
     lowerHistogram[10] -= legacyAmbiguousCount;
     lowerHistogram[9] += legacyAmbiguousCount;
   }
   return { p95_lower_bound_ms: approximatePercentiles(lowerHistogram).p95_ms };
+}
+
+/** Resolve only the degraded boundary when every h8 contribution is classified. */
+export function approximatePercentilesWithDegradedBoundary(
+  histogram: readonly number[],
+  classifiedH8Count = 0,
+  exact1000Count = 0,
+): { p50_ms: number; p95_ms: number } {
+  const percentiles = approximatePercentiles(histogram);
+  const degradedBinCount = histogram[8] ?? 0;
+  if (
+    !Number.isSafeInteger(classifiedH8Count) ||
+    classifiedH8Count < 0 ||
+    classifiedH8Count > degradedBinCount ||
+    !Number.isSafeInteger(exact1000Count) ||
+    exact1000Count < 0 ||
+    exact1000Count > classifiedH8Count
+  )
+    throw new Error('Invalid exact degraded-threshold histogram counts');
+  if (percentiles.p95_ms !== 1000 || degradedBinCount === 0) return percentiles;
+
+  const total = histogram.reduce((sum, count) => sum + count, 0);
+  const target = Math.ceil(total * 0.95);
+  const beforeDegradedBin = histogram.slice(0, 8).reduce((sum, count) => sum + count, 0);
+  const requiredFromBin = target - beforeDegradedBin;
+  if (exact1000Count >= requiredFromBin) return percentiles;
+  if (classifiedH8Count === degradedBinCount) return { ...percentiles, p95_ms: 999 };
+  return percentiles;
 }
 
 /** Merge buckets for the same (method, route) into an EndpointAggregate. */
@@ -184,14 +220,22 @@ export function mergeBuckets(
     if (request_count === 0) continue;
     const error_count = list.reduce((sum, b) => sum + b.error_count, 0);
     const mergedHistogram = emptyHistogram();
+    let classifiedH8Count = 0;
+    let exact1000Count = 0;
     for (const b of list) {
       for (let i = 0; i < mergedHistogram.length; i += 1) {
         mergedHistogram[i] += b.histogram[i];
       }
+      classifiedH8Count += b.latency_h8_classified_count ?? 0;
+      exact1000Count += b.latency_exact_1000ms_count ?? 0;
     }
     const lastSeenList = list.map((b) => b.last_seen).filter((v): v is number => v != null);
     const last_seen = lastSeenList.length ? Math.max(...lastSeenList) : null;
-    const { p50_ms, p95_ms } = approximatePercentiles(mergedHistogram);
+    const { p50_ms, p95_ms } = approximatePercentilesWithDegradedBoundary(
+      mergedHistogram,
+      classifiedH8Count,
+      exact1000Count,
+    );
     const ambiguousLatencyCount = list.reduce(
       (sum, bucket) => sum + (bucket.legacy_ambiguous_latency_count ?? 0),
       0,
@@ -215,7 +259,7 @@ export function mergeBuckets(
         request_count,
         error_rate,
         p95_ms,
-        ...histogramP95LowerBound(mergedHistogram, ambiguousLatencyCount),
+        ...histogramP95LowerBound(mergedHistogram, ambiguousLatencyCount, exact1000Count),
       }),
       ...(list.some((bucket) => bucket.upstream_sampled) ? { upstream_sampled: true } : {}),
       ...(list.some((bucket) => bucket.sampled) ? { sampled: true } : {}),

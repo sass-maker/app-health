@@ -148,6 +148,7 @@ function database() {
   for (const migration of [
     '0014_endpoint_rollups.sql',
     '0015_response_payload_bytes.sql',
+    '0045_endpoint_exact_degraded_threshold.sql',
     '0027_endpoint_cold_archives.sql',
   ]) {
     sqlite.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
