@@ -2,6 +2,7 @@ import {
   ApiTokenInput,
   ApiTokenScopes,
   WorkspaceInviteInput,
+  type ApiTokenScope,
   type WorkspaceRole,
 } from '@app-health/contracts';
 import { generateRawKey, hashKey } from './crypto.js';
@@ -166,18 +167,24 @@ export async function apiTokenIdentity(
     }>();
   if (!row) return null;
   const scopes = ApiTokenScopes.parse(JSON.parse(row.scopes_json));
-  const active = [];
-  for (const scope of scopes) {
-    const owned = await db
-      .prepare(
-        `SELECT e.id FROM environments e JOIN workspace_apps wa ON wa.app_id = e.app_id
-      JOIN apps a ON a.id = e.app_id AND a.archived_at IS NULL
-      WHERE wa.workspace_id = ? AND e.app_id = ? AND e.id = ?`,
+  const { results: active } = await db
+    .prepare(
+      `WITH requested AS (
+        SELECT key AS ordinal, json_extract(value, '$.app_id') AS app_id,
+          json_extract(value, '$.environment_id') AS environment_id
+        FROM json_each(?)
       )
-      .bind(row.workspace_id, scope.app_id, scope.environment_id)
-      .first();
-    if (owned) active.push(scope);
-  }
+      SELECT requested.app_id, requested.environment_id FROM requested
+      WHERE EXISTS (
+        SELECT 1 FROM environments e JOIN workspace_apps wa ON wa.app_id = e.app_id
+        JOIN apps a ON a.id = e.app_id AND a.archived_at IS NULL
+        WHERE wa.workspace_id = ? AND e.app_id = requested.app_id
+          AND e.id = requested.environment_id
+      )
+      ORDER BY requested.ordinal`,
+    )
+    .bind(JSON.stringify(scopes), row.workspace_id)
+    .all<ApiTokenScope>();
   if (!active.length) return null;
   return {
     id: row.id,

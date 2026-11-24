@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
   acceptInvite,
   apiTokenIdentity,
@@ -164,6 +164,66 @@ it('stores API verifiers only, isolates project/environment scopes and observes 
       `UPDATE workspace_api_tokens SET expires_at=9999999999999, revoked_at=1 WHERE id='${minted.id}'`,
     );
     expect(await apiTokenIdentity(db, minted.token)).toBeNull();
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('resolves active token scopes in stored order with bounded D1 reads', async () => {
+  const { db, sqlite } = fixture();
+  try {
+    const first = { app_id: 'app', environment_id: 'env' };
+    const second = { app_id: 'second-app', environment_id: 'second-env' };
+    const foreign = { app_id: 'other-app', environment_id: 'other-env' };
+    const mismatched = { app_id: first.app_id, environment_id: second.environment_id };
+    const archived = { app_id: 'archived-app', environment_id: 'archived-env' };
+    const removed = { app_id: first.app_id, environment_id: 'removed-env' };
+    sqlite.exec(`
+      INSERT INTO workspaces VALUES ('foreign', 'stranger', 'Foreign workspace', 1);
+      INSERT INTO apps (id, name, created_at, archived_at)
+        VALUES ('second-app', 'Second product', 1, NULL), ('archived-app', 'Archived product', 1, 1);
+      INSERT INTO environments (id, app_id, name, created_at)
+        VALUES ('second-env', 'second-app', 'production', 1),
+          ('archived-env', 'archived-app', 'production', 1);
+      INSERT INTO workspace_apps VALUES
+        ('other-app', 'foreign'), ('second-app', 'ws'), ('archived-app', 'ws');`);
+    const minted = await createApiToken(db, owner, {
+      name: 'Agent',
+      permission: 'read',
+      scopes: [first],
+    });
+    const updateScopes = sqlite.prepare('UPDATE workspace_api_tokens SET scopes_json=? WHERE id=?');
+    const reads = vi.spyOn(db, 'prepare');
+    const readCounts = [];
+    expect(await apiTokenIdentity(db, minted.token)).toMatchObject({
+      appIds: [first.app_id],
+      apiScopes: [first],
+    });
+    readCounts.push(reads.mock.calls.length);
+    reads.mockClear();
+
+    // The stored schema also accepts duplicate legacy scopes, so keep their position.
+    const repeat = Array.from({ length: 44 }, () => first);
+    updateScopes.run(
+      JSON.stringify([foreign, second, first, mismatched, archived, removed, ...repeat]),
+      minted.id,
+    );
+    expect(await apiTokenIdentity(db, minted.token)).toMatchObject({
+      appIds: [second.app_id, first.app_id],
+      apiScopes: [second, first, ...repeat],
+    });
+    readCounts.push(reads.mock.calls.length);
+    reads.mockClear();
+
+    updateScopes.run(JSON.stringify([foreign, mismatched, archived, removed]), minted.id);
+    expect(await apiTokenIdentity(db, minted.token)).toBeNull();
+    readCounts.push(reads.mock.calls.length);
+    reads.mockClear();
+
+    updateScopes.run(JSON.stringify([]), minted.id);
+    await expect(apiTokenIdentity(db, minted.token)).rejects.toThrow();
+    readCounts.push(reads.mock.calls.length);
+    expect(readCounts).toEqual([2, 2, 2, 1]);
   } finally {
     sqlite.close();
   }
