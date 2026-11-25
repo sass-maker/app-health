@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_from": "site-health/catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
+  "generated_from": "saas-maker catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
   "purpose": "Complete-response, read-only public GET journeys that App Health probes from scheduled vantages. Each journey is attributed to its catalog project.",
   "source_issue": "https://github.com/sass-maker/app-health/issues/175",
   "journeys": [
@@ -500,19 +500,6 @@
       }
     },
     {
-      "project": "every-song-is-a-website",
-      "journey": "home",
-      "url": "https://music.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Interactive song websites"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "contextdaddy",
       "journey": "home",
       "url": "https://daddyrad.com/context/",
@@ -542,19 +529,6 @@
             "equals": "fleet-social"
           }
         ]
-      }
-    },
-    {
-      "project": "protein-index",
-      "journey": "home",
-      "url": "https://food.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Food"
-        ],
-        "first_party_asset": true
       }
     },
     {

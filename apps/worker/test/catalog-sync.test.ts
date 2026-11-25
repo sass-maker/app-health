@@ -32,6 +32,9 @@ import {
   handleCatalogPublisherOwner,
 } from '../src/catalog-publishers.js';
 
+const canonicalPublicProjectIds = [...new Set(generated.journeys.map((row) => row.project))];
+const canonicalProjectCount = canonicalPublicProjectIds.length + 2;
+
 const enrollmentTestSecret = 'synthetic-enrollment-hmac-secret';
 const handleCatalogPublisher = (
   request: Request,
@@ -112,7 +115,7 @@ function fixture() {
   };
 }
 function canonical() {
-  const publicIds = [...new Set(generated.journeys.map((row) => row.project))];
+  const publicIds = canonicalPublicProjectIds;
   return {
     catalogSchemaVersion: 2,
     ownerNotes: 'PRIVATE_CANARY',
@@ -778,7 +781,7 @@ describe('automatic catalog publisher authority', () => {
       f.sqlite
         .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
         .get('ws'),
-    ).toEqual({ n: 39 });
+    ).toEqual({ n: canonicalProjectCount });
     expect(
       f.sqlite
         .prepare(
@@ -991,7 +994,7 @@ describe('automatic catalog publisher authority', () => {
       journeys: [],
     });
     const initial = { ...historical, preserve_outside_catalog_app_ids: ['app-40'] };
-    expect(initial.projects).toHaveLength(40);
+    expect(initial.projects).toHaveLength(canonicalProjectCount + 1);
     const baseline = await syncCatalog(f.db, 'ws', initial, 1000);
     const paired = await enrolledPublisher(f);
     expect(
@@ -1016,17 +1019,17 @@ describe('automatic catalog publisher authority', () => {
     );
     expect(response?.status).toBe(200);
     const acknowledged = (await response!.json()) as { project_count: number };
-    expect(acknowledged.project_count).toBe(39);
+    expect(acknowledged.project_count).toBe(canonicalProjectCount);
     expect(
       f.sqlite
         .prepare('SELECT count(*) AS n FROM current_workspace_catalog WHERE workspace_id = ?')
         .get('ws'),
-    ).toEqual({ n: 39 });
+    ).toEqual({ n: canonicalProjectCount });
     expect(
       f.sqlite
         .prepare('SELECT count(*) AS n FROM workspace_monitoring_projects WHERE workspace_id = ?')
         .get('ws'),
-    ).toEqual({ n: 39 });
+    ).toEqual({ n: canonicalProjectCount });
     expect(f.sqlite.prepare("SELECT verifier_hash FROM keys WHERE id='stable-key'").get()).toEqual({
       verifier_hash: 'stable-verifier',
     });
@@ -1308,7 +1311,9 @@ function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36, unlinked
 describe('canonical active portfolio synchronization', () => {
   it('selects the explicit active lifecycle and only uploads the allowlist and generic monitoring limits', () => {
     const projected = input();
-    expect(projected.projects).toHaveLength(39);
+    expect(projected.projects).toHaveLength(canonicalProjectCount);
+    expect(canonicalPublicProjectIds).toContain('techdata');
+    expect(canonicalPublicProjectIds).not.toContain('protein-index');
     expect(projected.projects[0]).toMatchObject({
       browser_visitors: 'not_applicable',
       native_sessions: 'applicable',
@@ -1323,13 +1328,15 @@ describe('canonical active portfolio synchronization', () => {
     expect(projected.projects.filter((row) => row.future_form === 'personal-tool')).toHaveLength(
       16,
     );
-    expect(projected.monitoring.projects.filter((row) => row.scope === 'public')).toHaveLength(37);
+    expect(projected.monitoring.projects.filter((row) => row.scope === 'public')).toHaveLength(
+      canonicalPublicProjectIds.length,
+    );
     expect(JSON.stringify(projected)).not.toMatch(
       /PRIVATE_CANARY|localPath|ignored.invalid|ownerNotes/,
     );
     const source = canonical();
     source.projects[0]!.lifecycle.portfolioStatus = 'archived';
-    expect(projectCanonicalCatalog(source, null).projects).toHaveLength(38);
+    expect(projectCanonicalCatalog(source, null).projects).toHaveLength(canonicalProjectCount - 1);
     expect(() => projectCanonicalCatalog({ ...source, catalogSchemaVersion: 1 }, null)).toThrow();
     expect(() =>
       projectCanonicalCatalog(
@@ -1345,9 +1352,10 @@ describe('canonical active portfolio synchronization', () => {
     );
   });
 
-  it('converges 57 owned records to 39 visible projects, preserving IDs, environments, keys and immutable receipts', async () => {
+  it('converges 57 owned records to the canonical visible projects, preserving IDs, environments, keys and immutable receipts', async () => {
     const f = fixture();
     seed(f, 57, 36, 1);
+    const expectedAppRecords = 57 + canonicalProjectCount - 36;
     expect(f.sqlite.prepare('SELECT count(*) AS n FROM catalog_project_imports').get()).toEqual({
       n: 56,
     });
@@ -1378,7 +1386,7 @@ describe('canonical active portfolio synchronization', () => {
       .get('app-0');
     const first = await syncCatalog(f.db, 'ws', input(), 10);
     const listed = await plane.listAppsAndEnvironments();
-    expect(listed).toHaveLength(39);
+    expect(listed).toHaveLength(canonicalProjectCount);
     expect(listed[0]?.catalog?.source).toBe('saas-maker');
     const existing = listed.find((row) => row.app.id === 'app-0')!;
     expect(existing.app.name).toBe('Canonical 0');
@@ -1389,10 +1397,12 @@ describe('canonical active portfolio synchronization', () => {
     expect(f.sqlite.prepare('SELECT verifier_hash FROM keys').get()).toEqual({
       verifier_hash: 'stable-verifier',
     });
-    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 60 });
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({
+      n: expectedAppRecords,
+    });
     expect(
       f.sqlite.prepare('SELECT count(*) AS n FROM workspace_monitoring_projects').get(),
-    ).toEqual({ n: 39 });
+    ).toEqual({ n: canonicalProjectCount });
     expect(
       f.sqlite.prepare('SELECT count(*) AS n FROM workspace_portfolio_sync_guards').get(),
     ).toEqual({ n: 0 });
@@ -1410,12 +1420,14 @@ describe('canonical active portfolio synchronization', () => {
           ).map((row) => row.app_id),
         )
       ).appIds,
-    ).toHaveLength(39);
+    ).toHaveLength(canonicalProjectCount);
     const health = await new D1WorkspaceHealth(f.db, 'ws').queryWorkspaceHealth(1750000000000);
-    expect(health.environments).toHaveLength(39);
+    expect(health.environments).toHaveLength(canonicalProjectCount);
     expect(health.environments.find((row) => row.app_id === 'app-0')?.app_name).toBe('Canonical 0');
-    expect(await plane.listApps()).toHaveLength(39);
-    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 60 });
+    expect(await plane.listApps()).toHaveLength(canonicalProjectCount);
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({
+      n: expectedAppRecords,
+    });
     const renamed = input();
     renamed.expected_previous_hash = first.projection_hash;
     renamed.projects[0]!.name = 'Renamed';
@@ -1427,9 +1439,10 @@ describe('canonical active portfolio synchronization', () => {
   it('refuses unlinked manual apps without matching names or creating empty duplicates, then accepts an explicit link', async () => {
     const f = fixture();
     seed(f, 57, 36, 1);
+    const manuallyLinkedProject = input().projects.at(-1)!;
     f.sqlite
       .prepare('UPDATE apps SET name = ? WHERE id = ?')
-      .run(input().projects[36]!.name, 'app-56');
+      .run(manuallyLinkedProject.name, 'app-56');
     const owner = {
       id: 'owner',
       label: 'Owner',
@@ -1444,7 +1457,7 @@ describe('canonical active portfolio synchronization', () => {
     );
     expect(await status!.json()).toMatchObject({
       mapped_catalog_ids: expect.arrayContaining([input().projects[0]!.catalog_id]),
-      unlinked_apps: [{ app_id: 'app-56', name: input().projects[36]!.name }],
+      unlinked_apps: [{ app_id: 'app-56', name: manuallyLinkedProject.name }],
     });
     await expect(syncCatalog(f.db, 'ws', input(), 10)).rejects.toThrow('existing_app_id');
     expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
@@ -1461,8 +1474,8 @@ describe('canonical active portfolio synchronization', () => {
         schema_version: 1,
         projects: [
           {
-            catalog_id: input().projects[36]!.catalog_id,
-            name: input().projects[36]!.name,
+            catalog_id: manuallyLinkedProject.catalog_id,
+            name: manuallyLinkedProject.name,
             lifecycle: 'active',
             existing_app_id: 'app-56',
           },
@@ -1470,11 +1483,16 @@ describe('canonical active portfolio synchronization', () => {
       }),
       11,
     );
+    const appRecordsAfterExplicitLink = f.sqlite
+      .prepare('SELECT count(*) AS n FROM apps')
+      .get() as { n: number };
     await syncCatalog(f.db, 'ws', input(), 12);
-    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 59 });
+    expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual(
+      appRecordsAfterExplicitLink,
+    );
     expect(
       (await new D1ControlPlane(f.db, 'ws').listApps()).find((row) => row.id === 'app-56')?.name,
-    ).toBe(input().projects[36]!.name);
+    ).toBe(manuallyLinkedProject.name);
   });
 
   it('preserves an explicitly acknowledged outside app, key and history without inventing a catalog identity', async () => {
@@ -1486,7 +1504,7 @@ describe('canonical active portfolio synchronization', () => {
     const acknowledged = input();
     acknowledged.preserve_outside_catalog_app_ids = ['app-56'];
     const result = await syncCatalog(f.db, 'ws', acknowledged, 10);
-    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(39);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(canonicalProjectCount);
     expect(
       f.sqlite
         .prepare('SELECT count(*) AS n FROM catalog_project_imports WHERE app_id = ?')
@@ -1530,7 +1548,7 @@ describe('canonical active portfolio synchronization', () => {
       ],
     });
     await importCatalogProjects(f.db, 'ws', link, 11, true);
-    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(39);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(canonicalProjectCount);
     expect(
       (await new D1ControlPlane(f.db, 'ws').listApps()).some((app) => app.id === 'app-56'),
     ).toBe(false);
@@ -1546,23 +1564,23 @@ describe('canonical active portfolio synchronization', () => {
     );
     const next = input();
     next.expected_previous_hash = first.projection_hash;
-    next.projects[39] = {
-      ...next.projects[39]!,
+    next.projects.push({
+      ...next.projects.at(-1)!,
       catalog_id: 'outside-service',
       name: 'Outside service joins',
-    };
-    next.monitoring.projects[39] = {
+    });
+    next.monitoring.projects.push({
       catalog_id: 'outside-service',
       name: 'Outside service joins',
       scope: 'private',
       reason: 'Private service.',
       journeys: [],
-    };
+    });
     await syncCatalog(f.db, 'ws', next, 13);
     expect(
       (await new D1ControlPlane(f.db, 'ws').listApps()).find((app) => app.id === 'app-56')?.name,
     ).toBe('Outside service joins');
-    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(40);
+    expect(await new D1ControlPlane(f.db, 'ws').listApps()).toHaveLength(canonicalProjectCount + 1);
     expect(
       f.sqlite.prepare('SELECT verifier_hash FROM keys WHERE id = ?').get('outside-key'),
     ).toEqual({ verifier_hash: 'outside-verifier' });
@@ -1891,10 +1909,10 @@ describe('canonical active portfolio synchronization', () => {
         async () => (await new D1ControlPlane(f.db, 'ws').listApps()).length,
         adapter,
       );
-    expect(await current()).toBe(39);
+    expect(await current()).toBe(canonicalProjectCount);
     finishOld(57);
     expect(await old).toBe(57);
-    expect(await current()).toBe(39);
+    expect(await current()).toBe(canonicalProjectCount);
   });
 
   it('shares one catalog read for default reports and summary while preserving explicit historical reads', async () => {
@@ -2038,7 +2056,9 @@ it.runIf(Boolean(process.env.APP_HEALTH_OWNER_CATALOG))(
       JSON.parse(readFileSync(process.env.APP_HEALTH_OWNER_CATALOG!, 'utf8')),
       null,
     );
-    expect(projected.projects).toHaveLength(39);
+    expect(projected.projects).toHaveLength(37);
+    expect(projected.projects.map((row) => row.catalog_id)).toContain('techdata');
+    expect(projected.projects.map((row) => row.catalog_id)).not.toContain('protein-index');
     expect(
       projected.projects.filter((row) =>
         ['local-only', 'private-authenticated'].includes(row.auth_model),
@@ -2048,7 +2068,7 @@ it.runIf(Boolean(process.env.APP_HEALTH_OWNER_CATALOG))(
     expect(projected.projects.filter((row) => row.future_form === 'personal-tool')).toHaveLength(
       15,
     );
-    expect(projected.monitoring.projects.filter((row) => row.scope === 'public')).toHaveLength(37);
+    expect(projected.monitoring.projects.filter((row) => row.scope === 'public')).toHaveLength(35);
     expect(projected.monitoring.projects.reduce((sum, row) => sum + row.journeys.length, 0)).toBe(
       43,
     );

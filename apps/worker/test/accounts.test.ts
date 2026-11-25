@@ -2253,6 +2253,10 @@ describe('Google account boundary with real D1 SQL', () => {
     const cookie = `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`;
     const workspace = await personalWorkspace(env.DB!, user.id);
     const publicIds = [...new Set(reviewedJourneys.journeys.map((row) => row.project))];
+    const expectedCanonicalProjectCount = publicIds.length + 2;
+    const expectedRetainedAppCount = 57 + expectedCanonicalProjectCount - 36;
+    expect(publicIds).toContain('techdata');
+    expect(publicIds).not.toContain('protein-index');
     const projection = projectCanonicalCatalog(
       {
         catalogSchemaVersion: 2,
@@ -2344,7 +2348,7 @@ describe('Google account boundary with real D1 SQL', () => {
     ).toBe(200);
     expect((await request('/v1/catalog/sync', cookie, projection)).status).toBe(200);
     const listed = (await (await request('/v1/apps', cookie)).json()) as ListAppsResponseV1;
-    expect(listed.apps).toHaveLength(39);
+    expect(listed.apps).toHaveLength(expectedCanonicalProjectCount);
     expect(listed.apps.find((row) => row.app.id === 'portfolio-app-0')).toMatchObject({
       app: { name: 'Canonical 0' },
       catalog: { kind: 'platform', future_form: 'support-tool', auth_model: 'local-only' },
@@ -2353,8 +2357,8 @@ describe('Google account boundary with real D1 SQL', () => {
       headers: { cookie },
     });
     const personal = await accountIdentity(identityRequest, env, undefined, undefined, true);
-    expect(personal?.owner.appIds).toHaveLength(60);
-    expect(personal?.apps).toHaveLength(39);
+    expect(personal?.owner.appIds).toHaveLength(expectedRetainedAppCount);
+    expect(personal?.apps).toHaveLength(expectedCanonicalProjectCount);
     const selected = await accountIdentity(
       new Request(identityRequest, { headers: { cookie, 'x-app-health-workspace': workspace.id } }),
       env,
@@ -2362,7 +2366,7 @@ describe('Google account boundary with real D1 SQL', () => {
       undefined,
       true,
     );
-    expect(selected?.apps).toHaveLength(39);
+    expect(selected?.apps).toHaveLength(expectedCanonicalProjectCount);
     expect(selected?.owner.appIds).toContain('portfolio-app-56');
     expect(
       (
