@@ -500,19 +500,6 @@
       }
     },
     {
-      "project": "every-song-is-a-website",
-      "journey": "home",
-      "url": "https://music.significanthobbies.com/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>Interactive song websites"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
       "project": "contextdaddy",
       "journey": "home",
       "url": "https://daddyrad.com/context/",
