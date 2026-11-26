@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_from": "saas-maker catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
+  "generated_from": "site-health/catalog/projects.json projects[].systems.probe (pnpm catalog:sync)",
   "purpose": "Complete-response, read-only public GET journeys that App Health probes from scheduled vantages. Each journey is attributed to its catalog project.",
   "source_issue": "https://github.com/sass-maker/app-health/issues/175",
   "journeys": [
@@ -542,6 +542,44 @@
           "<title>overview"
         ],
         "first_party_asset": true
+      }
+    },
+    {
+      "project": "techdata",
+      "journey": "food-products-api",
+      "url": "https://data.highsignal.app/api/food/products",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "data.products",
+            "min_items": 1
+          },
+          {
+            "path": "provenance.source",
+            "equals": "Significant Hobbies Food"
+          }
+        ]
+      }
+    },
+    {
+      "project": "techdata",
+      "journey": "food-recipes-api",
+      "url": "https://data.highsignal.app/api/food/recipes",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "application/json",
+        "json": [
+          {
+            "path": "data.recipes",
+            "min_items": 1
+          },
+          {
+            "path": "data.nutritionBasis",
+            "equals": "per_stated_recipe_serving"
+          }
+        ]
       }
     },
     {
