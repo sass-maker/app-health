@@ -2254,7 +2254,8 @@ describe('Google account boundary with real D1 SQL', () => {
     const workspace = await personalWorkspace(env.DB!, user.id);
     const publicIds = [...new Set(reviewedJourneys.journeys.map((row) => row.project))];
     const expectedCanonicalProjectCount = publicIds.length + 2;
-    const expectedRetainedAppCount = 57 + expectedCanonicalProjectCount - 36;
+    const seededCanonicalMappings = Math.min(36, expectedCanonicalProjectCount - 1);
+    const expectedRetainedAppCount = 57 + expectedCanonicalProjectCount - seededCanonicalMappings;
     expect(publicIds).toContain('techdata');
     expect(publicIds).not.toContain('protein-index');
     const projection = projectCanonicalCatalog(
@@ -2303,7 +2304,9 @@ describe('Google account boundary with real D1 SQL', () => {
             )
             .bind(
               workspace.id,
-              index < 36 ? projection.projects[index]!.catalog_id : `legacy-${index}`,
+              index < seededCanonicalMappings
+                ? projection.projects[index]!.catalog_id
+                : `legacy-${index}`,
               `Old ${index}`,
               app,
               'primary',
