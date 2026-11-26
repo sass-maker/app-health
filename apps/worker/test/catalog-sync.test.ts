@@ -34,6 +34,8 @@ import {
 
 const canonicalPublicProjectIds = [...new Set(generated.journeys.map((row) => row.project))];
 const canonicalProjectCount = canonicalPublicProjectIds.length + 2;
+// Exercise both existing ownership and creation even as the reviewed portfolio changes size.
+const seededCanonicalMappings = Math.min(36, canonicalProjectCount - 1);
 
 const enrollmentTestSecret = 'synthetic-enrollment-hmac-secret';
 const handleCatalogPublisher = (
@@ -1277,7 +1279,12 @@ describe('automatic catalog publisher authority', () => {
     ).toBe(401);
   });
 });
-function seed(f: ReturnType<typeof fixture>, count = 57, mappings = 36, unlinked = 0) {
+function seed(
+  f: ReturnType<typeof fixture>,
+  count = 57,
+  mappings = seededCanonicalMappings,
+  unlinked = 0,
+) {
   const projects = input().projects;
   for (let index = 0; index < count; index += 1) {
     f.sqlite
@@ -1323,7 +1330,11 @@ describe('canonical active portfolio synchronization', () => {
       projected.projects.filter((row) =>
         ['local-only', 'private-authenticated'].includes(row.auth_model),
       ),
-    ).toHaveLength(9);
+    ).toHaveLength(
+      canonical().projects.filter((row) =>
+        ['local-only', 'private-authenticated'].includes(row.deployment.authModel),
+      ).length,
+    );
     expect(projected.projects.filter((row) => row.future_form === 'support-tool')).toHaveLength(5);
     expect(projected.projects.filter((row) => row.future_form === 'personal-tool')).toHaveLength(
       16,
@@ -1354,8 +1365,8 @@ describe('canonical active portfolio synchronization', () => {
 
   it('converges 57 owned records to the canonical visible projects, preserving IDs, environments, keys and immutable receipts', async () => {
     const f = fixture();
-    seed(f, 57, 36, 1);
-    const expectedAppRecords = 57 + canonicalProjectCount - 36;
+    seed(f, 57, seededCanonicalMappings, 1);
+    const expectedAppRecords = 57 + canonicalProjectCount - seededCanonicalMappings;
     expect(f.sqlite.prepare('SELECT count(*) AS n FROM catalog_project_imports').get()).toEqual({
       n: 56,
     });
@@ -1438,7 +1449,7 @@ describe('canonical active portfolio synchronization', () => {
 
   it('refuses unlinked manual apps without matching names or creating empty duplicates, then accepts an explicit link', async () => {
     const f = fixture();
-    seed(f, 57, 36, 1);
+    seed(f, 57, seededCanonicalMappings, 1);
     const manuallyLinkedProject = input().projects.at(-1)!;
     f.sqlite
       .prepare('UPDATE apps SET name = ? WHERE id = ?')
@@ -1497,7 +1508,7 @@ describe('canonical active portfolio synchronization', () => {
 
   it('preserves an explicitly acknowledged outside app, key and history without inventing a catalog identity', async () => {
     const f = fixture();
-    seed(f, 57, 36, 1);
+    seed(f, 57, seededCanonicalMappings, 1);
     f.sqlite.exec(
       "INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at) VALUES ('outside-key', 'app-56', 'env-56', 'outside-verifier', 1); INSERT INTO log_events (log_id, app_id, environment_id, timestamp, event, level) VALUES ('outside-history', 'app-56', 'env-56', 1, 'owner.authored', 'info')",
     );
@@ -1529,7 +1540,7 @@ describe('canonical active portfolio synchronization', () => {
 
   it('links a preserved outside app after synchronization without changing the roster until the next canonical sync', async () => {
     const f = fixture();
-    seed(f, 57, 36, 1);
+    seed(f, 57, seededCanonicalMappings, 1);
     f.sqlite.exec(
       "INSERT INTO keys (id, app_id, environment_id, verifier_hash, created_at) VALUES ('outside-key', 'app-56', 'env-56', 'outside-verifier', 1)",
     );
@@ -1589,7 +1600,7 @@ describe('canonical active portfolio synchronization', () => {
   it('rejects outside acknowledgements for mapped, foreign, unknown or archived apps and closes ownership races', async () => {
     for (const invalid of ['app-0', 'unknown', 'foreign-app', 'archived-app']) {
       const f = fixture();
-      seed(f, 57, 36, 1);
+      seed(f, 57, seededCanonicalMappings, 1);
       f.sqlite.exec(
         "INSERT INTO apps (id, name, created_at, archived_at) VALUES ('foreign-app', 'Foreign', 1, NULL), ('archived-app', 'Archived', 1, 2); INSERT INTO workspace_apps VALUES ('foreign-app', 'foreign'), ('archived-app', 'ws')",
       );
@@ -1601,7 +1612,7 @@ describe('canonical active portfolio synchronization', () => {
       ).toEqual({ n: 0 });
     }
     const f = fixture();
-    seed(f, 57, 36, 1);
+    seed(f, 57, seededCanonicalMappings, 1);
     const raced = input();
     raced.preserve_outside_catalog_app_ids = ['app-56'];
     f.beforeBatch(() =>
@@ -1822,9 +1833,9 @@ describe('canonical active portfolio synchronization', () => {
       const f = fixture();
       seed(f);
       if (conflict === 'archive')
-        f.sqlite.exec("UPDATE apps SET archived_at = 1 WHERE id = 'app-35'");
+        f.sqlite.exec("UPDATE apps SET archived_at = 1 WHERE id = 'app-0'");
       if (conflict === 'foreign')
-        f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-35'");
+        f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-0'");
       if (conflict === 'legacy') {
         await syncCatalog(f.db, 'ws', input(), 10);
         f.sqlite.exec(
@@ -1846,14 +1857,14 @@ describe('canonical active portfolio synchronization', () => {
     const f = fixture();
     seed(f);
     f.beforeBatch(() =>
-      f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-35'"),
+      f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-0'"),
     );
     await expect(syncCatalog(f.db, 'ws', input(), 10)).rejects.toBeInstanceOf(CatalogSyncConflict);
     expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
     f.beforeBatch(() => {});
-    f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'ws' WHERE app_id = 'app-35'");
+    f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'ws' WHERE app_id = 'app-0'");
     await syncCatalog(f.db, 'ws', input(), 10);
-    f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-35'");
+    f.sqlite.exec("UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-0'");
     await expect(syncCatalog(f.db, 'ws', input(), 11)).rejects.toBeInstanceOf(CatalogSyncConflict);
   });
 
@@ -1861,14 +1872,14 @@ describe('canonical active portfolio synchronization', () => {
     const f = fixture();
     seed(f);
     f.sqlite.exec(`CREATE TRIGGER late_conflict AFTER INSERT ON apps WHEN NEW.id LIKE 'app-import-%'
-      BEGIN UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-35'; END;`);
+      BEGIN UPDATE workspace_apps SET workspace_id = 'foreign' WHERE app_id = 'app-0'; END;`);
     await expect(syncCatalog(f.db, 'ws', input(), 10)).rejects.toBeInstanceOf(CatalogSyncConflict);
     expect(f.sqlite.prepare('SELECT count(*) AS n FROM apps').get()).toEqual({ n: 57 });
     expect(
       f.sqlite.prepare('SELECT count(*) AS n FROM workspace_monitoring_projects').get(),
     ).toEqual({ n: 0 });
     expect(
-      f.sqlite.prepare("SELECT workspace_id FROM workspace_apps WHERE app_id = 'app-35'").get(),
+      f.sqlite.prepare("SELECT workspace_id FROM workspace_apps WHERE app_id = 'app-0'").get(),
     ).toEqual({ workspace_id: 'ws' });
   });
 
