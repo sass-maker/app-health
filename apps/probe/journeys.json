@@ -435,45 +435,6 @@
       }
     },
     {
-      "project": "storagedaddy",
-      "journey": "home",
-      "url": "https://daddyrad.com/storage/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>StorageDaddy"
-        ],
-        "first_party_asset": true
-      }
-    },
-    {
-      "project": "browserdaddy",
-      "journey": "home",
-      "url": "https://daddyrad.com/browser/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>BrowserDaddy"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
-      "project": "performancedaddy",
-      "journey": "home",
-      "url": "https://daddyrad.com/performance/",
-      "budget_ms": 3000,
-      "expect": {
-        "content_type": "text/html",
-        "body_includes": [
-          "<title>PerformanceDaddy"
-        ],
-        "first_party_asset": false
-      }
-    },
-    {
       "project": "meme-lab",
       "journey": "home",
       "url": "https://memes.significanthobbies.com/",
@@ -500,8 +461,60 @@
       }
     },
     {
-      "project": "contextdaddy",
+      "project": "daddyrad",
       "journey": "home",
+      "url": "https://daddyrad.com/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "daddyrad",
+      "journey": "storagedaddy-home",
+      "url": "https://daddyrad.com/storage/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>StorageDaddy"
+        ],
+        "first_party_asset": true
+      }
+    },
+    {
+      "project": "daddyrad",
+      "journey": "performancedaddy-home",
+      "url": "https://daddyrad.com/performance/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>PerformanceDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "daddyrad",
+      "journey": "browserdaddy-home",
+      "url": "https://daddyrad.com/browser/",
+      "budget_ms": 3000,
+      "expect": {
+        "content_type": "text/html",
+        "body_includes": [
+          "<title>BrowserDaddy"
+        ],
+        "first_party_asset": false
+      }
+    },
+    {
+      "project": "daddyrad",
+      "journey": "contextdaddy-home",
       "url": "https://daddyrad.com/context/",
       "budget_ms": 3000,
       "expect": {
